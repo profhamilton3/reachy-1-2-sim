@@ -19,11 +19,8 @@ ros2 launch reachy_sdk_server reachy_sdk_server.launch.py fake:=true
 **File to update if wrong:** `supervisord.conf` → `[program:robot-state-publisher]` command
 
 ## 4. Ubuntu version on physical Reachy 1.2
-**Status:** Pending confirmation from Siva (expected 2026-07-31)  
-**Impact:** If robot runs Ubuntu 22.04 (Humble) rather than 20.04 (Foxy), change:
-  - `Dockerfile`: `FROM --platform=linux/amd64 ros:humble`
-  - `supervisord.conf` + `entrypoint.sh`: replace `foxy` with `humble`
-  - `requirements.txt`: no change needed
+**Status:** ✓ CONFIRMED 2026-07-31 — Ubuntu 20.04, ROS 2 Foxy  
+**Impact:** No changes needed — Dockerfile already targets `ros:foxy`.
 
 ## 5. gRPC port
 **Assumed:** `50051` (standard gRPC default)  
