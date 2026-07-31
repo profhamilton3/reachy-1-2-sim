@@ -1,11 +1,9 @@
 # Open Assumptions — Verify Before Final Build
 
-## 3. gRPC API repo name
-**Status:** ⚠️ PROVIDED but needs verification  
-**Provided URL:** `https://github.com/pollen-robotics/reachy2-sdk-api`  
-**Concern:** This repo is named `reachy2-sdk-api` (Reachy 2), but our robot is Reachy 1.2. The older API repo is `pollen-robotics/reachy-sdk-api`. Confirm with Siva whether `reachy2-sdk-api` is intentionally used by `reachy_sdk_server_2021`, or if `reachy-sdk-api` (no "2") is the correct one.  
-**Impact:** Wrong API version would cause gRPC protobuf mismatches between client and server.  
-**File to update:** `Dockerfile` → gRPC api git clone line
+## 3. gRPC API package
+**Status:** ✓ CONFIRMED 2026-07-31  
+`reachy-sdk-api` (no "2") — installed via pip, supports Reachy 1.2.  
+`reachy2-sdk-api` is reference only and has no role in this project.
 
 ---
 

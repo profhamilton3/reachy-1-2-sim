@@ -54,9 +54,6 @@ RUN mkdir -p ${REACHY_WS}/src && \
     # Reachy 1.2 (2021) SDK server — contains reachy_bringup package
     # Launched via: ros2 launch reachy_bringup reachy.launch.py fake:=true start_sdk_server:=true
     git clone --depth 1 https://github.com/pollen-robotics/reachy_sdk_server_2021.git && \
-    # gRPC / protobuf API definitions (confirmed by Siva 2026-07-31)
-    # NOTE: named reachy2-sdk-api but used by the 2021 server — verify if reachy-sdk-api is needed instead
-    git clone --depth 1 https://github.com/pollen-robotics/reachy2-sdk-api.git && \
     # URDF / robot description for RViz2 display
     git clone --depth 1 https://github.com/pollen-robotics/reachy-description.git
 

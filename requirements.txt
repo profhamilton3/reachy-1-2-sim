@@ -1,4 +1,5 @@
 # Reachy 1.2 Python SDK (v1 — NOT reachy2-sdk)
+# reachy-sdk-api is the correct gRPC API for Reachy 1.2
 reachy-sdk
 reachy-sdk-api
 
