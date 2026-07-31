@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
     net-tools \
+    imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 # ── noVNC (web VNC client) ─────────────────────────────────────────────────────
