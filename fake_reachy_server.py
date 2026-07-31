@@ -89,7 +89,8 @@ class JointState:
         self.present_speed = 0.0
         self.present_load = 0.0
         self.temperature = 35.0
-        self.compliant = True
+        # Antenna joints (UIDs 33-34) are always stiff on physical Reachy — no turn_on needed
+        self.compliant = uid not in (33, 34)
         self.speed_limit = 0.0
         self.torque_limit = 100.0
 
