@@ -19,12 +19,16 @@ ros2 launch reachy_bringup reachy.launch.py fake:=true start_sdk_server:=true
 - Python client SDK: `https://github.com/pollen-robotics/reachy-sdk` (installed via pip)
 
 ## 3. URDF / robot description source
-**Status:** ⚠️ BLOCKED — `pollen-robotics/reachy-description` is a private repo (clone fails with auth error).  
-**Options:**
-  - A) The description package may already be inside `reachy_sdk_server_2021` — confirm with Siva.
-  - B) Siva provides the correct public repo URL or a local copy of the URDF.  
-**Current behaviour:** Robot state publisher is set to `autorestart=false` — if no description launch is found, RViz2 opens but shows no robot model. All other services (JupyterLab, SDK server, noVNC) work normally.  
-**File to update:** `supervisord.conf` → `[program:robot-state-publisher]` command
+**Status:** ⚠️ BLOCKED — `pollen-robotics/reachy-description` is a private repo.  
+RViz2 starts but shows no robot model. All other services work normally.  
+To resolve: Siva to provide a public URDF source or copy the description package into this repo.  
+Update `supervisord.conf` `[program:robot-state-publisher]` command when resolved.
+
+## 6. reachy_bringup fake mode
+**Status:** ✓ RESOLVED 2026-07-31 — NOT needed in Docker.  
+`reachy_bringup` is a package on the physical Reachy only (not in `reachy_sdk_server_2021`).  
+Replaced by `fake_reachy_server.py`: standalone Python gRPC server on port 50051 implementing
+the full reachy-sdk-api v1 surface. Phase 0 smoke tests confirmed passing.
 
 ## 4. Ubuntu version on physical Reachy 1.2
 **Status:** ✓ CONFIRMED 2026-07-31 — Ubuntu 20.04, ROS 2 Foxy  
