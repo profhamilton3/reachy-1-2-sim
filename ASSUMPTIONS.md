@@ -28,5 +28,4 @@ ros2 launch reachy_bringup reachy.launch.py fake:=true start_sdk_server:=true
 **Impact:** No changes needed — Dockerfile already targets `ros:foxy`.
 
 ## 5. gRPC port
-**Assumed:** `50051` (standard gRPC default)  
-**Verify:** Confirm `reachy_sdk_server` listens on 50051 in fake mode.
+**Status:** ✓ CONFIRMED 2026-07-31 — port 50051, all default ports correct.
