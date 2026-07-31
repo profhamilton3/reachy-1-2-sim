@@ -44,16 +44,18 @@ RUN git clone --depth 1 https://github.com/novnc/noVNC /opt/novnc \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-# ── ROS 2 workspace: reachy_sdk_server_2021 ───────────────────────────────────
-# Note: reachy-description (URDF) was private — description package may be
-# inside reachy_sdk_server_2021 itself. Confirm with Siva and add if needed.
+# ── ROS 2 workspace: SDK server + Reachy 1.2 (2021) URDF description ──────────
+# reachy_description (underscore) is the public Foxy package with reachy.URDF
+# and all .dae meshes. Earlier attempts used reachy-description (hyphen) — wrong.
 RUN mkdir -p ${REACHY_WS}/src && \
     cd ${REACHY_WS}/src && \
-    git clone --depth 1 https://github.com/pollen-robotics/reachy_sdk_server_2021.git
+    git clone --depth 1 https://github.com/pollen-robotics/reachy_sdk_server_2021.git && \
+    git clone --depth 1 https://github.com/pollen-robotics/reachy_description.git
 
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
     rosdep update --rosdistro ${ROS_DISTRO} && \
-    rosdep install --from-paths ${REACHY_WS}/src --ignore-src -r -y && \
+    rosdep install --from-paths ${REACHY_WS}/src --ignore-src -r -y \
+        --skip-keys "gazebo gazebo11 rviz" && \
     cd ${REACHY_WS} && \
     colcon build --symlink-install && \
     echo "source ${REACHY_WS}/install/setup.bash" >> /etc/bash.bashrc
