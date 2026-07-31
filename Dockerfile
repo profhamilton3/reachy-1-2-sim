@@ -48,11 +48,15 @@ RUN git clone --depth 1 https://github.com/novnc/noVNC /opt/novnc \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-# ── ROS 2 workspace: reachy-sdk-server + reachy-description ───────────────────
+# ── ROS 2 workspace: reachy_sdk_server_2021 + reachy-description ──────────────
 RUN mkdir -p ${REACHY_WS}/src && \
     cd ${REACHY_WS}/src && \
-    # SDK server (fake mode provides simulated robot without hardware)
-    git clone --depth 1 https://github.com/pollen-robotics/reachy_sdk_server.git && \
+    # Reachy 1.2 (2021) SDK server — contains reachy_bringup package
+    # Launched via: ros2 launch reachy_bringup reachy.launch.py fake:=true start_sdk_server:=true
+    git clone --depth 1 https://github.com/pollen-robotics/reachy_sdk_server_2021.git && \
+    # gRPC / protobuf API definitions (confirmed by Siva 2026-07-31)
+    # NOTE: named reachy2-sdk-api but used by the 2021 server — verify if reachy-sdk-api is needed instead
+    git clone --depth 1 https://github.com/pollen-robotics/reachy2-sdk-api.git && \
     # URDF / robot description for RViz2 display
     git clone --depth 1 https://github.com/pollen-robotics/reachy-description.git
 
