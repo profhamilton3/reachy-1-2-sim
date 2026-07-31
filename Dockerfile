@@ -77,8 +77,11 @@ COPY supervisord.conf /etc/supervisor/conf.d/reachy.conf
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 8888   # JupyterLab
-EXPOSE 6080   # noVNC → RViz2
-EXPOSE 50051  # Reachy SDK gRPC server
+# JupyterLab
+EXPOSE 8888
+# noVNC → RViz2
+EXPOSE 6080
+# Reachy SDK gRPC server
+EXPOSE 50051
 
 ENTRYPOINT ["/entrypoint.sh"]
