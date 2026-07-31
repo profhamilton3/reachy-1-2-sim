@@ -8,6 +8,7 @@ UInt32Value), not plain Python scalars.
 """
 
 import logging
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict
@@ -20,8 +21,11 @@ from google.protobuf.wrappers_pb2 import BoolValue, FloatValue, UInt32Value
 from reachy_sdk_api import (
     fan_pb2,
     fan_pb2_grpc,
+    head_kinematics_pb2,
+    head_kinematics_pb2_grpc,
     joint_pb2,
     joint_pb2_grpc,
+    kinematics_pb2,
     sensor_pb2,
     sensor_pb2_grpc,
 )
@@ -202,6 +206,56 @@ class FakeSensorService(sensor_pb2_grpc.SensorServiceServicer):
             time.sleep(dt)
 
 
+class FakeHeadKinematicsService(head_kinematics_pb2_grpc.HeadKinematicsServicer):
+    """Minimal analytic head kinematics — converts quaternion to neck RPY."""
+
+    # Neck joint UIDs matching JOINT_DEFS
+    _NECK_UIDS = [30, 31, 32]  # neck_roll, neck_pitch, neck_yaw
+
+    def ComputeHeadIK(self, request, context):
+        q = request.q
+        # Convert quaternion to euler (roll, pitch, yaw) analytically
+        roll, pitch, yaw = _quat_to_rpy(q.w, q.x, q.y, q.z)
+        ids = [joint_pb2.JointId(uid=uid) for uid in self._NECK_UIDS]
+        neck_pos = kinematics_pb2.JointPosition(
+            ids=ids,
+            positions=[roll, pitch, yaw],
+        )
+        return head_kinematics_pb2.HeadIKSolution(success=True, neck_position=neck_pos)
+
+    def ComputeHeadFK(self, request, context):
+        positions = request.neck_position.positions
+        roll = positions[0] if len(positions) > 0 else 0.0
+        pitch = positions[1] if len(positions) > 1 else 0.0
+        yaw = positions[2] if len(positions) > 2 else 0.0
+        w, x, y, z = _rpy_to_quat(roll, pitch, yaw)
+        return head_kinematics_pb2.HeadFKSolution(
+            success=True,
+            q=kinematics_pb2.Quaternion(w=w, x=x, y=y, z=z),
+        )
+
+
+def _quat_to_rpy(w, x, y, z):
+    """Quaternion → (roll, pitch, yaw) in radians — intrinsic xyz."""
+    roll = math.atan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
+    sinp = 2*(w*y - z*x)
+    pitch = math.asin(max(-1.0, min(1.0, sinp)))
+    yaw = math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+    return roll, pitch, yaw
+
+
+def _rpy_to_quat(roll, pitch, yaw):
+    """(roll, pitch, yaw) in radians → quaternion (w, x, y, z)."""
+    cr, sr = math.cos(roll/2), math.sin(roll/2)
+    cp, sp = math.cos(pitch/2), math.sin(pitch/2)
+    cy, sy = math.cos(yaw/2), math.sin(yaw/2)
+    w = cr*cp*cy + sr*sp*sy
+    x = sr*cp*cy - cr*sp*sy
+    y = cr*sp*cy + sr*cp*sy
+    z = cr*cp*sy - sr*sp*cy
+    return w, x, y, z
+
+
 class FakeFanService(fan_pb2_grpc.FanControllerServiceServicer):
     def __init__(self):
         self._fans = {uid: {"name": n, "uid": uid, "on": False} for n, uid in _FAN_DEFS}
@@ -231,6 +285,7 @@ def serve():
     joint_pb2_grpc.add_JointServiceServicer_to_server(FakeJointService(joints), server)
     sensor_pb2_grpc.add_SensorServiceServicer_to_server(FakeSensorService(), server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(FakeFanService(), server)
+    head_kinematics_pb2_grpc.add_HeadKinematicsServicer_to_server(FakeHeadKinematicsService(), server)
 
     server.add_insecure_port(f"[::]:{PORT}")
     server.start()
