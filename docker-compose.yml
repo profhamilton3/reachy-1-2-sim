@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  reachy-sim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: reachy-1-2-sim:latest
+    container_name: reachy-1-2-sim
+    platform: linux/amd64
+    ports:
+      - "8888:8888"   # JupyterLab
+      - "6080:6080"   # noVNC → RViz2
+      - "50051:50051" # Reachy SDK gRPC (connect from host via ReachySDK(host='localhost'))
+    volumes:
+      - ./notebooks:/notebooks   # Hot-reload notebooks without rebuild
+    environment:
+      - DISPLAY=:1
+    stdin_open: true
+    tty: true
+    restart: unless-stopped

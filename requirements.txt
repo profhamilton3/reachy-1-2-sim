@@ -1,0 +1,11 @@
+# Reachy 1.2 Python SDK (v1 — NOT reachy2-sdk)
+reachy-sdk
+reachy-sdk-api
+
+# JupyterLab
+jupyterlab>=4.0
+ipywidgets>=8.0
+
+# Utilities used in notebooks
+numpy>=1.24
+matplotlib>=3.7
