@@ -58,6 +58,9 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
     colcon build --symlink-install && \
     echo "source ${REACHY_WS}/install/setup.bash" >> /etc/bash.bashrc
 
+# ── Fake gRPC server (replaces reachy_bringup fake mode) ──────────────────────
+COPY fake_reachy_server.py /opt/fake_reachy_server.py
+
 # ── Notebooks ──────────────────────────────────────────────────────────────────
 COPY notebooks/ /notebooks/
 
