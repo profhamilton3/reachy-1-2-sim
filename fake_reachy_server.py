@@ -7,8 +7,10 @@ Note: JointState fields use google.protobuf wrapper types (FloatValue, BoolValue
 UInt32Value), not plain Python scalars.
 """
 
+import json
 import logging
 import math
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict
@@ -278,8 +280,38 @@ class FakeFanService(fan_pb2_grpc.FanControllerServiceServicer):
         return Empty()
 
 
+_STATE_FILE = "/tmp/reachy_joints.json"
+
+
+def _state_writer(joints: Dict[int, "JointState"]):
+    """Write joint positions to a JSON file at 30 Hz for the ROS bridge to read."""
+    dt = 1.0 / 30.0
+    while True:
+        state = {j.name: j.present_position for j in joints.values()}
+        try:
+            with open(_STATE_FILE, "w") as f:
+                json.dump(state, f)
+        except Exception:
+            pass
+        time.sleep(dt)
+
+
+def _interpolation_loop(joints: Dict[int, "JointState"]):
+    """Background servo sim: move present_position toward goal_position at 50 Hz."""
+    dt = 1.0 / 50.0
+    while True:
+        for j in joints.values():
+            if not j.compliant:
+                diff = j.goal_position - j.present_position
+                j.present_position += diff * min(dt * 5.0, 1.0)
+        time.sleep(dt)
+
+
 def serve():
     joints = {uid: JointState(name, uid) for name, uid in _JOINT_DEFS}
+
+    threading.Thread(target=_state_writer, args=(joints,), daemon=True).start()
+    threading.Thread(target=_interpolation_loop, args=(joints,), daemon=True).start()
 
     server = grpc.server(ThreadPoolExecutor(max_workers=10))
     joint_pb2_grpc.add_JointServiceServicer_to_server(FakeJointService(joints), server)
