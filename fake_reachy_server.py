@@ -13,14 +13,18 @@ import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict
+from typing import Dict, List, Optional
 
 import grpc
+import numpy as np
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf.wrappers_pb2 import BoolValue, FloatValue, UInt32Value
+from scipy.optimize import minimize
 
 from reachy_sdk_api import (
+    arm_kinematics_pb2,
+    arm_kinematics_pb2_grpc,
     fan_pb2,
     fan_pb2_grpc,
     head_kinematics_pb2,
@@ -238,6 +242,119 @@ class FakeHeadKinematicsService(head_kinematics_pb2_grpc.HeadKinematicsServicer)
         )
 
 
+# ── Arm kinematics ────────────────────────────────────────────────────────────
+# Approximate Reachy 1.2 geometry.  Joint axes match the URDF convention:
+#   shoulder_pitch → Y,  shoulder_roll → X,  arm/forearm_yaw → Z,
+#   elbow_pitch → Y,  wrist_pitch → Y,  wrist_roll → X.
+# At q=0 the arm hangs straight down (-Z).
+
+_R_SHOULDER_Y = -0.19   # right shoulder lateral offset (m)
+_L_SHOULDER_Y =  0.19   # left  shoulder lateral offset (m)
+_UPPER_ARM    =  0.28   # shoulder → elbow (m)
+_FOREARM      =  0.25   # elbow → wrist   (m)
+
+# Joint limits [min, max] in radians
+_R_ARM_LIMITS = [
+    (-3.14,  1.57),   # shoulder_pitch
+    (-1.57,  0.17),   # shoulder_roll (right arm: negative = outward)
+    (-2.09,  2.09),   # arm_yaw
+    (-2.35,  0.0),    # elbow_pitch (always bends same direction)
+    (-2.62,  2.62),   # forearm_yaw
+    (-0.79,  0.79),   # wrist_pitch
+    (-0.79,  0.79),   # wrist_roll
+]
+_L_ARM_LIMITS = [
+    (-3.14,  1.57),
+    (-0.17,  1.57),   # shoulder_roll (left arm: positive = outward)
+    (-2.09,  2.09),
+    (-2.35,  0.0),
+    (-2.62,  2.62),
+    (-0.79,  0.79),
+    (-0.79,  0.79),
+]
+
+
+def _rx(a: float) -> np.ndarray:
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[1,0,0,0],[0,c,-s,0],[0,s,c,0],[0,0,0,1]], dtype=float)
+
+
+def _ry(a: float) -> np.ndarray:
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[c,0,s,0],[0,1,0,0],[-s,0,c,0],[0,0,0,1]], dtype=float)
+
+
+def _rz(a: float) -> np.ndarray:
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[c,-s,0,0],[s,c,0,0],[0,0,1,0],[0,0,0,1]], dtype=float)
+
+
+def _tx(x: float, y: float, z: float) -> np.ndarray:
+    T = np.eye(4)
+    T[0, 3], T[1, 3], T[2, 3] = x, y, z
+    return T
+
+
+def _arm_fk(q: np.ndarray, side: str) -> np.ndarray:
+    """Forward kinematics for Reachy 1.2 7-DOF arm. q in radians."""
+    shoulder_y = _R_SHOULDER_Y if side == "right" else _L_SHOULDER_Y
+    roll_sign  = 1.0 if side == "right" else -1.0
+    T = _tx(0.0, shoulder_y, 0.0)
+    T = T @ _ry(q[0])                          # shoulder_pitch
+    T = T @ _rx(roll_sign * q[1])              # shoulder_roll (mirrored for left)
+    T = T @ _rz(q[2])                          # arm_yaw
+    T = T @ _tx(0, 0, -_UPPER_ARM)             # upper arm link
+    T = T @ _ry(q[3])                          # elbow_pitch
+    T = T @ _rz(q[4])                          # forearm_yaw
+    T = T @ _tx(0, 0, -_FOREARM)              # forearm link
+    T = T @ _ry(q[5])                          # wrist_pitch
+    T = T @ _rx(q[6])                          # wrist_roll
+    return T
+
+
+def _arm_ik(target: np.ndarray, side: str,
+            q0: Optional[List[float]] = None) -> tuple:
+    """Numerical IK via scipy L-BFGS-B. Returns (joints_rad, success)."""
+    bounds = _R_ARM_LIMITS if side == "right" else _L_ARM_LIMITS
+    q_init = np.zeros(7) if q0 is None else np.asarray(q0, dtype=float)[:7]
+
+    def cost(q):
+        T = _arm_fk(q, side)
+        pos = np.sum((T[:3, 3] - target[:3, 3]) ** 2)
+        rot = np.sum((T[:3, :3] - target[:3, :3]) ** 2)
+        return pos + 0.1 * rot
+
+    res = minimize(cost, q_init, method="L-BFGS-B", bounds=bounds,
+                   options={"maxiter": 1000, "ftol": 1e-10, "gtol": 1e-6})
+    return res.x, bool(res.fun < 0.01)
+
+
+class FakeArmKinematicsService(arm_kinematics_pb2_grpc.ArmKinematicsServicer):
+    """Numerical IK/FK for both arms using scipy optimization."""
+
+    def ComputeArmIK(self, request, context):
+        side = "left" if request.target.side == arm_kinematics_pb2.LEFT else "right"
+        target = np.array(list(request.target.pose.data), dtype=float).reshape(4, 4)
+        q0_vals = list(request.q0.positions)
+        q0 = q0_vals if q0_vals else None
+        joints, success = _arm_ik(target, side, q0)
+        arm_side = arm_kinematics_pb2.LEFT if side == "left" else arm_kinematics_pb2.RIGHT
+        joint_pos = kinematics_pb2.JointPosition(positions=joints.tolist())
+        arm_pos = arm_kinematics_pb2.ArmJointPosition(side=arm_side, positions=joint_pos)
+        if not success:
+            log.warning("ArmIK: no solution found for target %s", target[:3, 3])
+        return arm_kinematics_pb2.ArmIKSolution(success=success, arm_position=arm_pos)
+
+    def ComputeArmFK(self, request, context):
+        side = "left" if request.arm_position.side == arm_kinematics_pb2.LEFT else "right"
+        q = np.array(list(request.arm_position.positions.positions), dtype=float)
+        T = _arm_fk(q[:7], side)
+        pose = kinematics_pb2.Matrix4x4(data=T.flatten().tolist())
+        arm_side = arm_kinematics_pb2.LEFT if side == "left" else arm_kinematics_pb2.RIGHT
+        end_eff = arm_kinematics_pb2.ArmEndEffector(side=arm_side, pose=pose)
+        return arm_kinematics_pb2.ArmFKSolution(success=True, end_effector=end_eff)
+
+
 def _quat_to_rpy(w, x, y, z):
     """Quaternion → (roll, pitch, yaw) in radians — intrinsic xyz."""
     roll = math.atan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
@@ -319,6 +436,7 @@ def serve():
     sensor_pb2_grpc.add_SensorServiceServicer_to_server(FakeSensorService(), server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(FakeFanService(), server)
     head_kinematics_pb2_grpc.add_HeadKinematicsServicer_to_server(FakeHeadKinematicsService(), server)
+    arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(FakeArmKinematicsService(), server)
 
     server.add_insecure_port(f"[::]:{PORT}")
     server.start()
