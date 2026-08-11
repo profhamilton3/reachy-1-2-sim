@@ -37,8 +37,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
+# Pinned external repository revisions — update via R12-001 process.
+ARG NOVNC_SHA=7c36fabe599e053c5a81e98e091ac636f6c1e174
+ARG SDK_SERVER_SHA=42a372745505eb28ad160ab901d9a3f260569e41
+ARG REACHY_DESCRIPTION_SHA=d532bb7880c2c113be2cb42b8f855af614edcda2
+
 # ── noVNC (web VNC client) ─────────────────────────────────────────────────────
-RUN git clone --depth 1 https://github.com/novnc/noVNC /opt/novnc \
+RUN git clone https://github.com/novnc/noVNC /opt/novnc \
+    && git -C /opt/novnc checkout ${NOVNC_SHA} \
     && ln -sf /opt/novnc/vnc.html /opt/novnc/index.html
 
 # ── Python packages ────────────────────────────────────────────────────────────
@@ -50,8 +56,10 @@ RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 # and all .dae meshes. Earlier attempts used reachy-description (hyphen) — wrong.
 RUN mkdir -p ${REACHY_WS}/src && \
     cd ${REACHY_WS}/src && \
-    git clone --depth 1 https://github.com/pollen-robotics/reachy_sdk_server_2021.git && \
-    git clone --depth 1 https://github.com/pollen-robotics/reachy_description.git
+    git clone https://github.com/pollen-robotics/reachy_sdk_server_2021.git && \
+    git -C reachy_sdk_server_2021 checkout ${SDK_SERVER_SHA} && \
+    git clone https://github.com/pollen-robotics/reachy_description.git && \
+    git -C reachy_description checkout ${REACHY_DESCRIPTION_SHA}
 
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
     rosdep update --rosdistro ${ROS_DISTRO} && \
@@ -70,6 +78,13 @@ COPY notebooks/ /notebooks/
 
 # ── RViz2 config ───────────────────────────────────────────────────────────────
 COPY rviz/ /opt/rviz_config/
+
+# ── Scripts and scenes ─────────────────────────────────────────────────────────
+COPY scripts/ /opt/scripts/
+COPY scenes/ /opt/scenes/
+
+# ── Artifact output dir (collect_environment.py writes here) ───────────────────
+RUN mkdir -p /opt/artifacts
 
 # ── supervisord config ─────────────────────────────────────────────────────────
 COPY supervisord.conf /etc/supervisor/conf.d/reachy.conf

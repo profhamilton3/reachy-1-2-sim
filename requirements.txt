@@ -1,12 +1,15 @@
 # Reachy 1.2 Python SDK (v1 — NOT reachy2-sdk)
-# reachy-sdk-api is the correct gRPC API for Reachy 1.2
-reachy-sdk
-reachy-sdk-api
+# reachy-sdk-api is the gRPC API for Reachy 1.2; installed transitively by reachy-sdk.
+reachy-sdk==0.7.0
 
 # JupyterLab
-jupyterlab>=4.0
-ipywidgets>=8.0
+jupyterlab>=4.0,<5.0
+ipywidgets>=8.0,<9.0
 
 # Utilities used in notebooks
-numpy>=1.24
-matplotlib>=3.7
+numpy>=1.24,<2.0
+matplotlib>=3.7,<4.0
+
+# Scene validation (R12-200)
+jsonschema>=4.17
+pyyaml>=6.0

@@ -49,24 +49,38 @@ reachy = ReachySDK(host='localhost')  # port 50051 forwarded from container
 
 Install the SDK on your host:
 ```bash
-pip install reachy-sdk
+pip install reachy-sdk==0.7.0
 ```
+
+## Host-side smoke test (no Jupyter needed)
+
+```bash
+pip install reachy-sdk==0.7.0
+python3 scripts/smoke_test_host.py     # must pass before any PR merge
+```
+
+Exits 0 on success, nonzero on failure. Safe to run against the live container — no destructive motion, only bounded test commands.
 
 ## Architecture
 
+The gRPC service on port 50051 is a **custom Python fake server** (`fake_reachy_server.py`), not Pollen's `reachy_sdk_server` running in fake mode. It implements the Reachy v1 gRPC API with kinematic joint simulation (no physics or camera rendering).
+
 ```
 Docker container (linux/amd64, Ubuntu 20.04, ROS 2 Foxy)
-├── Xvfb :1          virtual display
-├── Fluxbox           window manager
+├── Xvfb :1              virtual display
+├── Fluxbox              window manager
 ├── x11vnc → port 5900
-├── noVNC/websockify → port 6080    ← browser RViz2
-├── reachy_sdk_server (fake mode) → port 50051  ← simulated robot
-├── robot_state_publisher            publishes URDF for RViz2
-├── rviz2                            3D visualization on virtual display
-└── JupyterLab → port 8888          ← browser coding
+├── noVNC/websockify → 127.0.0.1:6080    ← browser RViz2
+├── fake_reachy_server.py → 127.0.0.1:50051  ← custom kinematic fake server
+├── joint_state_bridge.py                publishes /joint_states to ROS
+├── robot_state_publisher                publishes URDF TF for RViz2
+├── rviz2                                3D visualization on virtual display
+└── JupyterLab → 127.0.0.1:8888         ← browser coding
 ```
 
 All processes managed by **supervisord**. Logs at `/var/log/supervisor/`.
+
+**Planned extensions** (see `docs/ROADMAP.md`): scene YAML files, v1 camera API, native macOS MuJoCo backend for physics/rendering.
 
 ## Notebooks
 

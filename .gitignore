@@ -15,3 +15,7 @@ __pycache__/
 
 # Logs
 *.log
+
+# Generated artifacts (keep the directory, ignore content)
+artifacts/*
+!artifacts/.gitkeep
