@@ -104,8 +104,8 @@ class SceneModel:
 
     # Default vertical clearance the gripper keeps above the table while
     # traversing (metres).  Grasp/place motions descend below this on purpose.
-    CARRY_CLEARANCE = 0.13
-    HOVER_CLEARANCE = 0.06
+    CARRY_CLEARANCE = 0.10
+    HOVER_CLEARANCE = 0.05
 
     def __init__(
         self,

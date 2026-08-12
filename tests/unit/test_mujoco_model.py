@@ -95,9 +95,11 @@ class TestVisualCollisionSeparation:
     def test_collision_geoms_add_no_mass(self, model):
         # Group-3 (collision) geoms are declared mass="0"; body inertia comes
         # from the visual geoms.  Proven by the invariant that total mass equals
-        # the visual-only reference measured in the R12-500 audit (66.512 kg):
-        # had collision geoms carried density-based mass, the total would rise.
-        assert model.body_mass.sum() == pytest.approx(66.512, abs=0.01)
+        # the visual-only reference: had collision geoms carried density-based
+        # mass, the total would rise.  Reference updated to 66.119 kg after the
+        # tabletop surface was lowered to z=0.74 (legs shortened to match the
+        # scene YAML / scene-awareness table height).
+        assert model.body_mass.sum() == pytest.approx(66.119, abs=0.01)
 
     def test_collision_geoms_exist_for_major_links(self, model):
         for name in ("torso_col", "r_upper_arm_col", "r_forearm_col",

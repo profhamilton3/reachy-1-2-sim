@@ -44,6 +44,15 @@ _R0 = np.array([
 
 _BASE = np.array(ARM_BASE_IN_WORLD)
 
+# The reachy_sdk FK/IK frame is the wrist (r_wrist2hand).  The gripper contact
+# pads sit ~0.12 m along the wrist's local -Z (measured from the model).  We
+# plan in *pad* (contact) space: pad_world = wrist_world + R_wrist @ (0,0,-TOOL),
+# so wrist_world = pad_world + R_wrist @ (0,0,+TOOL).  A true top-down grasp is
+# unreachable for this arm, so we accept whatever tilt IK finds and correct for
+# the pad offset at that orientation — the pads still land on the object.
+_TOOL_LEN = 0.12
+_TOOL = np.array([0.0, 0.0, _TOOL_LEN])
+
 
 def _rotz(a: float) -> np.ndarray:
     c, s = np.cos(a), np.sin(a)
@@ -87,9 +96,10 @@ class CartesianPlanner:
         return np.array(xyz) - _BASE
 
     def fk_world(self, joints: Sequence[float]) -> XYZ:
-        """Forward kinematics: joint angles (deg) → gripper world point."""
-        p = self._arm.forward_kinematics(list(joints))[:3, 3] + _BASE
-        return (float(p[0]), float(p[1]), float(p[2]))
+        """Forward kinematics: joint angles (deg) → gripper *pad* world point."""
+        F = self._arm.forward_kinematics(list(joints))
+        pad = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
+        return (float(pad[0]), float(pad[1]), float(pad[2]))
 
     def _orientations(self, prefer: Optional[Tuple[float, float]]):
         pairs = [(y, p) for y in self._yaws for p in self._pitches]
@@ -104,36 +114,39 @@ class CartesianPlanner:
         prefer: Optional[Tuple[float, float]] = None,
         return_orientation: bool = False,
     ):
-        """Return right-arm joint angles (deg) reaching gripper world point xyz.
+        """Return right-arm joint angles (deg) putting the gripper *pads* at pad
+        world point xyz (tool-frame IK).
 
-        Sweeps downward orientations and keeps the lowest-error solution.
+        Sweeps downward-ish orientations and keeps the lowest pad-error solution.
         ``prefer`` (a (yaw, pitch) pair) is tried first — passing the previous
         point's winning orientation makes contiguous path planning near-instant.
         Raises UnreachableError if none is within tolerance.
         """
-        target = self._world_to_armframe(xyz)
+        pad = np.array(xyz)
         q0 = list(seed) if seed is not None else None
         best_q: Optional[List[float]] = None
         best_err = float("inf")
         best_pair: Optional[Tuple[float, float]] = None
         for (yaw, pit) in self._orientations(prefer):
             R = _rotz(yaw) @ _roty(pit) @ _R0
+            wrist = pad + R @ _TOOL          # wrist target so pads land at `pad`
             M = np.eye(4)
             M[:3, :3] = R
-            M[:3, 3] = target
+            M[:3, 3] = wrist - _BASE
             try:
                 q = self._arm.inverse_kinematics(M, q0=q0)
             except Exception:
                 continue
-            got = np.array(self._arm.forward_kinematics(q)[:3, 3]) + _BASE
-            err = float(np.linalg.norm(got - np.array(xyz)))
+            F = self._arm.forward_kinematics(q)
+            pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
+            err = float(np.linalg.norm(pad_fk - pad))
             if err < best_err:
                 best_err, best_q, best_pair = err, list(q), (yaw, pit)
-                if err < 1e-4:
+                if err < 1e-3:
                     break
         if best_q is None or best_err > self._tol:
             raise UnreachableError(
-                f"No IK solution for {xyz} (best err={best_err:.4f} m)"
+                f"No IK solution for pad {xyz} (best err={best_err:.4f} m)"
             )
         return (best_q, best_pair) if return_orientation else best_q
 

@@ -128,6 +128,9 @@ def pick_and_place(robot, planner, scene, attacher, object_id, seed):
     place  = scene.rest_point(place_xy, object_id)
     retract = (place_xy[0], place_xy[1], scene.carry_z())
 
+    # Head tracks the object being manipulated.
+    P.look_at(robot, grasp, duration=1.0)
+
     # Approach in JOINT space (the arm lifts naturally): a straight Cartesian
     # line from READY to the hover point would clip the table — the collision
     # model rejects it, so we move joint-wise to the hover pose instead.
@@ -147,6 +150,7 @@ def pick_and_place(robot, planner, scene, attacher, object_id, seed):
     seed = _run_segment(arm, planner, grasp, lift, seed, 20, attacher, object_id)
 
     log.info("── %s: carry across table", object_id)
+    P.look_at(robot, place, duration=0.8)   # head tracks toward the drop site
     seed = _run_segment(arm, planner, lift, carry, seed, 35, attacher, object_id)
 
     log.info("── %s: descend to place", object_id)
@@ -195,6 +199,10 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
     log.info("── Move to READY pose")
     P.smooth_move(arm, P.READY, duration=2.0)
     seed = [P.READY[n] for n in R_ARM_JOINTS]
+
+    # Tilt the head/cameras down toward the tabletop workspace.
+    ws = scene.get(scene.manipulable_ids()[0]).center
+    P.look_at(robot, (ws[0], (ws[1] - 0.05), scene.table_surface_z), duration=1.0)
 
     for object_id in scene.manipulable_ids():
         log.info("=" * 56)

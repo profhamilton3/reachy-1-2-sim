@@ -17,6 +17,16 @@ services:
       - ./notebooks:/notebooks   # Hot-reload notebooks without rebuild
     environment:
       - DISPLAY=:1
+      # Backend selector (overridable from the shell):
+      #   kinematic     (default) — reliable, self-contained; the demo animates
+      #                 objects following the gripper in RViz.  `docker compose up`
+      #                 works out of the box with no host process.
+      #   mujoco-remote — real physics; bridges to the native macOS MuJoCo server.
+      #                 Use scripts/start_sim.sh, which starts that server and
+      #                 exports REACHY_SIM_BACKEND=mujoco-remote before compose up.
+      - REACHY_SIM_BACKEND=${REACHY_SIM_BACKEND:-kinematic}
+      - REACHY_SIM_MUJOCO_URL=ws://host.docker.internal:8765
+      - REACHY_SIM_ALLOW_FIXTURE_FALLBACK=true
     stdin_open: true
     tty: true
     restart: unless-stopped

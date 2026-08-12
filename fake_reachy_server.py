@@ -60,13 +60,44 @@ from mujoco_remote_backend import KinematicBridge, MujocoRemoteBackend
 _BACKEND_ENV = "REACHY_SIM_BACKEND"
 _MUJOCO_LEFT_JPG  = pathlib.Path("/tmp/reachy_left.jpg")
 _MUJOCO_RIGHT_JPG = pathlib.Path("/tmp/reachy_right.jpg")
+_SCENE_OVERRIDES = os.environ.get(
+    "REACHY_SIM_SCENE_OVERRIDES", "/tmp/reachy_scene_overrides.json"
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [fake-reachy] %(message)s")
 log = logging.getLogger(__name__)
 
 PORT = 50051
 
+import json
 import time
+
+
+def object_overrides_writer(remote, path: str = _SCENE_OVERRIDES, hz: float = 15.0) -> None:
+    """Publish live physics object poses to the scene-marker overrides file.
+
+    In the mujoco-remote backend the objects physically move; this mirrors their
+    tracked world positions into /tmp/reachy_scene_overrides.json so the RViz
+    scene markers follow the real objects (the same file the demo writes for
+    fake attachment in kinematic mode).  {object_id: [x, y, z]}.
+    """
+    period = 1.0 / hz
+    tmp = path + ".tmp"
+    while True:
+        try:
+            snap = remote.latest_snapshot()
+            objs = getattr(snap, "objects", None) or {}
+            if objs:
+                data = {
+                    oid: list(o.get("pos_xyz", [0.0, 0.0, 0.0]))
+                    for oid, o in objs.items()
+                }
+                with open(tmp, "w") as f:
+                    json.dump(data, f)
+                os.replace(tmp, path)
+        except Exception:
+            pass
+        time.sleep(period)
 
 
 class _MujocoRemoteCameraAdapter:
@@ -532,6 +563,10 @@ def serve() -> None:
         sensor_backend = mujoco
         camera = _MujocoRemoteCameraAdapter()
         camera.start()
+        threading.Thread(
+            target=object_overrides_writer, args=(mujoco,), daemon=True,
+            name="object-overrides-writer",
+        ).start()
         log.info("Backend: mujoco-remote → %s", mujoco._url)
     else:
         if backend_type not in ("kinematic", "fixture"):

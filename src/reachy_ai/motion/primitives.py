@@ -25,8 +25,11 @@ from typing import Dict
 log = logging.getLogger(__name__)
 
 _INTERP_HZ = 25          # interpolation update rate
-_GRIPPER_OPEN_DEG = 18.0
-_GRIPPER_CLOSED_DEG = -30.0  # finger gap ~30 mm — suitable for 60 mm cube / 70 mm cylinder
+# Gripper sign convention (measured from reachy_1_2.xml): NEGATIVE opens,
+# POSITIVE closes.  Pad gap: -45° ≈ 8.0 cm (open, clears the 60 mm cube and
+# 70 mm cylinder), -5° ≈ 4.6 cm (closed, squeezes both for a friction grip).
+_GRIPPER_OPEN_DEG = -45.0
+_GRIPPER_CLOSED_DEG = -5.0
 
 # ── Named joint poses (degrees) ───────────────────────────────────────────────
 # All poses are for the right arm only.  Unused joints keep their current value.
@@ -166,6 +169,47 @@ def smooth_move(arm, pose: Dict[str, float], duration: float = 2.0) -> None:
             getattr(arm, name).goal_position = start[name] + t * (goal - start[name])
         time.sleep(dt)
     log.debug("smooth_move done: %s", {k: f"{v:.1f}°" for k, v in pose.items()})
+
+
+import math
+
+# Approx world position of the head/cameras (torso top) for look-at geometry.
+_HEAD_WORLD = (0.02, 0.0, 1.18)
+# Neck look-at limits (deg).  Pitch capped at 45° for a natural down-gaze at the
+# tabletop (the joint allows up to 64°, which looks like staring at its chest).
+_NECK_PITCH_RANGE = (-45.0, 45.0)
+_NECK_YAW_RANGE = (-159.0, 159.0)
+
+
+def _clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+
+def look_at(robot, xyz, duration: float = 1.0) -> None:
+    """Orient the head so the cameras point toward world point xyz.
+
+    neck_pitch>0 looks down; neck_yaw>0 turns toward +Y (robot's left).  The
+    workspace objects are down and to the right (−Y), so this yaws right and
+    pitches down to face them.
+    """
+    head = getattr(robot, "head", None)
+    if head is None:
+        return
+    hx, hy, hz = _HEAD_WORLD
+    dx, dy, dz = xyz[0] - hx, xyz[1] - hy, xyz[2] - hz
+    horiz = math.hypot(dx, dy)
+    yaw = _clamp(math.degrees(math.atan2(dy, dx)), *_NECK_YAW_RANGE)
+    pitch = _clamp(math.degrees(math.atan2(-dz, horiz)), *_NECK_PITCH_RANGE)
+    robot.turn_on("head")
+    # turn_on("head") does not reliably make the neck stiff on the sim backend;
+    # stiffen the neck joints explicitly or goal_position is ignored (compliant).
+    for jn in ("neck_roll", "neck_pitch", "neck_yaw"):
+        try:
+            getattr(head, jn).compliant = False
+        except Exception:
+            pass
+    time.sleep(0.1)
+    smooth_move(head, {"neck_roll": 0.0, "neck_pitch": pitch, "neck_yaw": yaw}, duration)
 
 
 def execute_trajectory(
