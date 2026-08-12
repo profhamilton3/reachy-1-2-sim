@@ -16,3 +16,6 @@ pyyaml>=6.0
 
 # Camera fixture: JPEG encode/decode (R12-301)
 Pillow>=9.0
+
+# MuJoCo remote backend WebSocket client (R12-403)
+websockets>=10.0,<14.0

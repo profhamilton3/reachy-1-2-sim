@@ -46,7 +46,11 @@ _MUJOCO_URL = os.environ.get("REACHY_SIM_MUJOCO_URL", _DEFAULT_URL)
 _LEFT_JPG  = pathlib.Path("/tmp/reachy_left.jpg")
 _RIGHT_JPG = pathlib.Path("/tmp/reachy_right.jpg")
 
-from kinematic_backend import JOINT_DEFS, JointCommand, SimulationSnapshot
+from kinematic_backend import JOINT_DEFS, JointCommand, JointSample, SimulationSnapshot
+
+# Must match native_mujoco/protocol.py — inlined here so this module
+# runs inside Docker without access to the native server tree.
+PROTOCOL_VERSION = 1
 
 
 class ConnectionState(str, Enum):
@@ -185,8 +189,6 @@ class MujocoRemoteBackend:
                 await asyncio.sleep(_RECONNECT_DELAY)
 
     async def _session(self, ws) -> None:
-        from protocol import PROTOCOL_VERSION, Heartbeat, HeartbeatAck
-
         # Handshake
         hello = {"type": "hello", "protocol_version": PROTOCOL_VERSION,
                  "client_id": "docker-core"}
@@ -366,38 +368,74 @@ class MujocoRemoteBackend:
     # ── SimulationSnapshot bridge (for fake_reachy_server compatibility) ─
 
     def to_kinematic_snapshot(self) -> SimulationSnapshot:
-        """Convert RemoteSnapshot to kinematic_backend.SimulationSnapshot."""
+        """Convert the latest RemoteSnapshot to a kinematic_backend.SimulationSnapshot.
+
+        The returned snapshot is keyed by joint name and uses JointSample objects,
+        matching exactly what KinematicBackend.latest_snapshot() returns — so
+        FakeJointService and state_file_writer work with either backend.
+        """
         remote = self.latest_snapshot()
-        from kinematic_backend import _MutableJoint as _J  # noqa: PLC0415
-        joints = {}
+        joints: Dict[str, JointSample] = {}
+        seen_names: set = set()
+
         for name, s in remote.joints.items():
-            j = type("_J", (), {
-                "name": name,
-                "uid": s.uid,
-                "position": math.degrees(s.position_rad),
-                "velocity": math.degrees(s.velocity_rad_s),
-                "effort": s.effort,
-                "compliant": False,
-                "temperature": 25.0,
-                "hardware_status": "ok",
-            })()
-            joints[s.uid] = j
-        # Fill missing joints with zeroed data
-        existing_uids = {s.uid for s in remote.joints.values()}
-        for name, uid in JOINT_DEFS:
-            if uid not in existing_uids:
-                j = type("_J", (), {
-                    "name": name,
-                    "uid": uid,
-                    "position": 0.0,
-                    "velocity": 0.0,
-                    "effort": 0.0,
-                    "compliant": False,
-                    "temperature": 25.0,
-                    "hardware_status": "ok",
-                })()
-                joints[uid] = j
-        return SimulationSnapshot(joints=joints)
+            seen_names.add(name)
+            joints[name] = JointSample(
+                name=name,
+                uid=s.uid,
+                present_position=s.position_rad,
+                goal_position=s.position_rad,
+                present_speed=s.velocity_rad_s,
+                present_load=s.effort,
+                temperature=35.0,
+                compliant=s.compliant,
+                speed_limit=0.0,
+                torque_limit=100.0,
+            )
+
+        # Fill any joints the server hasn't reported yet with safe defaults.
+        for def_name, uid in JOINT_DEFS:
+            if def_name not in seen_names:
+                joints[def_name] = JointSample(
+                    name=def_name,
+                    uid=uid,
+                    present_position=0.0,
+                    goal_position=0.0,
+                    present_speed=0.0,
+                    present_load=0.0,
+                    temperature=35.0,
+                    compliant=uid not in (33, 34),  # antennae start stiff
+                    speed_limit=0.0,
+                    torque_limit=100.0,
+                )
+
+        return SimulationSnapshot(
+            sequence=remote.seq,
+            sim_step=remote.sim_step,
+            sim_time_s=remote.sim_time_s,
+            wall_time_ns=remote.wall_time_ns if remote.wall_time_ns else time.monotonic_ns(),
+            joints=joints,
+        )
+
+
+class KinematicBridge:
+    """Presents the KinematicBackend interface over a MujocoRemoteBackend.
+
+    Used by fake_reachy_server.py so FakeJointService and state_file_writer
+    work identically whether the active backend is kinematic or mujoco-remote.
+    """
+
+    def __init__(self, remote: MujocoRemoteBackend) -> None:
+        self._r = remote
+
+    def latest_snapshot(self) -> SimulationSnapshot:
+        return self._r.to_kinematic_snapshot()
+
+    def submit_command(self, cmd: JointCommand) -> None:
+        self._r.submit_command(cmd)
+
+    def uid_by_name(self, name: str) -> Optional[int]:
+        return self._r.uid_by_name(name)
 
 
 def _atomic_write(path: pathlib.Path, data: bytes) -> None:

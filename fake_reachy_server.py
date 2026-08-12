@@ -15,6 +15,8 @@ they can be unit-tested on the host without installing grpcio.
 
 import logging
 import math
+import os
+import pathlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
@@ -42,7 +44,7 @@ from reachy_sdk_api import (
     sensor_pb2_grpc,
 )
 
-from camera_fixture import CameraFixture, LEFT, RIGHT, frame_file_writer
+from camera_fixture import CameraFixture, CameraFrame, LEFT, RIGHT, frame_file_writer
 
 from kinematic_backend import (
     JOINT_DEFS,
@@ -53,12 +55,66 @@ from kinematic_backend import (
     state_file_writer,
 )
 
+from mujoco_remote_backend import KinematicBridge, MujocoRemoteBackend
+
+_BACKEND_ENV = "REACHY_SIM_BACKEND"
+_MUJOCO_LEFT_JPG  = pathlib.Path("/tmp/reachy_left.jpg")
+_MUJOCO_RIGHT_JPG = pathlib.Path("/tmp/reachy_right.jpg")
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [fake-reachy] %(message)s")
 log = logging.getLogger(__name__)
 
 PORT = 50051
 
 import time
+
+
+class _MujocoRemoteCameraAdapter:
+    """Serve MuJoCo camera frames from the tmp files written by MujocoRemoteBackend.
+
+    Presents the same latest_frame()/render_single_frame() interface as
+    CameraFixture so FakeCameraService works with either backend unchanged.
+    """
+
+    def __init__(self) -> None:
+        self._seqs: dict = {LEFT: 0, RIGHT: 0}
+        self._last: dict = {LEFT: None, RIGHT: None}
+
+    def latest_frame(self, cam_id: int) -> Optional[CameraFrame]:
+        path = _MUJOCO_LEFT_JPG if cam_id == LEFT else _MUJOCO_RIGHT_JPG
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return self._last[cam_id]
+        self._seqs[cam_id] += 1
+        frame = CameraFrame(
+            camera_id=cam_id,
+            sequence=self._seqs[cam_id],
+            wall_time_ns=time.time_ns(),
+            width=0,
+            height=0,
+            jpeg_bytes=data,
+        )
+        self._last[cam_id] = frame
+        return frame
+
+    def render_single_frame(self, cam_id: int) -> CameraFrame:
+        frame = self.latest_frame(cam_id)
+        if frame is not None:
+            return frame
+        # No frame from the native server yet — generate a dark placeholder.
+        import io
+        from PIL import Image as _PIL
+        buf = io.BytesIO()
+        _PIL.new("RGB", (320, 240), (10, 10, 30)).save(buf, format="JPEG", quality=70)
+        return CameraFrame(
+            camera_id=cam_id, sequence=0,
+            wall_time_ns=time.time_ns(), width=320, height=240,
+            jpeg_bytes=buf.getvalue(),
+        )
+
+    def start(self) -> None:
+        pass  # frames arrive via MujocoRemoteBackend._ingest_camera_frame
 
 _FORCE_SENSOR_DEFS = [
     ("r_force_gripper", 1),
@@ -97,7 +153,7 @@ def _sample_to_proto(s: JointSample) -> joint_pb2.JointState:
 class FakeJointService(joint_pb2_grpc.JointServiceServicer):
     """gRPC adapter — reads backend snapshots, submits commands. Never mutates state."""
 
-    def __init__(self, backend: KinematicBackend) -> None:
+    def __init__(self, backend) -> None:
         self._backend = backend
 
     def _resolve(self, ids, snapshot: SimulationSnapshot) -> List[JointSample]:
@@ -172,11 +228,18 @@ class FakeJointService(joint_pb2_grpc.JointServiceServicer):
 
 
 class FakeSensorService(sensor_pb2_grpc.SensorServiceServicer):
-    def __init__(self) -> None:
+    def __init__(self, remote_backend=None) -> None:
         self._sensors = {
-            uid: {"name": n, "uid": uid, "force": 0.0}
+            uid: {"name": n, "uid": uid}
             for n, uid in _FORCE_SENSOR_DEFS
         }
+        # When a MujocoRemoteBackend is provided, read live gripper forces from it.
+        self._remote = remote_backend
+
+    def _force(self, uid: int) -> float:
+        if self._remote is not None:
+            return self._remote.latest_snapshot().force_sensors.get(uid, 0.0)
+        return 0.0
 
     def GetAllForceSensorsId(self, request, context):
         names = [s["name"] for s in self._sensors.values()]
@@ -188,7 +251,7 @@ class FakeSensorService(sensor_pb2_grpc.SensorServiceServicer):
         ids = [sensor_pb2.SensorId(uid=s["uid"]) for s in sensors]
         states = [
             sensor_pb2.SensorState(
-                force_sensor_state=sensor_pb2.ForceSensorState(force=s["force"])
+                force_sensor_state=sensor_pb2.ForceSensorState(force=self._force(s["uid"]))
             )
             for s in sensors
         ]
@@ -206,7 +269,7 @@ class FakeSensorService(sensor_pb2_grpc.SensorServiceServicer):
             ids = [sensor_pb2.SensorId(uid=s["uid"]) for s in sensors]
             states = [
                 sensor_pb2.SensorState(
-                    force_sensor_state=sensor_pb2.ForceSensorState(force=s["force"])
+                    force_sensor_state=sensor_pb2.ForceSensorState(force=self._force(s["uid"]))
                 )
                 for s in sensors
             ]
@@ -460,22 +523,37 @@ class FakeCameraService(camera_reachy_pb2_grpc.CameraServiceServicer):
 # ── Server entrypoint ─────────────────────────────────────────────────────────
 
 def serve() -> None:
-    backend = KinematicBackend()
-    backend.start()
+    backend_type = os.environ.get(_BACKEND_ENV, "kinematic").lower()
+
+    if backend_type == "mujoco-remote":
+        mujoco = MujocoRemoteBackend()
+        mujoco.start()
+        joint_backend = KinematicBridge(mujoco)
+        sensor_backend = mujoco
+        camera = _MujocoRemoteCameraAdapter()
+        camera.start()
+        log.info("Backend: mujoco-remote → %s", mujoco._url)
+    else:
+        if backend_type not in ("kinematic", "fixture"):
+            log.warning("Unknown backend %r — falling back to kinematic", backend_type)
+        kinematic = KinematicBackend()
+        kinematic.start()
+        joint_backend = kinematic
+        sensor_backend = None
+        camera = CameraFixture()
+        camera.start()
+        threading.Thread(
+            target=frame_file_writer, args=(camera,), daemon=True, name="frame-writer"
+        ).start()
+        log.info("Backend: %s", backend_type)
 
     threading.Thread(
-        target=state_file_writer, args=(backend,), daemon=True, name="state-writer"
-    ).start()
-
-    camera = CameraFixture()
-    camera.start()
-    threading.Thread(
-        target=frame_file_writer, args=(camera,), daemon=True, name="frame-writer"
+        target=state_file_writer, args=(joint_backend,), daemon=True, name="state-writer"
     ).start()
 
     server = grpc.server(ThreadPoolExecutor(max_workers=10))
-    joint_pb2_grpc.add_JointServiceServicer_to_server(FakeJointService(backend), server)
-    sensor_pb2_grpc.add_SensorServiceServicer_to_server(FakeSensorService(), server)
+    joint_pb2_grpc.add_JointServiceServicer_to_server(FakeJointService(joint_backend), server)
+    sensor_pb2_grpc.add_SensorServiceServicer_to_server(FakeSensorService(sensor_backend), server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(FakeFanService(), server)
     head_kinematics_pb2_grpc.add_HeadKinematicsServicer_to_server(
         FakeHeadKinematicsService(), server
@@ -489,7 +567,7 @@ def serve() -> None:
 
     server.add_insecure_port(f"[::]:{PORT}")
     server.start()
-    snap = backend.latest_snapshot()
+    snap = joint_backend.latest_snapshot()
     log.info("Fake Reachy gRPC server listening on port %d", PORT)
     log.info("Joints: %s", list(snap.joints.keys()))
     server.wait_for_termination()
