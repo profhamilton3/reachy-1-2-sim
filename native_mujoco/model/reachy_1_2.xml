@@ -1,0 +1,360 @@
+<mujoco model="reachy_1_2">
+  <!--
+    Reachy 1.2 MuJoCo model — pure MJCF (no URDF import).
+    Kinematic structure extracted from reachy.urdf; geometry simplified to
+    capsules/spheres/boxes so MuJoCo auto-computes inertia from geometry.
+    All units SI (metres, radians, kg, s).  Compiler angle="radian".
+
+    Joint ordering (depth-first, matches joint_map.py):
+      0  r_shoulder_pitch    8  l_shoulder_pitch   16 neck_roll
+      1  r_shoulder_roll     9  l_shoulder_roll    17 neck_pitch
+      2  r_arm_yaw          10  l_arm_yaw          18 neck_yaw
+      3  r_elbow_pitch      11  l_elbow_pitch      19 l_antenna
+      4  r_forearm_yaw      12  l_forearm_yaw      20 r_antenna
+      5  r_wrist_pitch      13  l_wrist_pitch
+      6  r_wrist_roll       14  l_wrist_roll
+      7  r_gripper          15  l_gripper
+  -->
+
+  <compiler angle="radian" meshdir="meshes"/>
+
+  <!-- implicitfast is A-stable: handles stiff actuators (antennas) without NaN -->
+  <option timestep="0.002" gravity="0 0 -9.81" iterations="50" solver="Newton"
+          integrator="implicitfast"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <quality shadowsize="2048"/>
+  </visual>
+
+  <asset>
+    <texture name="skybox" type="skybox" builtin="gradient"
+             rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture name="groundtex" type="2d" builtin="checker" mark="edge"
+             rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8"
+             width="300" height="300"/>
+    <material name="groundplane" texture="groundtex" texuniform="true"
+              texrepeat="5 5" reflectance="0.2"/>
+    <material name="frame"         rgba="0.15 0.15 0.15 1"/>
+    <material name="white_plastic" rgba="0.92 0.92 0.92 1"/>
+    <material name="dark_gray"     rgba="0.20 0.20 0.20 1"/>
+    <material name="gripper_mat"   rgba="0.30 0.30 0.30 1"/>
+    <material name="antenna_mat"   rgba="0.20 0.70 0.20 1"/>
+    <material name="table_mat"     rgba="0.80 0.70 0.55 1"/>
+  </asset>
+
+  <worldbody>
+    <!-- ── Environment ─────────────────────────────────────────── -->
+    <geom name="floor" type="plane" size="3 3 0.1" material="groundplane"/>
+    <light name="overhead" pos="0 0 3" dir="0 0 -1"
+           diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2"/>
+    <light name="fill" pos="-1 1 2" dir="1 -1 -1"
+           diffuse="0.3 0.3 0.3" specular="0 0 0"/>
+
+    <!-- ── Tabletop workspace ──────────────────────────────────── -->
+    <body name="table" pos="0.55 0 0">
+      <geom name="tabletop"  type="box"     size="0.40 0.30 0.02"
+            pos="0 0 0.77"   material="table_mat"/>
+      <geom name="t_leg_fr"  type="capsule"
+            fromto="0.35  0.25 0  0.35  0.25 0.75" size="0.025" material="dark_gray"/>
+      <geom name="t_leg_fl"  type="capsule"
+            fromto="-0.35  0.25 0 -0.35  0.25 0.75" size="0.025" material="dark_gray"/>
+      <geom name="t_leg_br"  type="capsule"
+            fromto="0.35 -0.25 0  0.35 -0.25 0.75" size="0.025" material="dark_gray"/>
+      <geom name="t_leg_bl"  type="capsule"
+            fromto="-0.35 -0.25 0 -0.35 -0.25 0.75" size="0.025" material="dark_gray"/>
+    </body>
+
+    <!-- ── Pedestal (fixed base) ───────────────────────────────── -->
+    <!-- URDF: pedestal joint xyz=0 0 1  ⟹ torso origin is 1 m above world -->
+    <body name="pedestal" pos="0 0 0">
+      <geom name="pedestal_geom" type="cylinder"
+            fromto="0 0 0 0 0 0.95" size="0.08" material="dark_gray"/>
+
+      <!-- ── Torso ─────────────────────────────────────────────── -->
+      <body name="torso" pos="0 0 1">
+        <inertial pos="0 0 0" mass="12" diaginertia="0.15 0.15 0.08"/>
+        <geom name="torso_main" type="box"
+              size="0.10 0.18 0.12" pos="0 0 0" material="frame"/>
+
+        <!-- ════════════════════ RIGHT ARM ════════════════════════ -->
+        <!-- r_shoulder — URDF: torso→r_shoulder xyz=0 -0.19 0 -->
+        <body name="r_shoulder" pos="0 -0.19 0">
+          <joint name="r_shoulder_pitch" type="hinge" axis="0 1 0"
+                 range="-2.618 1.57" damping="1.5"/>
+          <geom name="r_shoulder_ball" type="sphere" size="0.042"
+                material="white_plastic"/>
+
+          <!-- r_shoulder_x — URDF: r_shoulder→r_shoulder_x xyz=0 0 0 -->
+          <body name="r_shoulder_x" pos="0 0 0">
+            <joint name="r_shoulder_roll" type="hinge" axis="1 0 0"
+                   range="-3.14 0.174" damping="1.5"/>
+            <!-- massless intermediate frame — tiny marker sphere -->
+            <geom name="r_shx_marker" type="sphere" size="0.005"
+                  material="dark_gray" mass="0.001"/>
+
+            <!-- r_upper_arm — URDF: r_shoulder_x→r_upper_arm xyz=0 0 0 -->
+            <body name="r_upper_arm" pos="0 0 0">
+              <joint name="r_arm_yaw" type="hinge" axis="0 0 1"
+                     range="-1.57 1.57" damping="1.0"/>
+              <geom name="r_upper_arm_cap" type="capsule"
+                    fromto="0 0 0 0 0 -0.28" size="0.035"
+                    material="white_plastic"/>
+
+              <!-- r_forearm — URDF: r_upper_arm→r_forearm xyz=0 0 -0.28 -->
+              <body name="r_forearm" pos="0 0 -0.28">
+                <joint name="r_elbow_pitch" type="hinge" axis="0 1 0"
+                       range="-2.182 0" damping="0.8"/>
+                <geom name="r_elbow_ball" type="sphere" size="0.032"
+                      material="frame"/>
+                <geom name="r_forearm_cap" type="capsule"
+                      fromto="0 0 0 0 0 -0.25" size="0.030"
+                      material="white_plastic"/>
+
+                <!-- r_wrist — URDF: r_forearm→r_wrist xyz=0 0 0 -->
+                <body name="r_wrist" pos="0 0 0">
+                  <joint name="r_forearm_yaw" type="hinge" axis="0 0 1"
+                         range="-1.745 1.745" damping="0.4"/>
+                  <geom name="r_wrist_marker" type="sphere" size="0.005"
+                        material="dark_gray" mass="0.001"/>
+
+                  <!-- r_wrist2hand — URDF: r_wrist→r_wrist2hand xyz=0 0 -0.25 -->
+                  <body name="r_wrist2hand" pos="0 0 -0.25">
+                    <joint name="r_wrist_pitch" type="hinge" axis="0 1 0"
+                           range="-0.785 0.785" damping="0.4"/>
+                    <geom name="r_wrist_ball" type="sphere" size="0.028"
+                          material="frame"/>
+
+                    <!-- r_gripper_thumb — URDF: r_wrist2hand→r_gripper_thumb xyz=0 0 -0.0325 -->
+                    <body name="r_gripper_thumb" pos="0 0 -0.0325">
+                      <joint name="r_wrist_roll" type="hinge" axis="1 0 0"
+                             range="-0.785 0.785" damping="0.4"/>
+                      <geom name="r_thumb_body" type="box"
+                            size="0.025 0.028 0.038" pos="0 -0.018 -0.022"
+                            material="gripper_mat"/>
+
+                      <!-- r_gripper_finger — URDF: r_gripper_thumb→r_gripper_finger xyz=0 -0.037 -0.03998 -->
+                      <body name="r_gripper_finger" pos="0 -0.037 -0.03998">
+                        <joint name="r_gripper" type="hinge" axis="1 0 0"
+                               range="-1.2 0.35" damping="0.3"/>
+                        <geom name="r_finger_body" type="box"
+                              size="0.012 0.010 0.038" pos="0 0 -0.038"
+                              material="gripper_mat"/>
+                      </body>
+
+                      <!-- r_tip site — URDF: xyz=0 -0.012 -0.085 from r_gripper_thumb -->
+                      <site name="r_tip" pos="0 -0.012 -0.085" size="0.012"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- ════════════════════ LEFT ARM ═════════════════════════ -->
+        <!-- l_shoulder — URDF: torso→l_shoulder xyz=0 0.19 0 -->
+        <body name="l_shoulder" pos="0 0.19 0">
+          <joint name="l_shoulder_pitch" type="hinge" axis="0 1 0"
+                 range="-2.618 1.57" damping="1.5"/>
+          <geom name="l_shoulder_ball" type="sphere" size="0.042"
+                material="white_plastic"/>
+
+          <!-- l_shoulder_x -->
+          <body name="l_shoulder_x" pos="0 0 0">
+            <joint name="l_shoulder_roll" type="hinge" axis="1 0 0"
+                   range="-0.174 3.14" damping="1.5"/>
+            <geom name="l_shx_marker" type="sphere" size="0.005"
+                  material="dark_gray" mass="0.001"/>
+
+            <!-- l_upper_arm -->
+            <body name="l_upper_arm" pos="0 0 0">
+              <joint name="l_arm_yaw" type="hinge" axis="0 0 1"
+                     range="-1.57 1.57" damping="1.0"/>
+              <geom name="l_upper_arm_cap" type="capsule"
+                    fromto="0 0 0 0 0 -0.28" size="0.035"
+                    material="white_plastic"/>
+
+              <!-- l_forearm -->
+              <body name="l_forearm" pos="0 0 -0.28">
+                <joint name="l_elbow_pitch" type="hinge" axis="0 1 0"
+                       range="-2.182 0" damping="0.8"/>
+                <geom name="l_elbow_ball" type="sphere" size="0.032"
+                      material="frame"/>
+                <geom name="l_forearm_cap" type="capsule"
+                      fromto="0 0 0 0 0 -0.25" size="0.030"
+                      material="white_plastic"/>
+
+                <!-- l_wrist -->
+                <body name="l_wrist" pos="0 0 0">
+                  <joint name="l_forearm_yaw" type="hinge" axis="0 0 1"
+                         range="-1.745 1.745" damping="0.4"/>
+                  <geom name="l_wrist_marker" type="sphere" size="0.005"
+                        material="dark_gray" mass="0.001"/>
+
+                  <!-- l_wrist2hand -->
+                  <body name="l_wrist2hand" pos="0 0 -0.25">
+                    <joint name="l_wrist_pitch" type="hinge" axis="0 1 0"
+                           range="-0.785 0.785" damping="0.4"/>
+                    <geom name="l_wrist_ball" type="sphere" size="0.028"
+                          material="frame"/>
+
+                    <!-- l_gripper_thumb -->
+                    <body name="l_gripper_thumb" pos="0 0 -0.0325">
+                      <joint name="l_wrist_roll" type="hinge" axis="1 0 0"
+                             range="-0.785 0.785" damping="0.4"/>
+                      <geom name="l_thumb_body" type="box"
+                            size="0.025 0.028 0.038" pos="0 0.018 -0.022"
+                            material="gripper_mat"/>
+
+                      <!-- l_gripper_finger — URDF: xyz=0 0.037 -0.03998 -->
+                      <body name="l_gripper_finger" pos="0 0.037 -0.03998">
+                        <joint name="l_gripper" type="hinge" axis="1 0 0"
+                               range="-0.35 1.2" damping="0.3"/>
+                        <geom name="l_finger_body" type="box"
+                              size="0.012 0.010 0.038" pos="0 0 -0.038"
+                              material="gripper_mat"/>
+                      </body>
+
+                      <!-- l_tip site — URDF: xyz=0 0.012 -0.085 from l_gripper_thumb -->
+                      <site name="l_tip" pos="0 0.012 -0.085" size="0.012"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- ════════════════════ HEAD / NECK ══════════════════════ -->
+        <!-- head_x — URDF: torso→head_x  neck_roll joint, xyz=0.015 0 0.095 -->
+        <body name="head_x" pos="0.015 0 0.095">
+          <joint name="neck_roll" type="hinge" axis="1 0 0"
+                 range="-0.8 0.8" damping="0.6"/>
+          <geom name="head_x_marker" type="sphere" size="0.005"
+                material="dark_gray" mass="0.001"/>
+
+          <!-- head_y — URDF: neck_pitch joint at same xyz as head_x -->
+          <body name="head_y" pos="0 0 0">
+            <joint name="neck_pitch" type="hinge" axis="0 1 0"
+                   range="-0.8 1.13" damping="0.6"/>
+            <geom name="head_y_marker" type="sphere" size="0.005"
+                  material="dark_gray" mass="0.001"/>
+
+            <!-- head_z — URDF: neck_yaw joint -->
+            <body name="head_z" pos="0 0 0">
+              <joint name="neck_yaw" type="hinge" axis="0 0 1"
+                     range="-2.79 2.79" damping="0.6"/>
+
+              <!-- head — URDF: neck_fixed (fixed joint, no relative motion) -->
+              <body name="head" pos="0 0 0">
+                <!-- head box: centred slightly above and forward of neck attachment -->
+                <geom name="head_box" type="box"
+                      size="0.088 0.090 0.068" pos="0.010 0 0.042"
+                      material="white_plastic"/>
+
+                <!-- ── Stereo cameras ──────────────────────────────
+                     URDF camera frames from head:
+                       left:  xyz=0.0033  0.03625 0.061
+                       right: xyz=0.0033 -0.03625 0.061
+                     euler="0 -1.5708 0" rotates -90° about Y so the
+                     camera's -Z (look direction) points in head's +X.     -->
+                <camera name="left_camera"
+                        pos="0.0033  0.03625 0.061"
+                        euler="0 -1.5708 0"
+                        fovy="1.0472"/>
+                <camera name="right_camera"
+                        pos="0.0033 -0.03625 0.061"
+                        euler="0 -1.5708 0"
+                        fovy="1.0472"/>
+
+                <!-- ── Left antenna — URDF: head→l_antenna_link xyz=-0.052 0.057 0.086 -->
+                <body name="l_antenna_link" pos="-0.052 0.057 0.086">
+                  <joint name="l_antenna" type="hinge" axis="0 0 1"
+                         range="-2.618 2.618" damping="0.05"/>
+                  <geom name="l_antenna_cap" type="capsule"
+                        fromto="0 0 0 0 0 0.045" size="0.006"
+                        material="antenna_mat"/>
+                </body>
+
+                <!-- ── Right antenna — URDF: head→r_antenna_link xyz=-0.052 -0.057 0.086 -->
+                <body name="r_antenna_link" pos="-0.052 -0.057 0.086">
+                  <joint name="r_antenna" type="hinge" axis="0 0 1"
+                         range="-2.618 2.618" damping="0.05"/>
+                  <geom name="r_antenna_cap" type="capsule"
+                        fromto="0 0 0 0 0 0.045" size="0.006"
+                        material="antenna_mat"/>
+                </body>
+
+              </body>  <!-- head -->
+            </body>  <!-- head_z -->
+          </body>  <!-- head_y -->
+        </body>  <!-- head_x -->
+
+      </body>  <!-- torso -->
+    </body>  <!-- pedestal -->
+
+  </worldbody>
+
+  <!-- ── Position actuators (P+D, joint-space control) ──────────── -->
+  <actuator>
+    <!-- Right arm (8 DOF) -->
+    <position name="act_r_shoulder_pitch" joint="r_shoulder_pitch"
+              kp="120" kv="12" ctrlrange="-2.618  1.570"/>
+    <position name="act_r_shoulder_roll"  joint="r_shoulder_roll"
+              kp="120" kv="12" ctrlrange="-3.140  0.174"/>
+    <position name="act_r_arm_yaw"        joint="r_arm_yaw"
+              kp="60"  kv="6"  ctrlrange="-1.570  1.570"/>
+    <position name="act_r_elbow_pitch"    joint="r_elbow_pitch"
+              kp="60"  kv="6"  ctrlrange="-2.182  0.000"/>
+    <position name="act_r_forearm_yaw"    joint="r_forearm_yaw"
+              kp="30"  kv="3"  ctrlrange="-1.745  1.745"/>
+    <position name="act_r_wrist_pitch"    joint="r_wrist_pitch"
+              kp="25"  kv="2"  ctrlrange="-0.785  0.785"/>
+    <position name="act_r_wrist_roll"     joint="r_wrist_roll"
+              kp="25"  kv="2"  ctrlrange="-0.785  0.785"/>
+    <position name="act_r_gripper"        joint="r_gripper"
+              kp="15"  kv="1"  ctrlrange="-1.200  0.350"/>
+
+    <!-- Left arm (8 DOF) -->
+    <position name="act_l_shoulder_pitch" joint="l_shoulder_pitch"
+              kp="120" kv="12" ctrlrange="-2.618  1.570"/>
+    <position name="act_l_shoulder_roll"  joint="l_shoulder_roll"
+              kp="120" kv="12" ctrlrange="-0.174  3.140"/>
+    <position name="act_l_arm_yaw"        joint="l_arm_yaw"
+              kp="60"  kv="6"  ctrlrange="-1.570  1.570"/>
+    <position name="act_l_elbow_pitch"    joint="l_elbow_pitch"
+              kp="60"  kv="6"  ctrlrange="-2.182  0.000"/>
+    <position name="act_l_forearm_yaw"    joint="l_forearm_yaw"
+              kp="30"  kv="3"  ctrlrange="-1.745  1.745"/>
+    <position name="act_l_wrist_pitch"    joint="l_wrist_pitch"
+              kp="25"  kv="2"  ctrlrange="-0.785  0.785"/>
+    <position name="act_l_wrist_roll"     joint="l_wrist_roll"
+              kp="25"  kv="2"  ctrlrange="-0.785  0.785"/>
+    <position name="act_l_gripper"        joint="l_gripper"
+              kp="15"  kv="1"  ctrlrange="-0.350  1.200"/>
+
+    <!-- Head / neck (3 DOF) -->
+    <position name="act_neck_roll"        joint="neck_roll"
+              kp="25"  kv="2"  ctrlrange="-0.800  0.800"/>
+    <position name="act_neck_pitch"       joint="neck_pitch"
+              kp="25"  kv="2"  ctrlrange="-0.800  1.130"/>
+    <position name="act_neck_yaw"         joint="neck_yaw"
+              kp="25"  kv="2"  ctrlrange="-2.790  2.790"/>
+
+    <!-- Antennas (2 DOF) — low kp: capsules have tiny rotational inertia ~1e-6 kg⋅m² -->
+    <position name="act_l_antenna"        joint="l_antenna"
+              kp="0.05" kv="0.02" ctrlrange="-2.618  2.618"/>
+    <position name="act_r_antenna"        joint="r_antenna"
+              kp="0.05" kv="0.02" ctrlrange="-2.618  2.618"/>
+  </actuator>
+
+  <!-- Named poses: all joints at zero = arms hanging down, head straight -->
+  <keyframe>
+    <key name="home"
+         qpos="0 0 0 0 0 0 0 0  0 0 0 0 0 0 0 0  0 0 0  0 0"
+         ctrl="0 0 0 0 0 0 0 0  0 0 0 0 0 0 0 0  0 0 0  0 0"/>
+  </keyframe>
+
+</mujoco>

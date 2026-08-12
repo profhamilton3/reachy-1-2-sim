@@ -1,0 +1,15 @@
+# native_mujoco/requirements.lock
+# Pinned for macOS arm64 (Apple Silicon), Python 3.14, mjpython launcher.
+# Install into your venv BEFORE running:
+#   pip install -r requirements.lock
+# Then run the server with:
+#   mjpython server.py
+#
+# mujoco is provided by the MuJoCo framework installation; do not pip-install
+# it separately if you are using the macOS pkg installer.
+# The version below is the exact wheel used during development.
+
+mujoco==3.11.0
+websockets==17.0.1
+Pillow==12.0.0
+numpy==2.3.5
