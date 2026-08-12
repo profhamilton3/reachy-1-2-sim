@@ -168,6 +168,33 @@ def smooth_move(arm, pose: Dict[str, float], duration: float = 2.0) -> None:
     log.debug("smooth_move done: %s", {k: f"{v:.1f}°" for k, v in pose.items()})
 
 
+def execute_trajectory(
+    arm,
+    joint_traj,
+    joint_names,
+    rate_hz: int = 25,
+    on_step=None,
+) -> None:
+    """Stream a pre-planned joint trajectory to the arm at rate_hz.
+
+    Args:
+        arm:         reachy.r_arm (turned on).
+        joint_traj:  list of joint-angle lists (degrees), one per step.
+        joint_names: names matching each joint-angle list entry.
+        rate_hz:     command rate.
+        on_step:     optional callback(step_index, joint_values) invoked after
+                     each command is sent — used to attach a carried object's
+                     marker to the gripper in the kinematic/RViz view.
+    """
+    dt = 1.0 / rate_hz
+    for i, q in enumerate(joint_traj):
+        for name, val in zip(joint_names, q):
+            getattr(arm, name).goal_position = float(val)
+        if on_step is not None:
+            on_step(i, q)
+        time.sleep(dt)
+
+
 def open_gripper(arm, duration: float = 0.8) -> None:
     """Open the right gripper smoothly."""
     smooth_move(arm, {"r_gripper": _GRIPPER_OPEN_DEG}, duration)

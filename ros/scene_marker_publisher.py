@@ -24,6 +24,7 @@ geometry_msgs/Quaternion message, so no reordering is needed.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 
@@ -53,8 +54,24 @@ except ImportError:  # pragma: no cover — only missing outside the container
     _ROS_AVAILABLE = False
 
 
-_PUBLISH_HZ = 1.0
+_PUBLISH_HZ = 15.0   # fast enough for smooth object-follows-gripper animation
 _NAMESPACE = "scene"
+_DEFAULT_OVERRIDES = "/tmp/reachy_scene_overrides.json"
+
+
+def _read_overrides(path: str) -> dict:
+    """Read {object_id: [x, y, z]} pose overrides written by the demo.
+
+    Used to animate a grasped object's marker so it follows the gripper in the
+    kinematic/RViz view (the kinematic backend has no grasp physics).  Returns
+    an empty dict if the file is absent or malformed.
+    """
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def _marker_type(kind: str) -> int:
@@ -130,8 +147,9 @@ def _build_marker(
 
 
 class SceneMarkerPublisher(Node):  # type: ignore[misc]
-    def __init__(self, scene_path: str) -> None:
+    def __init__(self, scene_path: str, overrides_path: str = _DEFAULT_OVERRIDES) -> None:
         super().__init__("scene_marker_publisher")
+        self._overrides_path = overrides_path
 
         transient_local_qos = QoSProfile(
             depth=1,
@@ -157,10 +175,14 @@ class SceneMarkerPublisher(Node):  # type: ignore[misc]
     def _publish(self) -> None:
         stamp = self.get_clock().now().to_msg()
         frame_id = self._scene.frame_id
-        markers = [
-            _build_marker(obj, idx, frame_id, stamp)
-            for idx, obj in enumerate(self._scene.objects)
-        ]
+        overrides = _read_overrides(self._overrides_path)
+        markers = []
+        for idx, obj in enumerate(self._scene.objects):
+            m = _build_marker(obj, idx, frame_id, stamp)
+            ov = overrides.get(obj.id)
+            if ov and len(ov) >= 3:
+                m.pose.position = Point(x=float(ov[0]), y=float(ov[1]), z=float(ov[2]))
+            markers.append(m)
         msg = MarkerArray()
         msg.markers = markers
         self._pub.publish(msg)
@@ -177,10 +199,15 @@ def main() -> None:
         ),
         help="Path to scene YAML file",
     )
+    parser.add_argument(
+        "--overrides",
+        default=os.environ.get("REACHY_SIM_SCENE_OVERRIDES", _DEFAULT_OVERRIDES),
+        help="JSON file of {object_id: [x,y,z]} live pose overrides",
+    )
     args, ros_args = parser.parse_known_args()
 
     rclpy.init(args=ros_args)
-    node = SceneMarkerPublisher(args.scene)
+    node = SceneMarkerPublisher(args.scene, args.overrides)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

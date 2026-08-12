@@ -1,0 +1,111 @@
+schema_version: "1.0"
+name: tabletop-demo-reachable
+# Pick-and-place demo scene.  Objects are positioned inside the right arm's
+# reachable workspace (x in [0.38, 0.46], y in [-0.22, +0.02] at table height)
+# so the demo in scripts/demo_pick_place.py can grasp and relocate both with
+# the right arm only.  See src/reachy_ai/scene/awareness.py for the table
+# surface / collision model that keeps the gripper above the tabletop.
+frame_id: pedestal
+seed: 42
+description: >-
+  Reachable tabletop scene for the right-arm pick-and-place demo.  Table
+  surface is at world z = 0.74 (table_top centre 0.72 + half-height 0.02).
+
+world:
+  gravity: [0.0, 0.0, -9.81]
+  background_rgba: [0.08, 0.10, 0.14, 1.0]
+  floor:
+    enabled: true
+    z: 0.0
+    size: [4.0, 4.0]
+    material:
+      rgba: [0.35, 0.35, 0.35, 1.0]
+    friction: [0.8, 0.01, 0.001]
+  lights:
+    - id: key_light
+      kind: directional
+      pose:
+        position: [1.0, -1.0, 2.5]
+        rpy: [0.0, 0.65, 2.35]
+      color: [1.0, 0.96, 0.90, 1.0]
+      intensity: 1.2
+      cast_shadows: true
+
+cameras:
+  left:
+    width: 640
+    height: 480
+    fovy_radians: 0.78
+    near: 0.02
+    far: 10.0
+    jpeg_quality: 85
+    fps: 15
+  right:
+    width: 640
+    height: 480
+    fovy_radians: 0.78
+    near: 0.02
+    far: 10.0
+    jpeg_quality: 85
+    fps: 15
+
+objects:
+  - id: table_top
+    geometry:
+      kind: box
+      size: [0.90, 0.65, 0.04]
+    pose:
+      position: [0.45, 0.0, 0.72]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.42, 0.25, 0.12, 1.0]
+      roughness: 0.7
+    physics:
+      dynamic: false
+      collision: true
+      friction: [0.9, 0.02, 0.001]
+    semantic_class: furniture.table
+    tags: [fixture, tabletop]
+
+  # Red cube — starts front-right, relocates toward centre.
+  - id: red_cube
+    geometry:
+      kind: box
+      size: [0.06, 0.06, 0.06]
+    pose:
+      position: [0.42, -0.18, 0.77]
+      rpy: [0.0, 0.0, 0.15]
+    material:
+      rgba: [0.90, 0.08, 0.06, 1.0]
+      roughness: 0.5
+    physics:
+      dynamic: true
+      collision: true
+      mass: 0.12
+      friction: [0.8, 0.01, 0.001]
+      restitution: 0.05
+    tracked: true
+    semantic_class: block.red
+    tags: [manipulation-target]
+
+  # Blue cylinder — starts near centre, relocates to front-right.
+  - id: blue_cylinder
+    geometry:
+      kind: cylinder
+      radius: 0.035
+      length: 0.10
+    pose:
+      position: [0.46, -0.08, 0.79]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.05, 0.25, 0.90, 1.0]
+      roughness: 0.45
+    physics:
+      dynamic: true
+      collision: true
+      mass: 0.10
+      friction: [0.75, 0.01, 0.001]
+      restitution: 0.03
+    tracked: true
+    semantic_class: cylinder.blue
+    tags: [manipulation-target]
