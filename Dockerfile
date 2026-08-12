@@ -83,6 +83,7 @@ COPY rviz/ /opt/rviz_config/
 
 # ── Scripts and scenes ─────────────────────────────────────────────────────────
 COPY scripts/ /opt/scripts/
+COPY src/ /opt/src/
 COPY scenes/ /opt/scenes/
 COPY ros/ /opt/ros_nodes/
 COPY scene_loader.py /opt/scene_loader.py
