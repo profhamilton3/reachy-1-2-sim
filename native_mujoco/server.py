@@ -56,7 +56,15 @@ from protocol import (
     message_type,
     validate_joint_command,
 )
+from calibration import (
+    StereoCalibrationProfile,
+    apply_to_model,
+    load_calibration,
+    synthetic_defaults,
+)
+from recorder import Recorder
 from renderer import StereoRenderer, jpeg_to_b64
+from sensor_effects import EffectConfig, SensorEffectPipeline
 
 log = logging.getLogger("reachy12.mujoco.server")
 
@@ -234,7 +242,18 @@ class ReachyMujocoServer:
         host: str,
         port: int,
         scene_path: Optional[str] = None,
+        calibration: Optional[StereoCalibrationProfile] = None,
+        enable_depth: bool = False,
+        enable_seg: bool = False,
+        effects: Optional[EffectConfig] = None,
+        record_dir: Optional[str] = None,
     ) -> None:
+        self._calibration = calibration
+        self._enable_depth = enable_depth
+        self._enable_seg = enable_seg
+        self._effects = effects or EffectConfig()
+        self._record_dir = record_dir
+
         tracked_ids = None
         if scene_path:
             log.info("Loading scene: %s (into model %s)", scene_path, model_path)
@@ -257,6 +276,18 @@ class ReachyMujocoServer:
         else:
             log.info("Loading model: %s", model_path)
             self._model = mujoco.MjModel.from_xml_path(model_path)
+
+        # Apply calibration intrinsics (fov_y) to model cameras.
+        if self._calibration is None:
+            self._calibration = synthetic_defaults(_CAM_WIDTH, _CAM_HEIGHT)
+            log.info("Calibration: using synthetic defaults (fov_y=%.1f°)",
+                     self._calibration.left_camera.fov_y_deg)
+        else:
+            log.info("Calibration: %s (fov_y=%.1f°)",
+                     self._calibration.provenance,
+                     self._calibration.left_camera.fov_y_deg)
+        apply_to_model(self._calibration, self._model)
+
         self._sim = SimState(self._model, tracked_ids=tracked_ids)
         self._host = host
         self._port = port
@@ -266,6 +297,7 @@ class ReachyMujocoServer:
         self._shutdown = threading.Event()
         self._connected_ws: Optional[Any] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._recorder: Optional[Recorder] = None   # set in _sim_thread
 
         # queues for thread→asyncio communication
         self._state_q: asyncio.Queue = None   # type: ignore[assignment]
@@ -282,8 +314,42 @@ class ReachyMujocoServer:
         cam_every = max(1, int(_SIM_STEP_HZ / _CAMERA_HZ))
         state_every = max(1, int(_SIM_STEP_HZ / _STATE_HZ))
 
-        renderer = StereoRenderer(self._model, width=_CAM_WIDTH, height=_CAM_HEIGHT)
+        renderer = StereoRenderer(
+            self._model,
+            width=_CAM_WIDTH, height=_CAM_HEIGHT,
+            enable_depth=self._enable_depth,
+            enable_seg=self._enable_seg,
+        )
         self._renderer = renderer
+
+        # Per-camera sensor effect pipelines (one each, not shared across cameras)
+        effect_pipelines = {
+            "left_camera":  SensorEffectPipeline(self._effects),
+            "right_camera": SensorEffectPipeline(self._effects),
+        }
+
+        # Recorder (R12-603)
+        sim_start = time.monotonic()
+        if self._record_dir:
+            self._recorder = Recorder.new(
+                self._record_dir,
+                {
+                    "model_path": str(_DEFAULT_MODEL),
+                    "scene_path": None,
+                    "calibration_provenance": (
+                        self._calibration.provenance if self._calibration else "none"
+                    ),
+                    "depth_enabled": self._enable_depth,
+                    "seg_enabled": self._enable_seg,
+                    "effects": {
+                        "blur_sigma": self._effects.blur_sigma,
+                        "noise_std": self._effects.noise_std,
+                        "drop_probability": self._effects.drop_probability,
+                        "latency_ms": self._effects.latency_ms,
+                    },
+                },
+            )
+            log.info("Recording to: %s", self._recorder.run_dir)
 
         step_period = 1.0 / _SIM_STEP_HZ
         next_step = time.monotonic()
@@ -308,12 +374,26 @@ class ReachyMujocoServer:
                 asyncio.run_coroutine_threadsafe(
                     self._state_q.put(state), self._loop
                 )
+                if self._recorder is not None:
+                    import json as _json
+                    self._recorder.record_state(_json.loads(state.encode()))
 
             # Camera render
             if self._sim.step % cam_every == 0 and self._loop:
                 data_copy = self._sim.copy_data()
                 frames = renderer.render_stereo(data_copy)
                 for cam_name, fr in frames.items():
+                    # Apply sensor effects (R12-602)
+                    pipe = effect_pipelines[cam_name]
+                    jpeg = pipe.apply_pixels(fr.jpeg_bytes)
+                    if jpeg is None:
+                        continue   # frame dropped by effect pipeline
+                    if self._effects.latency_ms > 0.0:
+                        pipe.push_latency(jpeg)
+                        jpeg = pipe.pop_ready()
+                        if jpeg is None:
+                            continue   # frame still in latency buffer
+
                     self._cam_seq[cam_name] += 1
                     cam_msg = CameraFrame(
                         camera=cam_name,
@@ -323,8 +403,10 @@ class ReachyMujocoServer:
                         scene_revision=self._sim.scene_revision,
                         width=fr.width,
                         height=fr.height,
-                        jpeg_b64=jpeg_to_b64(fr.jpeg_bytes),
+                        jpeg_b64=jpeg_to_b64(jpeg),
                         render_us=fr.render_us,
+                        depth_b64=fr.depth_b64,
+                        seg_b64=fr.seg_b64,
                     )
                     asyncio.run_coroutine_threadsafe(
                         self._frame_q.put(cam_msg), self._loop
@@ -340,6 +422,11 @@ class ReachyMujocoServer:
                 asyncio.run_coroutine_threadsafe(
                     self._reset_ack_q.put(ack), self._loop
                 )
+
+        if self._recorder is not None:
+            wall = time.monotonic() - sim_start
+            self._recorder.finalize(total_steps=self._sim.step, duration_s=wall)
+            log.info("Recording finalized: %s", self._recorder.run_dir)
 
         renderer.close()
         log.info("Sim thread stopped")
@@ -437,9 +524,15 @@ class ReachyMujocoServer:
                                             message=str(exc)).encode())
                         continue
                     self._sim.submit_command(decoded)
+                    if self._recorder is not None:
+                        self._recorder.record_command(decoded)
 
                 elif mtype == "reset":
                     self._sim.submit_reset(decoded)
+                    if self._recorder is not None:
+                        self._recorder.record_reset(
+                            decoded.get("seed"), self._sim.step
+                        )
 
                 elif mtype == "pause":
                     self._sim.submit_pause(bool(decoded.get("paused", True)))
@@ -542,6 +635,21 @@ def main() -> None:
     ap.add_argument("--host", default=_DEFAULT_HOST)
     ap.add_argument("--port", type=int, default=_DEFAULT_PORT)
     ap.add_argument("--log-level", default="INFO")
+    # R12-600: calibration
+    ap.add_argument("--calibration", default=None,
+                    help="camera calibration YAML file (R12-600); "
+                         "defaults to synthetic_defaults")
+    # R12-601: depth and segmentation
+    ap.add_argument("--depth", action="store_true",
+                    help="include depth map in camera_frame messages (R12-601)")
+    ap.add_argument("--segmentation", action="store_true",
+                    help="include body-ID segmentation in camera_frame messages (R12-601)")
+    # R12-602: sensor effects
+    ap.add_argument("--effects", default=None,
+                    help="sensor effect config YAML file (R12-602)")
+    # R12-603: recording
+    ap.add_argument("--record", default=None, metavar="DIR",
+                    help="record states+commands to timestamped run dir under DIR (R12-603)")
     args = ap.parse_args()
 
     logging.basicConfig(
@@ -549,8 +657,28 @@ def main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    server = ReachyMujocoServer(args.model, args.host, args.port,
-                                scene_path=args.scene)
+    # Load calibration profile
+    calibration: Optional[StereoCalibrationProfile] = None
+    if args.calibration:
+        calibration = load_calibration(args.calibration)
+        log.info("Loaded calibration from %s (%s)", args.calibration,
+                 calibration.provenance)
+
+    # Load sensor effects config
+    effects: Optional[EffectConfig] = None
+    if args.effects:
+        effects = EffectConfig.from_yaml(args.effects)
+        log.info("Loaded sensor effects from %s", args.effects)
+
+    server = ReachyMujocoServer(
+        args.model, args.host, args.port,
+        scene_path=args.scene,
+        calibration=calibration,
+        enable_depth=args.depth,
+        enable_seg=args.segmentation,
+        effects=effects,
+        record_dir=args.record,
+    )
     try:
         asyncio.run(server.run())
     except KeyboardInterrupt:

@@ -222,7 +222,11 @@ class State:
 
 @dataclass
 class CameraFrame:
-    """One JPEG image.  jpeg_b64 is base64-encoded bytes."""
+    """One rendered camera frame.
+
+    jpeg_b64 is always present (base64-encoded JPEG).
+    depth_b64 and seg_b64 are empty strings when not enabled (R12-601).
+    """
     type: str = field(default="camera_frame", init=False)
     camera: str = ""
     seq: int = 0
@@ -234,6 +238,9 @@ class CameraFrame:
     height: int = 480
     jpeg_b64: str = ""   # base64(JPEG bytes)
     render_us: int = 0   # render latency in microseconds
+    # R12-601: optional research products ("" = not enabled for this run)
+    depth_b64: str = ""  # base64(float16 H×W raw bytes), values in metres
+    seg_b64: str = ""    # base64(uint16 H×W raw bytes), values are MuJoCo body IDs
 
     def encode(self) -> str:
         return encode(asdict(self))

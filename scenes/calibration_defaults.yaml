@@ -1,0 +1,45 @@
+# Reachy 1.2 Simulator — Default Stereo Camera Calibration
+#
+# provenance: synthetic_defaults
+#   These values are derived from the MJCF model geometry, not from
+#   physical camera calibration.  Replace with a measured calibration
+#   file before running metric-precision research experiments.
+#
+# Intrinsics convention: OpenCV / ROS camera_info
+#   fx, fy   — focal length in pixels
+#   cx, cy   — principal point in pixels
+#   distortion — [k1, k2, p1, p2, k3] (radial + tangential, all zero for synthetic)
+#
+# Stereo convention: left camera is reference frame.
+#   baseline_m — inter-camera distance along +x axis (metres)
+#   R, T       — rotation and translation from left to right camera
+#                (null → identity rotation, T = [baseline_m, 0, 0])
+#
+# MuJoCo limitation: distortion is not applied to rendered pixels.
+# Coefficients are stored for external post-processing only.
+# fov_y = 2*atan(height / (2*fy)) is written to model.cam_fovy at startup.
+
+format_version: 1
+provenance: synthetic_defaults
+
+left_camera:
+  resolution: [640, 480]
+  fx: 480.0      # fov_y ≈ 53.1°
+  fy: 480.0
+  cx: 320.0
+  cy: 240.0
+  distortion: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+right_camera:
+  resolution: [640, 480]
+  fx: 480.0
+  fy: 480.0
+  cx: 320.0
+  cy: 240.0
+  distortion: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+stereo:
+  baseline_m: 0.065   # Reachy 1.2 head geometry (approximate)
+  rectified: false
+  R: null             # identity — cameras are approximately co-planar in simulation
+  T: null             # [0.065, 0, 0] implied by baseline_m
