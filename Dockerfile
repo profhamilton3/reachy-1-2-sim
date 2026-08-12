@@ -71,6 +71,7 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
 
 # ── Fake gRPC server + ROS joint state bridge ─────────────────────────────────
 COPY fake_reachy_server.py /opt/fake_reachy_server.py
+COPY kinematic_backend.py /opt/kinematic_backend.py
 COPY joint_state_bridge.py /opt/joint_state_bridge.py
 
 # ── Notebooks ──────────────────────────────────────────────────────────────────

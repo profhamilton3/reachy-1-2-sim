@@ -50,7 +50,7 @@ JOINT_DEFS = [
 
 # ── Domain models (R12-100) ───────────────────────────────────────────────────
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class JointCommand:
     """Command submitted to the backend for one joint."""
     uid: int
@@ -60,7 +60,7 @@ class JointCommand:
     torque_limit: Optional[float] = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class JointSample:
     """Immutable snapshot of one joint at a single simulation step."""
     name: str
