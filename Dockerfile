@@ -82,6 +82,8 @@ COPY rviz/ /opt/rviz_config/
 # ── Scripts and scenes ─────────────────────────────────────────────────────────
 COPY scripts/ /opt/scripts/
 COPY scenes/ /opt/scenes/
+COPY ros/ /opt/ros_nodes/
+COPY scene_loader.py /opt/scene_loader.py
 
 # ── Artifact output dir (collect_environment.py writes here) ───────────────────
 RUN mkdir -p /opt/artifacts
