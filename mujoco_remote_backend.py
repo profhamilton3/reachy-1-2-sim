@@ -75,6 +75,11 @@ class RemoteSnapshot:
     scene_revision: str = ""
     state: ConnectionState = ConnectionState.CONNECTING
     joints: Dict[str, RemoteJointSample] = field(default_factory=dict)
+    # R12-502: SDK force-sensor uid -> grip force (N); per-side grasp flags.
+    force_sensors: Dict[int, float] = field(default_factory=dict)
+    grasping: Dict[str, bool] = field(default_factory=dict)
+    # R12-503: tracked object poses keyed by object id (for RViz/browser).
+    objects: Dict[str, dict] = field(default_factory=dict)
     warnings: Tuple[str, ...] = ()
 
     def age_ms(self) -> float:
@@ -236,12 +241,15 @@ class MujocoRemoteBackend:
                     self._pending_cmds.clear()
 
                 if cmds:
-                    target = self._build_target_rad(cmds)
+                    target, compliant, speed, torque = self._build_command(cmds)
                     self._cmd_seq += 1
                     cmd_msg = {
                         "type": "joint_command",
                         "seq": self._cmd_seq,
                         "target_rad": target,
+                        "compliant": compliant,
+                        "speed_limit_rad_s": speed,
+                        "torque_limit_percent": torque,
                     }
                     await ws.send(json.dumps(cmd_msg))
 
@@ -272,6 +280,23 @@ class MujocoRemoteBackend:
             )
             joints[name] = sample
 
+        force_sensors = {
+            int(fs.get("uid")): float(fs.get("force", 0.0))
+            for fs in (msg.get("force_sensors") or [])
+            if fs.get("uid") is not None
+        }
+        grasping = {
+            str(g.get("side")): bool(g.get("grasping", False))
+            for g in (msg.get("grippers") or [])
+        }
+        objects = {
+            str(o.get("object_id")): {
+                "pos_xyz": o.get("pos_xyz", [0.0, 0.0, 0.0]),
+                "quat_wxyz": o.get("quat_wxyz", [1.0, 0.0, 0.0, 0.0]),
+            }
+            for o in (msg.get("objects") or [])
+            if o.get("object_id") is not None
+        }
         snap = RemoteSnapshot(
             seq=int(msg.get("seq", 0)),
             sim_step=int(msg.get("sim_step", 0)),
@@ -280,6 +305,9 @@ class MujocoRemoteBackend:
             scene_revision=str(msg.get("scene_revision", "")),
             state=ConnectionState.READY,
             joints=joints,
+            force_sensors=force_sensors,
+            grasping=grasping,
+            objects=objects,
         )
         with self._lock:
             self._snapshot = snap
@@ -300,24 +328,40 @@ class MujocoRemoteBackend:
         elif cam == "right_camera":
             _atomic_write(_RIGHT_JPG, jpeg)
 
-    def _build_target_rad(self, cmds: List[JointCommand]) -> List[float]:
-        """Merge per-UID commands into a 21-element target list."""
+    def _build_command(self, cmds: List[JointCommand]):
+        """Merge per-UID SDK commands into 21-element protocol lists.
+
+        Returns (target_rad, compliant, speed_limit_rad_s, torque_limit_percent).
+        The three optional lists hold None for joints left unchanged (R12-501).
+        """
         with self._lock:
             snap = self._snapshot
 
-        # Start from current positions
+        # Start targets from current positions so unspecified joints hold.
         target = [0.0] * 21
         for name, sample in snap.joints.items():
             idx = self._uid_to_idx.get(sample.uid)
             if idx is not None:
                 target[idx] = sample.position_rad
 
+        compliant: List[Optional[bool]] = [None] * 21
+        speed: List[Optional[float]] = [None] * 21
+        torque: List[Optional[float]] = [None] * 21
+
         for cmd in cmds:
             idx = self._uid_to_idx.get(cmd.uid)
-            if idx is not None and cmd.goal_position is not None:
+            if idx is None:
+                continue
+            if cmd.goal_position is not None:
                 target[idx] = float(cmd.goal_position)
+            if cmd.compliant is not None:
+                compliant[idx] = bool(cmd.compliant)
+            if cmd.speed_limit is not None:
+                speed[idx] = float(cmd.speed_limit)
+            if cmd.torque_limit is not None:
+                torque[idx] = float(cmd.torque_limit)
 
-        return target
+        return target, compliant, speed, torque
 
     # ── SimulationSnapshot bridge (for fake_reachy_server compatibility) ─
 

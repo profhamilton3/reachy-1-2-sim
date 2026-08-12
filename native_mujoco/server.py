@@ -25,14 +25,17 @@ import os
 import pathlib
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 import mujoco
 import numpy as np
 import websockets
 import websockets.exceptions
 
+from actuator import ActuatorController
+from gripper import GripperModel
 from joint_map import JOINT_TABLE, NUM_JOINTS
+from objects import ObjectTracker
 from protocol import (
     PROTOCOL_VERSION,
     CameraFrame,
@@ -50,7 +53,6 @@ from protocol import (
     State,
     decode,
     encode,
-    jpeg_to_b64,
     message_type,
     validate_joint_command,
 )
@@ -74,7 +76,11 @@ _CAM_HEIGHT   = int(os.environ.get("REACHY_SIM_CAMERA_HEIGHT", "480"))
 class SimState:
     """Mutable simulation state — owned by the sim thread."""
 
-    def __init__(self, model: mujoco.MjModel) -> None:
+    def __init__(
+        self,
+        model: mujoco.MjModel,
+        tracked_ids: Optional[Sequence[str]] = None,
+    ) -> None:
         self.model = model
         self.data = mujoco.MjData(model)
         self.step = 0
@@ -85,6 +91,29 @@ class SimState:
         self._pending_cmd: Optional[Dict[str, Any]] = None
         self._pending_reset: Optional[Dict[str, Any]] = None
         self._pending_pause: Optional[bool] = None
+
+        # R12-501: actuator/compliance model owns ctrl, gains and force limits.
+        self._reset_physics()
+        self.controller = ActuatorController(model)
+        self.controller.sync_targets_to_current(self.data)
+        # R12-502: gripper/contact model reads contacts for grasp & force state.
+        self.gripper = GripperModel(model)
+        # R12-503: dynamic object tracking (free-joint scene objects).
+        self.objects = ObjectTracker(model, self.data, tracked_ids=tracked_ids)
+        self.objects.capture_initial(self.data)
+
+    def _reset_physics(self) -> None:
+        """Reset to the home keyframe, keeping free-joint objects at their
+        MJCF scene poses (the 21-DOF keyframe would otherwise zero them)."""
+        if self.model.nkey:
+            mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
+        else:
+            mujoco.mj_resetData(self.model, self.data)
+        for jid in range(self.model.njnt):
+            if self.model.jnt_type[jid] == mujoco.mjtJoint.mjJNT_FREE:
+                adr = self.model.jnt_qposadr[jid]
+                self.data.qpos[adr:adr + 7] = self.model.qpos0[adr:adr + 7]
+        mujoco.mj_forward(self.model, self.data)  # propagate to xpos/contacts
 
     # --- Thread-safe command submission (from asyncio handlers) ---
 
@@ -117,34 +146,78 @@ class SimState:
 
         reset_id = None
         if reset_req is not None:
-            mujoco.mj_resetData(self.model, self.data)
+            self._reset_physics()
             self.step = 0
+            self.controller.sync_targets_to_current(self.data)
+            # R12-503: seeded, deterministic object placement.
+            seed = reset_req.get("seed")
+            self.objects.reset(
+                self.data,
+                seed=seed,
+                jitter_m=float(reset_req.get("jitter_m", 0.0)),
+            )
+            mujoco.mj_forward(self.model, self.data)
             reset_id = reset_req.get("request_id", "")
 
         if cmd is not None:
             tgt = cmd.get("target_rad", [])
             mask = cmd.get("mask")
+            compliant = cmd.get("compliant")            # optional list[bool|None]
+            speed = cmd.get("speed_limit_rad_s")        # optional list[float|None]
+            torque = cmd.get("torque_limit_percent")    # optional list[float|None]
             for entry in JOINT_TABLE:
                 idx = entry.mjcf_index
-                if mask is None or (mask and mask[idx]):
-                    lo, hi = entry.limits_rad
-                    self.data.ctrl[idx] = float(np.clip(tgt[idx], lo, hi))
+                if mask is not None and not (mask and mask[idx]):
+                    continue
+                if idx < len(tgt):
+                    self.controller.set_goal_position(idx, tgt[idx])
+                if compliant is not None and compliant[idx] is not None:
+                    self.controller.set_compliant(idx, compliant[idx])
+                if speed is not None and speed[idx] is not None:
+                    self.controller.set_speed_limit(idx, speed[idx])
+                if torque is not None and torque[idx] is not None:
+                    self.controller.set_torque_limit(idx, torque[idx])
             self._cmd_seq = cmd.get("seq", self._cmd_seq)
 
         return reset_id
+
+    def control_step(self, dt: float) -> None:
+        """Apply the actuator/compliance model for the upcoming mj_step."""
+        self.controller.apply(self.data, dt)
 
     def snapshot_joints(self) -> list:
         joints = []
         for entry in JOINT_TABLE:
             i = entry.mjcf_index
+            st = self.controller.state[i]
             joints.append({
                 "name": entry.sdk_name,
                 "uid": entry.uid,
                 "position_rad": float(self.data.qpos[i]),
                 "velocity_rad_s": float(self.data.qvel[i]),
-                "effort": float(self.data.qfrc_actuator[i]) if i < len(self.data.qfrc_actuator) else 0.0,
+                "effort": float(self.data.actuator_force[i]),
+                "compliant": bool(st.compliant),
+                "saturated": self.controller.is_saturated(self.data, i),
             })
         return joints
+
+    def snapshot_grippers(self):
+        """Return (grippers, force_sensors) lists for the state message."""
+        states = self.gripper.update(self.data)
+        grippers = []
+        force_sensors = []
+        for side, st in states.items():
+            grippers.append({
+                "side": side,
+                "grasping": st.grasping,
+                "grip_force_n": st.grip_force_n,
+                "grasped_geoms": st.grasped_geoms,
+            })
+            force_sensors.append({
+                "uid": st.sensor_uid,
+                "force": st.grip_force_n,
+            })
+        return grippers, force_sensors
 
     def copy_data(self) -> mujoco.MjData:
         """Deep copy of MjData for use in the render thread."""
@@ -155,10 +228,36 @@ class SimState:
 
 class ReachyMujocoServer:
 
-    def __init__(self, model_path: str, host: str, port: int) -> None:
-        log.info("Loading model: %s", model_path)
-        self._model = mujoco.MjModel.from_xml_path(model_path)
-        self._sim = SimState(self._model)
+    def __init__(
+        self,
+        model_path: str,
+        host: str,
+        port: int,
+        scene_path: Optional[str] = None,
+    ) -> None:
+        tracked_ids = None
+        if scene_path:
+            log.info("Loading scene: %s (into model %s)", scene_path, model_path)
+            import yaml
+            from objects import build_scene_model_xml
+            from scene_compiler import tracked_object_ids
+            # Validate for safety (raises on unsafe paths / bad schema); the
+            # compiler consumes the raw dict since it needs full physics fields.
+            try:
+                from scene_loader import load_scene
+                load_scene(scene_path)
+            except ImportError:
+                log.warning("scene_loader unavailable; skipping validation")
+            with open(scene_path) as f:
+                scene_doc = yaml.safe_load(f)
+            xml = build_scene_model_xml(scene_doc, model_path)
+            self._model = mujoco.MjModel.from_xml_string(xml)
+            tracked_ids = tracked_object_ids(scene_doc)
+            log.info("Scene loaded: %d tracked objects", len(tracked_ids))
+        else:
+            log.info("Loading model: %s", model_path)
+            self._model = mujoco.MjModel.from_xml_path(model_path)
+        self._sim = SimState(self._model, tracked_ids=tracked_ids)
         self._host = host
         self._port = port
 
@@ -199,6 +298,7 @@ class ReachyMujocoServer:
             reset_id = self._sim.apply_pending()
 
             if not self._sim.paused:
+                self._sim.control_step(dt)   # R12-501 actuator/compliance model
                 mujoco.mj_step(self._model, self._sim.data)
                 self._sim.step += 1
 
@@ -246,6 +346,7 @@ class ReachyMujocoServer:
 
     def _build_state(self) -> State:
         self._seq += 1
+        grippers, force_sensors = self._sim.snapshot_grippers()
         return State(
             seq=self._seq,
             sim_step=self._sim.step,
@@ -253,6 +354,9 @@ class ReachyMujocoServer:
             scene_revision=self._sim.scene_revision,
             paused=self._sim.paused,
             joints=self._sim.snapshot_joints(),
+            objects=self._sim.objects.poses_as_dicts(self._sim.data),
+            grippers=grippers,
+            force_sensors=force_sensors,
         )
 
     # ── WebSocket handler ────────────────────────────────────────────────────
@@ -433,6 +537,8 @@ class ReachyMujocoServer:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Reachy 1.2 native MuJoCo server")
     ap.add_argument("--model", default=str(_DEFAULT_MODEL))
+    ap.add_argument("--scene", default=None,
+                    help="scene YAML to compile into the model (R12-503)")
     ap.add_argument("--host", default=_DEFAULT_HOST)
     ap.add_argument("--port", type=int, default=_DEFAULT_PORT)
     ap.add_argument("--log-level", default="INFO")
@@ -443,7 +549,8 @@ def main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    server = ReachyMujocoServer(args.model, args.host, args.port)
+    server = ReachyMujocoServer(args.model, args.host, args.port,
+                                scene_path=args.scene)
     try:
         asyncio.run(server.run())
     except KeyboardInterrupt:

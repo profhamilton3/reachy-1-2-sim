@@ -14,6 +14,20 @@
       5  r_wrist_pitch      13  l_wrist_pitch
       6  r_wrist_roll       14  l_wrist_roll
       7  r_gripper          15  l_gripper
+
+    ── Collision model (R12-500) ────────────────────────────────────────────
+    Visual geoms (group 2) never collide (contype=0/conaffinity=0).
+    Collision geoms (group 3) are mass-free contact proxies; body mass/inertia
+    comes from the visual geoms.  Contact categories use bitmask channels:
+        world  : contype=1  conaffinity=6   (floor, table, pedestal base)
+        robot  : contype=2  conaffinity=5   (arm/head/gripper links)
+        object : contype=4  conaffinity=7   (manipulable scene objects)
+    Rule (a&b || b&a):
+        robot↔robot  = 0            → robot NEVER self-collides (MVP choice)
+        robot↔world  = collide      robot↔object = collide
+        world↔object = collide      object↔object = collide
+    Deliberate MVP simplification: full robot self-collision is OFF.  Selective
+    self-collision (e.g. gripper vs forearm) is deferred to a later ticket.
   -->
 
   <compiler angle="radian" meshdir="meshes"/>
@@ -21,6 +35,22 @@
   <!-- implicitfast is A-stable: handles stiff actuators (antennas) without NaN -->
   <option timestep="0.002" gravity="0 0 -9.81" iterations="50" solver="Newton"
           integrator="implicitfast"/>
+
+  <default>
+    <!-- Visual proxy: rendered, never collides, carries body mass/inertia. -->
+    <default class="visual">
+      <geom group="2" contype="0" conaffinity="0"/>
+    </default>
+    <!-- Robot collision proxy: mass-free contact shape, robot category. -->
+    <default class="collision">
+      <geom group="3" contype="2" conaffinity="5" mass="0"
+            rgba="1 0.5 0.5 0.3"/>
+    </default>
+    <!-- Static world collision (floor/table/pedestal). -->
+    <default class="world">
+      <geom contype="1" conaffinity="6"/>
+    </default>
+  </default>
 
   <visual>
     <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
@@ -46,7 +76,8 @@
 
   <worldbody>
     <!-- ── Environment ─────────────────────────────────────────── -->
-    <geom name="floor" type="plane" size="3 3 0.1" material="groundplane"/>
+    <geom name="floor" class="world" type="plane" size="3 3 0.1"
+          material="groundplane"/>
     <light name="overhead" pos="0 0 3" dir="0 0 -1"
            diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2"/>
     <light name="fill" pos="-1 1 2" dir="1 -1 -1"
@@ -54,36 +85,38 @@
 
     <!-- ── Tabletop workspace ──────────────────────────────────── -->
     <body name="table" pos="0.55 0 0">
-      <geom name="tabletop"  type="box"     size="0.40 0.30 0.02"
+      <geom name="tabletop"  class="world" type="box" size="0.40 0.30 0.02"
             pos="0 0 0.77"   material="table_mat"/>
-      <geom name="t_leg_fr"  type="capsule"
+      <geom name="t_leg_fr"  class="world" type="capsule"
             fromto="0.35  0.25 0  0.35  0.25 0.75" size="0.025" material="dark_gray"/>
-      <geom name="t_leg_fl"  type="capsule"
+      <geom name="t_leg_fl"  class="world" type="capsule"
             fromto="-0.35  0.25 0 -0.35  0.25 0.75" size="0.025" material="dark_gray"/>
-      <geom name="t_leg_br"  type="capsule"
+      <geom name="t_leg_br"  class="world" type="capsule"
             fromto="0.35 -0.25 0  0.35 -0.25 0.75" size="0.025" material="dark_gray"/>
-      <geom name="t_leg_bl"  type="capsule"
+      <geom name="t_leg_bl"  class="world" type="capsule"
             fromto="-0.35 -0.25 0 -0.35 -0.25 0.75" size="0.025" material="dark_gray"/>
     </body>
 
     <!-- ── Pedestal (fixed base) ───────────────────────────────── -->
     <!-- URDF: pedestal joint xyz=0 0 1  ⟹ torso origin is 1 m above world -->
     <body name="pedestal" pos="0 0 0">
-      <geom name="pedestal_geom" type="cylinder"
+      <geom name="pedestal_geom" class="world" type="cylinder"
             fromto="0 0 0 0 0 0.95" size="0.08" material="dark_gray"/>
 
       <!-- ── Torso ─────────────────────────────────────────────── -->
       <body name="torso" pos="0 0 1">
         <inertial pos="0 0 0" mass="12" diaginertia="0.15 0.15 0.08"/>
-        <geom name="torso_main" type="box"
+        <geom name="torso_main" class="visual" type="box"
               size="0.10 0.18 0.12" pos="0 0 0" material="frame"/>
+        <geom name="torso_col" class="collision" type="box"
+              size="0.10 0.18 0.12" pos="0 0 0"/>
 
         <!-- ════════════════════ RIGHT ARM ════════════════════════ -->
         <!-- r_shoulder — URDF: torso→r_shoulder xyz=0 -0.19 0 -->
         <body name="r_shoulder" pos="0 -0.19 0">
           <joint name="r_shoulder_pitch" type="hinge" axis="0 1 0"
                  range="-2.618 1.57" damping="1.5"/>
-          <geom name="r_shoulder_ball" type="sphere" size="0.042"
+          <geom name="r_shoulder_ball" class="visual" type="sphere" size="0.042"
                 material="white_plastic"/>
 
           <!-- r_shoulder_x — URDF: r_shoulder→r_shoulder_x xyz=0 0 0 -->
@@ -91,56 +124,68 @@
             <joint name="r_shoulder_roll" type="hinge" axis="1 0 0"
                    range="-3.14 0.174" damping="1.5"/>
             <!-- massless intermediate frame — tiny marker sphere -->
-            <geom name="r_shx_marker" type="sphere" size="0.005"
+            <geom name="r_shx_marker" class="visual" type="sphere" size="0.005"
                   material="dark_gray" mass="0.001"/>
 
             <!-- r_upper_arm — URDF: r_shoulder_x→r_upper_arm xyz=0 0 0 -->
             <body name="r_upper_arm" pos="0 0 0">
               <joint name="r_arm_yaw" type="hinge" axis="0 0 1"
                      range="-1.57 1.57" damping="1.0"/>
-              <geom name="r_upper_arm_cap" type="capsule"
+              <geom name="r_upper_arm_cap" class="visual" type="capsule"
                     fromto="0 0 0 0 0 -0.28" size="0.035"
                     material="white_plastic"/>
+              <geom name="r_upper_arm_col" class="collision" type="capsule"
+                    fromto="0 0 0 0 0 -0.28" size="0.035"/>
 
               <!-- r_forearm — URDF: r_upper_arm→r_forearm xyz=0 0 -0.28 -->
               <body name="r_forearm" pos="0 0 -0.28">
                 <joint name="r_elbow_pitch" type="hinge" axis="0 1 0"
                        range="-2.182 0" damping="0.8"/>
-                <geom name="r_elbow_ball" type="sphere" size="0.032"
+                <geom name="r_elbow_ball" class="visual" type="sphere" size="0.032"
                       material="frame"/>
-                <geom name="r_forearm_cap" type="capsule"
+                <geom name="r_forearm_cap" class="visual" type="capsule"
                       fromto="0 0 0 0 0 -0.25" size="0.030"
                       material="white_plastic"/>
+                <geom name="r_forearm_col" class="collision" type="capsule"
+                      fromto="0 0 0 0 0 -0.25" size="0.030"/>
 
                 <!-- r_wrist — URDF: r_forearm→r_wrist xyz=0 0 0 -->
                 <body name="r_wrist" pos="0 0 0">
                   <joint name="r_forearm_yaw" type="hinge" axis="0 0 1"
                          range="-1.745 1.745" damping="0.4"/>
-                  <geom name="r_wrist_marker" type="sphere" size="0.005"
+                  <geom name="r_wrist_marker" class="visual" type="sphere" size="0.005"
                         material="dark_gray" mass="0.001"/>
 
                   <!-- r_wrist2hand — URDF: r_wrist→r_wrist2hand xyz=0 0 -0.25 -->
                   <body name="r_wrist2hand" pos="0 0 -0.25">
                     <joint name="r_wrist_pitch" type="hinge" axis="0 1 0"
                            range="-0.785 0.785" damping="0.4"/>
-                    <geom name="r_wrist_ball" type="sphere" size="0.028"
+                    <geom name="r_wrist_ball" class="visual" type="sphere" size="0.028"
                           material="frame"/>
 
                     <!-- r_gripper_thumb — URDF: r_wrist2hand→r_gripper_thumb xyz=0 0 -0.0325 -->
                     <body name="r_gripper_thumb" pos="0 0 -0.0325">
                       <joint name="r_wrist_roll" type="hinge" axis="1 0 0"
                              range="-0.785 0.785" damping="0.4"/>
-                      <geom name="r_thumb_body" type="box"
+                      <geom name="r_thumb_body" class="visual" type="box"
                             size="0.025 0.028 0.038" pos="0 -0.018 -0.022"
                             material="gripper_mat"/>
+                      <!-- R12-502: collision uses an opposed-pad pinch model
+                           (fixed thumb pad at +y) rather than the bulky visual
+                           box, so the revolute finger forms a clean grasp. -->
+                      <geom name="r_thumb_col" class="collision" type="box"
+                            size="0.014 0.008 0.022" pos="0 0.005 -0.085"/>
 
                       <!-- r_gripper_finger — URDF: r_gripper_thumb→r_gripper_finger xyz=0 -0.037 -0.03998 -->
                       <body name="r_gripper_finger" pos="0 -0.037 -0.03998">
                         <joint name="r_gripper" type="hinge" axis="1 0 0"
                                range="-1.2 0.35" damping="0.3"/>
-                        <geom name="r_finger_body" type="box"
+                        <geom name="r_finger_body" class="visual" type="box"
                               size="0.012 0.010 0.038" pos="0 0 -0.038"
                               material="gripper_mat"/>
+                        <!-- moving pad: closes in +y toward the thumb pad -->
+                        <geom name="r_finger_col" class="collision" type="box"
+                              size="0.014 0.008 0.014" pos="0 0 -0.055"/>
                       </body>
 
                       <!-- r_tip site — URDF: xyz=0 -0.012 -0.085 from r_gripper_thumb -->
@@ -158,63 +203,73 @@
         <body name="l_shoulder" pos="0 0.19 0">
           <joint name="l_shoulder_pitch" type="hinge" axis="0 1 0"
                  range="-2.618 1.57" damping="1.5"/>
-          <geom name="l_shoulder_ball" type="sphere" size="0.042"
+          <geom name="l_shoulder_ball" class="visual" type="sphere" size="0.042"
                 material="white_plastic"/>
 
           <!-- l_shoulder_x -->
           <body name="l_shoulder_x" pos="0 0 0">
             <joint name="l_shoulder_roll" type="hinge" axis="1 0 0"
                    range="-0.174 3.14" damping="1.5"/>
-            <geom name="l_shx_marker" type="sphere" size="0.005"
+            <geom name="l_shx_marker" class="visual" type="sphere" size="0.005"
                   material="dark_gray" mass="0.001"/>
 
             <!-- l_upper_arm -->
             <body name="l_upper_arm" pos="0 0 0">
               <joint name="l_arm_yaw" type="hinge" axis="0 0 1"
                      range="-1.57 1.57" damping="1.0"/>
-              <geom name="l_upper_arm_cap" type="capsule"
+              <geom name="l_upper_arm_cap" class="visual" type="capsule"
                     fromto="0 0 0 0 0 -0.28" size="0.035"
                     material="white_plastic"/>
+              <geom name="l_upper_arm_col" class="collision" type="capsule"
+                    fromto="0 0 0 0 0 -0.28" size="0.035"/>
 
               <!-- l_forearm -->
               <body name="l_forearm" pos="0 0 -0.28">
                 <joint name="l_elbow_pitch" type="hinge" axis="0 1 0"
                        range="-2.182 0" damping="0.8"/>
-                <geom name="l_elbow_ball" type="sphere" size="0.032"
+                <geom name="l_elbow_ball" class="visual" type="sphere" size="0.032"
                       material="frame"/>
-                <geom name="l_forearm_cap" type="capsule"
+                <geom name="l_forearm_cap" class="visual" type="capsule"
                       fromto="0 0 0 0 0 -0.25" size="0.030"
                       material="white_plastic"/>
+                <geom name="l_forearm_col" class="collision" type="capsule"
+                      fromto="0 0 0 0 0 -0.25" size="0.030"/>
 
                 <!-- l_wrist -->
                 <body name="l_wrist" pos="0 0 0">
                   <joint name="l_forearm_yaw" type="hinge" axis="0 0 1"
                          range="-1.745 1.745" damping="0.4"/>
-                  <geom name="l_wrist_marker" type="sphere" size="0.005"
+                  <geom name="l_wrist_marker" class="visual" type="sphere" size="0.005"
                         material="dark_gray" mass="0.001"/>
 
                   <!-- l_wrist2hand -->
                   <body name="l_wrist2hand" pos="0 0 -0.25">
                     <joint name="l_wrist_pitch" type="hinge" axis="0 1 0"
                            range="-0.785 0.785" damping="0.4"/>
-                    <geom name="l_wrist_ball" type="sphere" size="0.028"
+                    <geom name="l_wrist_ball" class="visual" type="sphere" size="0.028"
                           material="frame"/>
 
                     <!-- l_gripper_thumb -->
                     <body name="l_gripper_thumb" pos="0 0 -0.0325">
                       <joint name="l_wrist_roll" type="hinge" axis="1 0 0"
                              range="-0.785 0.785" damping="0.4"/>
-                      <geom name="l_thumb_body" type="box"
+                      <geom name="l_thumb_body" class="visual" type="box"
                             size="0.025 0.028 0.038" pos="0 0.018 -0.022"
                             material="gripper_mat"/>
+                      <!-- R12-502: opposed-pad pinch model, mirrored (thumb pad at -y) -->
+                      <geom name="l_thumb_col" class="collision" type="box"
+                            size="0.014 0.008 0.022" pos="0 -0.005 -0.085"/>
 
                       <!-- l_gripper_finger — URDF: xyz=0 0.037 -0.03998 -->
                       <body name="l_gripper_finger" pos="0 0.037 -0.03998">
                         <joint name="l_gripper" type="hinge" axis="1 0 0"
                                range="-0.35 1.2" damping="0.3"/>
-                        <geom name="l_finger_body" type="box"
+                        <geom name="l_finger_body" class="visual" type="box"
                               size="0.012 0.010 0.038" pos="0 0 -0.038"
                               material="gripper_mat"/>
+                        <!-- moving pad: closes in -y toward the thumb pad -->
+                        <geom name="l_finger_col" class="collision" type="box"
+                              size="0.014 0.008 0.014" pos="0 0 -0.055"/>
                       </body>
 
                       <!-- l_tip site — URDF: xyz=0 0.012 -0.085 from l_gripper_thumb -->
@@ -232,14 +287,14 @@
         <body name="head_x" pos="0.015 0 0.095">
           <joint name="neck_roll" type="hinge" axis="1 0 0"
                  range="-0.8 0.8" damping="0.6"/>
-          <geom name="head_x_marker" type="sphere" size="0.005"
+          <geom name="head_x_marker" class="visual" type="sphere" size="0.005"
                 material="dark_gray" mass="0.001"/>
 
           <!-- head_y — URDF: neck_pitch joint at same xyz as head_x -->
           <body name="head_y" pos="0 0 0">
             <joint name="neck_pitch" type="hinge" axis="0 1 0"
                    range="-0.8 1.13" damping="0.6"/>
-            <geom name="head_y_marker" type="sphere" size="0.005"
+            <geom name="head_y_marker" class="visual" type="sphere" size="0.005"
                   material="dark_gray" mass="0.001"/>
 
             <!-- head_z — URDF: neck_yaw joint -->
@@ -250,9 +305,11 @@
               <!-- head — URDF: neck_fixed (fixed joint, no relative motion) -->
               <body name="head" pos="0 0 0">
                 <!-- head box: centred slightly above and forward of neck attachment -->
-                <geom name="head_box" type="box"
+                <geom name="head_box" class="visual" type="box"
                       size="0.088 0.090 0.068" pos="0.010 0 0.042"
                       material="white_plastic"/>
+                <geom name="head_col" class="collision" type="box"
+                      size="0.088 0.090 0.068" pos="0.010 0 0.042"/>
 
                 <!-- ── Stereo cameras ──────────────────────────────
                      URDF camera frames from head:
@@ -273,7 +330,7 @@
                 <body name="l_antenna_link" pos="-0.052 0.057 0.086">
                   <joint name="l_antenna" type="hinge" axis="0 0 1"
                          range="-2.618 2.618" damping="0.05"/>
-                  <geom name="l_antenna_cap" type="capsule"
+                  <geom name="l_antenna_cap" class="visual" type="capsule"
                         fromto="0 0 0 0 0 0.045" size="0.006"
                         material="antenna_mat"/>
                 </body>
@@ -282,7 +339,7 @@
                 <body name="r_antenna_link" pos="-0.052 -0.057 0.086">
                   <joint name="r_antenna" type="hinge" axis="0 0 1"
                          range="-2.618 2.618" damping="0.05"/>
-                  <geom name="r_antenna_cap" type="capsule"
+                  <geom name="r_antenna_cap" class="visual" type="capsule"
                         fromto="0 0 0 0 0 0.045" size="0.006"
                         material="antenna_mat"/>
                 </body>
@@ -297,57 +354,61 @@
 
   </worldbody>
 
-  <!-- ── Position actuators (P+D, joint-space control) ──────────── -->
+  <!-- ── Position actuators (P+D, joint-space control) ──────────────────────
+       forcerange = nominal simulated torque limit (Nm) with gravity headroom.
+       Not exact Dynamixel stall torques; documented sim values.  R12-501's
+       ActuatorController scales these by torque_limit_percent at runtime and
+       reports saturation, and zeros the gain to model SDK "compliant" mode. -->
   <actuator>
     <!-- Right arm (8 DOF) -->
     <position name="act_r_shoulder_pitch" joint="r_shoulder_pitch"
-              kp="120" kv="12" ctrlrange="-2.618  1.570"/>
+              kp="120" kv="12" ctrlrange="-2.618  1.570" forcerange="-60 60"/>
     <position name="act_r_shoulder_roll"  joint="r_shoulder_roll"
-              kp="120" kv="12" ctrlrange="-3.140  0.174"/>
+              kp="120" kv="12" ctrlrange="-3.140  0.174" forcerange="-60 60"/>
     <position name="act_r_arm_yaw"        joint="r_arm_yaw"
-              kp="60"  kv="6"  ctrlrange="-1.570  1.570"/>
+              kp="60"  kv="6"  ctrlrange="-1.570  1.570" forcerange="-30 30"/>
     <position name="act_r_elbow_pitch"    joint="r_elbow_pitch"
-              kp="60"  kv="6"  ctrlrange="-2.182  0.000"/>
+              kp="60"  kv="6"  ctrlrange="-2.182  0.000" forcerange="-40 40"/>
     <position name="act_r_forearm_yaw"    joint="r_forearm_yaw"
-              kp="30"  kv="3"  ctrlrange="-1.745  1.745"/>
+              kp="30"  kv="3"  ctrlrange="-1.745  1.745" forcerange="-15 15"/>
     <position name="act_r_wrist_pitch"    joint="r_wrist_pitch"
-              kp="25"  kv="2"  ctrlrange="-0.785  0.785"/>
+              kp="25"  kv="2"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
     <position name="act_r_wrist_roll"     joint="r_wrist_roll"
-              kp="25"  kv="2"  ctrlrange="-0.785  0.785"/>
+              kp="25"  kv="2"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
     <position name="act_r_gripper"        joint="r_gripper"
-              kp="15"  kv="1"  ctrlrange="-1.200  0.350"/>
+              kp="15"  kv="1"  ctrlrange="-1.200  0.350" forcerange="-8 8"/>
 
     <!-- Left arm (8 DOF) -->
     <position name="act_l_shoulder_pitch" joint="l_shoulder_pitch"
-              kp="120" kv="12" ctrlrange="-2.618  1.570"/>
+              kp="120" kv="12" ctrlrange="-2.618  1.570" forcerange="-60 60"/>
     <position name="act_l_shoulder_roll"  joint="l_shoulder_roll"
-              kp="120" kv="12" ctrlrange="-0.174  3.140"/>
+              kp="120" kv="12" ctrlrange="-0.174  3.140" forcerange="-60 60"/>
     <position name="act_l_arm_yaw"        joint="l_arm_yaw"
-              kp="60"  kv="6"  ctrlrange="-1.570  1.570"/>
+              kp="60"  kv="6"  ctrlrange="-1.570  1.570" forcerange="-30 30"/>
     <position name="act_l_elbow_pitch"    joint="l_elbow_pitch"
-              kp="60"  kv="6"  ctrlrange="-2.182  0.000"/>
+              kp="60"  kv="6"  ctrlrange="-2.182  0.000" forcerange="-40 40"/>
     <position name="act_l_forearm_yaw"    joint="l_forearm_yaw"
-              kp="30"  kv="3"  ctrlrange="-1.745  1.745"/>
+              kp="30"  kv="3"  ctrlrange="-1.745  1.745" forcerange="-15 15"/>
     <position name="act_l_wrist_pitch"    joint="l_wrist_pitch"
-              kp="25"  kv="2"  ctrlrange="-0.785  0.785"/>
+              kp="25"  kv="2"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
     <position name="act_l_wrist_roll"     joint="l_wrist_roll"
-              kp="25"  kv="2"  ctrlrange="-0.785  0.785"/>
+              kp="25"  kv="2"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
     <position name="act_l_gripper"        joint="l_gripper"
-              kp="15"  kv="1"  ctrlrange="-0.350  1.200"/>
+              kp="15"  kv="1"  ctrlrange="-0.350  1.200" forcerange="-8 8"/>
 
     <!-- Head / neck (3 DOF) -->
     <position name="act_neck_roll"        joint="neck_roll"
-              kp="25"  kv="2"  ctrlrange="-0.800  0.800"/>
+              kp="25"  kv="2"  ctrlrange="-0.800  0.800" forcerange="-10 10"/>
     <position name="act_neck_pitch"       joint="neck_pitch"
-              kp="25"  kv="2"  ctrlrange="-0.800  1.130"/>
+              kp="25"  kv="2"  ctrlrange="-0.800  1.130" forcerange="-10 10"/>
     <position name="act_neck_yaw"         joint="neck_yaw"
-              kp="25"  kv="2"  ctrlrange="-2.790  2.790"/>
+              kp="25"  kv="2"  ctrlrange="-2.790  2.790" forcerange="-10 10"/>
 
     <!-- Antennas (2 DOF) — low kp: capsules have tiny rotational inertia ~1e-6 kg⋅m² -->
     <position name="act_l_antenna"        joint="l_antenna"
-              kp="0.05" kv="0.02" ctrlrange="-2.618  2.618"/>
+              kp="0.05" kv="0.02" ctrlrange="-2.618  2.618" forcerange="-0.5 0.5"/>
     <position name="act_r_antenna"        joint="r_antenna"
-              kp="0.05" kv="0.02" ctrlrange="-2.618  2.618"/>
+              kp="0.05" kv="0.02" ctrlrange="-2.618  2.618" forcerange="-0.5 0.5"/>
   </actuator>
 
   <!-- Named poses: all joints at zero = arms hanging down, head straight -->

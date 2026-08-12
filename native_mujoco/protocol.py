@@ -84,11 +84,19 @@ class Hello:
 
 @dataclass
 class JointCommand:
-    """target_rad: full 21-element list in MJCF joint order (from joint_map)."""
+    """Full 21-element lists in MJCF joint order (from joint_map).
+
+    Only target_rad is required.  The optional per-joint lists carry the v1 SDK
+    actuator/compliance semantics (R12-501); each element may be None to leave
+    that joint's current setting unchanged.
+    """
     type: str = field(default="joint_command", init=False)
     seq: int = 0
     target_rad: List[float] = field(default_factory=list)
     mask: Optional[List[bool]] = None  # None = apply all; True element = apply
+    compliant: Optional[List[Optional[bool]]] = None
+    speed_limit_rad_s: Optional[List[Optional[float]]] = None
+    torque_limit_percent: Optional[List[Optional[float]]] = None
 
     def encode(self) -> str:
         return encode(asdict(self))
@@ -203,6 +211,9 @@ class State:
     # joints: list parallel to JOINT_TABLE order (21 entries)
     joints: List[Dict[str, Any]] = field(default_factory=list)
     objects: List[Dict[str, Any]] = field(default_factory=list)
+    # R12-502: per-gripper grasp/force state and SDK force-sensor readings.
+    grippers: List[Dict[str, Any]] = field(default_factory=list)
+    force_sensors: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
     def encode(self) -> str:
