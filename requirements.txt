@@ -13,3 +13,6 @@ matplotlib>=3.7,<4.0
 # Scene validation (R12-200)
 jsonschema>=4.17
 pyyaml>=6.0
+
+# Camera fixture: JPEG encode/decode (R12-301)
+Pillow>=9.0

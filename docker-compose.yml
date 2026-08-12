@@ -10,6 +10,7 @@ services:
       - "127.0.0.1:8888:8888"    # JupyterLab
       - "127.0.0.1:6080:6080"    # noVNC → RViz2
       - "127.0.0.1:50051:50051"  # Reachy SDK gRPC (connect via ReachySDK(host='localhost'))
+      - "127.0.0.1:8080:8080"     # Stereo camera browser preview
       # To allow access from other machines (e.g. remote notebook use), change 127.0.0.1
       # to 0.0.0.0 and ensure the host firewall restricts access appropriately.
     volumes:

@@ -29,6 +29,8 @@ from scipy.optimize import minimize
 from reachy_sdk_api import (
     arm_kinematics_pb2,
     arm_kinematics_pb2_grpc,
+    camera_reachy_pb2,
+    camera_reachy_pb2_grpc,
     fan_pb2,
     fan_pb2_grpc,
     head_kinematics_pb2,
@@ -39,6 +41,8 @@ from reachy_sdk_api import (
     sensor_pb2,
     sensor_pb2_grpc,
 )
+
+from camera_fixture import CameraFixture, LEFT, RIGHT, frame_file_writer
 
 from kinematic_backend import (
     JOINT_DEFS,
@@ -358,6 +362,101 @@ class FakeFanService(fan_pb2_grpc.FanControllerServiceServicer):
         return Empty()
 
 
+# ── Camera service ─────────────────────────────────────────────────────────────
+
+_STREAM_FRAME_HZ = 15.0  # max frame rate for StreamImage
+
+
+class FakeCameraService(camera_reachy_pb2_grpc.CameraServiceServicer):
+    """gRPC adapter over CameraFixture.
+
+    GetImage returns the latest buffered frame.
+    StreamImage yields frames at _STREAM_FRAME_HZ until the client cancels.
+    Zoom/focus RPCs return stable simulated values with success=True.
+    """
+
+    def __init__(self, fixture: CameraFixture) -> None:
+        self._fixture = fixture
+        # Simulated zoom/focus state — optical effects not modelled.
+        self._zoom_level = camera_reachy_pb2.ZoomLevelPossibilities.ZERO
+        self._zoom_speed = 10000
+        self._left_focus = 0
+        self._right_focus = 0
+        self._left_zoom = 0
+        self._right_zoom = 0
+
+    def _camera_id(self, request_camera) -> int:
+        return LEFT if request_camera.id == camera_reachy_pb2.CameraId.LEFT else RIGHT
+
+    def _get_frame_bytes(self, cam_id: int) -> bytes:
+        frame = self._fixture.latest_frame(cam_id)
+        if frame is None:
+            frame = self._fixture.render_single_frame(cam_id)
+        return frame.jpeg_bytes
+
+    # ── unary RPCs ──────────────────────────────────────────────────────────
+
+    def GetImage(self, request, context):
+        cam_id = self._camera_id(request.camera)
+        return camera_reachy_pb2.Image(data=self._get_frame_bytes(cam_id))
+
+    def GetZoomLevel(self, request, context):
+        return camera_reachy_pb2.ZoomLevel(level=self._zoom_level)
+
+    def GetZoomSpeed(self, request, context):
+        return camera_reachy_pb2.ZoomSpeed(speed=self._zoom_speed)
+
+    def SendZoomCommand(self, request, context):
+        which = request.WhichOneof("command")
+        if which == "level_command":
+            self._zoom_level = request.level_command.level
+        elif which == "speed_command":
+            self._zoom_speed = request.speed_command.speed
+        # homing_command resets to zero
+        elif which == "homing_command":
+            self._zoom_level = camera_reachy_pb2.ZoomLevelPossibilities.ZERO
+        return camera_reachy_pb2.ZoomCommandAck(success=True)
+
+    def GetZoomFocus(self, request, context):
+        from google.protobuf.wrappers_pb2 import UInt32Value
+        return camera_reachy_pb2.ZoomFocusMessage(
+            left_focus=UInt32Value(value=self._left_focus),
+            right_focus=UInt32Value(value=self._right_focus),
+            left_zoom=UInt32Value(value=self._left_zoom),
+            right_zoom=UInt32Value(value=self._right_zoom),
+        )
+
+    def SetZoomFocus(self, request, context):
+        if request.HasField("left_focus"):
+            self._left_focus = request.left_focus.value
+        if request.HasField("right_focus"):
+            self._right_focus = request.right_focus.value
+        if request.HasField("left_zoom"):
+            self._left_zoom = request.left_zoom.value
+        if request.HasField("right_zoom"):
+            self._right_zoom = request.right_zoom.value
+        return camera_reachy_pb2.ZoomCommandAck(success=True)
+
+    def StartAutofocus(self, request, context):
+        return camera_reachy_pb2.ZoomCommandAck(success=True)
+
+    def StopAutofocus(self, request, context):
+        return camera_reachy_pb2.ZoomCommandAck(success=True)
+
+    # ── streaming RPC ────────────────────────────────────────────────────────
+
+    def StreamImage(self, request, context):
+        cam_id = self._camera_id(request.request.camera)
+        dt = 1.0 / _STREAM_FRAME_HZ
+        last_seq = -1
+        while context.is_active():
+            frame = self._fixture.latest_frame(cam_id)
+            if frame is not None and frame.sequence != last_seq:
+                last_seq = frame.sequence
+                yield camera_reachy_pb2.Image(data=frame.jpeg_bytes)
+            time.sleep(dt)
+
+
 # ── Server entrypoint ─────────────────────────────────────────────────────────
 
 def serve() -> None:
@@ -366,6 +465,12 @@ def serve() -> None:
 
     threading.Thread(
         target=state_file_writer, args=(backend,), daemon=True, name="state-writer"
+    ).start()
+
+    camera = CameraFixture()
+    camera.start()
+    threading.Thread(
+        target=frame_file_writer, args=(camera,), daemon=True, name="frame-writer"
     ).start()
 
     server = grpc.server(ThreadPoolExecutor(max_workers=10))
@@ -377,6 +482,9 @@ def serve() -> None:
     )
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(
         FakeArmKinematicsService(), server
+    )
+    camera_reachy_pb2_grpc.add_CameraServiceServicer_to_server(
+        FakeCameraService(camera), server
     )
 
     server.add_insecure_port(f"[::]:{PORT}")

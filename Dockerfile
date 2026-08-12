@@ -84,6 +84,8 @@ COPY scripts/ /opt/scripts/
 COPY scenes/ /opt/scenes/
 COPY ros/ /opt/ros_nodes/
 COPY scene_loader.py /opt/scene_loader.py
+COPY camera_fixture.py /opt/camera_fixture.py
+COPY web/ /opt/web/
 
 # ── Artifact output dir (collect_environment.py writes here) ───────────────────
 RUN mkdir -p /opt/artifacts
@@ -101,5 +103,7 @@ EXPOSE 8888
 EXPOSE 6080
 # Reachy SDK gRPC server
 EXPOSE 50051
+# Stereo camera browser preview
+EXPOSE 8080
 
 ENTRYPOINT ["/entrypoint.sh"]
