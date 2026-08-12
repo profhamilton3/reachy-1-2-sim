@@ -20,9 +20,15 @@ import json
 import os
 import sys
 import time
+import socketserver
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from typing import Optional
+
+
+class _ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    """Each request (MJPEG stream) runs in its own thread so both cameras stream concurrently."""
+    daemon_threads = True
 
 _LEFT_FILE = "/tmp/reachy_left.jpg"
 _RIGHT_FILE = "/tmp/reachy_right.jpg"
@@ -192,7 +198,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    server = HTTPServer((args.host, args.port), _Handler)
+    server = _ThreadingHTTPServer((args.host, args.port), _Handler)
     print(f"Camera web server on http://{args.host}:{args.port}/", flush=True)
     try:
         server.serve_forever()
