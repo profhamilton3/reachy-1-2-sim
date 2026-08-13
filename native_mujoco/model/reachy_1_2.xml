@@ -362,39 +362,44 @@
        ActuatorController scales these by torque_limit_percent at runtime and
        reports saturation, and zeros the gain to model SDK "compliant" mode. -->
   <actuator>
-    <!-- Right arm (8 DOF) -->
+    <!-- Right arm (8 DOF).  kp raised ~2.5x from the original soft values so the
+         physics arm TRACKS streamed trajectories instead of lagging/sagging;
+         kv scaled as ~kv0·sqrt(kp/kp0) to stay near-critically damped (NOT
+         over-damped — high kv makes the joint sluggish).  forcerange kept at the
+         original documented torque limits (the actuator/torque tests depend on
+         them).  Stable at the 500 Hz / dt=2 ms sim step. -->
     <position name="act_r_shoulder_pitch" joint="r_shoulder_pitch"
-              kp="120" kv="12" ctrlrange="-2.618  1.570" forcerange="-60 60"/>
+              kp="300" kv="20" ctrlrange="-2.618  1.570" forcerange="-60 60"/>
     <position name="act_r_shoulder_roll"  joint="r_shoulder_roll"
-              kp="120" kv="12" ctrlrange="-3.140  0.174" forcerange="-60 60"/>
+              kp="300" kv="20" ctrlrange="-3.140  0.174" forcerange="-60 60"/>
     <position name="act_r_arm_yaw"        joint="r_arm_yaw"
-              kp="60"  kv="6"  ctrlrange="-1.570  1.570" forcerange="-30 30"/>
+              kp="150" kv="10" ctrlrange="-1.570  1.570" forcerange="-30 30"/>
     <position name="act_r_elbow_pitch"    joint="r_elbow_pitch"
-              kp="60"  kv="6"  ctrlrange="-2.182  0.000" forcerange="-40 40"/>
+              kp="200" kv="11" ctrlrange="-2.182  0.000" forcerange="-40 40"/>
     <position name="act_r_forearm_yaw"    joint="r_forearm_yaw"
-              kp="30"  kv="3"  ctrlrange="-1.745  1.745" forcerange="-15 15"/>
+              kp="80"  kv="5"  ctrlrange="-1.745  1.745" forcerange="-15 15"/>
     <position name="act_r_wrist_pitch"    joint="r_wrist_pitch"
-              kp="25"  kv="2"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
+              kp="60"  kv="3"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
     <position name="act_r_wrist_roll"     joint="r_wrist_roll"
-              kp="25"  kv="2"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
+              kp="60"  kv="3"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
     <position name="act_r_gripper"        joint="r_gripper"
               kp="15"  kv="1"  ctrlrange="-1.200  0.350" forcerange="-8 8"/>
 
-    <!-- Left arm (8 DOF) -->
+    <!-- Left arm (8 DOF) — gains match the right arm for symmetry. -->
     <position name="act_l_shoulder_pitch" joint="l_shoulder_pitch"
-              kp="120" kv="12" ctrlrange="-2.618  1.570" forcerange="-60 60"/>
+              kp="300" kv="20" ctrlrange="-2.618  1.570" forcerange="-60 60"/>
     <position name="act_l_shoulder_roll"  joint="l_shoulder_roll"
-              kp="120" kv="12" ctrlrange="-0.174  3.140" forcerange="-60 60"/>
+              kp="300" kv="20" ctrlrange="-0.174  3.140" forcerange="-60 60"/>
     <position name="act_l_arm_yaw"        joint="l_arm_yaw"
-              kp="60"  kv="6"  ctrlrange="-1.570  1.570" forcerange="-30 30"/>
+              kp="150" kv="10" ctrlrange="-1.570  1.570" forcerange="-30 30"/>
     <position name="act_l_elbow_pitch"    joint="l_elbow_pitch"
-              kp="60"  kv="6"  ctrlrange="-2.182  0.000" forcerange="-40 40"/>
+              kp="200" kv="11" ctrlrange="-2.182  0.000" forcerange="-40 40"/>
     <position name="act_l_forearm_yaw"    joint="l_forearm_yaw"
-              kp="30"  kv="3"  ctrlrange="-1.745  1.745" forcerange="-15 15"/>
+              kp="80"  kv="5"  ctrlrange="-1.745  1.745" forcerange="-15 15"/>
     <position name="act_l_wrist_pitch"    joint="l_wrist_pitch"
-              kp="25"  kv="2"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
+              kp="60"  kv="3"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
     <position name="act_l_wrist_roll"     joint="l_wrist_roll"
-              kp="25"  kv="2"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
+              kp="60"  kv="3"  ctrlrange="-0.785  0.785" forcerange="-10 10"/>
     <position name="act_l_gripper"        joint="l_gripper"
               kp="15"  kv="1"  ctrlrange="-0.350  1.200" forcerange="-8 8"/>
 

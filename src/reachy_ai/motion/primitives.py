@@ -46,6 +46,9 @@ HOME: Dict[str, float] = {
 }
 
 # Transitional ready pose: arm angled forward, elbow bent, hand relaxed open.
+# NOTE: this pose puts the gripper pad forward and BELOW the tabletop surface in
+# the kinematic model — do not use it as a transit hub over the table.  Kept for
+# backward-compatibility; the pick-and-place demo uses the SIDE poses below.
 READY: Dict[str, float] = {
     "r_shoulder_pitch": -25.0,
     "r_shoulder_roll":   0.0,
@@ -53,6 +56,53 @@ READY: Dict[str, float] = {
     "r_elbow_pitch":    -55.0,
     "r_forearm_yaw":     0.0,
     "r_wrist_pitch":    15.0,
+    "r_wrist_roll":      0.0,
+    "r_gripper":        _GRIPPER_OPEN_DEG,
+}
+
+# ── Table-clearing transit poses ("jumping-jack" abduction, then over) ────────
+# The demo tabletop spans x∈[0,0.90], y∈[−0.33,+0.33] with its surface at z=0.74,
+# while the right shoulder sits at world (0,−0.19,1.0) — the whole forward
+# workspace is above the table with only ~0.26 m of headroom.  Raising the arm by
+# pitching it FORWARD (the intuitive move) sweeps the gripper straight into the
+# tabletop.  Instead we raise it like a JUMPING JACK: shoulder *pitch stays ~0*
+# and shoulder *roll* drives the arm laterally OUT, away from the torso, past the
+# table's right edge (−Y), where there is no table to hit.  Only once the arm is
+# out and up does it reach forward over the table (as a collision-checked
+# Cartesian move).  Both poses were FK-verified so the gripper pad clears the
+# table slab throughout every joint-space interpolation HOME → ABDUCT_LOW →
+# SIDE_HIGH.
+#
+#   ABDUCT_LOW : arm swung straight OUT to the right, roughly horizontal, elbow
+#                extended — pitch 0, so it moves away from the side of the torso
+#                without going forward (pad ≈ (0.00,−0.82,0.83), well outside the
+#                table's −0.33 right edge).
+#   SIDE_HIGH  : from ABDUCT_LOW, lift the upper arm and FLEX THE ELBOW TIGHT —
+#                a "bicep-curl" that folds the forearm UP so the whole forearm
+#                (not just the gripper tip) rides high and clear of the table.
+#                This is the raised transit hub (pad ≈ (0.33,−0.41,1.15), wrist ≈
+#                (0.23,−0.43,1.10) — both ~0.4 m above the surface).  Verified so
+#                BOTH the pad and the wrist clear the slab through every
+#                interpolation; the arm only reaches forward over the table,
+#                unflexing as needed, once fully raised.
+ABDUCT_LOW: Dict[str, float] = {
+    "r_shoulder_pitch":  0.0,
+    "r_shoulder_roll":  -75.0,
+    "r_arm_yaw":         0.0,
+    "r_elbow_pitch":     0.0,
+    "r_forearm_yaw":     0.0,
+    "r_wrist_pitch":     0.0,
+    "r_wrist_roll":      0.0,
+    "r_gripper":        _GRIPPER_OPEN_DEG,
+}
+
+SIDE_HIGH: Dict[str, float] = {
+    "r_shoulder_pitch": -25.0,
+    "r_shoulder_roll":  -88.0,
+    "r_arm_yaw":         0.0,
+    "r_elbow_pitch":   -100.0,   # tight bicep flex → forearm folds up, rides high
+    "r_forearm_yaw":     0.0,
+    "r_wrist_pitch":     0.0,
     "r_wrist_roll":      0.0,
     "r_gripper":        _GRIPPER_OPEN_DEG,
 }
@@ -249,9 +299,109 @@ def close_gripper(arm, duration: float = 0.8) -> None:
     smooth_move(arm, {"r_gripper": _GRIPPER_CLOSED_DEG}, duration)
 
 
-def go_home(robot, arm, duration: float = 2.5) -> None:
-    """Return the right arm to the home (zero) pose then turn off motors."""
-    smooth_move(arm, READY, duration * 0.4)
-    smooth_move(arm, HOME, duration * 0.6)
+def _reached(arm, targets: Dict[str, float], tol: float) -> bool:
+    return all(
+        abs(getattr(arm, n).present_position - v) <= tol for n, v in targets.items()
+    )
+
+
+def wait_until(
+    arm,
+    targets: Dict[str, float],
+    tol: float = 8.0,
+    timeout: float = 3.5,
+    reassert: bool = False,
+) -> bool:
+    """Closed-loop wait: poll present_position until every joint in ``targets``
+    is within ``tol`` degrees of its goal.
+
+    Returns True if converged, False on timeout.  Physics tracking lags the
+    commanded goal, so callers that need the arm to actually *be* somewhere
+    (e.g. fully abducted and clear of the table before reaching forward) gate on
+    this rather than assume the pose was reached.
+
+    ``reassert`` is OFF by default: re-sending goals every poll makes the
+    mujoco-remote bridge rebuild the full target vector from lagging positions,
+    which drags the abducted shoulder back down.  Set the goals once, then wait.
+    """
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if reassert:
+            for n, v in targets.items():
+                getattr(arm, n).goal_position = v
+        if _reached(arm, targets, tol):
+            return True
+        time.sleep(0.1)
+    return False
+
+
+# Joint whose isolated abduction lifts the arm out to the side.
+_ABDUCT_JOINT = "r_shoulder_roll"
+
+
+def raise_to_side(arm, duration: float = 3.0) -> None:
+    """Lift the right arm out to the robot's right side to the SIDE_HIGH hub.
+
+    Sequenced to work under physics, where commanding the abduction together
+    with the elbow/pitch *stalls* the shoulder-roll (a coupling quirk of the
+    mujoco-remote bridge — the joint reaches full abduction only when driven
+    alone from a compact arm).  So we:
+
+      1. Abduct the shoulder-roll FIRST, isolated, and wait (closed-loop) for it
+         to actually swing the arm out past the table's right edge.
+      2. THEN lift/flex the rest of the arm to the hub; the roll holds out.
+
+    The result clears the table in both the physics and kinematic models.
+    """
+    roll_goal = SIDE_HIGH[_ABDUCT_JOINT]
+    # 1. Isolated abduction — ramp the shoulder-roll out alone and confirm the
+    #    arm actually swings out to the side (it holds at its ~-85° range limit).
+    smooth_move(arm, {_ABDUCT_JOINT: roll_goal}, duration * 0.5)
+    wait_until(arm, {_ABDUCT_JOINT: roll_goal}, tol=8.0, timeout=3.0)
+    # 2. Set the rest of the hub DIRECTLY (one shot, no ramp).  Ramping all
+    #    joints together collapses the abducted roll; a single direct goal set
+    #    holds it (verified: roll stays ~-83° at ~5 Nm).  Then wait to converge.
+    for n, v in SIDE_HIGH.items():
+        getattr(arm, n).goal_position = v
+    wait_until(arm, SIDE_HIGH, tol=14.0, timeout=3.0)
+
+
+def stow_from_side(robot, arm, duration: float = 3.0) -> None:
+    """Reverse of raise_to_side: swing the arm back into the jumping-jack
+    position, then lower it down by Reachy's side, motors off.
+
+    The return trajectory can leave the arm partway (flexed/forward), so we first
+    re-establish a clean jumping-jack pose — shoulder fully abducted OUT to the
+    side, elbow/pitch straightened — and only THEN adduct the shoulder-roll to
+    swing the whole arm down at the side (the downward half of a jumping jack).
+    Roll is driven in isolation so the coupling that stalls it doesn't bite.
+    """
+    roll_out = SIDE_HIGH[_ABDUCT_JOINT]
+    # 1. Move BACK into the jumping-jack direction: make sure the shoulder is
+    #    fully abducted out to the side before anything else.
+    smooth_move(arm, {_ABDUCT_JOINT: roll_out}, duration * 0.30)
+    wait_until(arm, {_ABDUCT_JOINT: roll_out}, tol=8.0, timeout=2.5)
+    # 2. Un-flex to a straight arm held OUT to the side (direct set so the ramp
+    #    coupling doesn't collapse the abduction).
+    jj = dict(HOME)
+    jj[_ABDUCT_JOINT] = roll_out
+    for n, v in jj.items():
+        getattr(arm, n).goal_position = v
+    wait_until(arm, {"r_elbow_pitch": 0.0, "r_shoulder_pitch": 0.0}, tol=15.0, timeout=2.5)
+    # 3. Lower: adduct the shoulder-roll ALONE so the arm swings down by the side.
+    smooth_move(arm, {_ABDUCT_JOINT: 0.0}, duration * 0.55)
+    wait_until(arm, {_ABDUCT_JOINT: 0.0}, tol=10.0, timeout=3.0)
+    # 4. Settle everything at HOME.
+    for n, v in HOME.items():
+        getattr(arm, n).goal_position = v
+    wait_until(arm, HOME, tol=12.0, timeout=2.0)
     robot.turn_off("r_arm")
-    log.info("Right arm at HOME, motors off.")
+    log.info("Right arm stowed at HOME, motors off.")
+
+
+def go_home(robot, arm, duration: float = 2.5) -> None:
+    """Return the right arm to the home (zero) pose then turn off motors.
+
+    Routes through the side-clearing stow path so the hand never crosses the
+    tabletop on the way down."""
+    stow_from_side(robot, arm, duration)

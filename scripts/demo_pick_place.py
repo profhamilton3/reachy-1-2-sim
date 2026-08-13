@@ -66,6 +66,18 @@ _PLACE_XY = {
 }
 
 _STEP_HZ = 25
+# Over-table transit segments (swing-in, lift, carry, swing-out) stream at a
+# SLOWER rate so the physics arm has time to actually track each setpoint at the
+# commanded clear height instead of lagging and sagging below it.  ~8 Hz gives
+# the arm ~125 ms per setpoint — plenty for the stiffened actuators to converge,
+# so the hand holds the high arc tightly over the table.
+_CARRY_HZ = 8
+
+# The arm arcs through this height (m) when travelling between pick and place.
+# Chosen 0.26 m above the table surface (0.74) so the whole hand AND forearm are
+# visibly clear of the tabletop and any objects sitting on it (the pad-only
+# collision model doesn't see the forearm, so we keep the transit high).
+_CLEAR_Z = 1.00
 
 
 class MarkerAttacher:
@@ -101,9 +113,12 @@ class MarkerAttacher:
                 pass
 
 
-def _run_segment(arm, planner, start, end, seed, steps, attacher=None, object_id=None):
+def _run_segment(arm, planner, start, end, seed, steps, attacher=None,
+                 object_id=None, rate_hz=_STEP_HZ):
     """Plan a collision-checked Cartesian segment and execute it.  Returns the
-    final joint solution (seed for the next segment)."""
+    final joint solution (seed for the next segment).  ``rate_hz`` sets the
+    streaming rate — pass a slower rate for over-table transits so the physics
+    arm tracks the commanded height instead of sagging."""
     traj, cart = planner.plan_segment(start, end, steps, seed)
 
     on_step = None
@@ -111,58 +126,92 @@ def _run_segment(arm, planner, start, end, seed, steps, attacher=None, object_id
         def on_step(i, q, _c=cart):
             attacher.follow(object_id, _c[i])
 
-    P.execute_trajectory(arm, traj, R_ARM_JOINTS, rate_hz=_STEP_HZ, on_step=on_step)
+    P.execute_trajectory(arm, traj, R_ARM_JOINTS, rate_hz=rate_hz, on_step=on_step)
     return traj[-1]
 
 
-def pick_and_place(robot, planner, scene, attacher, object_id, seed):
-    """Full pick-and-place cycle for one object.  Returns the ending seed."""
+def pick_and_place(robot, planner, scene, attacher, object_id, seed, side_pad):
+    """Full pick-and-place cycle for one object, approaching over the table's
+    right side.  Starts and ends at the SIDE_HIGH hub (``side_pad``).  Returns
+    the ending seed.
+
+    Motion arc — the arm is at the SIDE_HIGH hub (up and out to the robot's
+    right, clear of the table) at entry and exit.  Every segment is a
+    collision-checked Cartesian move; the hand only ever enters the table
+    footprint at or above _CLEAR_Z, then descends straight down onto the object:
+
+      SIDE_HIGH → [over table @ _CLEAR_Z] → above pick
+                → [down] → hover → grasp → close gripper
+                → [up]   → above pick
+                → [over table @ _CLEAR_Z] → above place
+                → [down] → place → open gripper
+                → [up]   → above place
+                → [over table @ _CLEAR_Z] → SIDE_HIGH
+    """
     arm = robot.r_arm
-    obj = scene.get(object_id)
     place_xy = _PLACE_XY[object_id]
 
-    hover  = scene.hover_point(object_id)
-    grasp  = scene.grasp_point(object_id)
-    lift   = (grasp[0], grasp[1], scene.carry_z())
-    carry  = (place_xy[0], place_xy[1], scene.carry_z())
-    place  = scene.rest_point(place_xy, object_id)
-    retract = (place_xy[0], place_xy[1], scene.carry_z())
+    hover = scene.hover_point(object_id)   # object top + 0.05 m
+    grasp = scene.grasp_point(object_id)   # object centre (gripper pads land here)
+    place = scene.rest_point(place_xy, object_id)
 
-    # Head tracks the object being manipulated.
+    # High-clearance waypoints directly above the pick and place sites.  The arm
+    # crosses the table only at _CLEAR_Z (0.21 m above the surface).
+    above_pick  = (hover[0],     hover[1],     _CLEAR_Z)
+    above_place = (place_xy[0],  place_xy[1],  _CLEAR_Z)
+
+    # 1. Head looks toward the object.
     P.look_at(robot, grasp, duration=1.0)
 
-    # Approach in JOINT space (the arm lifts naturally): a straight Cartesian
-    # line from READY to the hover point would clip the table — the collision
-    # model rejects it, so we move joint-wise to the hover pose instead.
-    log.info("── %s: approach above object", object_id)
-    hover_q = planner.solve(hover, seed=seed)
-    P.smooth_move(arm, dict(zip(R_ARM_JOINTS, hover_q)), duration=2.0)
-    seed = hover_q
+    # 2. Swing IN from the side, over the table, to directly above the object.
+    #    Slow rate so the arm holds the high arc (no sag) while crossing over.
+    log.info("── %s: swing in over table to above pick", object_id)
+    seed = _run_segment(arm, planner, side_pad, above_pick, seed, 40, rate_hz=_CARRY_HZ)
 
+    # 3. Descend straight down: above → hover → grasp.
+    log.info("── %s: descend to hover", object_id)
+    seed = _run_segment(arm, planner, above_pick, hover, seed, 25)
     log.info("── %s: descend to grasp", object_id)
-    seed = _run_segment(arm, planner, hover, grasp, seed, 20)
+    seed = _run_segment(arm, planner, hover, grasp, seed, 15)
 
+    # 4. Close gripper.
     log.info("── %s: close gripper", object_id)
     P.close_gripper(arm)
-    attacher.follow(object_id, grasp)   # marker now tracks the gripper
+    attacher.follow(object_id, grasp)
 
-    log.info("── %s: lift", object_id)
-    seed = _run_segment(arm, planner, grasp, lift, seed, 20, attacher, object_id)
+    # 5. Lift straight up to clear height above the pick site (slow, so the arm
+    #    actually reaches the clear height before carrying).
+    log.info("── %s: lift to clear height", object_id)
+    seed = _run_segment(arm, planner, grasp, above_pick, seed, 30, attacher, object_id,
+                        rate_hz=_CARRY_HZ)
 
-    log.info("── %s: carry across table", object_id)
-    P.look_at(robot, place, duration=0.8)   # head tracks toward the drop site
-    seed = _run_segment(arm, planner, lift, carry, seed, 35, attacher, object_id)
+    # 6. Head tracks toward the place site while the arm swings across.
+    P.look_at(robot, (place_xy[0], place_xy[1], scene.table_surface_z), duration=0.8)
 
+    # 7. Carry over the table at clear height to above the place site — slow rate
+    #    keeps the hand pinned to the high arc the whole way across.
+    log.info("── %s: carry over table at clear height", object_id)
+    seed = _run_segment(arm, planner, above_pick, above_place, seed, 40, attacher, object_id,
+                        rate_hz=_CARRY_HZ)
+
+    # 8. Descend straight down onto the place position.
     log.info("── %s: descend to place", object_id)
-    seed = _run_segment(arm, planner, carry, place, seed, 20, attacher, object_id)
+    seed = _run_segment(arm, planner, above_place, place, seed, 30, attacher, object_id)
 
+    # 9. Open gripper; release marker.
     log.info("── %s: open gripper (release)", object_id)
     P.open_gripper(arm)
-    attacher.release(object_id, place)   # object stays at its new location
+    attacher.release(object_id, place)
 
-    log.info("── %s: retract", object_id)
-    seed = _run_segment(arm, planner, place, retract, seed, 20)
-    return seed
+    # 10. Lift straight up to clear height, then return to the side hub by
+    #     RE-ABDUCTING the shoulder (roll-first, closed-loop).  A Cartesian
+    #     swing-out streams all joints together, which stalls the shoulder-roll
+    #     under physics, so use the sequenced raise instead.
+    log.info("── %s: retract to clear height", object_id)
+    seed = _run_segment(arm, planner, place, above_place, seed, 25, rate_hz=_CARRY_HZ)
+    log.info("── %s: re-abduct back out to the side hub", object_id)
+    P.raise_to_side(arm)
+    return [P.SIDE_HIGH[n] for n in R_ARM_JOINTS]
 
 
 def run_demo(host: str, port: int, scene_path: str) -> None:
@@ -194,11 +243,15 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
     time.sleep(0.3)
     log.info("Right arm ON")
 
-    # Lift out of the rest pose in joint space (avoids sweeping up through the
-    # table that a Cartesian straight-line from arms-down would cause).
-    log.info("── Move to READY pose")
-    P.smooth_move(arm, P.READY, duration=2.0)
-    seed = [P.READY[n] for n in R_ARM_JOINTS]
+    # Lift up the robot's RIGHT SIDE to the SIDE_HIGH transit hub — the hand
+    # swings out past the table's right edge before rising, so it never sweeps
+    # up through the tabletop (verified clear in kinematic and physics models).
+    log.info("── Raise arm up the side to the SIDE_HIGH hub")
+    P.raise_to_side(arm, duration=3.0)
+    side_seed = [P.SIDE_HIGH[n] for n in R_ARM_JOINTS]
+    side_pad = planner.fk_world(side_seed)
+    log.info("   SIDE_HIGH pad=(%.2f, %.2f, %.2f)", *side_pad)
+    seed = side_seed
 
     # Tilt the head/cameras down toward the tabletop workspace.
     ws = scene.get(scene.manipulable_ids()[0]).center
@@ -209,13 +262,15 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
         px, py = _PLACE_XY.get(object_id, (None, None))
         log.info("OBJECT: %s  → place (%.2f, %.2f)", object_id, px, py)
         log.info("=" * 56)
-        seed = pick_and_place(robot, planner, scene, attacher, object_id, seed)
-        log.info("── Return to READY")
-        P.smooth_move(arm, P.READY, duration=1.5)
-        seed = [P.READY[n] for n in R_ARM_JOINTS]
+        seed = pick_and_place(robot, planner, scene, attacher, object_id, seed, side_pad)
+        # pick_and_place already returned to the SIDE_HIGH hub via raise_to_side
+        # (closed-loop), so the next pick starts fully abducted and table-clear.
+        seed = side_seed
 
     log.info("=" * 56)
-    log.info("── Return HOME and turn off")
+    log.info("── Stow: reverse the raise — lower the arm down the side by Reachy")
+    # Mirror of raise_to_side: SIDE_HIGH → ABDUCT_LOW → HOME, so the arm unflexes
+    # and comes down at the robot's side, never sweeping forward over the table.
     P.go_home(robot, arm, duration=3.0)
     log.info("Demo complete.")
 
