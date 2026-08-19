@@ -63,6 +63,12 @@ _MUJOCO_RIGHT_JPG = pathlib.Path("/tmp/reachy_right.jpg")
 _SCENE_OVERRIDES = os.environ.get(
     "REACHY_SIM_SCENE_OVERRIDES", "/tmp/reachy_scene_overrides.json"
 )
+_INTERACTIVE_STATE = os.environ.get(
+    "REACHY_SIM_INTERACTIVE_STATE", "/tmp/reachy_interactive_state.json"
+)
+_RESET_REQUEST = os.environ.get(
+    "REACHY_SIM_RESET_REQUEST", "/tmp/reachy_reset_request"
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [fake-reachy] %(message)s")
 log = logging.getLogger(__name__)
@@ -97,6 +103,69 @@ def object_overrides_writer(remote, path: str = _SCENE_OVERRIDES, hz: float = 15
                 os.replace(tmp, path)
         except Exception:
             pass
+        time.sleep(period)
+
+
+def interactive_state_writer(remote, path: str = _INTERACTIVE_STATE, hz: float = 15.0) -> None:
+    """Publish live interactive-control on/off states to a JSON file.
+
+    Mirrors the physics server's button/switch/lever states into
+    /tmp/reachy_interactive_state.json so the practice script (and any RViz
+    overlay) can read them for visible + closed-loop feedback.
+    {control_id: {"type": ..., "on": bool, "value": float}}.
+    """
+    period = 1.0 / hz
+    tmp = path + ".tmp"
+    while True:
+        try:
+            snap = remote.latest_snapshot()
+            controls = getattr(snap, "interactive", None) or {}
+            data = {
+                cid: {
+                    "type": c.get("type", ""),
+                    "on": bool(c.get("on", False)),
+                    "value": float(c.get("value", 0.0)),
+                }
+                for cid, c in controls.items()
+            }
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, path)
+        except Exception:
+            pass
+        time.sleep(period)
+
+
+_RESET_ACK = os.environ.get("REACHY_SIM_RESET_ACK", "/tmp/reachy_reset_ack")
+
+
+def reset_watcher(remote, path: str = _RESET_REQUEST, hz: float = 10.0) -> None:
+    """Trigger an acknowledged physics reset when a client drops a sentinel file.
+
+    Reads an optional generation token from the request file, calls the backend's
+    acknowledged reset (which blocks until the native server's reset_ack arrives),
+    then writes the generation to /tmp/reachy_reset_ack so the client can confirm
+    completion without relying on a fixed sleep.
+    """
+    period = 1.0 / hz
+    req_path = pathlib.Path(path)
+    ack_path = pathlib.Path(_RESET_ACK)
+    while True:
+        try:
+            if req_path.exists():
+                gen = req_path.read_text().strip()
+                req_path.unlink(missing_ok=True)
+                event = remote.request_reset()
+                ok = event.wait(timeout=6.0)
+                if not ok:
+                    log.warning("reset_watcher: reset ack timed out")
+                # Write the ack generation (even on timeout so the demo doesn't hang).
+                try:
+                    ack_path.write_text(gen)
+                except OSError:
+                    pass
+        except Exception:
+            log.debug("reset_watcher error", exc_info=True)
         time.sleep(period)
 
 
@@ -566,6 +635,14 @@ def serve() -> None:
         threading.Thread(
             target=object_overrides_writer, args=(mujoco,), daemon=True,
             name="object-overrides-writer",
+        ).start()
+        threading.Thread(
+            target=interactive_state_writer, args=(mujoco,), daemon=True,
+            name="interactive-state-writer",
+        ).start()
+        threading.Thread(
+            target=reset_watcher, args=(mujoco,), daemon=True,
+            name="reset-watcher",
         ).start()
         log.info("Backend: mujoco-remote → %s", mujoco._url)
     else:

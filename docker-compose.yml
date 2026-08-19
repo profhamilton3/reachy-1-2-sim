@@ -27,6 +27,9 @@ services:
       - REACHY_SIM_BACKEND=${REACHY_SIM_BACKEND:-kinematic}
       - REACHY_SIM_MUJOCO_URL=ws://host.docker.internal:8765
       - REACHY_SIM_ALLOW_FIXTURE_FALLBACK=true
+      # Scene the noVNC/RViz view renders — set by scripts/start_sim.sh so it
+      # matches the launched physics scene.  Defaults to the pick-and-place table.
+      - REACHY_SIM_SCENE_FILE=${REACHY_SIM_SCENE_FILE:-/opt/scenes/tabletop_demo.yaml}
     stdin_open: true
     tty: true
     restart: unless-stopped

@@ -96,10 +96,10 @@ class TestVisualCollisionSeparation:
         # Group-3 (collision) geoms are declared mass="0"; body inertia comes
         # from the visual geoms.  Proven by the invariant that total mass equals
         # the visual-only reference: had collision geoms carried density-based
-        # mass, the total would rise.  Reference updated to 66.119 kg after the
-        # tabletop surface was lowered to z=0.74 (legs shortened to match the
-        # scene YAML / scene-awareness table height).
-        assert model.body_mass.sum() == pytest.approx(66.119, abs=0.01)
+        # mass, the total would rise.  Reference is 41.159 kg for the
+        # furniture-free robot model (the built-in table was removed so scenes
+        # own their own workspace).
+        assert model.body_mass.sum() == pytest.approx(41.159, abs=0.01)
 
     def test_collision_geoms_exist_for_major_links(self, model):
         for name in ("torso_col", "r_upper_arm_col", "r_forearm_col",
@@ -113,8 +113,10 @@ class TestCollisionChannels:
         assert not _can_collide(model, "r_finger_col", "l_finger_col")
 
     def test_robot_collides_with_world(self, model):
+        # The robot collides with static world geoms (floor).  Scene furniture
+        # (tables/consoles) is provided by scenes, not the base model.
         assert _can_collide(model, "r_forearm_col", "floor")
-        assert _can_collide(model, "torso_col", "tabletop")
+        assert _can_collide(model, "torso_col", "floor")
 
     def test_robot_collision_contype(self, model):
         # robot collision geoms: contype=2, conaffinity=5
@@ -123,7 +125,7 @@ class TestCollisionChannels:
         assert model.geom_conaffinity[gid] == 5
 
     def test_world_collision_contype(self, model):
-        gid = _gid(model, "tabletop")
+        gid = _gid(model, "floor")
         assert model.geom_contype[gid] == 1
         assert model.geom_conaffinity[gid] == 6
 

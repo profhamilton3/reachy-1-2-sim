@@ -32,8 +32,13 @@ from typing import Dict, List, Optional
 import mujoco
 import numpy as np
 
-# Antenna actuator names are always stiff by default (match KinematicBackend).
-_DEFAULT_STIFF_ACTUATORS = ("act_l_antenna", "act_r_antenna")
+# Actuators stiff by default: the antennas (as on the physical robot) and the
+# neck, so the head HOLDS its pose and looks at the workspace instead of drooping
+# to the floor under gravity (the cameras are head-mounted).
+_DEFAULT_STIFF_ACTUATORS = (
+    "act_l_antenna", "act_r_antenna",
+    "act_neck_roll", "act_neck_pitch", "act_neck_yaw",
+)
 _SATURATION_EPS = 1e-3  # Nm margin for saturation detection
 
 

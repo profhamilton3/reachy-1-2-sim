@@ -9,12 +9,15 @@
 # scene object poses mirrored into RViz (port 6080).  If the native server is not
 # running, the container falls back to the kinematic fixture automatically.
 #
-# Usage:
-#   ./scripts/start_sim.sh                       # demo scene
-#   REACHY_SIM_SCENE=scenes/foo.yaml ./scripts/start_sim.sh
+# Usage — pick the scene by short name (default: tabletop_demo); the SAME scene
+# drives both the physics (camera :8080) and the noVNC/RViz view (:6080):
+#   ./scripts/start_sim.sh                              # tabletop pick-and-place
+#   REACHY_SIM_SCENE=control_panel ./scripts/start_sim.sh   # control console
+#   REACHY_SIM_SCENE=/abs/path/to/scene.yaml ./scripts/start_sim.sh
 #
-# Then run the pick-and-place demo:
+# Then run the matching demo, e.g.:
 #   docker compose exec reachy-sim python3 /opt/scripts/demo_pick_place.py
+#   docker compose exec reachy-sim python3 /opt/scripts/demo_control_panel.py
 #
 # Observe: RViz  → http://localhost:6080     camera → http://localhost:8080
 #
@@ -26,8 +29,24 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SCENE="${REACHY_SIM_SCENE:-$REPO/scenes/tabletop_demo.yaml}"
 LOG="${REACHY_SIM_SERVER_LOG:-/tmp/reachy_mujoco_server.log}"
+
+# Scene selector: a short name (control_panel), a bare file (control_panel.yaml),
+# or a full path all work.  The SAME scene drives the physics (native server,
+# host path) AND the noVNC/RViz view (container path /opt/scenes/<file>), so the
+# two views always match.
+SCENE_IN="${REACHY_SIM_SCENE:-tabletop_demo}"
+case "$SCENE_IN" in
+    /*)         SCENE="$SCENE_IN" ;;                         # absolute path
+    *.yaml)     SCENE="$REPO/scenes/$(basename "$SCENE_IN")" ;;
+    *)          SCENE="$REPO/scenes/${SCENE_IN}.yaml" ;;     # short name
+esac
+if [ ! -f "$SCENE" ]; then
+    echo "✖ Scene not found: $SCENE" >&2
+    echo "  Available: $(ls "$REPO/scenes"/*.yaml | xargs -n1 basename | sed 's/\.yaml//' | tr '\n' ' ')" >&2
+    exit 1
+fi
+SCENE_FILE="/opt/scenes/$(basename "$SCENE")"   # path inside the container
 
 echo "▶ Stopping any existing native server on :8765 …"
 lsof -tiTCP:8765 -sTCP:LISTEN 2>/dev/null | xargs -r kill -9 || true
@@ -49,9 +68,10 @@ if ! lsof -iTCP:8765 -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 echo "  server up (log: $LOG)"
 
-echo "▶ Bringing up the Docker container (physics backend) …"
+echo "▶ Bringing up the Docker container (physics backend, noVNC scene: $SCENE_FILE) …"
 cd "$REPO"
-REACHY_SIM_BACKEND=mujoco-remote docker compose up -d
+REACHY_SIM_BACKEND=mujoco-remote REACHY_SIM_SCENE_FILE="$SCENE_FILE" \
+    docker compose up -d
 
 echo
 echo "✓ Sim running with the MuJoCo physics backend."

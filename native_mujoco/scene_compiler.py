@@ -30,6 +30,13 @@ from typing import Any, List, Mapping, Optional, Tuple
 _OBJ_CONTYPE = 4
 _OBJ_CONAFFINITY = 7
 
+# Fixture channel: static console/furniture collides with robot links (contype=2)
+# but NOT with mounted controls (contype=4).
+# Verification: (8 & 5)==0, (2 & 2)==2 → fixture↔robot collide ✓
+#               (8 & 7)==0, (4 & 2)==0 → fixture↔control no collision ✓
+_FIXTURE_CONTYPE = 8
+_FIXTURE_CONAFFINITY = 2
+
 
 class SceneCompilerError(Exception):
     pass
@@ -85,9 +92,57 @@ def dynamic_object_ids(scene_doc: Mapping[str, Any]) -> List[str]:
     return ids
 
 
+def joint_name(obj_id: str) -> str:
+    """Name of the articulation joint emitted for an object (see _compile_object)."""
+    return f"{_safe_name(str(obj_id))}__j"
+
+
+def geom_name(obj_id: str) -> str:
+    """Name of the geom emitted for an articulated/interactive object."""
+    return f"{_safe_name(str(obj_id))}__g"
+
+
+def interactive_specs(scene_doc: Mapping[str, Any]) -> List[dict]:
+    """Return the interactive-control specs the physics server drives.
+
+    Each entry resolves the MuJoCo joint/geom names the InteractiveController
+    binds to, plus the toggle parameters from the scene ``interactive`` block.
+    """
+    specs: List[dict] = []
+    for o in (scene_doc.get("objects") or []):
+        inter = o.get("interactive")
+        if not inter:
+            continue
+        art = o.get("articulation") or {}
+        mat = o.get("material") or {}
+        oid = str(o.get("id"))
+        specs.append({
+            "id": oid,
+            "joint_name": joint_name(oid),
+            "geom_name": geom_name(oid),
+            "type": inter.get("type", "button"),
+            "source": inter.get("source", "joint"),
+            "on_threshold": inter.get("on_threshold"),
+            "off_threshold": inter.get("off_threshold"),
+            "bistable": bool(inter.get("bistable", False)),
+            "lit_rgba": inter.get("lit_rgba"),
+            "base_rgba": mat.get("rgba"),
+            "joint": art.get("joint"),
+            "range": art.get("range"),
+        })
+    return specs
+
+
 # ---------------------------------------------------------------------------
 # Per-object compiler
 # ---------------------------------------------------------------------------
+
+_INTERACTIVE_JOINT_REQUIREMENTS = {
+    "button": "slide",
+    "switch": "hinge",
+    "lever":  "hinge",
+}
+
 
 def _compile_object(obj: Mapping[str, Any]) -> Tuple[str, str]:
     obj_id = obj.get("id") or "unknown"
@@ -95,26 +150,85 @@ def _compile_object(obj: Mapping[str, Any]) -> Tuple[str, str]:
     geo = obj.get("geometry") or {}
     material = obj.get("material") or {}
     physics = obj.get("physics") or {}
+    articulation = obj.get("articulation") or {}
+    interactive = obj.get("interactive")
+
+    # Gate 8-B: enforce interactive↔articulation relational contract.
+    if interactive:
+        if not articulation:
+            raise SceneCompilerError(
+                f"Object '{obj_id}': interactive requires articulation "
+                f"(button→slide, lever/switch→hinge)"
+            )
+        itype = interactive.get("type", "")
+        required_joint = _INTERACTIVE_JOINT_REQUIREMENTS.get(itype)
+        actual_joint = articulation.get("joint")
+        if required_joint and actual_joint != required_joint:
+            raise SceneCompilerError(
+                f"Object '{obj_id}': interactive type '{itype}' requires "
+                f"articulation.joint='{required_joint}', got '{actual_joint}'"
+            )
 
     pos_str = _pos_str(pose.get("position") or [0, 0, 0])
     quat_str = _quat_str(_pose_quat(pose, obj_id))
     rgba_str = _rgba_str(material.get("rgba") or [0.7, 0.7, 0.7, 1.0])
 
     dynamic = bool(physics.get("dynamic"))
+    articulated = bool(articulation)
     collision = physics.get("collision", True)
 
+    # Articulated / interactive geoms are named so the InteractiveController can
+    # find them for color changes.
+    named = articulated or bool(obj.get("interactive"))
     geom_xml, asset_xml = _compile_geometry(
-        geo, obj_id, rgba_str, physics, dynamic, collision
+        geo, obj_id, rgba_str, physics, dynamic, collision,
+        articulated=articulated,
+        geom_pos=articulation.get("handle_offset") if articulated else None,
+        name=geom_name(obj_id) if named else None,
     )
 
-    free = "\n      <freejoint/>" if dynamic else ""
+    if articulated:
+        joint = _compile_articulation(articulation, obj_id)
+    elif dynamic:
+        joint = "\n      <freejoint/>"
+    else:
+        joint = ""
+
     body_xml = (
         f'    <body name="{_xml_attr(obj_id)}" pos="{pos_str}" quat="{quat_str}">'
-        f"{free}\n"
+        f"{joint}\n"
         f"      {geom_xml}\n"
         f"    </body>"
     )
     return body_xml, asset_xml
+
+
+def _compile_articulation(art: Mapping[str, Any], obj_id: str) -> str:
+    """Emit a single-DOF <joint> so the body swings (hinge) or slides."""
+    jtype = art.get("joint")
+    if jtype not in ("hinge", "slide"):
+        raise SceneCompilerError(
+            f"Object '{obj_id}': articulation.joint must be 'hinge' or 'slide'"
+        )
+    axis = art.get("axis") or [0, 0, 1]
+    if len(axis) != 3:
+        raise SceneCompilerError(f"Object '{obj_id}': articulation.axis needs 3 values")
+    attrs = [
+        f'name="{joint_name(obj_id)}"',
+        f'type="{jtype}"',
+        f'axis="{_pos_str(axis)}"',
+    ]
+    rng = art.get("range")
+    if rng is not None and len(rng) == 2:
+        attrs.append('limited="true"')
+        attrs.append(f'range="{float(rng[0]):.6f} {float(rng[1]):.6f}"')
+    elif art.get("limited") is False:
+        attrs.append('limited="false"')
+    for key in ("damping", "stiffness", "springref", "armature"):
+        val = art.get(key)
+        if val is not None:
+            attrs.append(f'{key}="{float(val):.6f}"')
+    return f'\n      <joint {" ".join(attrs)}/>'
 
 
 def _compile_geometry(
@@ -124,6 +238,9 @@ def _compile_geometry(
     physics: Mapping[str, Any],
     dynamic: bool,
     collision: bool,
+    articulated: bool = False,
+    geom_pos: Optional[Any] = None,
+    name: Optional[str] = None,
 ) -> Tuple[str, str]:
     kind = geo.get("kind") or "box"
     asset_xml = ""
@@ -144,14 +261,14 @@ def _compile_geometry(
 
     elif kind == "cylinder":
         r = float(geo.get("radius") or 0.05)
-        h = float(geo.get("height") or 0.1)
+        h = float(geo.get("length") or 0.1)
         shape = f'type="cylinder" size="{r:.6f} {h/2:.6f}"'
 
     elif kind == "mesh":
         path = str(geo.get("path") or geo.get("uri") or "")
-        name = _safe_name(obj_id)
-        asset_xml = f'<mesh name="{name}" file="{_xml_attr(path)}"/>'
-        shape = f'type="mesh" mesh="{name}"'
+        mesh_asset_name = _safe_name(obj_id)
+        asset_xml = f'<mesh name="{mesh_asset_name}" file="{_xml_attr(path)}"/>'
+        shape = f'type="mesh" mesh="{mesh_asset_name}"'
 
     else:
         raise SceneCompilerError(
@@ -159,9 +276,19 @@ def _compile_geometry(
         )
 
     attrs = [shape, f'rgba="{rgba_str}"']
+    if name:
+        attrs.insert(0, f'name="{_xml_attr(name)}"')
+    if geom_pos is not None and isinstance(geom_pos, (list, tuple)) and len(geom_pos) == 3:
+        attrs.append(f'pos="{_pos_str(geom_pos)}"')
 
-    # Contact channel + friction only when collidable.
-    if collision:
+    # Contact channel + friction.
+    # collision: true  → standard object channel (contype=4, conaffinity=7)
+    # collision: "fixture" → fixture channel (contype=8, conaffinity=2)
+    #            collides with robot links but not with sibling controls
+    # collision: false → non-colliding (contype=0, conaffinity=0)
+    if collision == "fixture":
+        attrs.append(f'contype="{_FIXTURE_CONTYPE}" conaffinity="{_FIXTURE_CONAFFINITY}"')
+    elif collision:
         attrs.append(f'contype="{_OBJ_CONTYPE}" conaffinity="{_OBJ_CONAFFINITY}"')
         fr = physics.get("friction")
         if isinstance(fr, (list, tuple)) and len(fr) >= 1:
@@ -170,9 +297,13 @@ def _compile_geometry(
     else:
         attrs.append('contype="0" conaffinity="0"')
 
-    # Mass for dynamic objects (static bodies' mass is irrelevant).
-    if dynamic:
+    # Mass: dynamic (freejoint) and articulated (hinge/slide) bodies both need a
+    # finite mass so MuJoCo can build a well-conditioned inertia.  Static welded
+    # bodies don't (their mass is irrelevant).
+    if dynamic or articulated:
         mass = physics.get("mass")
+        if mass is None:
+            mass = 0.05 if articulated else None   # light default for controls
         if mass is not None:
             attrs.append(f'mass="{float(mass):.6f}"')
     if "restitution" in physics:

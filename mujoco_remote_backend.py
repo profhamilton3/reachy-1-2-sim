@@ -31,6 +31,7 @@ import pathlib
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Mapping, Optional, Tuple
@@ -56,7 +57,9 @@ PROTOCOL_VERSION = 1
 class ConnectionState(str, Enum):
     CONNECTING = "connecting"
     READY      = "ready"
+    RESETTING  = "resetting"
     DEGRADED   = "degraded"
+    ABORTED    = "aborted"
     STOPPED    = "stopped"
 
 
@@ -84,6 +87,8 @@ class RemoteSnapshot:
     grasping: Dict[str, bool] = field(default_factory=dict)
     # R12-503: tracked object poses keyed by object id (for RViz/browser).
     objects: Dict[str, dict] = field(default_factory=dict)
+    # R12-504: interactive control on/off states keyed by control id.
+    interactive: Dict[str, dict] = field(default_factory=dict)
     warnings: Tuple[str, ...] = ()
 
     def age_ms(self) -> float:
@@ -102,10 +107,13 @@ class MujocoRemoteBackend:
         self._conn_state = ConnectionState.CONNECTING
         self._cmd_seq = 0
         self._pending_cmds: List[JointCommand] = []
+        self._pending_reset = False
+        self._last_target: Optional[List[float]] = None
         self._shutdown = threading.Event()
         self._reconnect_count = 0
 
-        # build uid→index map from kinematic_backend JOINT_DEFS
+        # Build uid→index map from kinematic_backend JOINT_DEFS once at construction
+        # so _build_command() works before the first reset.
         self._uid_to_idx: Dict[int, int] = {}
         self._idx_to_uid: Dict[int, int] = {}
         for i, (name, uid) in enumerate(JOINT_DEFS):
@@ -113,6 +121,36 @@ class MujocoRemoteBackend:
             self._idx_to_uid[i] = uid
 
         self._thread: Optional[threading.Thread] = None
+
+        # Reset acknowledgement (Gate 8-D).
+        self._pending_reset_id: Optional[str] = None
+        self._reset_ack_event: threading.Event = threading.Event()
+        # Timeout for waiting on a reset ack (seconds).
+        self._reset_timeout: float = float(
+            os.environ.get("REACHY_SIM_RESET_TIMEOUT_S", "5.0")
+        )
+
+    def request_reset(self) -> threading.Event:
+        """Ask the native server to reset the scene.
+
+        Generates a unique request_id, enters RESETTING state (commands are
+        held until the matching reset_ack arrives), and returns a threading.Event
+        that is set when the ack arrives (or the timeout fires).  Callers that
+        need to block until reset is confirmed can call event.wait(timeout).
+        """
+        rid = uuid.uuid4().hex
+        with self._lock:
+            self._pending_reset = True
+            self._pending_reset_id = rid
+            self._last_target = None    # re-seed goals from the post-reset pose
+            self._conn_state = ConnectionState.RESETTING
+        self._reset_ack_event.clear()
+        return self._reset_ack_event
+
+    def wait_for_reset(self, timeout: Optional[float] = None) -> bool:
+        """Block until a reset_ack is received.  Returns True on success."""
+        t = timeout if timeout is not None else self._reset_timeout
+        return self._reset_ack_event.wait(timeout=t)
 
     # ── Public API (same shape as KinematicBackend) ───────────────────────
 
@@ -166,8 +204,22 @@ class MujocoRemoteBackend:
         finally:
             loop.close()
 
+    def _on_reset_timeout(self) -> None:
+        """Called from the asyncio event loop when a reset_ack does not arrive in time."""
+        with self._lock:
+            if self._conn_state == ConnectionState.RESETTING:
+                log.error(
+                    "Reset ack timed out after %.1f s — entering ABORTED state",
+                    self._reset_timeout,
+                )
+                self._conn_state = ConnectionState.ABORTED
+                self._pending_reset_id = None
+        # Signal waiters so they don't hang; they can check connection_state.
+        self._reset_ack_event.set()
+
     async def _connect_loop(self) -> None:
         import websockets
+        import websockets.exceptions as _ws_exc
 
         while not self._shutdown.is_set():
             try:
@@ -180,7 +232,7 @@ class MujocoRemoteBackend:
                 ) as ws:
                     self._reconnect_count += 1
                     await self._session(ws)
-            except Exception as exc:
+            except (OSError, ConnectionError, _ws_exc.WebSocketException) as exc:
                 log.warning("Connection error: %s — retry in %.1fs",
                             exc, _RECONNECT_DELAY)
                 with self._lock:
@@ -228,6 +280,26 @@ class MujocoRemoteBackend:
                 elif mtype == "heartbeat_ack":
                     last_hb = time.monotonic()
 
+                elif mtype == "reset_ack":
+                    req_id = msg.get("request_id", "")
+                    with self._lock:
+                        if (self._conn_state == ConnectionState.RESETTING
+                                and req_id == self._pending_reset_id):
+                            self._conn_state = ConnectionState.READY
+                            self._pending_reset_id = None
+                            # _last_target is already None; it will be re-seeded
+                            # from the post-reset pose on the next command.
+                            log.info(
+                                "Reset ack received (id=%s sim_step=%s)",
+                                req_id, msg.get("sim_step"),
+                            )
+                        else:
+                            log.warning(
+                                "Unexpected reset_ack id=%s (expected %s)",
+                                req_id, self._pending_reset_id,
+                            )
+                    self._reset_ack_event.set()
+
                 elif mtype == "shutdown":
                     log.info("Server sent shutdown: %s", msg.get("reason", ""))
                     return
@@ -239,8 +311,26 @@ class MujocoRemoteBackend:
         async def _send() -> None:
             while not self._shutdown.is_set():
                 with self._lock:
-                    cmds = list(self._pending_cmds)
-                    self._pending_cmds.clear()
+                    resetting = self._conn_state == ConnectionState.RESETTING
+                    do_reset = self._pending_reset
+                    reset_id = self._pending_reset_id if do_reset else None
+                    if do_reset:
+                        self._pending_reset = False
+                    # Hold commands during reset — keep them in _pending_cmds.
+                    if not resetting:
+                        cmds = list(self._pending_cmds)
+                        self._pending_cmds.clear()
+                    else:
+                        cmds = []
+
+                if do_reset and reset_id:
+                    await ws.send(json.dumps(
+                        {"type": "reset", "request_id": reset_id}
+                    ))
+                    # Schedule a timeout: if no ack in time, abort.
+                    asyncio.get_event_loop().call_later(
+                        self._reset_timeout, self._on_reset_timeout
+                    )
 
                 if cmds:
                     target, compliant, speed, torque = self._build_command(cmds)
@@ -299,6 +389,15 @@ class MujocoRemoteBackend:
             for o in (msg.get("objects") or [])
             if o.get("object_id") is not None
         }
+        interactive = {
+            str(c.get("id")): {
+                "type": c.get("type", ""),
+                "on": bool(c.get("on", False)),
+                "value": float(c.get("value", 0.0)),
+            }
+            for c in (msg.get("interactive") or [])
+            if c.get("id") is not None
+        }
         snap = RemoteSnapshot(
             seq=int(msg.get("seq", 0)),
             sim_step=int(msg.get("sim_step", 0)),
@@ -310,6 +409,7 @@ class MujocoRemoteBackend:
             force_sensors=force_sensors,
             grasping=grasping,
             objects=objects,
+            interactive=interactive,
         )
         with self._lock:
             self._snapshot = snap
@@ -336,15 +436,20 @@ class MujocoRemoteBackend:
         Returns (target_rad, compliant, speed_limit_rad_s, torque_limit_percent).
         The three optional lists hold None for joints left unchanged (R12-501).
         """
-        with self._lock:
-            snap = self._snapshot
-
-        # Start targets from current positions so unspecified joints hold.
-        target = [0.0] * 21
-        for name, sample in snap.joints.items():
-            idx = self._uid_to_idx.get(sample.uid)
-            if idx is not None:
-                target[idx] = sample.position_rad
+        # Start from the LAST COMMANDED targets so joints not in this batch keep
+        # their commanded goal.  (Seeding from current positions instead let
+        # unspecified joints — e.g. the neck — ratchet toward wherever gravity
+        # had dragged them, since every arm command re-sent their sagging
+        # position as the goal.)  First call seeds from the current pose.
+        if self._last_target is None:
+            with self._lock:
+                snap = self._snapshot
+            self._last_target = [0.0] * 21
+            for name, sample in snap.joints.items():
+                idx = self._uid_to_idx.get(sample.uid)
+                if idx is not None:
+                    self._last_target[idx] = sample.position_rad
+        target = list(self._last_target)
 
         compliant: List[Optional[bool]] = [None] * 21
         speed: List[Optional[float]] = [None] * 21
@@ -363,6 +468,7 @@ class MujocoRemoteBackend:
             if cmd.torque_limit is not None:
                 torque[idx] = float(cmd.torque_limit)
 
+        self._last_target = list(target)
         return target, compliant, speed, torque
 
     # ── SimulationSnapshot bridge (for fake_reachy_server compatibility) ─

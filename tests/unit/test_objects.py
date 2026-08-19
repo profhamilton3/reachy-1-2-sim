@@ -61,8 +61,8 @@ def sim(model):
 
 class TestModelComposition:
     def test_objects_added(self, model):
-        # robot (26) + 3 scene bodies
-        assert model.nbody == 29
+        # robot (25, furniture-free) + 3 scene bodies
+        assert model.nbody == 28
 
     def test_dynamic_objects_have_freejoints(self, model):
         # 21 robot hinges + 2 free joints

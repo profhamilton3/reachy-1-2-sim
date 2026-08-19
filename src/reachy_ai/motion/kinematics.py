@@ -34,6 +34,12 @@ R_ARM_JOINTS = [
     "r_elbow_pitch", "r_forearm_yaw", "r_wrist_pitch", "r_wrist_roll",
 ]
 
+# Left-arm joint order (mirror of the right).
+L_ARM_JOINTS = [
+    "l_shoulder_pitch", "l_shoulder_roll", "l_arm_yaw",
+    "l_elbow_pitch", "l_forearm_yaw", "l_wrist_pitch", "l_wrist_roll",
+]
+
 # Baseline "point down and forward" gripper orientation (from FK of a natural
 # reaching pose); the sweep rotates this about world Z (yaw) and Y (pitch).
 _R0 = np.array([
@@ -42,7 +48,29 @@ _R0 = np.array([
     [0.92, 0.05, 0.39],
 ])
 
+# Reflection across the y=0 plane.  Mirroring a proper rotation R across the
+# sagittal plane gives S @ R @ S (still a proper rotation), so the left arm's
+# baseline orientation is the mirror image of the right's.
+_MIRROR = np.diag([1.0, -1.0, 1.0])
+_R0_LEFT = _MIRROR @ _R0 @ _MIRROR
+
 _BASE = np.array(ARM_BASE_IN_WORLD)
+
+
+def _joints_for(side: str):
+    if side == "left":
+        return L_ARM_JOINTS
+    if side == "right":
+        return R_ARM_JOINTS
+    raise ValueError(f"side must be 'left' or 'right', got '{side!r}'")
+
+
+def _r0_for(side: str) -> np.ndarray:
+    if side == "left":
+        return _R0_LEFT
+    if side == "right":
+        return _R0
+    raise ValueError(f"side must be 'left' or 'right', got '{side!r}'")
 
 # The reachy_sdk FK/IK frame is the wrist (r_wrist2hand).  The gripper contact
 # pads sit ~0.12 m along the wrist's local -Z (measured from the model).  We
@@ -73,12 +101,17 @@ class CollisionError(RuntimeError):
 
 
 class CartesianPlanner:
-    """Plans right-arm joint trajectories for Cartesian gripper targets."""
+    """Plans one-arm joint trajectories for Cartesian gripper targets.
+
+    ``side`` selects the arm: 'right' (default) or 'left'.  The left arm uses the
+    mirrored joint set and baseline orientation; all other logic is shared.
+    """
 
     def __init__(
         self,
         arm,
         scene: Optional[SceneModel] = None,
+        side: str = "right",
         yaw_samples: int = 9,
         yaw_range: float = 1.0,
         pitch_samples: Sequence[float] = (-0.6, -0.3, 0.0, 0.3, 0.5, 0.8),
@@ -86,6 +119,9 @@ class CartesianPlanner:
     ) -> None:
         self._arm = arm
         self._scene = scene
+        self.side = side
+        self.joints = _joints_for(side)
+        self._R0 = _r0_for(side)
         self._yaws = np.linspace(-yaw_range, yaw_range, yaw_samples)
         self._pitches = pitch_samples
         self._tol = tol
@@ -128,7 +164,7 @@ class CartesianPlanner:
         best_err = float("inf")
         best_pair: Optional[Tuple[float, float]] = None
         for (yaw, pit) in self._orientations(prefer):
-            R = _rotz(yaw) @ _roty(pit) @ _R0
+            R = _rotz(yaw) @ _roty(pit) @ self._R0
             wrist = pad + R @ _TOOL          # wrist target so pads land at `pad`
             M = np.eye(4)
             M[:3, :3] = R

@@ -306,7 +306,11 @@
           "default": false
         },
         "collision": {
-          "type": "boolean",
+          "description": "true = standard object channel; false = no collision; \"fixture\" = collides with robot links but not with sibling controls (contype=8 conaffinity=2).",
+          "oneOf": [
+            {"type": "boolean"},
+            {"type": "string", "enum": ["fixture"]}
+          ],
           "default": true
         },
         "mass": {
@@ -326,6 +330,101 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        }
+      }
+    },
+    "articulation": {
+      "description": "Single-DOF joint that makes this body movable (lever/switch hinge, spring-button slide). When present the body is neither welded nor free — it swings/slides on this joint.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "joint",
+        "axis"
+      ],
+      "properties": {
+        "joint": {
+          "enum": [
+            "hinge",
+            "slide"
+          ]
+        },
+        "axis": {
+          "$ref": "#/$defs/vec3"
+        },
+        "range": {
+          "description": "Joint limits [lo, hi] in radians (hinge) or metres (slide).",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number"
+          }
+        },
+        "damping": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stiffness": {
+          "description": "Spring stiffness returning the joint toward springref (used for spring buttons).",
+          "type": "number",
+          "minimum": 0
+        },
+        "armature": {
+          "description": "Reflected inertia added to the joint DOF; stabilises light control handles.",
+          "type": "number",
+          "minimum": 0
+        },
+        "springref": {
+          "type": "number"
+        },
+        "limited": {
+          "type": "boolean",
+          "default": true
+        },
+        "handle_offset": {
+          "description": "Offset (m) of the geom from the joint pivot, so a lever/switch handle extends out from its hinge. Default [0,0,0] (geom centred on the joint).",
+          "$ref": "#/$defs/vec3"
+        }
+      }
+    },
+    "interactive": {
+      "description": "Registers this body as an operable control the physics server toggles/reports.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "button",
+            "switch",
+            "lever"
+          ]
+        },
+        "source": {
+          "description": "How actuation is measured: 'joint' (displacement/angle of the articulation) or 'contact' (gripper contact).",
+          "enum": [
+            "joint",
+            "contact"
+          ],
+          "default": "joint"
+        },
+        "on_threshold": {
+          "description": "Joint value at/beyond which the control reads ON (rad or m).",
+          "type": "number"
+        },
+        "off_threshold": {
+          "description": "Joint value at/below which a momentary control re-arms (rad or m).",
+          "type": "number"
+        },
+        "lit_rgba": {
+          "$ref": "#/$defs/rgba"
+        },
+        "bistable": {
+          "description": "Switches/levers snap to the nearest end and hold there.",
+          "type": "boolean",
+          "default": false
         }
       }
     },
@@ -353,6 +452,12 @@
         },
         "physics": {
           "$ref": "#/$defs/physics"
+        },
+        "articulation": {
+          "$ref": "#/$defs/articulation"
+        },
+        "interactive": {
+          "$ref": "#/$defs/interactive"
         },
         "tracked": {
           "type": "boolean",

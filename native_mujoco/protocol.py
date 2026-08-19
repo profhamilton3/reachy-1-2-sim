@@ -214,6 +214,8 @@ class State:
     # R12-502: per-gripper grasp/force state and SDK force-sensor readings.
     grippers: List[Dict[str, Any]] = field(default_factory=list)
     force_sensors: List[Dict[str, Any]] = field(default_factory=list)
+    # R12-504: interactive control on/off states ({id, type, on, value}).
+    interactive: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
     def encode(self) -> str:
