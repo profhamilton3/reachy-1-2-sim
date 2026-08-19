@@ -155,12 +155,49 @@ def _is_on(control_id):
     return bool(st and st.get("on"))
 
 
+# Outward normal of the slanted upper panel (rpy pitch -0.60): points up and
+# toward the robot.  Approaches/retreats to upper controls run along this so the
+# arm never drags across the slant face.
+_SLANT_NORMAL = (-0.565, 0.0, 0.825)
+
+
+def _is_lower(target):
+    """True for the flat-top buttons, which sit UNDER the slanted panel."""
+    return (target.control_type == "button"
+            and target.actuate_dir[2] < -0.7
+            and target.point[2] < 0.85)
+
+
 def operate_button(robot, arm, planner, target, side, seed):
-    """Poke the button with a closed gripper: reach above (sag-compensated),
-    descend through the cap to toggle it, retract.  Retries a deeper press if
-    the first sweep didn't register (borderline reach)."""
-    above = _add(target.point, target.off_dir, _STANDOFF)
+    """Press a button, panel-aware.
+
+    LOWER (flat-top) buttons sit UNDER the slanted panel, so the hand enters the
+    gap horizontally FROM THE FRONT, presses down, and withdraws back out the
+    front — it never descends through the slant.  UPPER (slant-face) buttons are
+    approached and withdrawn along the panel normal.
+    """
+    P.look_at(robot, target.point, duration=0.6)      # look at THIS control
     P.close_gripper(arm, duration=0.4, side=side)     # solid poker
+
+    if _is_lower(target):
+        gap_z = target.point[2] + 0.06
+        front = (target.point[0] - 0.15, target.point[1], gap_z)   # ahead of gap
+        over = (target.point[0], target.point[1], gap_z)           # over the cap
+        if reach(arm, planner, front) is None:
+            log.warning("   %s: front approach unreachable — skipping", target.id)
+            return seed
+        reach(arm, planner, over)                     # slide in under the slant
+        for depth in (_PRESS_DEPTH, _PRESS_DEPTH + 0.02, _PRESS_DEPTH + 0.04):
+            reach(arm, planner, _add(target.point, target.actuate_dir, depth))
+            if _is_on(target.id):
+                break
+            reach(arm, planner, over, iters=1, compensate=False)
+        reach(arm, planner, over, iters=1, compensate=False)       # up out of press
+        reach(arm, planner, front, iters=1, compensate=False)      # withdraw front
+        return seed
+
+    # Upper slant button: approach/retreat along the panel normal.
+    above = _add(target.point, target.off_dir, _STANDOFF)
     if reach(arm, planner, above) is None:
         log.warning("   %s: standoff unreachable — skipping", target.id)
         return seed
@@ -168,31 +205,30 @@ def operate_button(robot, arm, planner, target, side, seed):
         reach(arm, planner, _add(target.point, target.actuate_dir, depth))
         if _is_on(target.id):
             break
-        reach(arm, planner, above, iters=1, compensate=False)   # lift & retry
+        reach(arm, planner, above, iters=1, compensate=False)
     reach(arm, planner, above, iters=1, compensate=False)
     return seed
 
 
 def operate_hinge(robot, arm, planner, target, side, seed):
-    """Flip a switch/lever by SWEEPING a closed gripper across its handle: come
-    in on the OFF side and sweep through to the ON side, carrying the handle past
-    its midpoint (where the bistable detent snaps it on).  A sweep is far more
-    tolerant of the arm's few-cm reach error than trying to grip a thin handle.
-    Retries with a wider sweep if it didn't catch."""
+    """Flip an upper-panel switch/lever by sweeping a closed gripper across its
+    handle.  Approach and (carefully) retreat along the slant NORMAL so the arm
+    lifts straight off the panel instead of dragging across it."""
+    P.look_at(robot, target.point, duration=0.6)      # look at THIS control
     tip = target.point
     ad = target.actuate_dir
-    approach = _add(tip, ad, -_STANDOFF)              # off side, standoff
+    standoff = _add(tip, _SLANT_NORMAL, _STANDOFF)    # out along the panel normal
     P.close_gripper(arm, duration=0.4, side=side)     # push tool
-    if reach(arm, planner, approach) is None:
+    if reach(arm, planner, standoff) is None:
         log.warning("   %s: approach unreachable — skipping", target.id)
         return seed
     for extra in (0.0, 0.03, 0.06):
-        reach(arm, planner, _add(tip, ad, -0.04))     # just before the handle
+        reach(arm, planner, _add(tip, ad, -0.04))     # off side, just before handle
         reach(arm, planner, _add(tip, ad, _FLIP_PUSH + extra))  # sweep through
         if _is_on(target.id):
             break
-        reach(arm, planner, approach, iters=1, compensate=False)
-    reach(arm, planner, approach, iters=1, compensate=False)
+        reach(arm, planner, _add(tip, _SLANT_NORMAL, 0.06), iters=1, compensate=False)
+    reach(arm, planner, standoff, iters=1, compensate=False)   # lift off the panel
     return seed
 
 
@@ -249,16 +285,15 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
     settle_ready("right")
     settle_ready("left")
 
-    # Keep the head UP, fixed on the console overview — do NOT track individual
-    # (low) controls, which pitches the head down at the surface.  The arms/
-    # grippers come into this view as they reach the console.  Aim at the centre
-    # of the control cluster, biased upward toward the raised slanted panel.
+    # Initial gaze at the console; each operate_* call then aims the head at the
+    # specific control it is working (down at the lower panel, up at the upper
+    # panel).  The neck holds its gaze now, so it tracks the control without
+    # drooping to the floor.
     ctrls = scene.controls()
     cx = sum(c.center[0] for c in ctrls) / len(ctrls)
-    cz = max(c.center[2] for c in ctrls) - 0.03      # near the top of the panel
-    console_view = (cx, 0.0, cz)
-    P.look_at(robot, console_view, duration=1.0)
-    log.info("Head fixed on console overview %s", tuple(round(v, 2) for v in console_view))
+    cz = max(c.center[2] for c in ctrls) - 0.03
+    P.look_at(robot, (cx, 0.0, cz), duration=1.0)
+    log.info("Head looks at the console; tracks each control as it works.")
 
     actuated = 0
     on_count = 0
