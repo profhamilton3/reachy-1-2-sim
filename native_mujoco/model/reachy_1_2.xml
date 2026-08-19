@@ -83,21 +83,10 @@
     <light name="fill" pos="-1 1 2" dir="1 -1 -1"
            diffuse="0.3 0.3 0.3" specular="0 0 0"/>
 
-    <!-- ── Tabletop workspace ──────────────────────────────────── -->
-    <!-- Surface top at world z=0.74 (matches scenes/*.yaml table_top and the
-         scene-awareness collision model in src/reachy_ai/scene). -->
-    <body name="table" pos="0.55 0 0">
-      <geom name="tabletop"  class="world" type="box" size="0.40 0.30 0.02"
-            pos="0 0 0.72"   material="table_mat"/>
-      <geom name="t_leg_fr"  class="world" type="capsule"
-            fromto="0.35  0.25 0  0.35  0.25 0.70" size="0.025" material="dark_gray"/>
-      <geom name="t_leg_fl"  class="world" type="capsule"
-            fromto="-0.35  0.25 0 -0.35  0.25 0.70" size="0.025" material="dark_gray"/>
-      <geom name="t_leg_br"  class="world" type="capsule"
-            fromto="0.35 -0.25 0  0.35 -0.25 0.70" size="0.025" material="dark_gray"/>
-      <geom name="t_leg_bl"  class="world" type="capsule"
-            fromto="-0.35 -0.25 0 -0.35 -0.25 0.70" size="0.025" material="dark_gray"/>
-    </body>
+    <!-- No built-in table: the robot model is furniture-free so it works with
+         any scene.  Scenes provide their own workspace (e.g. scenes/*.yaml
+         `table_top`, or scenes/control_panel.yaml's console), which the native
+         backend compiles in with collision. -->
 
     <!-- ── Pedestal (fixed base) ───────────────────────────────── -->
     <!-- URDF: pedestal joint xyz=0 0 1  ⟹ torso origin is 1 m above world -->

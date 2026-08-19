@@ -117,7 +117,7 @@ objects:
     material: {rgba: [0.85, 0.10, 0.10, 1.0]}
     physics: {collision: true, friction: [1.0, 0.02, 0.001]}
     articulation: {joint: slide, axis: [0, 0, 1], range: [-0.012, 0.0], stiffness: 250, damping: 4, springref: 0}
-    interactive: {type: button, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [1.0, 0.45, 0.45, 1.0]}
+    interactive: {type: button, source: contact, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [1.0, 0.45, 0.45, 1.0]}
     semantic_class: control.button
     tags: [control]
 
@@ -127,7 +127,7 @@ objects:
     material: {rgba: [0.10, 0.65, 0.15, 1.0]}
     physics: {collision: true, friction: [1.0, 0.02, 0.001]}
     articulation: {joint: slide, axis: [0, 0, 1], range: [-0.012, 0.0], stiffness: 250, damping: 4, springref: 0}
-    interactive: {type: button, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [0.5, 1.0, 0.5, 1.0]}
+    interactive: {type: button, source: contact, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [0.5, 1.0, 0.5, 1.0]}
     semantic_class: control.button
     tags: [control]
 
@@ -137,7 +137,7 @@ objects:
     material: {rgba: [0.10, 0.30, 0.90, 1.0]}
     physics: {collision: true, friction: [1.0, 0.02, 0.001]}
     articulation: {joint: slide, axis: [0, 0, 1], range: [-0.012, 0.0], stiffness: 250, damping: 4, springref: 0}
-    interactive: {type: button, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [0.5, 0.7, 1.0, 1.0]}
+    interactive: {type: button, source: contact, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [0.5, 0.7, 1.0, 1.0]}
     semantic_class: control.button
     tags: [control]
 
@@ -147,7 +147,7 @@ objects:
     material: {rgba: [0.88, 0.80, 0.10, 1.0]}
     physics: {collision: true, friction: [1.0, 0.02, 0.001]}
     articulation: {joint: slide, axis: [0, 0, 1], range: [-0.012, 0.0], stiffness: 250, damping: 4, springref: 0}
-    interactive: {type: button, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [1.0, 1.0, 0.5, 1.0]}
+    interactive: {type: button, source: contact, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [1.0, 1.0, 0.5, 1.0]}
     semantic_class: control.button
     tags: [control]
 
@@ -200,7 +200,7 @@ objects:
     material: {rgba: [0.90, 0.90, 0.90, 1.0]}
     physics: {collision: true, friction: [1.0, 0.02, 0.001]}
     articulation: {joint: slide, axis: [0, 0, 1], range: [-0.012, 0.0], stiffness: 250, damping: 4, springref: 0}
-    interactive: {type: button, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [1.0, 1.0, 0.8, 1.0]}
+    interactive: {type: button, source: contact, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [1.0, 1.0, 0.8, 1.0]}
     semantic_class: control.button
     tags: [control]
 
@@ -210,6 +210,6 @@ objects:
     material: {rgba: [1.0, 0.50, 0.60, 1.0]}
     physics: {collision: true, friction: [1.0, 0.02, 0.001]}
     articulation: {joint: slide, axis: [0, 0, 1], range: [-0.012, 0.0], stiffness: 250, damping: 4, springref: 0}
-    interactive: {type: button, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [1.0, 0.75, 0.8, 1.0]}
+    interactive: {type: button, source: contact, on_threshold: -0.007, off_threshold: -0.002, lit_rgba: [1.0, 0.75, 0.8, 1.0]}
     semantic_class: control.button
     tags: [control]

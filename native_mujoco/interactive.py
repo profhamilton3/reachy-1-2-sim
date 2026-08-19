@@ -32,11 +32,15 @@ import numpy as np
 _BISTABLE_TORQUE = 0.08
 _BISTABLE_WIDTH = 0.15
 
+# A robot collision geom has contype == 2 (see reachy_1_2.xml collision model).
+_ROBOT_CONTYPE = 2
+
 
 @dataclass
 class _Element:
     obj_id: str
     kind: str                    # button | switch | lever
+    source: str                  # joint | contact
     qpos_adr: int
     dof_adr: int
     geom_id: int                 # -1 if the geom was not found
@@ -81,6 +85,7 @@ class InteractiveController:
             self._elements.append(_Element(
                 obj_id=str(s.get("id")),
                 kind=kind,
+                source=s.get("source", "joint"),
                 qpos_adr=int(model.jnt_qposadr[jid]),
                 dof_adr=int(model.jnt_dofadr[jid]),
                 geom_id=gid,
@@ -111,7 +116,10 @@ class InteractiveController:
         for e in self._elements:
             v = float(data.qpos[e.qpos_adr])
             if e.kind == "button":
-                self._update_button(e, v)
+                if e.source == "contact":
+                    self._update_button_contact(e, data)
+                else:
+                    self._update_button(e, v)
             else:
                 self._update_hinge(e, v, data)
             self._paint(e)
@@ -123,6 +131,27 @@ class InteractiveController:
             e.armed = False
         elif not e.armed and v >= e.off_threshold:
             e.armed = True           # released far enough to re-arm
+
+    def _update_button_contact(self, e: _Element, data: mujoco.MjData) -> None:
+        """Toggle on a fresh touch by the robot (any gripper/arm collision geom
+        contacting the button geom).  Forgiving for light presses where the arm
+        can't drive the spring the full toggle depth."""
+        touched = False
+        if e.geom_id >= 0:
+            for i in range(data.ncon):
+                c = data.contact[i]
+                g1, g2 = int(c.geom1), int(c.geom2)
+                if e.geom_id not in (g1, g2):
+                    continue
+                other = g2 if g1 == e.geom_id else g1
+                if int(self.model.geom_contype[other]) == _ROBOT_CONTYPE:
+                    touched = True
+                    break
+        if e.armed and touched:
+            e.on = not e.on
+            e.armed = False
+        elif not e.armed and not touched:
+            e.armed = True
 
     def _update_hinge(self, e: _Element, v: float, data: mujoco.MjData) -> None:
         e.on = v >= e.on_threshold
