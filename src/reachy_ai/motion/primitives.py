@@ -25,11 +25,41 @@ from typing import Dict
 log = logging.getLogger(__name__)
 
 _INTERP_HZ = 25          # interpolation update rate
-# Gripper sign convention (measured from reachy_1_2.xml): NEGATIVE opens,
-# POSITIVE closes.  Pad gap: -45° ≈ 8.0 cm (open, clears the 60 mm cube and
-# 70 mm cylinder), -5° ≈ 4.6 cm (closed, squeezes both for a friction grip).
+# Gripper sign convention (measured from reachy_1_2.xml): the RIGHT gripper
+# opens NEGATIVE, closes POSITIVE.  Pad gap: -45° ≈ 8.0 cm (open), -5° ≈ 4.6 cm
+# (closed).  The LEFT gripper's range is mirrored (ctrlrange -0.35..1.2 vs the
+# right's -1.2..0.35), so its signs are inverted: opens POSITIVE, closes NEGATIVE.
 _GRIPPER_OPEN_DEG = -45.0
 _GRIPPER_CLOSED_DEG = -5.0
+_L_GRIPPER_OPEN_DEG = 45.0
+_L_GRIPPER_CLOSED_DEG = 5.0
+
+# Joint-name suffixes whose sign flips when a right-arm pose is mirrored to the
+# left across the sagittal (y=0) plane.  Pitch joints (about the y-axis) keep
+# their sign; roll/yaw joints (about x/z) flip.
+_MIRROR_FLIP_SUFFIXES = ("shoulder_roll", "arm_yaw", "forearm_yaw", "wrist_roll")
+
+
+def mirror_pose(pose: Dict[str, float]) -> Dict[str, float]:
+    """Map a RIGHT-arm pose dict to the mirror-image LEFT-arm pose.
+
+    Renames ``r_*`` → ``l_*``, negates the roll/yaw joints (sagittal mirror),
+    and inverts the gripper sign (the left gripper's convention is reversed).
+    """
+    out: Dict[str, float] = {}
+    for name, val in pose.items():
+        if not name.startswith("r_"):
+            out[name] = val
+            continue
+        suffix = name[2:]
+        lname = "l_" + suffix
+        if suffix == "gripper":
+            out[lname] = -val
+        elif suffix in _MIRROR_FLIP_SUFFIXES:
+            out[lname] = -val
+        else:
+            out[lname] = val
+    return out
 
 # ── Named joint poses (degrees) ───────────────────────────────────────────────
 # All poses are for the right arm only.  Unused joints keep their current value.
@@ -289,14 +319,18 @@ def execute_trajectory(
         time.sleep(dt)
 
 
-def open_gripper(arm, duration: float = 0.8) -> None:
-    """Open the right gripper smoothly."""
-    smooth_move(arm, {"r_gripper": _GRIPPER_OPEN_DEG}, duration)
+def open_gripper(arm, duration: float = 0.8, side: str = "right") -> None:
+    """Open the gripper smoothly (side-aware sign)."""
+    jn = f"{side[0]}_gripper"
+    val = _L_GRIPPER_OPEN_DEG if side == "left" else _GRIPPER_OPEN_DEG
+    smooth_move(arm, {jn: val}, duration)
 
 
-def close_gripper(arm, duration: float = 0.8) -> None:
-    """Close the right gripper to a firm grip."""
-    smooth_move(arm, {"r_gripper": _GRIPPER_CLOSED_DEG}, duration)
+def close_gripper(arm, duration: float = 0.8, side: str = "right") -> None:
+    """Close the gripper to a firm grip (side-aware sign)."""
+    jn = f"{side[0]}_gripper"
+    val = _L_GRIPPER_CLOSED_DEG if side == "left" else _GRIPPER_CLOSED_DEG
+    smooth_move(arm, {jn: val}, duration)
 
 
 def _reached(arm, targets: Dict[str, float], tol: float) -> bool:

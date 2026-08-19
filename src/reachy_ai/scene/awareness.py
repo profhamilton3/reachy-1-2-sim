@@ -40,6 +40,15 @@ class SceneObject:
     dynamic: bool
     tracked: bool
     tags: Tuple[str, ...] = ()
+    semantic_class: Optional[str] = None
+    quat: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)  # wxyz
+    # Interactive control metadata (None for plain objects).
+    control_type: Optional[str] = None      # button | switch | lever
+    articulation: Optional[dict] = None      # {joint, axis, range, handle_offset, ...}
+
+    @property
+    def is_control(self) -> bool:
+        return self.control_type is not None
 
     @property
     def half_height(self) -> float:
@@ -74,6 +83,67 @@ class CollisionViolation:
 def _center_of(pose: dict) -> XYZ:
     pos = pose.get("position", [0.0, 0.0, 0.0])
     return (float(pos[0]), float(pos[1]), float(pos[2]))
+
+
+def _quat_of(pose: dict) -> Tuple[float, float, float, float]:
+    """World orientation (w,x,y,z) from a scene pose (orientation_wxyz or rpy)."""
+    if "orientation_wxyz" in pose:
+        q = [float(v) for v in pose["orientation_wxyz"]]
+        return (q[0], q[1], q[2], q[3])
+    if "rpy" in pose:
+        r, p, y = (float(v) for v in pose["rpy"])
+        cr, sr = math.cos(r / 2), math.sin(r / 2)
+        cp, sp = math.cos(p / 2), math.sin(p / 2)
+        cy, sy = math.cos(y / 2), math.sin(y / 2)
+        return (
+            cr * cp * cy + sr * sp * sy,
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+        )
+    return (1.0, 0.0, 0.0, 0.0)
+
+
+def _rotate(q: Tuple[float, float, float, float], v: XYZ) -> XYZ:
+    """Rotate vector v by unit quaternion q (w,x,y,z)."""
+    w, x, y, z = q
+    vx, vy, vz = v
+    # t = 2 * cross(q_vec, v)
+    tx = 2.0 * (y * vz - z * vy)
+    ty = 2.0 * (z * vx - x * vz)
+    tz = 2.0 * (x * vy - y * vx)
+    # v' = v + w*t + cross(q_vec, t)
+    return (
+        vx + w * tx + (y * tz - z * ty),
+        vy + w * ty + (z * tx - x * tz),
+        vz + w * tz + (x * ty - y * tx),
+    )
+
+
+def _cross(a: XYZ, b: XYZ) -> XYZ:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _unit(v: XYZ) -> XYZ:
+    n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+    if n < 1e-9:
+        return (0.0, 0.0, 0.0)
+    return (v[0] / n, v[1] / n, v[2] / n)
+
+
+@dataclass(frozen=True)
+class ControlTarget:
+    """How the gripper should actuate one control (see SceneModel.control_target)."""
+    id: str
+    control_type: str            # button | switch | lever
+    point: XYZ                   # cap centre (button) or handle tip (hinge)
+    actuate_dir: XYZ             # unit world direction to turn the control ON
+    off_dir: XYZ                 # unit world direction to turn it OFF
+    preferred_arm: str           # right | left | either
 
 
 def _full_extents(geo: dict) -> Tuple[float, float, float]:
@@ -134,6 +204,7 @@ class SceneModel:
             geo = raw.get("geometry", {})
             phys = raw.get("physics", {})
             tags = tuple(raw.get("tags", []) or [])
+            inter = raw.get("interactive") or {}
             obj = SceneObject(
                 id=raw["id"],
                 kind=geo.get("kind", "box"),
@@ -142,6 +213,10 @@ class SceneModel:
                 dynamic=bool(phys.get("dynamic", False)),
                 tracked=bool(raw.get("tracked", False)),
                 tags=tags,
+                semantic_class=raw.get("semantic_class"),
+                quat=_quat_of(raw.get("pose", {})),
+                control_type=inter.get("type"),
+                articulation=raw.get("articulation"),
             )
             objects.append(obj)
             if table_id is None and (
@@ -177,7 +252,85 @@ class SceneModel:
         return t.top_z
 
     def static_obstacles(self) -> List[SceneObject]:
-        return [o for o in self._objects.values() if not o.dynamic]
+        # Controls are small and intentionally contacted by the gripper, so they
+        # are NOT planning obstacles; large fixtures (console/table) are.
+        return [
+            o for o in self._objects.values()
+            if not o.dynamic and not o.is_control
+        ]
+
+    def panel_obstacles(self) -> List[SceneObject]:
+        """Console/panel fixture boxes the arm should route around."""
+        return [
+            o for o in self._objects.values()
+            if not o.is_control and (
+                "fixture" in o.tags or "panel" in o.tags
+                or (o.semantic_class or "").startswith("furniture.")
+            )
+        ]
+
+    # ── Interactive controls ───────────────────────────────────────────────────
+
+    def controls(self) -> List[SceneObject]:
+        """All operable controls (buttons/switches/levers), in scene order."""
+        return [o for o in self._objects.values() if o.is_control]
+
+    def preferred_arm(self, object_id: str, margin: float = 0.03) -> str:
+        """'right' (y<0), 'left' (y>0), or 'either' (near the midline)."""
+        y = self._objects[object_id].center[1]
+        if y < -margin:
+            return "right"
+        if y > margin:
+            return "left"
+        return "either"
+
+    def controls_for_arm(self, side: str, margin: float = 0.03) -> List[str]:
+        """Control ids that ``side`` ('right'|'left') should operate.
+
+        'either' (near-midline) controls are included for both sides.
+        """
+        out = []
+        for o in self.controls():
+            pref = self.preferred_arm(o.id, margin)
+            if pref == side or pref == "either":
+                out.append(o.id)
+        return out
+
+    def control_target(self, object_id: str) -> "ControlTarget":
+        """Where and how the gripper actuates a control.
+
+        * button — ``point`` is the cap centre; ``actuate_dir`` is the world
+          press direction (into the button, along its slide axis); ``off_dir``
+          is the reverse (release/out).
+        * switch / lever — ``point`` is the handle tip (centre + rotated
+          handle_offset); ``actuate_dir`` is the tangential push that turns it
+          ON; ``off_dir`` the tangent that turns it OFF.
+        """
+        o = self._objects[object_id]
+        art = o.articulation or {}
+        axis_local = tuple(float(v) for v in (art.get("axis") or [0.0, 0.0, 1.0]))
+        if o.control_type == "button":
+            # Press travels along -axis_world (slide range is negative).
+            axis_world = _rotate(o.quat, axis_local)
+            press = _unit((-axis_world[0], -axis_world[1], -axis_world[2]))
+            point = o.center
+            return ControlTarget(
+                id=o.id, control_type="button", point=point,
+                actuate_dir=press, off_dir=(-press[0], -press[1], -press[2]),
+                preferred_arm=self.preferred_arm(o.id),
+            )
+        # Hinge control: handle tip and tangential push directions.
+        off = tuple(float(v) for v in (art.get("handle_offset") or [0.0, 0.0, 0.0]))
+        r_world = _rotate(o.quat, off)                      # pivot -> tip
+        tip = (o.center[0] + r_world[0], o.center[1] + r_world[1], o.center[2] + r_world[2])
+        axis_world = _rotate(o.quat, axis_local)
+        # Tangent that increases the joint angle (toward ON) = axis × r.
+        tangent = _unit(_cross(axis_world, r_world))
+        return ControlTarget(
+            id=o.id, control_type=o.control_type, point=tip,
+            actuate_dir=tangent, off_dir=(-tangent[0], -tangent[1], -tangent[2]),
+            preferred_arm=self.preferred_arm(o.id),
+        )
 
     # ── Grasp / place geometry ────────────────────────────────────────────────
 

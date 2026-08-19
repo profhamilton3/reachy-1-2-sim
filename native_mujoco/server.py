@@ -25,7 +25,7 @@ import os
 import pathlib
 import threading
 import time
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 import mujoco
 import numpy as np
@@ -88,6 +88,7 @@ class SimState:
         self,
         model: mujoco.MjModel,
         tracked_ids: Optional[Sequence[str]] = None,
+        interactive_specs: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> None:
         self.model = model
         self.data = mujoco.MjData(model)
@@ -109,6 +110,11 @@ class SimState:
         # R12-503: dynamic object tracking (free-joint scene objects).
         self.objects = ObjectTracker(model, self.data, tracked_ids=tracked_ids)
         self.objects.capture_initial(self.data)
+        # R12-504: interactive controls (buttons/switches/levers).
+        from interactive import InteractiveController
+        self.interactive = InteractiveController(
+            model, self.data, interactive_specs or []
+        )
 
     def _reset_physics(self) -> None:
         """Reset to the home keyframe, keeping free-joint objects at their
@@ -164,6 +170,7 @@ class SimState:
                 seed=seed,
                 jitter_m=float(reset_req.get("jitter_m", 0.0)),
             )
+            self.interactive.reset(self.data)
             mujoco.mj_forward(self.model, self.data)
             reset_id = reset_req.get("request_id", "")
 
@@ -192,6 +199,12 @@ class SimState:
     def control_step(self, dt: float) -> None:
         """Apply the actuator/compliance model for the upcoming mj_step."""
         self.controller.apply(self.data, dt)
+        # R12-504: toggle logic + bistable snap torque, applied before mj_step.
+        self.interactive.update(self.data)
+
+    def snapshot_interactive(self) -> list:
+        """Interactive control on/off states for the state message."""
+        return self.interactive.states(self.data)
 
     def snapshot_joints(self) -> list:
         joints = []
@@ -255,11 +268,13 @@ class ReachyMujocoServer:
         self._record_dir = record_dir
 
         tracked_ids = None
+        interactive_specs = None
         if scene_path:
             log.info("Loading scene: %s (into model %s)", scene_path, model_path)
             import yaml
             from objects import build_scene_model_xml
             from scene_compiler import tracked_object_ids
+            from scene_compiler import interactive_specs as _interactive_specs
             # Validate for safety (raises on unsafe paths / bad schema); the
             # compiler consumes the raw dict since it needs full physics fields.
             try:
@@ -272,7 +287,9 @@ class ReachyMujocoServer:
             xml = build_scene_model_xml(scene_doc, model_path)
             self._model = mujoco.MjModel.from_xml_string(xml)
             tracked_ids = tracked_object_ids(scene_doc)
-            log.info("Scene loaded: %d tracked objects", len(tracked_ids))
+            interactive_specs = _interactive_specs(scene_doc)
+            log.info("Scene loaded: %d tracked objects, %d interactive controls",
+                     len(tracked_ids), len(interactive_specs))
         else:
             log.info("Loading model: %s", model_path)
             self._model = mujoco.MjModel.from_xml_path(model_path)
@@ -288,7 +305,11 @@ class ReachyMujocoServer:
                      self._calibration.left_camera.fov_y_deg)
         apply_to_model(self._calibration, self._model)
 
-        self._sim = SimState(self._model, tracked_ids=tracked_ids)
+        self._sim = SimState(
+            self._model,
+            tracked_ids=tracked_ids,
+            interactive_specs=interactive_specs,
+        )
         self._host = host
         self._port = port
 
@@ -444,6 +465,7 @@ class ReachyMujocoServer:
             objects=self._sim.objects.poses_as_dicts(self._sim.data),
             grippers=grippers,
             force_sensors=force_sensors,
+            interactive=self._sim.snapshot_interactive(),
         )
 
     # ── WebSocket handler ────────────────────────────────────────────────────

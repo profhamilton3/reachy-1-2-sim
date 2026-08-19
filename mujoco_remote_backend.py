@@ -84,6 +84,8 @@ class RemoteSnapshot:
     grasping: Dict[str, bool] = field(default_factory=dict)
     # R12-503: tracked object poses keyed by object id (for RViz/browser).
     objects: Dict[str, dict] = field(default_factory=dict)
+    # R12-504: interactive control on/off states keyed by control id.
+    interactive: Dict[str, dict] = field(default_factory=dict)
     warnings: Tuple[str, ...] = ()
 
     def age_ms(self) -> float:
@@ -299,6 +301,15 @@ class MujocoRemoteBackend:
             for o in (msg.get("objects") or [])
             if o.get("object_id") is not None
         }
+        interactive = {
+            str(c.get("id")): {
+                "type": c.get("type", ""),
+                "on": bool(c.get("on", False)),
+                "value": float(c.get("value", 0.0)),
+            }
+            for c in (msg.get("interactive") or [])
+            if c.get("id") is not None
+        }
         snap = RemoteSnapshot(
             seq=int(msg.get("seq", 0)),
             sim_step=int(msg.get("sim_step", 0)),
@@ -310,6 +321,7 @@ class MujocoRemoteBackend:
             force_sensors=force_sensors,
             grasping=grasping,
             objects=objects,
+            interactive=interactive,
         )
         with self._lock:
             self._snapshot = snap

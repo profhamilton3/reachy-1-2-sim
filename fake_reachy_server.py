@@ -63,6 +63,9 @@ _MUJOCO_RIGHT_JPG = pathlib.Path("/tmp/reachy_right.jpg")
 _SCENE_OVERRIDES = os.environ.get(
     "REACHY_SIM_SCENE_OVERRIDES", "/tmp/reachy_scene_overrides.json"
 )
+_INTERACTIVE_STATE = os.environ.get(
+    "REACHY_SIM_INTERACTIVE_STATE", "/tmp/reachy_interactive_state.json"
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [fake-reachy] %(message)s")
 log = logging.getLogger(__name__)
@@ -95,6 +98,36 @@ def object_overrides_writer(remote, path: str = _SCENE_OVERRIDES, hz: float = 15
                 with open(tmp, "w") as f:
                     json.dump(data, f)
                 os.replace(tmp, path)
+        except Exception:
+            pass
+        time.sleep(period)
+
+
+def interactive_state_writer(remote, path: str = _INTERACTIVE_STATE, hz: float = 15.0) -> None:
+    """Publish live interactive-control on/off states to a JSON file.
+
+    Mirrors the physics server's button/switch/lever states into
+    /tmp/reachy_interactive_state.json so the practice script (and any RViz
+    overlay) can read them for visible + closed-loop feedback.
+    {control_id: {"type": ..., "on": bool, "value": float}}.
+    """
+    period = 1.0 / hz
+    tmp = path + ".tmp"
+    while True:
+        try:
+            snap = remote.latest_snapshot()
+            controls = getattr(snap, "interactive", None) or {}
+            data = {
+                cid: {
+                    "type": c.get("type", ""),
+                    "on": bool(c.get("on", False)),
+                    "value": float(c.get("value", 0.0)),
+                }
+                for cid, c in controls.items()
+            }
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, path)
         except Exception:
             pass
         time.sleep(period)
@@ -566,6 +599,10 @@ def serve() -> None:
         threading.Thread(
             target=object_overrides_writer, args=(mujoco,), daemon=True,
             name="object-overrides-writer",
+        ).start()
+        threading.Thread(
+            target=interactive_state_writer, args=(mujoco,), daemon=True,
+            name="interactive-state-writer",
         ).start()
         log.info("Backend: mujoco-remote → %s", mujoco._url)
     else:
