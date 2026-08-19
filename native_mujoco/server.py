@@ -612,16 +612,14 @@ class ReachyMujocoServer:
     def _load_scene(
         self, scene_doc: dict
     ) -> tuple[bool, str, list, str]:
-        """Stub: scene loading wired to scene_compiler (R12-402)."""
-        try:
-            import hashlib, json as _json
-            rev = hashlib.sha256(
-                _json.dumps(scene_doc, sort_keys=True).encode()
-            ).hexdigest()[:12]
-            self._sim.scene_revision = rev
-            return True, rev, [], ""
-        except Exception as exc:
-            return False, "", [], str(exc)
+        """Runtime scene replacement is not yet implemented atomically.
+
+        Accepting a scene_load here would set a new revision without actually
+        swapping the MuJoCo model, creating false provenance (clients believe a
+        new scene is active while the old physical world remains loaded).
+        Reject until atomic model/scene swap is implemented and tested.
+        """
+        return False, "", [], "restart_required: runtime scene_load is not supported; restart the server with the desired scene"
 
     # ── Entry point ──────────────────────────────────────────────────────────
 

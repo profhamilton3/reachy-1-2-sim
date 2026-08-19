@@ -230,14 +230,14 @@ def _compile_geometry(
 
     elif kind == "cylinder":
         r = float(geo.get("radius") or 0.05)
-        h = float(geo.get("height") or 0.1)
+        h = float(geo.get("length") or 0.1)
         shape = f'type="cylinder" size="{r:.6f} {h/2:.6f}"'
 
     elif kind == "mesh":
         path = str(geo.get("path") or geo.get("uri") or "")
-        name = _safe_name(obj_id)
-        asset_xml = f'<mesh name="{name}" file="{_xml_attr(path)}"/>'
-        shape = f'type="mesh" mesh="{name}"'
+        mesh_asset_name = _safe_name(obj_id)
+        asset_xml = f'<mesh name="{mesh_asset_name}" file="{_xml_attr(path)}"/>'
+        shape = f'type="mesh" mesh="{mesh_asset_name}"'
 
     else:
         raise SceneCompilerError(

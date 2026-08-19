@@ -19,7 +19,7 @@ from scene_compiler import (  # noqa: E402
 def _button_scene():
     return {"objects": [{
         "id": "btn_red",
-        "geometry": {"kind": "cylinder", "radius": 0.02, "height": 0.02},
+        "geometry": {"kind": "cylinder", "radius": 0.02, "length": 0.02},
         "pose": {"position": [0.55, -0.1, 0.87]},
         "material": {"rgba": [0.9, 0.1, 0.1, 1]},
         "articulation": {"joint": "slide", "axis": [0, 0, 1],
@@ -92,3 +92,51 @@ class TestInteractiveSpecs:
             "pose": {"position": [0.5, 0, 0.8]},
         }]}
         assert interactive_specs(scene) == []
+
+
+# ── B2 regression: cylinder length/height field contract ─────────────────────
+
+class TestCylinderLengthContract:
+
+    def test_cylinder_length_maps_to_mujoco_half_length(self):
+        scene = {"objects": [{
+            "id": "btn",
+            "geometry": {"kind": "cylinder", "radius": 0.030, "length": 0.028},
+            "pose": {"position": [0.55, -0.1, 0.87]},
+        }]}
+        xml = compile_scene(scene)
+        # MuJoCo cylinder size="radius half_length": 0.028/2 = 0.014
+        assert "0.030000 0.014000" in xml, (
+            "Cylinder compiled with wrong half-length; expected 0.014000 (half of 0.028)"
+        )
+
+    def test_cylinder_height_field_not_used(self):
+        """The 'height' field (invalid in schema) must not silently override length."""
+        scene_with_length = {"objects": [{
+            "id": "a",
+            "geometry": {"kind": "cylinder", "radius": 0.030, "length": 0.028},
+            "pose": {"position": [0.5, 0, 0.8]},
+        }]}
+        xml = compile_scene(scene_with_length)
+        # Must NOT produce the 0.1m default half-length (0.050000)
+        assert "0.030000 0.050000" not in xml, (
+            "Cylinder fell back to default height 0.1m; 'length' field was not read"
+        )
+
+    def test_control_panel_buttons_compile_correct_height(self):
+        import pathlib
+        try:
+            import yaml as _yaml
+        except ImportError:
+            pytest.skip("PyYAML not available")
+        yaml_path = pathlib.Path(__file__).parent.parent.parent / "scenes" / "control_panel.yaml"
+        if not yaml_path.exists():
+            pytest.skip("control_panel.yaml not found")
+        with open(yaml_path) as f:
+            doc = _yaml.safe_load(f)
+        xml = compile_scene(doc)
+        # All six cylindrical buttons declare length: 0.028 → half = 0.014
+        assert "0.030000 0.050000" not in xml, (
+            "At least one button compiled with 0.1m default; 'length' was not read"
+        )
+        assert "0.030000 0.014000" in xml

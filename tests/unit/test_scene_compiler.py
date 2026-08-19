@@ -49,7 +49,7 @@ class TestGeometry:
         assert 'type="sphere"' in compile_scene(doc) and "0.030000" in compile_scene(doc)
 
     def test_cylinder_half_height(self):
-        doc = {"objects": [{"id": "c", "geometry": {"kind": "cylinder", "radius": 0.025, "height": 0.12},
+        doc = {"objects": [{"id": "c", "geometry": {"kind": "cylinder", "radius": 0.025, "length": 0.12},
                             "pose": {"position": [0, 0, 0]}}]}
         xml = compile_scene(doc)
         assert 'type="cylinder"' in xml and "0.025000" in xml and "0.060000" in xml

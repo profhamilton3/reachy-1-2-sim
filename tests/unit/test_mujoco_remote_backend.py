@@ -262,3 +262,50 @@ class TestKinematicBridge:
         snap = bridge.latest_snapshot()
         assert snap.sequence == 5
         assert snap.joints["r_shoulder_pitch"].present_position == pytest.approx(0.7)
+
+
+# ── B1 regression: constructor initializes joint maps and thread ───────────────
+
+class TestConstructorLifecycle:
+
+    def test_constructor_initializes_joint_maps(self):
+        b = _make_remote_backend()
+        assert hasattr(b, "_uid_to_idx")
+        assert hasattr(b, "_idx_to_uid")
+        assert len(b._uid_to_idx) == len(JOINT_DEFS)
+        assert len(b._idx_to_uid) == len(JOINT_DEFS)
+
+    def test_constructor_initializes_thread_to_none(self):
+        b = _make_remote_backend()
+        assert b._thread is None
+
+    def test_build_command_works_before_first_reset(self):
+        b = _make_remote_backend()
+        b._snapshot = _make_remote_snapshot(joints=_full_remote_joints())
+        cmd = JointCommand(uid=10, goal_position=0.5)
+        target, compliant, speed, torque = b._build_command([cmd])
+        assert isinstance(target, list)
+        assert len(target) == len(JOINT_DEFS)
+        idx = b._uid_to_idx[10]
+        assert target[idx] == pytest.approx(0.5)
+
+    def test_request_reset_does_not_replace_thread_handle(self):
+        """request_reset() must not overwrite _thread; start() owns that field."""
+        b = _make_remote_backend()
+        sentinel = object()
+        b._thread = sentinel  # type: ignore[assignment]
+        b.request_reset()
+        assert b._thread is sentinel
+
+    def test_request_reset_sets_pending_reset_flag(self):
+        b = _make_remote_backend()
+        b.request_reset()
+        with b._lock:
+            assert b._pending_reset is True
+
+    def test_request_reset_clears_last_target(self):
+        b = _make_remote_backend()
+        b._last_target = [0.0] * len(JOINT_DEFS)
+        b.request_reset()
+        with b._lock:
+            assert b._last_target is None

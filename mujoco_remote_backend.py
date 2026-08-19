@@ -109,14 +109,8 @@ class MujocoRemoteBackend:
         self._shutdown = threading.Event()
         self._reconnect_count = 0
 
-    def request_reset(self) -> None:
-        """Ask the native server to reset the scene (robot to home, objects to
-        start, interactive controls to OFF).  Sent on the next _send cycle."""
-        with self._lock:
-            self._pending_reset = True
-            self._last_target = None    # re-seed goals from the post-reset pose
-
-        # build uid→index map from kinematic_backend JOINT_DEFS
+        # Build uid→index map from kinematic_backend JOINT_DEFS once at construction
+        # so _build_command() works before the first reset.
         self._uid_to_idx: Dict[int, int] = {}
         self._idx_to_uid: Dict[int, int] = {}
         for i, (name, uid) in enumerate(JOINT_DEFS):
@@ -124,6 +118,13 @@ class MujocoRemoteBackend:
             self._idx_to_uid[i] = uid
 
         self._thread: Optional[threading.Thread] = None
+
+    def request_reset(self) -> None:
+        """Ask the native server to reset the scene (robot to home, objects to
+        start, interactive controls to OFF).  Sent on the next _send cycle."""
+        with self._lock:
+            self._pending_reset = True
+            self._last_target = None    # re-seed goals from the post-reset pose
 
     # ── Public API (same shape as KinematicBackend) ───────────────────────
 

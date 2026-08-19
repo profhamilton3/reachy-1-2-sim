@@ -25,7 +25,7 @@ def _build(scene):
 
 
 _BTN = {"objects": [{
-    "id": "btn", "geometry": {"kind": "cylinder", "radius": 0.02, "height": 0.02},
+    "id": "btn", "geometry": {"kind": "cylinder", "radius": 0.02, "length": 0.02},
     "pose": {"position": [0.5, 0, 0.8]}, "material": {"rgba": [0.9, 0.1, 0.1, 1]},
     "articulation": {"joint": "slide", "axis": [0, 0, 1], "range": [-0.012, 0.0],
                      "stiffness": 250, "damping": 4},

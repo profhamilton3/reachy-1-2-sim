@@ -133,7 +133,7 @@ def reach(arm, planner, target, iters: int = 2, dur: float = 1.4, compensate: bo
             try:
                 q = planner.solve(cand, seed=seed)
                 break
-            except (UnreachableError, Exception):
+            except UnreachableError:
                 continue
         if q is None:
             return err if moved else None        # truly unreachable

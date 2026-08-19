@@ -58,11 +58,19 @@ _BASE = np.array(ARM_BASE_IN_WORLD)
 
 
 def _joints_for(side: str):
-    return L_ARM_JOINTS if side == "left" else R_ARM_JOINTS
+    if side == "left":
+        return L_ARM_JOINTS
+    if side == "right":
+        return R_ARM_JOINTS
+    raise ValueError(f"side must be 'left' or 'right', got '{side!r}'")
 
 
 def _r0_for(side: str) -> np.ndarray:
-    return _R0_LEFT if side == "left" else _R0
+    if side == "left":
+        return _R0_LEFT
+    if side == "right":
+        return _R0
+    raise ValueError(f"side must be 'left' or 'right', got '{side!r}'")
 
 # The reachy_sdk FK/IK frame is the wrist (r_wrist2hand).  The gripper contact
 # pads sit ~0.12 m along the wrist's local -Z (measured from the model).  We
