@@ -67,17 +67,19 @@ _PRESS_DEPTH = 0.012    # m the finger drives a button in
 _FLIP_PUSH = 0.06       # m the finger drags a switch/lever handle to flip it
 _STEP_HZ = 10           # slow streaming so the physics arm tracks
 
-# Retracted GUARD pose (right arm): elbow folded back so the hand sits near the
-# body (pad ~0.37 m forward), CLEAR of the console (front edge at x=0.5).  The
-# arm returns here between controls and extends its forearm out to each control
-# from this posture, so the elbow/upper arm never drives into the structure.
+# Retracted GUARD pose (right arm): the SHOULDER is pitched back (positive
+# pitch) so the whole upper arm + elbow swing BEHIND the torso — like a relay
+# runner reaching back or a rearward elbow jab — pulling the hand well back
+# (pad ~0.2 m forward, vs the console front edge at x=0.5).  The arm returns
+# here between controls and swings the shoulder FORWARD to reach each one, so
+# the elbow/upper arm clears the console structure instead of driving into it.
 GUARD_R = {
-    "r_shoulder_pitch": -15.0,
-    "r_shoulder_roll":   -5.0,
+    "r_shoulder_pitch":  30.0,    # +pitch = upper arm swings BACK/down behind
+    "r_shoulder_roll":  -10.0,
     "r_arm_yaw":          0.0,
-    "r_elbow_pitch":   -115.0,
+    "r_elbow_pitch":   -115.0,    # forearm folded up toward the shoulder
     "r_forearm_yaw":      0.0,
-    "r_wrist_pitch":     10.0,
+    "r_wrist_pitch":     15.0,
     "r_wrist_roll":       0.0,
     "r_gripper":        -45.0,
 }
