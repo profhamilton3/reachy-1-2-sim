@@ -393,12 +393,15 @@
               kp="15"  kv="1"  ctrlrange="-0.350  1.200" forcerange="-8 8"/>
 
     <!-- Head / neck (3 DOF) -->
+    <!-- Neck: strengthened so the head firmly HOLDS its commanded gaze against
+         gravity (the head carries the stereo cameras).  kp raised, forcerange
+         widened; the head is light so this is stable. -->
     <position name="act_neck_roll"        joint="neck_roll"
-              kp="25"  kv="2"  ctrlrange="-0.800  0.800" forcerange="-10 10"/>
+              kp="80"  kv="8"  ctrlrange="-0.800  0.800" forcerange="-30 30"/>
     <position name="act_neck_pitch"       joint="neck_pitch"
-              kp="25"  kv="2"  ctrlrange="-0.800  1.130" forcerange="-10 10"/>
+              kp="80"  kv="8"  ctrlrange="-0.800  1.130" forcerange="-30 30"/>
     <position name="act_neck_yaw"         joint="neck_yaw"
-              kp="25"  kv="2"  ctrlrange="-2.790  2.790" forcerange="-10 10"/>
+              kp="80"  kv="8"  ctrlrange="-2.790  2.790" forcerange="-30 30"/>
 
     <!-- Antennas (2 DOF) — low kp: capsules have tiny rotational inertia ~1e-6 kg⋅m² -->
     <position name="act_l_antenna"        joint="l_antenna"

@@ -105,6 +105,7 @@ class MujocoRemoteBackend:
         self._cmd_seq = 0
         self._pending_cmds: List[JointCommand] = []
         self._pending_reset = False
+        self._last_target: Optional[List[float]] = None
         self._shutdown = threading.Event()
         self._reconnect_count = 0
 
@@ -113,6 +114,7 @@ class MujocoRemoteBackend:
         start, interactive controls to OFF).  Sent on the next _send cycle."""
         with self._lock:
             self._pending_reset = True
+            self._last_target = None    # re-seed goals from the post-reset pose
 
         # build uid→index map from kinematic_backend JOINT_DEFS
         self._uid_to_idx: Dict[int, int] = {}
@@ -360,15 +362,20 @@ class MujocoRemoteBackend:
         Returns (target_rad, compliant, speed_limit_rad_s, torque_limit_percent).
         The three optional lists hold None for joints left unchanged (R12-501).
         """
-        with self._lock:
-            snap = self._snapshot
-
-        # Start targets from current positions so unspecified joints hold.
-        target = [0.0] * 21
-        for name, sample in snap.joints.items():
-            idx = self._uid_to_idx.get(sample.uid)
-            if idx is not None:
-                target[idx] = sample.position_rad
+        # Start from the LAST COMMANDED targets so joints not in this batch keep
+        # their commanded goal.  (Seeding from current positions instead let
+        # unspecified joints — e.g. the neck — ratchet toward wherever gravity
+        # had dragged them, since every arm command re-sent their sagging
+        # position as the goal.)  First call seeds from the current pose.
+        if self._last_target is None:
+            with self._lock:
+                snap = self._snapshot
+            self._last_target = [0.0] * 21
+            for name, sample in snap.joints.items():
+                idx = self._uid_to_idx.get(sample.uid)
+                if idx is not None:
+                    self._last_target[idx] = sample.position_rad
+        target = list(self._last_target)
 
         compliant: List[Optional[bool]] = [None] * 21
         speed: List[Optional[float]] = [None] * 21
@@ -387,6 +394,7 @@ class MujocoRemoteBackend:
             if cmd.torque_limit is not None:
                 torque[idx] = float(cmd.torque_limit)
 
+        self._last_target = list(target)
         return target, compliant, speed, torque
 
     # ── SimulationSnapshot bridge (for fake_reachy_server compatibility) ─
