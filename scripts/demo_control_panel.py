@@ -143,7 +143,6 @@ def operate_button(robot, arm, planner, target, side, seed):
     descend through the cap to toggle it, retract.  Retries a deeper press if
     the first sweep didn't register (borderline reach)."""
     above = _add(target.point, target.off_dir, _STANDOFF)
-    P.look_at(robot, target.point, duration=0.5)
     P.close_gripper(arm, duration=0.4, side=side)     # solid poker
     if reach(arm, planner, above) is None:
         log.warning("   %s: standoff unreachable — skipping", target.id)
@@ -166,7 +165,6 @@ def operate_hinge(robot, arm, planner, target, side, seed):
     tip = target.point
     ad = target.actuate_dir
     approach = _add(tip, ad, -_STANDOFF)              # off side, standoff
-    P.look_at(robot, tip, duration=0.5)
     P.close_gripper(arm, duration=0.4, side=side)     # push tool
     if reach(arm, planner, approach) is None:
         log.warning("   %s: approach unreachable — skipping", target.id)
@@ -231,6 +229,17 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
 
     settle_ready("right")
     settle_ready("left")
+
+    # Keep the head UP, fixed on the console overview — do NOT track individual
+    # (low) controls, which pitches the head down at the surface.  The arms/
+    # grippers come into this view as they reach the console.  Aim at the centre
+    # of the control cluster, biased upward toward the raised slanted panel.
+    ctrls = scene.controls()
+    cx = sum(c.center[0] for c in ctrls) / len(ctrls)
+    cz = max(c.center[2] for c in ctrls) - 0.03      # near the top of the panel
+    console_view = (cx, 0.0, cz)
+    P.look_at(robot, console_view, duration=1.0)
+    log.info("Head fixed on console overview %s", tuple(round(v, 2) for v in console_view))
 
     actuated = 0
     on_count = 0
