@@ -62,10 +62,25 @@ _STATE_FILE = os.environ.get("REACHY_SIM_INTERACTIVE_STATE",
                              "/tmp/reachy_interactive_state.json")
 _RESET_REQUEST = os.environ.get("REACHY_SIM_RESET_REQUEST",
                                 "/tmp/reachy_reset_request")
-_STANDOFF = 0.09        # m in front of a control before actuating
+_STANDOFF = 0.10        # m in front of a control before actuating
 _PRESS_DEPTH = 0.012    # m the finger drives a button in
 _FLIP_PUSH = 0.06       # m the finger drags a switch/lever handle to flip it
 _STEP_HZ = 10           # slow streaming so the physics arm tracks
+
+# Retracted GUARD pose (right arm): elbow folded back so the hand sits near the
+# body (pad ~0.37 m forward), CLEAR of the console (front edge at x=0.5).  The
+# arm returns here between controls and extends its forearm out to each control
+# from this posture, so the elbow/upper arm never drives into the structure.
+GUARD_R = {
+    "r_shoulder_pitch": -15.0,
+    "r_shoulder_roll":   -5.0,
+    "r_arm_yaw":          0.0,
+    "r_elbow_pitch":   -115.0,
+    "r_forearm_yaw":      0.0,
+    "r_wrist_pitch":     10.0,
+    "r_wrist_roll":       0.0,
+    "r_gripper":        -45.0,
+}
 
 
 def _add(p, d, s):
@@ -218,14 +233,16 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
     robot.turn_on("r_arm")
     robot.turn_on("l_arm")
     time.sleep(0.3)
-    ready_pose = {"right": P.READY, "left": P.mirror_pose(P.READY)}
+    # Retracted guard posture per side (elbow back, hand clear of the console).
+    guard_pose = {"right": GUARD_R, "left": P.mirror_pose(GUARD_R)}
 
     def settle_ready(side):
-        """Drive the arm to its side's ready pose and hold until it's actually
-        there — every control approach then starts from the same configuration,
-        removing the run-to-run reach variance."""
-        P.smooth_move(arms[side], ready_pose[side], duration=1.3)
-        P.wait_until(arms[side], ready_pose[side], tol=6.0, timeout=2.5, reassert=True)
+        """Return the arm to its retracted GUARD pose and hold until it's there.
+        Every control approach starts from this elbow-back posture, so the arm
+        extends its forearm out to the control without swinging the elbow/upper
+        arm into the console — and every approach starts identically."""
+        P.smooth_move(arms[side], guard_pose[side], duration=1.3)
+        P.wait_until(arms[side], guard_pose[side], tol=6.0, timeout=2.5, reassert=True)
 
     settle_ready("right")
     settle_ready("left")
