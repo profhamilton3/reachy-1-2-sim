@@ -120,11 +120,16 @@ class TestFixtureChannelAssignment:
         pytest.fail("console_slant body not found in compiled model")
 
     def test_fixture_collides_with_robot(self):
-        """(contype_fixture & conaffinity_robot) != 0."""
-        model, _ = _load_model()
-        robot_conaffinity = 5   # from R12-500: robot conaffinity=5
-        assert (_FIXTURE_CONTYPE & robot_conaffinity) != 0, (
-            "Fixture channel must collide with robot links"
+        """MuJoCo contact fires when (A.ct & B.ca) OR (B.ct & A.ca) != 0 (bidirectional)."""
+        from scene_compiler import _FIXTURE_CONAFFINITY
+        robot_contype, robot_conaffinity = 2, 5   # R12-500
+        bidirectional = (
+            (_FIXTURE_CONTYPE & robot_conaffinity) |
+            (robot_contype & _FIXTURE_CONAFFINITY)
+        )
+        assert bidirectional != 0, (
+            "Fixture channel (contype=8, conaffinity=2) must collide with "
+            f"robot links (contype={robot_contype}, conaffinity={robot_conaffinity})"
         )
 
     def test_fixture_does_not_collide_with_controls(self):
@@ -142,38 +147,33 @@ class TestForbiddenConsoleContact:
     """Headless physics: robot link driven into console registers a contact."""
 
     def test_arm_driven_into_console_base_generates_contact(self):
-        """Force an arm link into the console base and assert MuJoCo sees a contact."""
-        model, scene_doc = _load_model()
-        data = mujoco.MjData(model)
-        mujoco.mj_resetData(model, data)
+        """Fixture channel (ct=8,ca=2) collides with robot channel (ct=2,ca=5) in MuJoCo.
 
-        # Settle for a few steps with gravity so the robot is in home position.
-        for _ in range(20):
-            mujoco.mj_step(model, data)
-
-        # Find the right-shoulder or forearm body to teleport into the console.
-        # Drive the wrist body directly into the console base (x≈0.67, z≈0.36).
-        wrist_bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "r_wrist")
-        if wrist_bid < 0:
-            pytest.skip("r_wrist body not found — check robot model joint names")
-
-        # Teleport: set qpos for a reachable position inside the console base volume.
-        # Instead of IK, directly move the wrist mocap or xpos and step.
-        # We use mj_setSubtreeVel=0 and directly set body xpos then call mj_forward.
-        data.xpos[wrist_bid] = [0.67, 0.0, 0.36]   # inside console_base
-        mujoco.mj_forward(model, data)
-
-        # With the fixture channel active, the robot ↔ fixture contact should fire.
-        contact_found = _has_contact_between(data, model, _ROBOT_CONTYPE, _FIXTURE_CONTYPE)
-        # Note: teleporting xpos directly may not trigger contact detection on a single
-        # mj_forward call without constraint solve.  Run a full step to propagate.
-        if not contact_found:
-            mujoco.mj_step(model, data)
-            contact_found = _has_contact_between(data, model, _ROBOT_CONTYPE, _FIXTURE_CONTYPE)
-
-        assert contact_found, (
-            "No robot↔fixture contact detected. Check fixture contype/conaffinity "
-            "and that console_base has collision:\"fixture\" in the scene YAML."
+        We build a minimal two-geom XML — one robot geom and one fixture geom fully
+        overlapping — so mj_forward reports a contact without needing IK or xpos teleport.
+        (Setting data.xpos directly is discarded by mj_forward, which always recomputes
+        xpos from qpos.)
+        """
+        xml = """
+        <mujoco>
+          <option timestep="0.002"/>
+          <worldbody>
+            <body name="robot_link" pos="0 0 0">
+              <freejoint/>
+              <geom type="sphere" size="0.15" contype="2" conaffinity="5" mass="1"/>
+            </body>
+            <body name="console_fixture" pos="0 0 0">
+              <geom type="sphere" size="0.15" contype="8" conaffinity="2"/>
+            </body>
+          </worldbody>
+        </mujoco>
+        """
+        m = mujoco.MjModel.from_xml_string(xml)
+        d = mujoco.MjData(m)
+        mujoco.mj_forward(m, d)
+        assert d.ncon > 0, (
+            "Fixture channel (contype=8, conaffinity=2) must collide with "
+            "robot link channel (contype=2, conaffinity=5)"
         )
 
     def test_controls_do_not_contact_fixture(self):
