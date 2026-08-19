@@ -408,10 +408,14 @@
   </actuator>
 
   <!-- Named poses: all joints at zero = arms hanging down, head straight -->
+  <!-- Home: arms down, neck pitched DOWN ~0.45 rad so the head-mounted stereo
+       cameras look at the workspace in front (table/console) rather than the
+       horizon.  Order: 8 right-arm, 8 left-arm, neck_roll, neck_pitch, neck_yaw,
+       2 antennas. -->
   <keyframe>
     <key name="home"
-         qpos="0 0 0 0 0 0 0 0  0 0 0 0 0 0 0 0  0 0 0  0 0"
-         ctrl="0 0 0 0 0 0 0 0  0 0 0 0 0 0 0 0  0 0 0  0 0"/>
+         qpos="0 0 0 0 0 0 0 0  0 0 0 0 0 0 0 0  0 0.45 0  0 0"
+         ctrl="0 0 0 0 0 0 0 0  0 0 0 0 0 0 0 0  0 0.45 0  0 0"/>
   </keyframe>
 
 </mujoco>
