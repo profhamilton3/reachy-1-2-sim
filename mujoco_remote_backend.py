@@ -104,8 +104,15 @@ class MujocoRemoteBackend:
         self._conn_state = ConnectionState.CONNECTING
         self._cmd_seq = 0
         self._pending_cmds: List[JointCommand] = []
+        self._pending_reset = False
         self._shutdown = threading.Event()
         self._reconnect_count = 0
+
+    def request_reset(self) -> None:
+        """Ask the native server to reset the scene (robot to home, objects to
+        start, interactive controls to OFF).  Sent on the next _send cycle."""
+        with self._lock:
+            self._pending_reset = True
 
         # build uid→index map from kinematic_backend JOINT_DEFS
         self._uid_to_idx: Dict[int, int] = {}
@@ -243,6 +250,11 @@ class MujocoRemoteBackend:
                 with self._lock:
                     cmds = list(self._pending_cmds)
                     self._pending_cmds.clear()
+                    do_reset = self._pending_reset
+                    self._pending_reset = False
+
+                if do_reset:
+                    await ws.send(json.dumps({"type": "reset", "request_id": "demo"}))
 
                 if cmds:
                     target, compliant, speed, torque = self._build_command(cmds)

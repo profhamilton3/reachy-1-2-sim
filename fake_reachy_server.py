@@ -66,6 +66,9 @@ _SCENE_OVERRIDES = os.environ.get(
 _INTERACTIVE_STATE = os.environ.get(
     "REACHY_SIM_INTERACTIVE_STATE", "/tmp/reachy_interactive_state.json"
 )
+_RESET_REQUEST = os.environ.get(
+    "REACHY_SIM_RESET_REQUEST", "/tmp/reachy_reset_request"
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [fake-reachy] %(message)s")
 log = logging.getLogger(__name__)
@@ -128,6 +131,20 @@ def interactive_state_writer(remote, path: str = _INTERACTIVE_STATE, hz: float =
             with open(tmp, "w") as f:
                 json.dump(data, f)
             os.replace(tmp, path)
+        except Exception:
+            pass
+        time.sleep(period)
+
+
+def reset_watcher(remote, path: str = _RESET_REQUEST, hz: float = 10.0) -> None:
+    """Trigger a physics reset when a client (e.g. the demo) drops a sentinel
+    file.  A file-based signal avoids threading a reset RPC through gRPC."""
+    period = 1.0 / hz
+    while True:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                remote.request_reset()
         except Exception:
             pass
         time.sleep(period)
@@ -603,6 +620,10 @@ def serve() -> None:
         threading.Thread(
             target=interactive_state_writer, args=(mujoco,), daemon=True,
             name="interactive-state-writer",
+        ).start()
+        threading.Thread(
+            target=reset_watcher, args=(mujoco,), daemon=True,
+            name="reset-watcher",
         ).start()
         log.info("Backend: mujoco-remote → %s", mujoco._url)
     else:

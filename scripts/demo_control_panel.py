@@ -60,6 +60,8 @@ log = logging.getLogger("panel")
 
 _STATE_FILE = os.environ.get("REACHY_SIM_INTERACTIVE_STATE",
                              "/tmp/reachy_interactive_state.json")
+_RESET_REQUEST = os.environ.get("REACHY_SIM_RESET_REQUEST",
+                                "/tmp/reachy_reset_request")
 _STANDOFF = 0.09        # m in front of a control before actuating
 _PRESS_DEPTH = 0.012    # m the finger drives a button in
 _FLIP_PUSH = 0.06       # m the finger drags a switch/lever handle to flip it
@@ -76,6 +78,15 @@ def _read_state(control_id: str):
             return json.load(f).get(control_id)
     except (FileNotFoundError, json.JSONDecodeError):
         return None
+
+
+def request_reset():
+    """Drop the sentinel file the sim's reset-watcher polls, to reset the scene
+    (robot home, controls OFF) before a run."""
+    try:
+        open(_RESET_REQUEST, "w").close()
+    except OSError:
+        pass
 
 
 def _pad(arm, planner):
@@ -147,21 +158,26 @@ def operate_button(robot, arm, planner, target, side, seed):
 
 
 def operate_hinge(robot, arm, planner, target, side, seed):
-    """Reach the handle with a closed gripper and sweep it past the midpoint to
-    flip it ON.  Retries with a longer sweep if it didn't catch."""
-    above = _add(target.point, target.off_dir, _STANDOFF)
-    P.look_at(robot, target.point, duration=0.5)
+    """Flip a switch/lever by SWEEPING a closed gripper across its handle: come
+    in on the OFF side and sweep through to the ON side, carrying the handle past
+    its midpoint (where the bistable detent snaps it on).  A sweep is far more
+    tolerant of the arm's few-cm reach error than trying to grip a thin handle.
+    Retries with a wider sweep if it didn't catch."""
+    tip = target.point
+    ad = target.actuate_dir
+    approach = _add(tip, ad, -_STANDOFF)              # off side, standoff
+    P.look_at(robot, tip, duration=0.5)
     P.close_gripper(arm, duration=0.4, side=side)     # push tool
-    if reach(arm, planner, above) is None:
+    if reach(arm, planner, approach) is None:
         log.warning("   %s: approach unreachable — skipping", target.id)
         return seed
-    for push in (_FLIP_PUSH, _FLIP_PUSH + 0.03, _FLIP_PUSH + 0.06):
-        reach(arm, planner, target.point)             # to the handle
-        reach(arm, planner, _add(target.point, target.actuate_dir, push))
+    for extra in (0.0, 0.03, 0.06):
+        reach(arm, planner, _add(tip, ad, -0.04))     # just before the handle
+        reach(arm, planner, _add(tip, ad, _FLIP_PUSH + extra))  # sweep through
         if _is_on(target.id):
             break
-        reach(arm, planner, above, iters=1, compensate=False)
-    reach(arm, planner, above, iters=1, compensate=False)
+        reach(arm, planner, approach, iters=1, compensate=False)
+    reach(arm, planner, approach, iters=1, compensate=False)
     return seed
 
 
@@ -196,16 +212,28 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
         "left": None,
     }
 
+    # Start from a clean, repeatable state: reset the scene (robot home,
+    # controls OFF) so each run begins identically and the count is meaningful.
+    request_reset()
+    time.sleep(1.5)
+
     robot.turn_on("r_arm")
     robot.turn_on("l_arm")
     time.sleep(0.3)
-    # Ready poses: right arm READY, left arm the mirror.
-    P.smooth_move(arms["right"], P.READY, duration=1.5)
-    P.smooth_move(arms["left"], P.mirror_pose(P.READY), duration=1.5)
-    seeds["right"] = [P.READY[n] for n in planners["right"].joints]
-    seeds["left"] = [P.mirror_pose(P.READY)[n] for n in planners["left"].joints]
+    ready_pose = {"right": P.READY, "left": P.mirror_pose(P.READY)}
 
-    ok = 0
+    def settle_ready(side):
+        """Drive the arm to its side's ready pose and hold until it's actually
+        there — every control approach then starts from the same configuration,
+        removing the run-to-run reach variance."""
+        P.smooth_move(arms[side], ready_pose[side], duration=1.3)
+        P.wait_until(arms[side], ready_pose[side], tol=6.0, timeout=2.5, reassert=True)
+
+    settle_ready("right")
+    settle_ready("left")
+
+    actuated = 0
+    on_count = 0
     for cid in [c.id for c in scene.controls()]:
         side = scene.preferred_arm(cid)
         if side == "either":
@@ -214,22 +242,24 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
         target = scene.control_target(cid)
         log.info("=" * 56)
         log.info("CONTROL: %s  (%s, %s arm)", cid, target.control_type, side)
+        settle_ready(side)                       # consistent starting pose
+        before = _is_on(cid)
         if target.control_type == "button":
-            seeds[side] = operate_button(robot, arm, planner, target, side, seeds[side])
+            operate_button(robot, arm, planner, target, side, seeds[side])
         else:
-            seeds[side] = operate_hinge(robot, arm, planner, target, side, seeds[side])
+            operate_hinge(robot, arm, planner, target, side, seeds[side])
         time.sleep(0.4)
-        st = _read_state(cid)
-        if st is not None:
-            log.info("   %s is now %s", cid, "ON" if st.get("on") else "OFF")
-            ok += 1 if st.get("on") else 0
-        # Return the operating arm to its ready pose.
-        ready = P.READY if side == "right" else P.mirror_pose(P.READY)
-        P.smooth_move(arm, ready, duration=1.0)
-        seeds[side] = [ready[n] for n in planner.joints]
+        now_on = _is_on(cid)
+        changed = now_on != before
+        actuated += 1 if changed else 0
+        on_count += 1 if now_on else 0
+        log.info("   %s: %s (%s)", cid, "ON" if now_on else "OFF",
+                 "actuated" if changed else "no change")
+        settle_ready(side)                       # return to ready
 
     log.info("=" * 56)
-    log.info("Controls turned ON: %d / %d", ok, len(scene.controls()))
+    log.info("Controls actuated: %d / %d   (now ON: %d)",
+             actuated, len(scene.controls()), on_count)
     log.info("── Stow both arms")
     P.smooth_move(arms["right"], P.HOME, duration=1.5)
     P.smooth_move(arms["left"], P.mirror_pose(P.HOME), duration=1.5)
