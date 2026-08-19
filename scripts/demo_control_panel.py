@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import pathlib
 import sys
@@ -41,7 +42,12 @@ except ImportError:
     sys.exit(1)
 
 from reachy_ai.motion import primitives as P
-from reachy_ai.motion.kinematics import CartesianPlanner, UnreachableError
+from reachy_ai.motion.kinematics import (
+    CartesianPlanner,
+    L_ARM_JOINTS,
+    R_ARM_JOINTS,
+    UnreachableError,
+)
 from reachy_ai.motion.safety import gate_check
 from reachy_ai.scene.awareness import SceneModel
 
@@ -72,59 +78,90 @@ def _read_state(control_id: str):
         return None
 
 
-def _pose(planner, xyz, seed):
-    """IK a world pad point → {joint: deg} dict (or None if unreachable)."""
-    try:
-        q = planner.solve(xyz, seed=seed)
-    except (UnreachableError, Exception):
-        return None
-    return dict(zip(planner.joints, q)), q
+def _pad(arm, planner):
+    joints = R_ARM_JOINTS if planner.side == "right" else L_ARM_JOINTS
+    return planner.fk_world([getattr(arm, n).present_position for n in joints])
+
+
+def _dist(a, b):
+    return math.sqrt(sum((a[i] - b[i]) ** 2 for i in range(3)))
+
+
+def reach(arm, planner, target, iters: int = 2, dur: float = 1.4, compensate: bool = True):
+    """Move the gripper pad to a world point, compensating for the physics
+    tracking sag.
+
+    The multi-joint command path under-tracks by a few cm; we re-assert the goal
+    to settle, measure the residual, then aim *beyond* the target by that
+    residual so the sagged arm lands on it.  Returns the final |error| (m).
+    """
+    aim = tuple(target)
+    seed = None
+    moved = False
+    err = None
+    for _ in range(max(1, iters)):
+        q = None
+        for cand in (aim, tuple(target)):        # fall back to the raw target
+            try:
+                q = planner.solve(cand, seed=seed)
+                break
+            except (UnreachableError, Exception):
+                continue
+        if q is None:
+            return err if moved else None        # truly unreachable
+        seed = q
+        moved = True
+        pose = dict(zip(planner.joints, q))
+        P.smooth_move(arm, pose, duration=dur)
+        P.wait_until(arm, pose, tol=4.0, timeout=2.2, reassert=True)
+        resid = [target[i] - _pad(arm, planner)[i] for i in range(3)]
+        err = math.sqrt(sum(r * r for r in resid))
+        if not compensate or err < 0.02:
+            break
+        aim = tuple(target[i] + resid[i] for i in range(3))
+    return err
+
+
+def _is_on(control_id):
+    st = _read_state(control_id)
+    return bool(st and st.get("on"))
 
 
 def operate_button(robot, arm, planner, target, side, seed):
-    """Approach from a standoff, press the button, retract."""
-    out = target.off_dir                       # points away from the panel
-    press_to = _add(target.point, target.actuate_dir, _PRESS_DEPTH)
-    standoff = _add(target.point, out, _STANDOFF)
-
-    P.look_at(robot, target.point, duration=0.6)
-    for label, xyz in (("standoff", standoff), ("press", press_to), ("release", standoff)):
-        sol = _pose(planner, xyz, seed)
-        if sol is None:
-            log.warning("   %s: %s unreachable — skipping", target.id, label)
-            return seed
-        pose, seed = sol
-        P.smooth_move(arm, pose, duration=1.2 if label != "press" else 0.6)
+    """Poke the button with a closed gripper: reach above (sag-compensated),
+    descend through the cap to toggle it, retract.  Retries a deeper press if
+    the first sweep didn't register (borderline reach)."""
+    above = _add(target.point, target.off_dir, _STANDOFF)
+    P.look_at(robot, target.point, duration=0.5)
+    P.close_gripper(arm, duration=0.4, side=side)     # solid poker
+    if reach(arm, planner, above) is None:
+        log.warning("   %s: standoff unreachable — skipping", target.id)
+        return seed
+    for depth in (_PRESS_DEPTH, _PRESS_DEPTH + 0.02, _PRESS_DEPTH + 0.04):
+        reach(arm, planner, _add(target.point, target.actuate_dir, depth))
+        if _is_on(target.id):
+            break
+        reach(arm, planner, above, iters=1, compensate=False)   # lift & retry
+    reach(arm, planner, above, iters=1, compensate=False)
     return seed
 
 
 def operate_hinge(robot, arm, planner, target, side, seed):
-    """Approach the handle, close the gripper, drag it past the midpoint to flip
-    it ON, then open and retract."""
-    out = target.off_dir                       # away from the ON push direction
-    grip_at = target.point
-    standoff = _add(grip_at, out, _STANDOFF)
-    flip_to = _add(grip_at, target.actuate_dir, _FLIP_PUSH)
-
-    P.look_at(robot, grip_at, duration=0.6)
-    P.open_gripper(arm, side=side)
-    for label, xyz in (("approach", standoff), ("at-handle", grip_at)):
-        sol = _pose(planner, xyz, seed)
-        if sol is None:
-            log.warning("   %s: %s unreachable — skipping", target.id, label)
-            return seed
-        pose, seed = sol
-        P.smooth_move(arm, pose, duration=1.2)
-    P.close_gripper(arm, side=side)            # pinch/push tool on the handle
-    sol = _pose(planner, flip_to, seed)
-    if sol is not None:
-        pose, seed = sol
-        P.smooth_move(arm, pose, duration=1.0)  # drag the handle past midpoint
-    P.open_gripper(arm, side=side)
-    sol = _pose(planner, standoff, seed)
-    if sol is not None:
-        pose, seed = sol
-        P.smooth_move(arm, pose, duration=1.0)
+    """Reach the handle with a closed gripper and sweep it past the midpoint to
+    flip it ON.  Retries with a longer sweep if it didn't catch."""
+    above = _add(target.point, target.off_dir, _STANDOFF)
+    P.look_at(robot, target.point, duration=0.5)
+    P.close_gripper(arm, duration=0.4, side=side)     # push tool
+    if reach(arm, planner, above) is None:
+        log.warning("   %s: approach unreachable — skipping", target.id)
+        return seed
+    for push in (_FLIP_PUSH, _FLIP_PUSH + 0.03, _FLIP_PUSH + 0.06):
+        reach(arm, planner, target.point)             # to the handle
+        reach(arm, planner, _add(target.point, target.actuate_dir, push))
+        if _is_on(target.id):
+            break
+        reach(arm, planner, above, iters=1, compensate=False)
+    reach(arm, planner, above, iters=1, compensate=False)
     return seed
 
 
