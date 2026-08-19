@@ -306,7 +306,11 @@
           "default": false
         },
         "collision": {
-          "type": "boolean",
+          "description": "true = standard object channel; false = no collision; \"fixture\" = collides with robot links but not with sibling controls (contype=8 conaffinity=2).",
+          "oneOf": [
+            {"type": "boolean"},
+            {"type": "string", "enum": ["fixture"]}
+          ],
           "default": true
         },
         "mass": {

@@ -30,6 +30,13 @@ from typing import Any, List, Mapping, Optional, Tuple
 _OBJ_CONTYPE = 4
 _OBJ_CONAFFINITY = 7
 
+# Fixture channel: static console/furniture collides with robot links (contype=2)
+# but NOT with mounted controls (contype=4).
+# Verification: (8 & 5)==0, (2 & 2)==2 → fixture↔robot collide ✓
+#               (8 & 7)==0, (4 & 2)==0 → fixture↔control no collision ✓
+_FIXTURE_CONTYPE = 8
+_FIXTURE_CONAFFINITY = 2
+
 
 class SceneCompilerError(Exception):
     pass
@@ -130,6 +137,13 @@ def interactive_specs(scene_doc: Mapping[str, Any]) -> List[dict]:
 # Per-object compiler
 # ---------------------------------------------------------------------------
 
+_INTERACTIVE_JOINT_REQUIREMENTS = {
+    "button": "slide",
+    "switch": "hinge",
+    "lever":  "hinge",
+}
+
+
 def _compile_object(obj: Mapping[str, Any]) -> Tuple[str, str]:
     obj_id = obj.get("id") or "unknown"
     pose = obj.get("pose") or {}
@@ -137,6 +151,23 @@ def _compile_object(obj: Mapping[str, Any]) -> Tuple[str, str]:
     material = obj.get("material") or {}
     physics = obj.get("physics") or {}
     articulation = obj.get("articulation") or {}
+    interactive = obj.get("interactive")
+
+    # Gate 8-B: enforce interactive↔articulation relational contract.
+    if interactive:
+        if not articulation:
+            raise SceneCompilerError(
+                f"Object '{obj_id}': interactive requires articulation "
+                f"(button→slide, lever/switch→hinge)"
+            )
+        itype = interactive.get("type", "")
+        required_joint = _INTERACTIVE_JOINT_REQUIREMENTS.get(itype)
+        actual_joint = articulation.get("joint")
+        if required_joint and actual_joint != required_joint:
+            raise SceneCompilerError(
+                f"Object '{obj_id}': interactive type '{itype}' requires "
+                f"articulation.joint='{required_joint}', got '{actual_joint}'"
+            )
 
     pos_str = _pos_str(pose.get("position") or [0, 0, 0])
     quat_str = _quat_str(_pose_quat(pose, obj_id))
@@ -250,8 +281,14 @@ def _compile_geometry(
     if geom_pos is not None and isinstance(geom_pos, (list, tuple)) and len(geom_pos) == 3:
         attrs.append(f'pos="{_pos_str(geom_pos)}"')
 
-    # Contact channel + friction only when collidable.
-    if collision:
+    # Contact channel + friction.
+    # collision: true  → standard object channel (contype=4, conaffinity=7)
+    # collision: "fixture" → fixture channel (contype=8, conaffinity=2)
+    #            collides with robot links but not with sibling controls
+    # collision: false → non-colliding (contype=0, conaffinity=0)
+    if collision == "fixture":
+        attrs.append(f'contype="{_FIXTURE_CONTYPE}" conaffinity="{_FIXTURE_CONAFFINITY}"')
+    elif collision:
         attrs.append(f'contype="{_OBJ_CONTYPE}" conaffinity="{_OBJ_CONAFFINITY}"')
         fr = physics.get("friction")
         if isinstance(fr, (list, tuple)) and len(fr) >= 1:

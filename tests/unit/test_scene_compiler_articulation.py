@@ -9,6 +9,7 @@ _NATIVE = os.path.join(os.path.dirname(__file__), "../../native_mujoco")
 sys.path.insert(0, _NATIVE)
 
 from scene_compiler import (  # noqa: E402
+    SceneCompilerError,
     compile_scene,
     geom_name,
     interactive_specs,
@@ -92,6 +93,129 @@ class TestInteractiveSpecs:
             "pose": {"position": [0.5, 0, 0.8]},
         }]}
         assert interactive_specs(scene) == []
+
+
+# ── Gate 8-B: interactive↔articulation relational enforcement ────────────────
+
+class TestInteractiveArticulationContract:
+
+    def test_button_without_articulation_raises(self):
+        scene = {"objects": [{
+            "id": "bad",
+            "geometry": {"kind": "box", "size": [0.1, 0.1, 0.1]},
+            "pose": {"position": [0.5, 0, 0.8]},
+            "interactive": {"type": "button", "on_threshold": -0.005},
+        }]}
+        with pytest.raises(SceneCompilerError, match="interactive requires articulation"):
+            compile_scene(scene)
+
+    def test_button_with_hinge_raises(self):
+        scene = {"objects": [{
+            "id": "bad",
+            "geometry": {"kind": "box", "size": [0.02, 0.02, 0.1]},
+            "pose": {"position": [0.5, 0, 0.9]},
+            "articulation": {"joint": "hinge", "axis": [0, 1, 0]},
+            "interactive": {"type": "button", "on_threshold": -0.005},
+        }]}
+        with pytest.raises(SceneCompilerError, match="requires articulation.joint='slide'"):
+            compile_scene(scene)
+
+    def test_lever_without_articulation_raises(self):
+        scene = {"objects": [{
+            "id": "bad",
+            "geometry": {"kind": "box", "size": [0.02, 0.02, 0.1]},
+            "pose": {"position": [0.5, 0, 0.9]},
+            "interactive": {"type": "lever", "on_threshold": 0.1, "bistable": True},
+        }]}
+        with pytest.raises(SceneCompilerError, match="interactive requires articulation"):
+            compile_scene(scene)
+
+    def test_lever_with_slide_raises(self):
+        scene = {"objects": [{
+            "id": "bad",
+            "geometry": {"kind": "box", "size": [0.02, 0.02, 0.1]},
+            "pose": {"position": [0.5, 0, 0.9]},
+            "articulation": {"joint": "slide", "axis": [0, 0, 1]},
+            "interactive": {"type": "lever", "on_threshold": 0.1, "bistable": True},
+        }]}
+        with pytest.raises(SceneCompilerError, match="requires articulation.joint='hinge'"):
+            compile_scene(scene)
+
+    def test_switch_with_slide_raises(self):
+        scene = {"objects": [{
+            "id": "bad",
+            "geometry": {"kind": "box", "size": [0.02, 0.02, 0.07]},
+            "pose": {"position": [0.5, 0, 0.9]},
+            "articulation": {"joint": "slide", "axis": [0, 0, 1]},
+            "interactive": {"type": "switch", "on_threshold": 0.0, "bistable": True},
+        }]}
+        with pytest.raises(SceneCompilerError, match="requires articulation.joint='hinge'"):
+            compile_scene(scene)
+
+    def test_button_with_correct_slide_passes(self):
+        """button + slide articulation must compile without error."""
+        compile_scene(_button_scene())   # should not raise
+
+    def test_lever_with_correct_hinge_passes(self):
+        """lever + hinge articulation must compile without error."""
+        compile_scene(_lever_scene())   # should not raise
+
+
+# ── Gate 8-B: control_panel.yaml schema→compile contract ─────────────────────
+
+class TestControlPanelSchemaContract:
+    """Load control_panel.yaml through schema validation then compile and check dims."""
+
+    @pytest.fixture(scope="class")
+    def panel_xml(self):
+        import pathlib, yaml as _yaml
+        yaml_path = pathlib.Path(__file__).parents[2] / "scenes" / "control_panel.yaml"
+        if not yaml_path.exists():
+            pytest.skip("control_panel.yaml not found")
+        with open(yaml_path) as f:
+            doc = _yaml.safe_load(f)
+        return compile_scene(doc)
+
+    def test_all_button_cylinders_have_correct_half_length(self, panel_xml):
+        """All six cylinders (radius=0.030, length=0.028) → half=0.014."""
+        assert "0.030000 0.050000" not in panel_xml, (
+            "At least one button compiled with 0.1 m default height"
+        )
+        assert "0.030000 0.014000" in panel_xml
+
+    def test_fixture_channel_emitted_for_console_bodies(self, panel_xml):
+        """Console fixtures must use contype=8 (fixture channel)."""
+        assert 'contype="8"' in panel_xml
+        assert 'conaffinity="2"' in panel_xml
+
+    def test_control_collision_channel_emitted_for_buttons(self, panel_xml):
+        """Interactive controls must use contype=4 (object channel)."""
+        assert 'contype="4"' in panel_xml
+
+    def test_mujoco_model_button_geom_size(self):
+        """MjModel geom_size for btn_red must match the YAML (r=0.030, h/2=0.014)."""
+        mujoco = pytest.importorskip("mujoco")
+        import pathlib, yaml as _yaml
+        yaml_path = pathlib.Path(__file__).parents[2] / "scenes" / "control_panel.yaml"
+        if not yaml_path.exists():
+            pytest.skip("control_panel.yaml not found")
+        native_path = pathlib.Path(__file__).parents[2] / "native_mujoco"
+        import sys
+        sys.path.insert(0, str(native_path))
+        from objects import build_scene_model_xml
+        model_xml_path = native_path / "model" / "reachy_1_2.xml"
+        if not model_xml_path.exists():
+            pytest.skip("Robot model XML not found")
+        with open(yaml_path) as f:
+            doc = _yaml.safe_load(f)
+        xml = build_scene_model_xml(doc, str(model_xml_path))
+        m = mujoco.MjModel.from_xml_string(xml)
+        gid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, "btn_red__g")
+        assert gid >= 0, "btn_red__g geom not found in compiled model"
+        # MuJoCo cylinder size[0]=radius, size[1]=half-length
+        import pytest as _pt
+        assert m.geom_size[gid, 0] == _pt.approx(0.030, abs=1e-4), "Wrong radius"
+        assert m.geom_size[gid, 1] == _pt.approx(0.014, abs=1e-4), "Wrong half-length"
 
 
 # ── B2 regression: cylinder length/height field contract ─────────────────────

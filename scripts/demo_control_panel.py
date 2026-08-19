@@ -60,8 +60,13 @@ log = logging.getLogger("panel")
 
 _STATE_FILE = os.environ.get("REACHY_SIM_INTERACTIVE_STATE",
                              "/tmp/reachy_interactive_state.json")
-_RESET_REQUEST = os.environ.get("REACHY_SIM_RESET_REQUEST",
-                                "/tmp/reachy_reset_request")
+# Paths for the acknowledged reset handshake (see fake_reachy_server.reset_watcher).
+_RESET_SENTINEL = pathlib.Path(
+    os.environ.get("REACHY_SIM_RESET_REQUEST", "/tmp/reachy_reset_request")
+)
+_RESET_ACK = pathlib.Path(
+    os.environ.get("REACHY_SIM_RESET_ACK", "/tmp/reachy_reset_ack")
+)
 _STANDOFF = 0.10        # m in front of a control before actuating
 _PRESS_DEPTH = 0.012    # m the finger drives a button in
 _FLIP_PUSH = 0.06       # m the finger drags a switch/lever handle to flip it
@@ -97,13 +102,30 @@ def _read_state(control_id: str):
         return None
 
 
-def request_reset():
-    """Drop the sentinel file the sim's reset-watcher polls, to reset the scene
-    (robot home, controls OFF) before a run."""
+def request_reset_and_wait(timeout: float = 8.0) -> bool:
+    """Trigger a physics reset and block until the native server acknowledges it.
+
+    Writes a generation token to the reset-request sentinel, then polls the
+    reset-ack file written by fake_reachy_server.reset_watcher after it receives
+    the backend's reset_ack.  Returns True when confirmed, False on timeout.
+    No fixed sleep is used as the correctness mechanism.
+    """
+    gen = str(time.monotonic_ns())
     try:
-        open(_RESET_REQUEST, "w").close()
+        _RESET_SENTINEL.write_text(gen)
     except OSError:
-        pass
+        log.warning("Could not write reset sentinel — proceeding without ack")
+        return False
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if _RESET_ACK.exists() and _RESET_ACK.read_text().strip() == gen:
+                return True
+        except OSError:
+            pass
+        time.sleep(0.05)
+    log.warning("Reset ack not received within %.1f s", timeout)
+    return False
 
 
 def _pad(arm, planner):
@@ -240,8 +262,14 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
     backend = os.environ.get("REACHY_SIM_BACKEND", "kinematic").lower()
     log.info("Backend: %s", backend)
     if backend != "mujoco-remote":
-        log.warning("Interactive controls only respond in the mujoco-remote "
-                    "(physics) backend; run scripts/start_sim.sh first.")
+        log.error(
+            "Research/demo mode requires the mujoco-remote (physics) backend "
+            "(REACHY_SIM_BACKEND=mujoco-remote).  "
+            "Run scripts/start_sim.sh first, then re-run the demo.  "
+            "Interactive controls are only driven by native MuJoCo physics — "
+            "the kinematic backend will not respond to any control actuation."
+        )
+        sys.exit(1)
 
     scene = SceneModel.from_yaml(scene_path)
     log.info("Scene '%s': %d controls", scene.frame_id, len(scene.controls()))
@@ -265,8 +293,8 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
 
     # Start from a clean, repeatable state: reset the scene (robot home,
     # controls OFF) so each run begins identically and the count is meaningful.
-    request_reset()
-    time.sleep(1.5)
+    if not request_reset_and_wait(timeout=8.0):
+        log.warning("Reset did not complete cleanly — proceeding with caution")
 
     robot.turn_on("r_arm")
     robot.turn_on("l_arm")

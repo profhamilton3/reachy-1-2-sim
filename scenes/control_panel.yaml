@@ -71,9 +71,10 @@ objects:
       rgba: [0.20, 0.22, 0.28, 1.0]
     physics:
       dynamic: false
-      # Non-colliding: the console must not shove its own mounted controls
-      # around.  The arm avoids the console via scene-awareness path planning.
-      collision: false
+      # "fixture": collides with robot links (contype=8/conaffinity=2) but NOT
+      # with mounted controls (contype=4), so controls animate freely while the
+      # arm cannot pass through the console body.
+      collision: "fixture"
     semantic_class: furniture.console
     tags: [panel, fixture]
 
@@ -87,9 +88,7 @@ objects:
       rgba: [0.26, 0.28, 0.34, 1.0]
     physics:
       dynamic: false
-      # Non-colliding: the console must not shove its own mounted controls
-      # around.  The arm avoids the console via scene-awareness path planning.
-      collision: false
+      collision: "fixture"
     semantic_class: furniture.console
     tags: [panel, fixture]
 
@@ -104,9 +103,7 @@ objects:
       rgba: [0.24, 0.26, 0.32, 1.0]
     physics:
       dynamic: false
-      # Non-colliding: the console must not shove its own mounted controls
-      # around.  The arm avoids the console via scene-awareness path planning.
-      collision: false
+      collision: "fixture"
     semantic_class: furniture.console
     tags: [panel, fixture]
 

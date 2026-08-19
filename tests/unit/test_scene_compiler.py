@@ -140,6 +140,47 @@ class TestObjectClassifiers:
         assert dynamic_object_ids(doc) == ["a"]
 
 
+class TestFixtureCollisionChannel:
+    """Gate 8-C: 'fixture' collision value emits the correct contact channel."""
+
+    def test_fixture_emits_fixture_contype(self):
+        xml = compile_scene(_box(physics={"dynamic": False, "collision": "fixture"}))
+        assert 'contype="8"' in xml, "fixture should use contype=8"
+        assert 'conaffinity="2"' in xml, "fixture should use conaffinity=2"
+
+    def test_fixture_does_not_emit_object_channel(self):
+        xml = compile_scene(_box(physics={"dynamic": False, "collision": "fixture"}))
+        assert 'contype="4"' not in xml
+        assert 'contype="0"' not in xml
+
+    def test_fixture_collides_with_robot(self):
+        """MuJoCo contact fires when (A.contype & B.conaffinity) OR (B.contype & A.conaffinity) != 0."""
+        from scene_compiler import _FIXTURE_CONTYPE, _FIXTURE_CONAFFINITY
+        robot_contype, robot_conaffinity = 2, 5  # R12-500
+        # Bidirectional check (MuJoCo ORs both directions).
+        assert ((_FIXTURE_CONTYPE & robot_conaffinity) | (robot_contype & _FIXTURE_CONAFFINITY)) != 0, (
+            "Fixture channel must collide with robot links (contype=2, conaffinity=5)"
+        )
+
+    def test_fixture_does_not_collide_with_control_conaffinity(self):
+        """(fixture_contype & obj_conaffinity) == 0: fixture must not collide with controls."""
+        from scene_compiler import _FIXTURE_CONTYPE, _OBJ_CONAFFINITY
+        assert (_FIXTURE_CONTYPE & _OBJ_CONAFFINITY) == 0
+
+    def test_control_does_not_collide_with_fixture_conaffinity(self):
+        """(obj_contype & fixture_conaffinity) == 0: controls must not collide with fixture."""
+        from scene_compiler import _FIXTURE_CONAFFINITY, _OBJ_CONTYPE
+        assert (_OBJ_CONTYPE & _FIXTURE_CONAFFINITY) == 0
+
+    def test_false_still_disables_collision(self):
+        xml = compile_scene(_box(physics={"dynamic": False, "collision": False}))
+        assert 'contype="0" conaffinity="0"' in xml
+
+    def test_true_still_uses_object_channel(self):
+        xml = compile_scene(_box(physics={"dynamic": False, "collision": True}))
+        assert 'contype="4" conaffinity="7"' in xml
+
+
 class TestStructure:
     def test_empty_objects(self):
         xml = compile_scene({"objects": []})

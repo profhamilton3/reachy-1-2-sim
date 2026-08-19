@@ -266,6 +266,8 @@ class ReachyMujocoServer:
         self._enable_seg = enable_seg
         self._effects = effects or EffectConfig()
         self._record_dir = record_dir
+        self._model_path = model_path        # actual path used — not _DEFAULT_MODEL
+        self._scene_path = scene_path        # actual scene path (or None)
 
         tracked_ids = None
         interactive_specs = None
@@ -354,21 +356,7 @@ class ReachyMujocoServer:
         if self._record_dir:
             self._recorder = Recorder.new(
                 self._record_dir,
-                {
-                    "model_path": str(_DEFAULT_MODEL),
-                    "scene_path": None,
-                    "calibration_provenance": (
-                        self._calibration.provenance if self._calibration else "none"
-                    ),
-                    "depth_enabled": self._enable_depth,
-                    "seg_enabled": self._enable_seg,
-                    "effects": {
-                        "blur_sigma": self._effects.blur_sigma,
-                        "noise_std": self._effects.noise_std,
-                        "drop_probability": self._effects.drop_probability,
-                        "latency_ms": self._effects.latency_ms,
-                    },
-                },
+                self._build_recorder_manifest(),
             )
             log.info("Recording to: %s", self._recorder.run_dir)
 
@@ -608,6 +596,50 @@ class ReachyMujocoServer:
         finally:
             self._connected_ws = None
             log.info("Handler exited for %s", addr)
+
+    def _build_recorder_manifest(self) -> dict:
+        """Build a provenance manifest with actual model/scene paths and versions.
+
+        Records immutable identity for the compiled world so Epic 8 can reject
+        experience from incompatible model/scene/physics identities.
+        """
+        import hashlib
+        import platform
+        import sys as _sys
+
+        def _sha256(path: Optional[str]) -> Optional[str]:
+            if not path:
+                return None
+            try:
+                return hashlib.sha256(
+                    pathlib.Path(path).read_bytes()
+                ).hexdigest()
+            except OSError:
+                return None
+
+        mujoco_version = getattr(mujoco, "__version__", "unknown")
+        return {
+            "model_path": self._model_path,
+            "model_sha256": _sha256(self._model_path),
+            "scene_path": self._scene_path,
+            "scene_sha256": _sha256(self._scene_path),
+            "scene_revision": self._sim.scene_revision,
+            "mujoco_version": mujoco_version,
+            "python_version": _sys.version,
+            "platform": platform.platform(),
+            "protocol_version": PROTOCOL_VERSION,
+            "calibration_provenance": (
+                self._calibration.provenance if self._calibration else "none"
+            ),
+            "depth_enabled": self._enable_depth,
+            "seg_enabled": self._enable_seg,
+            "effects": {
+                "blur_sigma": self._effects.blur_sigma,
+                "noise_std": self._effects.noise_std,
+                "drop_probability": self._effects.drop_probability,
+                "latency_ms": self._effects.latency_ms,
+            },
+        }
 
     def _load_scene(
         self, scene_doc: dict
