@@ -14,6 +14,25 @@ from reachy_ai.experience.models import EpisodeResult, EpisodeStatus
 from reachy_ai.evaluation.base import EvaluationPolicy, Violation, ViolationKind
 
 
+# Reachy 1.2 right-arm + head + antennas = 21 controllable joints (see
+# native_mujoco/joint_map.py). The evaluator must run offline on EpisodeResult
+# alone, so we resolve the count from the native module when it is importable
+# and otherwise fall back to the known constant. The safety evaluator must
+# never raise merely because the native MuJoCo package is not on sys.path.
+_DEFAULT_NUM_JOINTS = 21
+
+
+def _num_joints() -> int:
+    try:
+        from joint_map import NUM_JOINTS  # native_mujoco, when on sys.path
+        return int(NUM_JOINTS)
+    except Exception:
+        return _DEFAULT_NUM_JOINTS
+
+
+NUM_JOINTS = _num_joints()
+
+
 # Pattern emitted by EpisodeRunner into result.hard_violations
 _RE_FORBIDDEN = re.compile(
     r"forbidden_robot_fixture_contact:\s*(\d+)\s*occurrences?", re.IGNORECASE
@@ -29,35 +48,40 @@ def check_forbidden_contacts(
 ) -> List[Violation]:
     """Detect forbidden robot↔fixture contacts from EpisodeResult.
 
-    Returns a list of Violation objects, one per distinct forbidden-contact
-    entry in result.hard_violations plus one if contact_summary shows
-    forbidden_total > policy.forbidden_contact_allowed.
+    Fail-closed: the reported count is the MAX across every available evidence
+    source (parsed hard_violations entries, contact_summary["forbidden_total"],
+    and metrics["forbidden_contact_count"]). Sources may disagree — e.g. the
+    runner's structured summary can report contacts that never made it into the
+    free-text hard_violations list — so trusting only the first source that
+    parses could let a real collision through. We take the worst case.
+
+    Uses re.search (not match) so a step/timestamp prefix on the runner's
+    string cannot silently defeat detection.
     """
     violations: List[Violation] = []
-    seen_count: Optional[int] = None
+    counts: List[int] = []
 
     for entry in result.hard_violations:
-        m = _RE_FORBIDDEN.match(entry)
+        m = _RE_FORBIDDEN.search(entry)
         if m:
-            count = int(m.group(1))
-            seen_count = count
-            if count > policy.forbidden_contact_allowed:
-                violations.append(Violation(
-                    kind=ViolationKind.FORBIDDEN_CONTACT,
-                    description=(
-                        f"Robot-fixture contact detected: {count} occurrence(s). "
-                        f"Policy allows at most {policy.forbidden_contact_allowed}."
-                    ),
-                    severity="hard",
-                ))
+            counts.append(int(m.group(1)))
 
-    # Also check contact_summary in case the runner populated it differently.
-    forbidden_total = result.contact_summary.get("forbidden_total", 0)
-    if seen_count is None and forbidden_total > policy.forbidden_contact_allowed:
+    try:
+        counts.append(int(result.contact_summary.get("forbidden_total", 0) or 0))
+    except (TypeError, ValueError):
+        pass
+    try:
+        counts.append(int(result.metrics.get("forbidden_contact_count", 0) or 0))
+    except (TypeError, ValueError):
+        pass
+
+    worst = max(counts) if counts else 0
+    if worst > policy.forbidden_contact_allowed:
         violations.append(Violation(
             kind=ViolationKind.FORBIDDEN_CONTACT,
             description=(
-                f"Forbidden contact total from contact_summary: {forbidden_total}. "
+                f"Robot-fixture contact detected: {worst} occurrence(s) "
+                f"(max across hard_violations / contact_summary / metrics). "
                 f"Policy allows at most {policy.forbidden_contact_allowed}."
             ),
             severity="hard",
@@ -94,7 +118,6 @@ def check_saturation(
     total_steps = result.metrics.get("total_steps", 1.0) or 1.0
     # Saturation fraction: (number of saturated joints × 1) / total joints
     # Use saturated_joint_count from the FINAL snapshot as a proxy.
-    from joint_map import NUM_JOINTS  # native_mujoco must be in sys.path
     sat_fraction = sat_count / max(1, NUM_JOINTS)
     if sat_fraction > policy.saturation_fraction_limit:
         violations.append(Violation(

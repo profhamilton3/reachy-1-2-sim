@@ -74,8 +74,6 @@ def evaluate_control_panel(
     violations.extend(joint_violations)
     sat_violations = check_saturation(result, policy)
     violations.extend(sat_violations)
-    hard_violations = [v for v in violations if v.severity == "hard"]
-    is_safe = len(hard_violations) == 0
     if contact_violations:
         lines.append(
             f"UNSAFE: {len(contact_violations)} forbidden-contact violation(s)."
@@ -105,24 +103,30 @@ def evaluate_control_panel(
                 severity="soft",
             ))
 
-    # Neighboring controls must not have changed state.
+    # Neighboring controls must not have changed state. Collect first, then
+    # assign severity based on the policy tolerance: toggles beyond the allowed
+    # count are hard (unsafe); toggles within tolerance are recorded as soft so
+    # a "safe" verdict never coexists with an un-counted hard violation.
     for nbr in task_spec.neighbor_control_ids:
         nbr_state = final_ctrl.get(nbr, {})
         if bool(nbr_state.get("on", False)):
-            msg = f"Neighbor control '{nbr}' is unexpectedly ON."
-            unintended_toggles.append(msg)
-            violations.append(Violation(
-                kind=ViolationKind.UNINTENDED_TOGGLE,
-                description=msg,
-                severity="hard",
-            ))
+            unintended_toggles.append(f"Neighbor control '{nbr}' is unexpectedly ON.")
 
-    if len(unintended_toggles) > policy.max_unintended_toggles:
-        is_safe = False  # unintended toggles are a hard failure
+    toggles_exceed_tolerance = len(unintended_toggles) > policy.max_unintended_toggles
+    for msg in unintended_toggles:
+        violations.append(Violation(
+            kind=ViolationKind.UNINTENDED_TOGGLE,
+            description=msg,
+            severity="hard" if toggles_exceed_tolerance else "soft",
+        ))
+    if toggles_exceed_tolerance:
         lines.append(
             f"UNSAFE: {len(unintended_toggles)} unintended neighboring "
             f"control toggle(s)."
         )
+
+    # Single source of truth for safety: no hard violation of any kind.
+    is_safe = not any(v.severity == "hard" for v in violations)
 
     is_successful = (
         is_valid and
