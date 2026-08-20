@@ -40,6 +40,7 @@ from typing import Optional
 from reachy_ai.evaluation.base import EpisodeVerdict
 from reachy_ai.evaluation.ranking import explain_ranking
 from reachy_ai.motion.recipe import TrajectoryRecipe
+from reachy_ai.search.convergence import ConvergenceChecker
 from reachy_ai.search.runner import SearchConfig, SearchRunner
 
 
@@ -101,9 +102,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     store = _open_store(args.db) if args.db else None
     ctx = store.__enter__() if store is not None else None
+    checker = _make_checker(args)
 
     try:
-        result = runner.run(_dry_run_evaluate, store=ctx)
+        result = runner.run(_dry_run_evaluate, store=ctx, convergence_checker=checker)
     finally:
         if store is not None:
             store.__exit__(None, None, None)
@@ -154,7 +156,13 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             max_kept=args.max_kept,
         )
         runner = SearchRunner(config)
-        result = runner.resume(_dry_run_evaluate, prior, extra_budget=args.budget, store=s)
+        checker = _make_checker(args)
+        result = runner.resume(
+            _dry_run_evaluate, prior,
+            extra_budget=args.budget,
+            store=s,
+            convergence_checker=checker,
+        )
 
     _print_result(result)
     return 0
@@ -199,18 +207,31 @@ def _cmd_show(args: argparse.Namespace) -> int:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _make_checker(args: argparse.Namespace) -> Optional[ConvergenceChecker]:
+    """Build a ConvergenceChecker from CLI args, or None if not requested."""
+    window = getattr(args, "convergence_window", None)
+    if not window:
+        return None
+    min_trials = getattr(args, "min_trials", 5) or 5
+    return ConvergenceChecker(window=window, min_trials=min_trials)
+
+
 def _open_store(db_path: str):
     from reachy_ai.experience.store import ExperienceStore
     return ExperienceStore.open(db_path)
 
 
 def _print_result(result) -> None:
+    conv_tag = ""
+    if result.converged:
+        conv_tag = f"  converged=True(+{result.trials_since_improvement})"
     print(
         f"study={result.study_id}  "
         f"trials_run={result.trials_run}  "
         f"skipped={result.trials_skipped}  "
         f"kept={len(result.kept)}  "
         f"pruned={len(result.pruned)}"
+        f"{conv_tag}"
     )
     if result.best:
         v = result.best.verdict
@@ -243,6 +264,25 @@ def _build_parser() -> argparse.ArgumentParser:
     shared.add_argument("--seed", type=int, default=0, help="RNG seed for random sampler")
     shared.add_argument("--pruner", choices=["dominance", "budget", "none"], default="dominance")
     shared.add_argument("--max-kept", type=int, default=10, dest="max_kept")
+    shared.add_argument(
+        "--convergence-window",
+        type=int,
+        default=None,
+        dest="convergence_window",
+        metavar="N",
+        help=(
+            "Stop early when the best rank_key has not improved for N consecutive "
+            "trials.  Omit to disable early stopping (default: run full budget)."
+        ),
+    )
+    shared.add_argument(
+        "--min-trials",
+        type=int,
+        default=5,
+        dest="min_trials",
+        metavar="M",
+        help="Minimum trials before convergence is checked (default: 5).",
+    )
 
     run_p = sub.add_parser("run", parents=[shared], help="Start a new search run")
     run_p.add_argument("--baseline", required=True, help="Path to baseline recipe JSON/YAML")
