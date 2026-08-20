@@ -1,0 +1,320 @@
+"""R12-805: SearchRunner — bounded parameter search with optional store persistence.
+
+SearchRunner iterates over search points suggested by a Sampler, calls a
+caller-supplied evaluate_fn for each, ranks all candidates lexicographically,
+and applies a PruningStrategy to the result.
+
+Store integration is opt-in.  When an ExperienceStore is provided, each trial
+is recorded with the search_point and verdict stored in optimizer_metadata so
+the search can be resumed later via load_prior_from_store() + run().
+
+evaluate_fn contract
+--------------------
+    def evaluate_fn(recipe: TrajectoryRecipe) -> EpisodeVerdict:
+        ...
+
+The function receives a candidate recipe (bounded_parameters updated with the
+current search point) and must return an EpisodeVerdict.  It may run a real
+simulation or return a synthetic verdict for dry-run use.  Exceptions from
+evaluate_fn are caught: the trial is marked failed in the store (if any) and
+the search point is added to already_done so it is not re-tried.
+
+Resume workflow
+---------------
+    prior = SearchRunner.load_prior_from_store(store, study_id)
+    result = runner.run(evaluate_fn, prior_results=prior, store=store)
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import uuid
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from reachy_ai.evaluation.base import EpisodeVerdict
+from reachy_ai.evaluation.ranking import RankedCandidate, rank_candidates
+from reachy_ai.motion.recipe import TrajectoryRecipe
+from reachy_ai.search.pruning import (
+    BudgetPruner, CompositePruner, DominancePruner, NoPruner, PruningStrategy,
+)
+from reachy_ai.search.samplers import GridSampler, RandomSampler, Sampler
+from reachy_ai.search.space import SearchPoint, SearchSpace
+
+EvaluateFn = Callable[[TrajectoryRecipe], EpisodeVerdict]
+PriorResults = List[Tuple[SearchPoint, EpisodeVerdict]]
+
+
+@dataclasses.dataclass
+class SearchConfig:
+    """Parameters that govern one search run."""
+    study_id: str
+    baseline_recipe: TrajectoryRecipe
+    budget: int = 20
+    sampler: str = "grid"     # "grid" | "random"
+    random_seed: int = 0
+    pruner: str = "dominance" # "dominance" | "budget" | "none"
+    max_kept: int = 10        # used by "budget" pruner
+
+
+@dataclasses.dataclass
+class SearchResult:
+    """Output of one search run (or resume)."""
+    study_id: str
+    best: Optional[RankedCandidate]
+    ranked: List[RankedCandidate]   # all candidates before pruning, best-first
+    kept: List[RankedCandidate]     # after pruning
+    pruned: List[RankedCandidate]   # discarded by pruner
+    trials_run: int                 # evaluations performed this run
+    trials_skipped: int             # prior results reused without re-evaluation
+
+
+class SearchRunner:
+    """Bounded parameter search engine."""
+
+    def __init__(self, config: SearchConfig) -> None:
+        self._config = config
+        self._space = SearchSpace.from_recipe(config.baseline_recipe)
+        self._sampler: Sampler = _make_sampler(config)
+        self._pruner: PruningStrategy = _make_pruner(config)
+
+    @property
+    def space(self) -> SearchSpace:
+        return self._space
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
+    def run(
+        self,
+        evaluate_fn: EvaluateFn,
+        *,
+        prior_results: Optional[PriorResults] = None,
+        store: Optional[Any] = None,        # ExperienceStore (imported lazily)
+        task_spec: Optional[Any] = None,    # TaskSpec for store recording
+        episode_config: Optional[Any] = None,  # EpisodeConfig for store recording
+    ) -> SearchResult:
+        """Run the search, optionally extending prior results.
+
+        Args:
+            evaluate_fn:    Caller-provided evaluator — recipe → EpisodeVerdict.
+            prior_results:  (search_point, verdict) pairs from a previous run or
+                            loaded via load_prior_from_store().  These seed the
+                            already_done set so their points are not re-sampled.
+            store:          Optional ExperienceStore.  When provided, each trial
+                            is persisted with search_point and verdict_json in
+                            optimizer_metadata.
+            task_spec:      Passed to store.create_trial(); defaults to a minimal
+                            synthetic TaskSpec derived from the baseline recipe.
+            episode_config: Passed to store.create_trial(); defaults to a minimal
+                            synthetic EpisodeConfig.
+        """
+        prior = list(prior_results or [])
+        already_done: List[SearchPoint] = [pt for pt, _ in prior]
+        candidates: List[RankedCandidate] = [
+            RankedCandidate(verdict=v, trial_id=v.trial_id or v.episode_id)
+            for _, v in prior
+        ]
+
+        trials_run = 0
+        budget = self._config.budget
+
+        while trials_run < budget:
+            points = self._sampler.suggest(self._space, already_done, n=1)
+            if not points:
+                break  # grid fully exhausted or sampler gave up
+
+            pt = points[0]
+            recipe = _apply_point(self._config.baseline_recipe, pt)
+
+            store_trial_id: Optional[str] = None
+            if store is not None:
+                store_trial_id = _store_create(
+                    store, self._config.study_id, recipe, pt, task_spec, episode_config
+                )
+
+            try:
+                verdict = evaluate_fn(recipe)
+            except Exception as exc:
+                if store is not None and store_trial_id is not None:
+                    _store_fail(store, store_trial_id, str(exc))
+                already_done.append(pt)
+                trials_run += 1
+                continue
+
+            if store is not None and store_trial_id is not None:
+                _store_complete(store, store_trial_id, verdict, pt)
+
+            already_done.append(pt)
+            trial_id = verdict.trial_id or verdict.episode_id or store_trial_id or uuid.uuid4().hex
+            candidates.append(RankedCandidate(verdict=verdict, trial_id=trial_id))
+            trials_run += 1
+
+        ranked = rank_candidates(candidates)
+        pruning_result = self._pruner.prune(ranked)
+
+        return SearchResult(
+            study_id=self._config.study_id,
+            best=pruning_result.kept[0] if pruning_result.kept else None,
+            ranked=ranked,
+            kept=pruning_result.kept,
+            pruned=pruning_result.pruned,
+            trials_run=trials_run,
+            trials_skipped=len(prior),
+        )
+
+    # ------------------------------------------------------------------
+    # Resume helper
+    # ------------------------------------------------------------------
+
+    def resume(
+        self,
+        evaluate_fn: EvaluateFn,
+        prior_results: PriorResults,
+        *,
+        extra_budget: int,
+        store: Optional[Any] = None,
+        task_spec: Optional[Any] = None,
+        episode_config: Optional[Any] = None,
+    ) -> SearchResult:
+        """Continue search from prior results with extra_budget new trials."""
+        extended = dataclasses.replace(self._config, budget=extra_budget)
+        runner = SearchRunner(extended)
+        return runner.run(
+            evaluate_fn,
+            prior_results=prior_results,
+            store=store,
+            task_spec=task_spec,
+            episode_config=episode_config,
+        )
+
+    # ------------------------------------------------------------------
+    # Store-backed prior loading
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def load_prior_from_store(store: Any, study_id: str) -> PriorResults:
+        """Read completed search trials from the store and rebuild prior results.
+
+        Only SUCCEEDED and FAILED trials with both search_point and verdict_json
+        in optimizer_metadata are included.  Trials recorded by other means
+        (without optimizer_metadata populated by the runner) are silently skipped.
+        """
+        rows = store.list_trials(study_id)
+        results: PriorResults = []
+        for row in rows:
+            status = row.get("status", "")
+            if status not in ("SUCCEEDED", "FAILED"):
+                continue
+            try:
+                metadata = json.loads(row.get("optimizer_metadata_json") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            search_point = metadata.get("search_point")
+            verdict_json = metadata.get("verdict_json")
+            if not search_point or not verdict_json:
+                continue
+            try:
+                verdict = EpisodeVerdict.from_json(verdict_json)
+            except Exception:
+                continue
+            results.append((search_point, verdict))
+        return results
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _apply_point(baseline: TrajectoryRecipe, point: SearchPoint) -> TrajectoryRecipe:
+    """Return a new recipe with bounded_parameters values updated from point."""
+    new_bp: Dict[str, Any] = {}
+    for name, spec in baseline.bounded_parameters.items():
+        if name in point:
+            if isinstance(spec, dict):
+                new_bp[name] = {**spec, "value": point[name]}
+            else:
+                new_bp[name] = point[name]
+        else:
+            new_bp[name] = spec
+    return dataclasses.replace(
+        baseline,
+        recipe_id=f"{baseline.recipe_id}_s{uuid.uuid4().hex[:6]}",
+        bounded_parameters=new_bp,
+        source="search_candidate",
+        parent_recipe_id=baseline.recipe_id,
+    )
+
+
+def _make_sampler(config: SearchConfig) -> Sampler:
+    if config.sampler == "random":
+        return RandomSampler(seed=config.random_seed)
+    return GridSampler()
+
+
+def _make_pruner(config: SearchConfig) -> PruningStrategy:
+    if config.pruner == "budget":
+        return BudgetPruner(max_kept=config.max_kept)
+    if config.pruner == "none":
+        return NoPruner()
+    return DominancePruner()
+
+
+def _store_create(
+    store: Any,
+    study_id: str,
+    recipe: TrajectoryRecipe,
+    point: SearchPoint,
+    task_spec: Optional[Any],
+    episode_config: Optional[Any],
+) -> str:
+    """Create a PENDING trial in the store. Returns store-assigned trial_id."""
+    from reachy_ai.experience.models import (
+        EpisodeConfig, SimulatorIdentity, TaskSpec,
+    )
+    ts = task_spec or TaskSpec(task_id=recipe.recipe_id, task_type=recipe.task_type or "search")
+    cfg = episode_config or EpisodeConfig(simulator_identity=SimulatorIdentity())
+    trial_id = store.create_trial(
+        study_id,
+        ts,
+        recipe.to_json(),
+        cfg,
+        optimizer_metadata={"search_point": point},
+    )
+    store.start_trial(trial_id)
+    return trial_id
+
+
+def _store_complete(
+    store: Any,
+    trial_id: str,
+    verdict: EpisodeVerdict,
+    point: SearchPoint,
+) -> None:
+    """Persist a completed verdict to the store trial."""
+    from reachy_ai.experience.models import EpisodeResult, EpisodeStatus
+    status = (
+        EpisodeStatus.SUCCEEDED
+        if (verdict.is_valid and verdict.is_safe and verdict.is_successful)
+        else EpisodeStatus.FAILED
+    )
+    result = EpisodeResult(
+        episode_id=verdict.episode_id or trial_id,
+        trial_id=trial_id,
+        status=status,
+        success=verdict.is_successful,
+        metrics=verdict.metrics,
+    )
+    try:
+        store.complete_trial(trial_id, result)
+    except Exception:
+        store.fail_trial(trial_id, "complete_trial failed")
+    store.patch_optimizer_metadata(trial_id, {"verdict_json": verdict.to_json()})
+
+
+def _store_fail(store: Any, trial_id: str, reason: str) -> None:
+    try:
+        store.fail_trial(trial_id, reason)
+    except Exception:
+        pass

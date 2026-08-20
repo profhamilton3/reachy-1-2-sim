@@ -439,6 +439,21 @@ class ExperienceStore:
     # Orphan recovery (called on open)
     # ------------------------------------------------------------------
 
+    def patch_optimizer_metadata(self, trial_id: str, update: Dict[str, Any]) -> None:
+        """Merge update dict into the trial's optimizer_metadata_json in-place."""
+        row = self._conn.execute(
+            "SELECT optimizer_metadata_json FROM trials WHERE trial_id=?", (trial_id,)
+        ).fetchone()
+        if row is None:
+            raise ExperienceStoreError(f"Trial '{trial_id}' not found")
+        existing = json.loads(row[0] or "{}")
+        existing.update(update)
+        with self._conn:
+            self._conn.execute(
+                "UPDATE trials SET optimizer_metadata_json=? WHERE trial_id=?",
+                (json.dumps(existing), trial_id),
+            )
+
     def _recover_orphans(self, threshold_s: float = _DEFAULT_ORPHAN_THRESHOLD_S) -> int:
         """Mark stale RUNNING trials as ABORTED. Returns the count recovered.
 

@@ -1,0 +1,272 @@
+"""R12-805: CLI entry point for the bounded parameter search engine.
+
+Usage
+-----
+Dry-run (no physics, synthetic evaluator):
+
+    python -m reachy_ai.search.cli run \\
+        --baseline recipes/baseline_control.json \\
+        --study-id study_001 \\
+        --budget 10 \\
+        --sampler grid
+
+Resume a previous search (loading prior verdicts from the store):
+
+    python -m reachy_ai.search.cli resume \\
+        --study-id study_001 \\
+        --db runs/study_001.db \\
+        --budget 5
+
+Show the current ranking for a study:
+
+    python -m reachy_ai.search.cli show \\
+        --study-id study_001 \\
+        --db runs/study_001.db
+
+All subcommands default to dry-run mode: the built-in synthetic evaluator
+returns a verdict with quality scores derived from the normalised parameter
+values.  For real evaluation, integrate SearchRunner.run() directly and
+supply a task-specific evaluate_fn.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import uuid
+from typing import Optional
+
+from reachy_ai.evaluation.base import EpisodeVerdict
+from reachy_ai.evaluation.ranking import explain_ranking
+from reachy_ai.motion.recipe import TrajectoryRecipe
+from reachy_ai.search.runner import SearchConfig, SearchRunner
+
+
+# ---------------------------------------------------------------------------
+# Built-in dry-run evaluator
+# ---------------------------------------------------------------------------
+
+def _dry_run_evaluate(recipe: TrajectoryRecipe) -> EpisodeVerdict:
+    """Synthetic evaluator: always succeeds; quality derived from param values."""
+    scores: list[float] = []
+    for spec in recipe.bounded_parameters.values():
+        if not isinstance(spec, dict):
+            continue
+        lo = float(spec.get("min", 0.0))
+        hi = float(spec.get("max", 1.0))
+        val = float(spec.get("value", (lo + hi) / 2.0))
+        if hi > lo:
+            scores.append((val - lo) / (hi - lo))
+    avg = sum(scores) / len(scores) if scores else 0.5
+
+    eid = uuid.uuid4().hex
+    return EpisodeVerdict(
+        episode_id=eid,
+        trial_id=eid,
+        task_type=recipe.task_type or "dry_run",
+        policy_version=1,
+        is_valid=True,
+        is_safe=True,
+        is_successful=True,
+        violations=[],
+        metrics={"dry_run": 1.0, "avg_param_score": avg},
+        ranking_scores={
+            "accuracy_score": avg,
+            "clearance_score": avg,
+            "effort_score": 1.0,
+            "smoothness_score": 1.0,
+            "duration_score": avg,
+        },
+        explanation=f"[dry-run] recipe={recipe.recipe_id} avg_score={avg:.3f}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: run
+# ---------------------------------------------------------------------------
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    recipe = TrajectoryRecipe.load(args.baseline)
+    config = SearchConfig(
+        study_id=args.study_id,
+        baseline_recipe=recipe,
+        budget=args.budget,
+        sampler=args.sampler,
+        random_seed=args.seed,
+        pruner=args.pruner,
+        max_kept=args.max_kept,
+    )
+    runner = SearchRunner(config)
+
+    store = _open_store(args.db) if args.db else None
+    ctx = store.__enter__() if store is not None else None
+
+    try:
+        result = runner.run(_dry_run_evaluate, store=ctx)
+    finally:
+        if store is not None:
+            store.__exit__(None, None, None)
+
+    _print_result(result)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: resume
+# ---------------------------------------------------------------------------
+
+def _cmd_resume(args: argparse.Namespace) -> int:
+    if not args.db:
+        print("ERROR: --db is required for resume", file=sys.stderr)
+        return 1
+
+    recipe_path: Optional[str] = getattr(args, "baseline", None)
+
+    store = _open_store(args.db)
+    with store as s:
+        prior = SearchRunner.load_prior_from_store(s, args.study_id)
+        if not prior:
+            print(
+                f"No prior search results found in '{args.db}' for "
+                f"study '{args.study_id}'.",
+                file=sys.stderr,
+            )
+            return 1
+
+        if recipe_path:
+            recipe = TrajectoryRecipe.load(recipe_path)
+        else:
+            # Reconstruct from first prior trial's recipe_json in the store
+            rows = s.list_trials(args.study_id, limit=1)
+            if not rows:
+                print("ERROR: no trials in store to recover baseline recipe.", file=sys.stderr)
+                return 1
+            recipe = TrajectoryRecipe.from_json(rows[0]["recipe_json"])
+
+        config = SearchConfig(
+            study_id=args.study_id,
+            baseline_recipe=recipe,
+            budget=args.budget,
+            sampler=args.sampler,
+            random_seed=args.seed,
+            pruner=args.pruner,
+            max_kept=args.max_kept,
+        )
+        runner = SearchRunner(config)
+        result = runner.resume(_dry_run_evaluate, prior, extra_budget=args.budget, store=s)
+
+    _print_result(result)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: show
+# ---------------------------------------------------------------------------
+
+def _cmd_show(args: argparse.Namespace) -> int:
+    if not args.db:
+        print("ERROR: --db is required for show", file=sys.stderr)
+        return 1
+
+    store = _open_store(args.db)
+    with store as s:
+        prior = SearchRunner.load_prior_from_store(s, args.study_id)
+
+    if not prior:
+        print(f"No completed search trials for study '{args.study_id}'.")
+        return 0
+
+    from reachy_ai.evaluation.ranking import RankedCandidate, rank_candidates
+    candidates = [
+        RankedCandidate(verdict=v, trial_id=v.trial_id or v.episode_id)
+        for _, v in prior
+    ]
+    ranked = rank_candidates(candidates)
+    print(explain_ranking(ranked))
+    if ranked:
+        best = ranked[0].verdict
+        print(
+            f"\nBest: trial={ranked[0].trial_id[:8]}  "
+            f"valid={best.is_valid}  safe={best.is_safe}  "
+            f"success={best.is_successful}  "
+            f"scores={json.dumps(best.ranking_scores, separators=(',', ':'))}"
+        )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _open_store(db_path: str):
+    from reachy_ai.experience.store import ExperienceStore
+    return ExperienceStore.open(db_path)
+
+
+def _print_result(result) -> None:
+    print(
+        f"study={result.study_id}  "
+        f"trials_run={result.trials_run}  "
+        f"skipped={result.trials_skipped}  "
+        f"kept={len(result.kept)}  "
+        f"pruned={len(result.pruned)}"
+    )
+    if result.best:
+        v = result.best.verdict
+        print(
+            f"Best: trial={result.best.trial_id[:8]}  "
+            f"valid={v.is_valid}  safe={v.is_safe}  success={v.is_successful}"
+        )
+        print(f"  Ranking scores: {json.dumps(v.ranking_scores, separators=(',', ':'))}")
+        print(f"  Explanation: {v.explanation}")
+    else:
+        print("No candidates produced.")
+
+
+# ---------------------------------------------------------------------------
+# Argument parser
+# ---------------------------------------------------------------------------
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m reachy_ai.search.cli",
+        description="Bounded parameter search engine for trajectory recipes.",
+    )
+    sub = parser.add_subparsers(dest="subcommand", required=True)
+
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--study-id", required=True, help="Unique study identifier")
+    shared.add_argument("--db", default=None, help="ExperienceStore SQLite path")
+    shared.add_argument("--budget", type=int, default=20, help="Max new trials to run")
+    shared.add_argument("--sampler", choices=["grid", "random"], default="grid")
+    shared.add_argument("--seed", type=int, default=0, help="RNG seed for random sampler")
+    shared.add_argument("--pruner", choices=["dominance", "budget", "none"], default="dominance")
+    shared.add_argument("--max-kept", type=int, default=10, dest="max_kept")
+
+    run_p = sub.add_parser("run", parents=[shared], help="Start a new search run")
+    run_p.add_argument("--baseline", required=True, help="Path to baseline recipe JSON/YAML")
+
+    resume_p = sub.add_parser("resume", parents=[shared], help="Resume from store")
+    resume_p.add_argument("--baseline", default=None, help="Override baseline recipe (optional)")
+
+    show_p = sub.add_parser("show", parents=[shared], help="Show ranking from store")
+
+    return parser
+
+
+def main(argv=None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.subcommand == "run":
+        return _cmd_run(args)
+    if args.subcommand == "resume":
+        return _cmd_resume(args)
+    if args.subcommand == "show":
+        return _cmd_show(args)
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
