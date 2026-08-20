@@ -38,6 +38,9 @@ _FIXTURE_CONTYPE = 8
 _FIXTURE_CONAFFINITY = 2
 
 
+COMPILER_VERSION = "1.0"
+
+
 class SceneCompilerError(Exception):
     pass
 
