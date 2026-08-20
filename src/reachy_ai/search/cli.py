@@ -42,7 +42,7 @@ from reachy_ai.evaluation.ranking import explain_ranking
 from reachy_ai.motion.recipe import TrajectoryRecipe
 from reachy_ai.search.convergence import ConvergenceChecker
 from reachy_ai.search.report import compare_studies, generate_report
-from reachy_ai.search.runner import SearchConfig, SearchRunner
+from reachy_ai.search.runner import SearchConfig, SearchRunner, apply_best_to_recipe
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +213,84 @@ def _cmd_show(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
+# Subcommand: export
+# ---------------------------------------------------------------------------
+
+def _cmd_export(args: argparse.Namespace) -> int:
+    if not args.db:
+        print("ERROR: --db is required for export", file=sys.stderr)
+        return 1
+
+    store = _open_store(args.db)
+    with store as s:
+        prior = SearchRunner.load_prior_from_store(s, args.study_id)
+        if not prior:
+            print(
+                f"No prior search results found for study '{args.study_id}'.",
+                file=sys.stderr,
+            )
+            return 1
+
+        baseline_path: Optional[str] = getattr(args, "baseline", None)
+        if baseline_path:
+            baseline = TrajectoryRecipe.load(baseline_path)
+        else:
+            rows = s.list_trials(args.study_id, limit=1)
+            if not rows:
+                print("ERROR: no trials in store to recover baseline recipe.", file=sys.stderr)
+                return 1
+            baseline = TrajectoryRecipe.from_json(rows[0]["recipe_json"])
+
+    # Reconstruct result enough to call apply_best_to_recipe
+    from reachy_ai.evaluation.ranking import RankedCandidate, rank_candidates
+    from reachy_ai.search.runner import SearchResult
+
+    candidates = [
+        RankedCandidate(verdict=v, trial_id=v.trial_id or v.episode_id)
+        for _, v in prior
+    ]
+    ranked = rank_candidates(candidates)
+    point_map = {(v.trial_id or v.episode_id): pt for pt, v in prior}
+
+    best_candidate = ranked[0] if ranked else None
+    best_sp = point_map.get(best_candidate.trial_id) if best_candidate else None
+
+    result = SearchResult(
+        study_id=args.study_id,
+        best=best_candidate,
+        ranked=ranked,
+        kept=ranked,
+        pruned=[],
+        trials_run=0,
+        trials_skipped=len(prior),
+        best_search_point=best_sp,
+    )
+
+    recipe = apply_best_to_recipe(result, baseline)
+    if recipe is None:
+        print("No best recipe available (no valid candidates).", file=sys.stderr)
+        return 1
+
+    fmt = getattr(args, "format", "json")
+    text = recipe.to_json() if fmt == "json" else recipe.to_yaml()
+
+    output_path: Optional[str] = getattr(args, "output", None)
+    if output_path:
+        import pathlib
+        pathlib.Path(output_path).write_text(text)
+        print(f"Best recipe written to: {output_path}")
+        print(f"  recipe_id={recipe.recipe_id}")
+        if recipe.bounded_parameters:
+            for name, spec in recipe.bounded_parameters.items():
+                val = spec.get("value") if isinstance(spec, dict) else spec
+                print(f"  {name}={val}")
+    else:
+        print(text)
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Subcommand: report
 # ---------------------------------------------------------------------------
 
@@ -358,6 +436,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
     show_p = sub.add_parser("show", parents=[shared], help="Show ranking from store")
 
+    # export: reconstruct the best recipe from the store and write it
+    export_p = sub.add_parser(
+        "export",
+        help="Export the best-performing recipe from a study to a file or stdout",
+    )
+    export_p.add_argument("--study-id", required=True, dest="study_id")
+    export_p.add_argument("--db", default=None, help="ExperienceStore SQLite path")
+    export_p.add_argument(
+        "--baseline", default=None,
+        help="Baseline recipe path (recovered from store if omitted)",
+    )
+    export_p.add_argument(
+        "--output", default=None, metavar="PATH",
+        help="Write recipe to this file (print to stdout if omitted)",
+    )
+    export_p.add_argument(
+        "--format", choices=["json", "yaml"], default="json",
+        help="Output format (default: json)",
+    )
+
     # report and compare do not use the convergence flags from shared
     _report_shared = argparse.ArgumentParser(add_help=False)
     _report_shared.add_argument("--db", default=None, help="ExperienceStore SQLite path")
@@ -395,6 +493,8 @@ def main(argv=None) -> int:
         return _cmd_resume(args)
     if args.subcommand == "show":
         return _cmd_show(args)
+    if args.subcommand == "export":
+        return _cmd_export(args)
     if args.subcommand == "report":
         return _cmd_report(args)
     if args.subcommand == "compare":
