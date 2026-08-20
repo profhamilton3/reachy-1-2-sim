@@ -141,3 +141,32 @@ class EpisodeVerdict:
 
     def to_json(self, *, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "EpisodeVerdict":
+        violations = [
+            Violation(
+                kind=ViolationKind(v["kind"]),
+                description=v["description"],
+                step=v.get("step"),
+                severity=v.get("severity", "hard"),
+            )
+            for v in d.get("violations", [])
+        ]
+        return cls(
+            episode_id=d["episode_id"],
+            trial_id=d["trial_id"],
+            task_type=d["task_type"],
+            policy_version=d["policy_version"],
+            is_valid=bool(d["is_valid"]),
+            is_safe=bool(d["is_safe"]),
+            is_successful=bool(d["is_successful"]),
+            violations=violations,
+            metrics=d.get("metrics", {}),
+            ranking_scores=d.get("ranking_scores", {}),
+            explanation=d.get("explanation", ""),
+        )
+
+    @classmethod
+    def from_json(cls, s: str) -> "EpisodeVerdict":
+        return cls.from_dict(json.loads(s))
