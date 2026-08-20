@@ -1,0 +1,161 @@
+recipe_id: pick_place_baseline_v1
+recipe_version: 1
+task_type: pick_and_place
+arm: right
+source: baseline
+parent_recipe_id: ""
+
+# bounded_parameters: tunable scalars with units and search bounds.
+# Baseline values are the constants from the existing demo_pick_place.py and
+# the named poses in src/reachy_ai/motion/primitives.py.
+bounded_parameters:
+  # --- Object selection --------------------------------------------------------
+  object_id:
+    value: red_cube
+    options:
+      - red_cube
+      - blue_cylinder
+    unit: name
+    description: which tracked object to pick
+
+  # --- Phase step counts -------------------------------------------------------
+  home_steps:
+    value: 40
+    min: 15
+    max: 150
+    unit: steps
+  transit_steps:
+    value: 50
+    min: 20
+    max: 200
+    unit: steps
+    description: steps for the lateral abduction transit arc
+  hover_steps:
+    value: 40
+    min: 20
+    max: 150
+    unit: steps
+    description: steps for positioning above the object
+  descend_steps:
+    value: 25
+    min: 10
+    max: 100
+    unit: steps
+  grasp_steps:
+    value: 15
+    min: 5
+    max: 60
+    unit: steps
+    description: steps to close the gripper
+  settle_grasp_steps:
+    value: 20
+    min: 5
+    max: 80
+    unit: steps
+    description: hold steps after grasp to confirm grip
+  lift_steps:
+    value: 30
+    min: 15
+    max: 120
+    unit: steps
+  carry_steps:
+    value: 50
+    min: 20
+    max: 200
+    unit: steps
+    description: steps to swing the arm to the place position
+  place_steps:
+    value: 25
+    min: 10
+    max: 100
+    unit: steps
+  release_steps:
+    value: 15
+    min: 5
+    max: 60
+    unit: steps
+  retreat_steps:
+    value: 30
+    min: 15
+    max: 120
+    unit: steps
+
+joint_limits:
+  r_shoulder_pitch: 90.0
+  r_shoulder_roll: 90.0
+  r_arm_yaw: 90.0
+  r_elbow_pitch: 125.0
+  r_forearm_yaw: 100.0
+  r_wrist_pitch: 45.0
+  r_wrist_roll: 45.0
+
+velocity_limits: {}
+effort_limits: {}
+
+primitive_sequence:
+  # Arm to home position (all joints at 0, gripper open).
+  - primitive: home
+    parameters:
+      hold_steps: 40
+
+  # Lateral abduction arc — arm swings out to the side and up (jumping-jack
+  # transit) so the forearm clears the tabletop when moving over it.
+  - primitive: transit_clear
+    parameters:
+      hold_steps: 50
+
+  # Position gripper above the target object.
+  - primitive: hover
+    parameters:
+      hold_steps: 40
+      object_id: red_cube
+
+  # Lower the gripper to grasp height.
+  - primitive: descend
+    parameters:
+      hold_steps: 25
+      object_id: red_cube
+
+  # Close the gripper around the object.
+  - primitive: grasp
+    parameters:
+      hold_steps: 15
+
+  # Hold grip to let friction forces settle.
+  - primitive: settle_grasp
+    parameters:
+      hold_steps: 20
+
+  # Raise the gripper (with object) back to the hover height.
+  - primitive: lift
+    parameters:
+      hold_steps: 30
+      object_id: red_cube
+
+  # Carry the object to the place position via the transit arc.
+  - primitive: carry
+    parameters:
+      hold_steps: 50
+      object_id: red_cube
+
+  # Lower the object to place height.
+  - primitive: place
+    parameters:
+      hold_steps: 25
+      object_id: red_cube
+
+  # Open the gripper to release the object.
+  - primitive: release
+    parameters:
+      hold_steps: 15
+
+  # Raise and retract away from the placed object.
+  - primitive: retreat
+    parameters:
+      hold_steps: 30
+      object_id: red_cube
+
+  # Return arm to home position.
+  - primitive: home
+    parameters:
+      hold_steps: 40
