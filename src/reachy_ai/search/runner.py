@@ -200,8 +200,12 @@ class SearchRunner:
         Only SUCCEEDED and FAILED trials with both search_point and verdict_json
         in optimizer_metadata are included.  Trials recorded by other means
         (without optimizer_metadata populated by the runner) are silently skipped.
+
+        limit=None requests every trial: truncating here would drop prior points
+        from already_done and cause them to be re-evaluated on resume, defeating
+        the dedup guarantee this method exists to provide.
         """
-        rows = store.list_trials(study_id)
+        rows = store.list_trials(study_id, limit=None)
         results: PriorResults = []
         for row in rows:
             status = row.get("status", "")
@@ -306,11 +310,15 @@ def _store_complete(
         success=verdict.is_successful,
         metrics=verdict.metrics,
     )
+    # Status + verdict_json are written in one transaction so a crash can never
+    # leave a completed trial without its verdict (which load_prior_from_store
+    # would silently skip, forcing a re-evaluation on resume).
     try:
-        store.complete_trial(trial_id, result)
+        store.complete_trial(
+            trial_id, result, optimizer_metadata={"verdict_json": verdict.to_json()}
+        )
     except Exception:
         store.fail_trial(trial_id, "complete_trial failed")
-    store.patch_optimizer_metadata(trial_id, {"verdict_json": verdict.to_json()})
 
 
 def _store_fail(store: Any, trial_id: str, reason: str) -> None:
