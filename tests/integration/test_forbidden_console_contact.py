@@ -194,3 +194,139 @@ class TestForbiddenConsoleContact:
             "Controls are contacting the console fixture — check that the fixture "
             "conaffinity does not include the control contype bit."
         )
+
+
+# ── PR 8.4: Evaluator-level contact classification tests ──────────────────────
+
+class TestEvaluatorForbiddenContactClassification:
+    """Verify that evaluate_control_panel() classifies contact violations
+    directly from EpisodeResult without re-running physics."""
+
+    def _make_result(self, forbidden_total: int, status_value: str = "SUCCEEDED"):
+        """Build a synthetic EpisodeResult for evaluator testing."""
+        import sys, os
+        _SRC = str(pathlib.Path(__file__).resolve().parents[2] / "src")
+        if _SRC not in sys.path:
+            sys.path.insert(0, _SRC)
+        from reachy_ai.experience.models import EpisodeResult, EpisodeStatus
+        hard_v = []
+        if forbidden_total > 0:
+            hard_v.append(f"forbidden_robot_fixture_contact: {forbidden_total} occurrences")
+        return EpisodeResult(
+            episode_id="test_ep",
+            trial_id="test_tr",
+            status=EpisodeStatus(status_value),
+            hard_violations=hard_v,
+            contact_summary={"forbidden_total": forbidden_total, "total_contacts": forbidden_total},
+            metrics={"total_steps": 200.0, "saturated_joint_count": 0.0,
+                     "forbidden_contact_count": float(forbidden_total)},
+            final_control_states={},
+        )
+
+    def test_clean_episode_produces_no_contact_violation(self):
+        import sys, os
+        _SRC = str(pathlib.Path(__file__).resolve().parents[2] / "src")
+        if _SRC not in sys.path:
+            sys.path.insert(0, _SRC)
+        from reachy_ai.evaluation.contacts import check_forbidden_contacts
+        from reachy_ai.evaluation.base import EvaluationPolicy
+        result = self._make_result(0)
+        violations = check_forbidden_contacts(result, EvaluationPolicy())
+        assert violations == [], f"Clean episode should produce no violations, got: {violations}"
+
+    def test_forbidden_contact_produces_hard_violation(self):
+        import sys, os
+        _SRC = str(pathlib.Path(__file__).resolve().parents[2] / "src")
+        if _SRC not in sys.path:
+            sys.path.insert(0, _SRC)
+        from reachy_ai.evaluation.contacts import check_forbidden_contacts
+        from reachy_ai.evaluation.base import EvaluationPolicy, ViolationKind
+        result = self._make_result(3)
+        violations = check_forbidden_contacts(result, EvaluationPolicy())
+        assert len(violations) >= 1
+        assert all(v.kind == ViolationKind.FORBIDDEN_CONTACT for v in violations)
+        assert all(v.severity == "hard" for v in violations)
+
+    def test_evaluate_control_panel_is_unsafe_on_forbidden_contact(self):
+        import sys, os
+        _SRC = str(pathlib.Path(__file__).resolve().parents[2] / "src")
+        if _SRC not in sys.path:
+            sys.path.insert(0, _SRC)
+        from reachy_ai.evaluation.control_panel import evaluate_control_panel
+        from reachy_ai.evaluation.base import EvaluationPolicy
+        from reachy_ai.experience.models import ControlPanelTaskSpec
+        result = self._make_result(5)
+        spec = ControlPanelTaskSpec(
+            task_id="t0", task_type="operate_control", control_id="btn_red",
+            requested_final_state=True,
+        )
+        verdict = evaluate_control_panel(result, spec, EvaluationPolicy())
+        assert not verdict.is_safe
+        assert not verdict.is_successful
+
+    def test_evaluate_control_panel_safe_on_clean_episode(self):
+        import sys, os
+        _SRC = str(pathlib.Path(__file__).resolve().parents[2] / "src")
+        if _SRC not in sys.path:
+            sys.path.insert(0, _SRC)
+        from reachy_ai.evaluation.control_panel import evaluate_control_panel
+        from reachy_ai.evaluation.base import EvaluationPolicy
+        from reachy_ai.experience.models import ControlPanelTaskSpec, EpisodeResult, EpisodeStatus
+        result = EpisodeResult(
+            episode_id="clean",
+            trial_id="tr1",
+            status=EpisodeStatus.SUCCEEDED,
+            hard_violations=[],
+            contact_summary={"forbidden_total": 0},
+            metrics={"total_steps": 200.0, "saturated_joint_count": 0.0,
+                     "forbidden_contact_count": 0.0},
+            final_control_states={"btn_red": {"id": "btn_red", "on": True}},
+        )
+        spec = ControlPanelTaskSpec(
+            task_id="t0", task_type="operate_control", control_id="btn_red",
+            requested_final_state=True,
+        )
+        verdict = evaluate_control_panel(result, spec, EvaluationPolicy())
+        assert verdict.is_safe
+        assert verdict.is_successful
+
+    def test_collision_verdict_cannot_outrank_safe_verdict(self):
+        import sys, os
+        _SRC = str(pathlib.Path(__file__).resolve().parents[2] / "src")
+        if _SRC not in sys.path:
+            sys.path.insert(0, _SRC)
+        from reachy_ai.evaluation.control_panel import evaluate_control_panel
+        from reachy_ai.evaluation.base import EvaluationPolicy
+        from reachy_ai.evaluation.ranking import RankedCandidate, rank_candidates
+        from reachy_ai.experience.models import ControlPanelTaskSpec, EpisodeResult, EpisodeStatus
+        policy = EvaluationPolicy()
+        spec = ControlPanelTaskSpec(
+            task_id="t0", task_type="operate_control", control_id="btn_red",
+            requested_final_state=True,
+        )
+        # Unsafe: collision, but control toggled on (appears successful)
+        collision_result = self._make_result(2)
+        collision_result.final_control_states["btn_red"] = {"id": "btn_red", "on": True}
+        # Override metrics to make it look fast
+        collision_result.metrics["total_steps"] = 10.0
+        collision_verdict = evaluate_control_panel(collision_result, spec, policy)
+
+        # Safe: no contact, control toggled, but slower
+        safe_result = EpisodeResult(
+            episode_id="safe",
+            trial_id="tr_safe",
+            status=EpisodeStatus.SUCCEEDED,
+            hard_violations=[],
+            contact_summary={"forbidden_total": 0},
+            metrics={"total_steps": 5000.0, "saturated_joint_count": 0.0,
+                     "forbidden_contact_count": 0.0},
+            final_control_states={"btn_red": {"id": "btn_red", "on": True}},
+        )
+        safe_verdict = evaluate_control_panel(safe_result, spec, policy)
+
+        collision_cand = RankedCandidate(verdict=collision_verdict, trial_id="collision")
+        safe_cand = RankedCandidate(verdict=safe_verdict, trial_id="safe")
+        ranked = rank_candidates([collision_cand, safe_cand])
+        assert ranked[0].trial_id == "safe", (
+            "A fast collision trajectory must never outrank a slower safe one"
+        )
