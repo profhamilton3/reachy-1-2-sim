@@ -257,11 +257,22 @@ class ExperienceStore:
                 f"Cannot start trial '{trial_id}': not found or not in PENDING state"
             )
 
-    def complete_trial(self, trial_id: str, result: EpisodeResult) -> None:
+    def complete_trial(
+        self,
+        trial_id: str,
+        result: EpisodeResult,
+        *,
+        optimizer_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Transition RUNNING → SUCCEEDED or FAILED (determined by result.status).
 
         result.status must be SUCCEEDED or FAILED; use fail_trial() or
         abort_trial() for other terminal transitions.
+
+        If optimizer_metadata is given, it is merged into the trial's existing
+        optimizer_metadata_json within the same transaction as the status
+        change, so a completed trial can never be left missing its metadata by
+        a crash between two separate writes.
         """
         if result.status not in (EpisodeStatus.SUCCEEDED, EpisodeStatus.FAILED):
             raise ExperienceStoreError(
@@ -270,21 +281,47 @@ class ExperienceStore:
             )
         now = _now_iso()
         with self._conn:
-            n = self._conn.execute(
-                """
-                UPDATE trials
-                SET status=?, success=?, result_json=?, completed_at=?
-                WHERE trial_id=? AND status=?
-                """,
-                (
-                    result.status.value,
-                    1 if result.success else 0,
-                    result.to_json(),
-                    now,
-                    trial_id,
-                    EpisodeStatus.RUNNING.value,
-                ),
-            ).rowcount
+            if optimizer_metadata is not None:
+                row = self._conn.execute(
+                    "SELECT optimizer_metadata_json FROM trials "
+                    "WHERE trial_id=? AND status=?",
+                    (trial_id, EpisodeStatus.RUNNING.value),
+                ).fetchone()
+                merged = json.loads(row[0] or "{}") if row is not None else {}
+                merged.update(optimizer_metadata)
+                n = self._conn.execute(
+                    """
+                    UPDATE trials
+                    SET status=?, success=?, result_json=?, completed_at=?,
+                        optimizer_metadata_json=?
+                    WHERE trial_id=? AND status=?
+                    """,
+                    (
+                        result.status.value,
+                        1 if result.success else 0,
+                        result.to_json(),
+                        now,
+                        json.dumps(merged),
+                        trial_id,
+                        EpisodeStatus.RUNNING.value,
+                    ),
+                ).rowcount
+            else:
+                n = self._conn.execute(
+                    """
+                    UPDATE trials
+                    SET status=?, success=?, result_json=?, completed_at=?
+                    WHERE trial_id=? AND status=?
+                    """,
+                    (
+                        result.status.value,
+                        1 if result.success else 0,
+                        result.to_json(),
+                        now,
+                        trial_id,
+                        EpisodeStatus.RUNNING.value,
+                    ),
+                ).rowcount
         if n == 0:
             raise ExperienceStoreError(
                 f"Cannot complete trial '{trial_id}': not found or not in RUNNING state"
@@ -418,11 +455,18 @@ class ExperienceStore:
         row = cur.fetchone()
         return _row_dict(cur, row) if row else None
 
-    def list_trials(self, study_id: str, limit: int = 500) -> List[Dict[str, Any]]:
-        """Return all trials for a study, newest first."""
+    def list_trials(
+        self, study_id: str, limit: Optional[int] = 500
+    ) -> List[Dict[str, Any]]:
+        """Return trials for a study, newest first.
+
+        Pass ``limit=None`` for an unbounded result (SQLite ``LIMIT -1``).  This
+        is required by resume paths that must reconstruct every prior trial;
+        the default 500 cap is a safety limit for interactive listing only.
+        """
         cur = self._conn.execute(
             "SELECT * FROM trials WHERE study_id=? ORDER BY created_at DESC LIMIT ?",
-            (study_id, limit),
+            (study_id, -1 if limit is None else limit),
         )
         rows = cur.fetchall()
         return [_row_dict(cur, r) for r in rows]

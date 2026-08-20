@@ -509,3 +509,47 @@ class TestSearchRunnerStoreIntegration:
 
         restored_keys = {v.rank_key for _, v in prior}
         assert orig_keys == restored_keys
+
+    def test_load_prior_recovers_more_than_default_list_limit(self, tmp_path):
+        """Regression: load_prior_from_store must not truncate at list_trials'
+        default 500-row cap.  A study with >500 recorded trials would otherwise
+        drop prior points from already_done and re-evaluate them on resume."""
+        from reachy_ai.experience.store import ExperienceStore
+
+        # 24 x 24 = 576 grid points, safely above the 500 default limit.
+        recipe = _recipe(
+            bounded={
+                "a": {"value": 0.0, "min": 0.0, "max": 23.0, "step": 1.0},
+                "b": {"value": 0.0, "min": 0.0, "max": 23.0, "step": 1.0},
+            }
+        )
+        n_points = 24 * 24
+        config = SearchConfig(
+            study_id="big_study", baseline_recipe=recipe, budget=n_points
+        )
+        runner = SearchRunner(config)
+
+        db = str(tmp_path / "big.db")
+        with ExperienceStore.open(db) as store:
+            result = runner.run(_counting_evaluate, store=store)
+            assert result.trials_run == n_points
+
+            # Default limit truncates; None must not.
+            capped = store.list_trials("big_study")
+            assert len(capped) == 500
+            full = store.list_trials("big_study", limit=None)
+            assert len(full) == n_points
+
+            prior = SearchRunner.load_prior_from_store(store, "big_study")
+
+        assert len(prior) == n_points
+
+        # Resuming with the full prior re-samples nothing: the grid is exhausted.
+        resume_cfg = SearchConfig(
+            study_id="big_study", baseline_recipe=recipe, budget=10
+        )
+        resumed = SearchRunner(resume_cfg).run(
+            lambda r: _make_verdict(), prior_results=prior
+        )
+        assert resumed.trials_run == 0
+        assert resumed.trials_skipped == n_points

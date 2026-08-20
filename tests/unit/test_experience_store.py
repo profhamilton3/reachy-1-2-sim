@@ -120,6 +120,45 @@ class TestTrialLifecycle:
         assert row["status"] == EpisodeStatus.FAILED.value
         assert row["success"] == 0
 
+    def test_complete_with_optimizer_metadata_is_atomic(self, db_path):
+        import json
+        with ExperienceStore.open(db_path) as store:
+            tid = store.create_trial(
+                "study-1", _task(), _recipe_json(), _config(),
+                optimizer_metadata={"search_point": {"x": 0.5}},
+            )
+            store.start_trial(tid)
+            store.complete_trial(
+                tid, _succeeded_result(tid),
+                optimizer_metadata={"verdict_json": "{\"ok\": true}"},
+            )
+            row = store.get_trial(tid)
+        # Status change and metadata land together; the create-time key survives
+        # the merge alongside the completion-time key.
+        assert row["status"] == EpisodeStatus.SUCCEEDED.value
+        meta = json.loads(row["optimizer_metadata_json"])
+        assert meta["search_point"] == {"x": 0.5}
+        assert meta["verdict_json"] == "{\"ok\": true}"
+
+    def test_complete_metadata_not_written_on_bad_transition(self, db_path):
+        import json
+        with ExperienceStore.open(db_path) as store:
+            tid = store.create_trial(
+                "study-1", _task(), _recipe_json(), _config(),
+                optimizer_metadata={"search_point": {"x": 0.5}},
+            )
+            # Never started → not RUNNING → completion must be rejected and the
+            # metadata merge must not have leaked through.
+            with pytest.raises(ExperienceStoreError):
+                store.complete_trial(
+                    tid, _succeeded_result(tid),
+                    optimizer_metadata={"verdict_json": "leaked"},
+                )
+            row = store.get_trial(tid)
+        assert row["status"] == EpisodeStatus.PENDING.value
+        meta = json.loads(row["optimizer_metadata_json"])
+        assert "verdict_json" not in meta
+
     def test_fail_trial(self, db_path):
         with ExperienceStore.open(db_path) as store:
             tid = store.create_trial("study-1", _task(), _recipe_json(), _config())
