@@ -87,15 +87,18 @@ class Violation:
 class EpisodeVerdict:
     """Structured result of evaluating one episode against a task spec.
 
-    Tier ordering (highest first) for lexicographic ranking:
-      1. is_valid         — episode produced no NaN/INVALID state
-      2. is_safe          — no forbidden contacts or hard violations
-      3. is_successful    — task success criteria met
-      4. accuracy_score   — task-specific accuracy [0, 1]
-      5. clearance_score  — minimum robot-fixture clearance [0, 1]
-      6. effort_score     — inverse of saturation fraction [0, 1]
-      7. smoothness_score — jerk proxy (1.0 = no per-step data) [0, 1]
-      8. duration_score   — shorter = better [0, 1]
+    Active ranking tiers (highest first) for lexicographic ranking:
+      1. is_valid       — episode produced no NaN/INVALID state
+      2. is_safe        — no forbidden contacts or hard violations
+      3. is_successful  — task success criteria met
+      4. accuracy_score — task-specific accuracy [0, 1]
+      5. effort_score   — inverse of saturation fraction [0, 1]
+      6. duration_score — shorter = better [0, 1]
+
+    Not-yet-active (excluded from rank_key until per-step snapshot data is
+    available from EpisodeRunner):
+      clearance_score  — minimum robot-fixture clearance [0, 1]
+      smoothness_score — jerk proxy [0, 1]
     """
     episode_id: str
     trial_id: str
@@ -109,7 +112,13 @@ class EpisodeVerdict:
     ranking_scores: Dict[str, float]
     explanation: str
 
-    # Convenience tier tuple for sorting (higher = better, all tiers).
+    # Convenience tier tuple for sorting (higher = better).
+    # Active tiers (6):
+    #   1. is_valid  2. is_safe  3. is_successful
+    #   4. accuracy_score  5. effort_score  6. duration_score
+    # clearance_score and smoothness_score are not yet computable from
+    # EpisodeResult alone (per-step snapshot data required) and are excluded
+    # to avoid phantom tiers that always tie.
     @property
     def rank_key(self):
         s = self.ranking_scores
@@ -118,9 +127,7 @@ class EpisodeVerdict:
             float(self.is_safe),
             float(self.is_successful),
             s.get("accuracy_score", 0.0),
-            s.get("clearance_score", 0.0),
             s.get("effort_score", 0.0),
-            s.get("smoothness_score", 0.0),
             s.get("duration_score", 0.0),
         )
 

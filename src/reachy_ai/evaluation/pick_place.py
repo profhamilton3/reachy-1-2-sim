@@ -186,13 +186,14 @@ def evaluate_pick_place(
 
     ranking_scores: Dict[str, float] = {
         "accuracy_score": accuracy if position_ok else 0.0,
-        "clearance_score": 1.0 - min(1.0, contact_metrics["forbidden_contact_count"]),
         "effort_score": max(
             0.0,
             1.0 - effort_metrics["saturated_joint_count"] / 21.0
         ),
-        "smoothness_score": 1.0,  # no per-step snapshot data in this release
         "duration_score": 1.0 / (1.0 + total_steps / 1000.0),
+        # clearance_score and smoothness_score require per-step snapshot data
+        # not available in EpisodeResult; omitted until EpisodeRunner exposes
+        # snapshots (tracked in issue #17).
     }
 
     lines.append(

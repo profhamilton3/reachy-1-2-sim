@@ -160,13 +160,14 @@ def evaluate_control_panel(
     total_steps = max(1.0, effort_metrics["total_steps"])
     ranking_scores: Dict[str, float] = {
         "accuracy_score": float(intended_toggled),
-        "clearance_score": 1.0 - min(1.0, contact_metrics["forbidden_contact_count"]),
         "effort_score": max(
             0.0,
             1.0 - (effort_metrics["saturated_joint_count"] / max(1.0, 21.0))
         ),
-        "smoothness_score": 1.0,  # per-step jerk not available without snapshots
         "duration_score": 1.0 / (1.0 + total_steps / 1000.0),
+        # clearance_score and smoothness_score require per-step snapshot data
+        # not available in EpisodeResult; omitted until EpisodeRunner exposes
+        # snapshots (tracked in issue #17).
     }
 
     lines.append(

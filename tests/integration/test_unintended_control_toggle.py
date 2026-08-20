@@ -291,9 +291,11 @@ class TestMetricsPopulated:
     def test_ranking_scores_contain_expected_keys(self):
         result = _make_result({"btn_red": {"id": "btn_red", "on": True}})
         verdict = evaluate_control_panel(result, _spec(), _POLICY)
-        for key in ("accuracy_score", "clearance_score", "effort_score",
-                    "smoothness_score", "duration_score"):
+        for key in ("accuracy_score", "effort_score", "duration_score"):
             assert key in verdict.ranking_scores, f"Missing ranking score: {key}"
+        # clearance_score and smoothness_score require per-step snapshots (issue #17)
+        assert "clearance_score" not in verdict.ranking_scores
+        assert "smoothness_score" not in verdict.ranking_scores
 
     def test_verdict_serialises_to_json(self):
         import json

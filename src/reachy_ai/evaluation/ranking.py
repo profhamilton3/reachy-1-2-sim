@@ -1,17 +1,18 @@
 """R12-804: Lexicographic candidate ranking.
 
-Tier order (highest first):
-  1. is_valid         — NaN/INVALID episodes are strictly worse than any valid one
-  2. is_safe          — any forbidden contact or unintended toggle beats every unsafe
-  3. is_successful    — task success beats failure
-  4. accuracy_score   — task-specific accuracy [0, 1]
-  5. clearance_score  — min robot-fixture clearance proxy [0, 1]
-  6. effort_score     — inverse saturation fraction [0, 1]
-  7. smoothness_score — jerk proxy [0, 1]
-  8. duration_score   — shorter episode = better [0, 1]
+Active tier order (highest first):
+  1. is_valid       — NaN/INVALID episodes are strictly worse than any valid one
+  2. is_safe        — any forbidden contact or unintended toggle beats every unsafe
+  3. is_successful  — task success beats failure
+  4. accuracy_score — task-specific accuracy [0, 1]
+  5. effort_score   — inverse saturation fraction [0, 1]
+  6. duration_score — shorter episode = better [0, 1]
+
+clearance_score and smoothness_score are excluded from rank_key because they
+require per-step snapshot data not yet available from EpisodeResult alone.
 
 A faster collision can never outrank a slower safe path because safety (tier 2)
-is always evaluated before speed (tier 8).
+is always evaluated before speed (tier 6).
 """
 
 from __future__ import annotations

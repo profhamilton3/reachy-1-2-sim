@@ -75,9 +75,7 @@ def _dry_run_evaluate(recipe: TrajectoryRecipe, seed: int = 0) -> EpisodeVerdict
         metrics={"dry_run": 1.0, "avg_param_score": avg},
         ranking_scores={
             "accuracy_score": avg,
-            "clearance_score": avg,
             "effort_score": 1.0,
-            "smoothness_score": 1.0,
             "duration_score": avg,
         },
         explanation=f"[dry-run] recipe={recipe.recipe_id} avg_score={avg:.3f}",

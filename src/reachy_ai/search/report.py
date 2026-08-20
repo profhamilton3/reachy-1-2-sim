@@ -143,7 +143,7 @@ class ComparisonResult:
         if self.rank_delta is not None:
             tier_names = [
                 "is_valid", "is_safe", "is_successful",
-                "accuracy", "clearance", "effort", "smoothness", "duration",
+                "accuracy", "effort", "duration",
             ]
             delta_parts = [
                 f"{name}={delta:+.3f}"

@@ -5,9 +5,11 @@ Verifies that the tier ordering is correct:
   2. safe > unsafe
   3. successful > failed
   4. accurate > inaccurate
-  5. high clearance > low clearance
-  6. low saturation > high saturation
-  7. shorter > longer
+  5. low saturation > high saturation
+  6. shorter > longer
+
+clearance_score and smoothness_score are not active ranking tiers (excluded
+until per-step snapshot data is available from EpisodeResult).
 
 Critical invariant: a faster collision path can NEVER outrank a safe path
 regardless of speed tier advantage.
@@ -166,7 +168,7 @@ class TestTier3Success:
 
 
 # ---------------------------------------------------------------------------
-# Tier 4–8: within safe+successful, fine-grained ordering
+# Tier 4–6: within safe+successful, fine-grained ordering
 # ---------------------------------------------------------------------------
 
 class TestFineTiers:
@@ -176,21 +178,24 @@ class TestFineTiers:
         ranked = rank_candidates([lo, hi])
         assert ranked[0].trial_id == "hi_acc"
 
-    def test_higher_clearance_wins_when_accuracy_equal(self):
-        hi = _candidate(_verdict(accuracy=1.0, clearance=0.9), "hi_cl")
-        lo = _candidate(_verdict(accuracy=1.0, clearance=0.1), "lo_cl")
-        ranked = rank_candidates([lo, hi])
-        assert ranked[0].trial_id == "hi_cl"
+    def test_clearance_score_does_not_affect_ranking(self):
+        """clearance_score is excluded from rank_key until per-step data is available."""
+        hi_cl = _candidate(_verdict(accuracy=1.0, clearance=0.9), "hi_cl")
+        lo_cl = _candidate(_verdict(accuracy=1.0, clearance=0.1), "lo_cl")
+        ranked = rank_candidates([lo_cl, hi_cl])
+        # Both have equal rank_key (clearance not a tier) — stable sort preserves input order
+        assert {c.trial_id for c in ranked} == {"hi_cl", "lo_cl"}
+        assert ranked[0].rank_key == ranked[1].rank_key
 
-    def test_lower_saturation_wins_when_clearance_equal(self):
-        lo_sat = _candidate(_verdict(clearance=1.0, effort=0.9), "lo_sat")
-        hi_sat = _candidate(_verdict(clearance=1.0, effort=0.1), "hi_sat")
+    def test_lower_saturation_wins_when_accuracy_equal(self):
+        lo_sat = _candidate(_verdict(accuracy=1.0, effort=0.9), "lo_sat")
+        hi_sat = _candidate(_verdict(accuracy=1.0, effort=0.1), "hi_sat")
         ranked = rank_candidates([hi_sat, lo_sat])
         assert ranked[0].trial_id == "lo_sat"
 
     def test_shorter_duration_wins_at_lowest_tier(self):
-        fast = _candidate(_verdict(effort=1.0, smoothness=1.0, duration=0.9), "fast")
-        slow = _candidate(_verdict(effort=1.0, smoothness=1.0, duration=0.1), "slow")
+        fast = _candidate(_verdict(effort=1.0, duration=0.9), "fast")
+        slow = _candidate(_verdict(effort=1.0, duration=0.1), "slow")
         ranked = rank_candidates([slow, fast])
         assert ranked[0].trial_id == "fast"
 

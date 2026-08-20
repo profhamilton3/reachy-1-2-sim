@@ -497,10 +497,7 @@ def _aggregate_verdicts(
     is_safe = all(v.is_safe for v in verdicts)
     is_successful = all(v.is_successful for v in verdicts)
 
-    score_keys = (
-        "accuracy_score", "clearance_score", "effort_score",
-        "smoothness_score", "duration_score",
-    )
+    score_keys = ("accuracy_score", "effort_score", "duration_score")
     ranking_scores: Dict[str, float] = {}
     score_stds: Dict[str, float] = {}
     for key in score_keys:
