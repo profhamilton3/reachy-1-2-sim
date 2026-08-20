@@ -73,6 +73,7 @@ class SearchResult:
     trials_skipped: int             # prior results reused without re-evaluation
     converged: bool = False         # True if convergence checker fired early
     trials_since_improvement: int = 0  # consecutive trailing non-improving trials
+    best_search_point: Optional[SearchPoint] = None  # search point of the best candidate
 
 
 class SearchRunner:
@@ -128,6 +129,11 @@ class SearchRunner:
             RankedCandidate(verdict=v, trial_id=v.trial_id or v.episode_id)
             for _, v in prior
         ]
+        # Map trial_id → search_point for both prior and new trials so
+        # apply_best_to_recipe() can materialise the winning parameters.
+        trial_point_map: Dict[str, SearchPoint] = {
+            (v.trial_id or v.episode_id): pt for pt, v in prior
+        }
 
         # When sampler="adaptive" and prior is available, build AdaptiveSampler
         # from the ranked prior so exploitation targets the best-known points.
@@ -185,6 +191,7 @@ class SearchRunner:
             already_done.append(pt)
             trial_id = verdict.trial_id or verdict.episode_id or store_trial_id or uuid.uuid4().hex
             candidates.append(RankedCandidate(verdict=verdict, trial_id=trial_id))
+            trial_point_map[trial_id] = pt
             trials_run += 1
 
             _maybe_update_convergence(convergence_checker, candidates)
@@ -194,9 +201,12 @@ class SearchRunner:
         ranked = rank_candidates(candidates)
         pruning_result = self._pruner.prune(ranked)
 
+        best_candidate = pruning_result.kept[0] if pruning_result.kept else None
+        best_sp = trial_point_map.get(best_candidate.trial_id) if best_candidate else None
+
         return SearchResult(
             study_id=self._config.study_id,
-            best=pruning_result.kept[0] if pruning_result.kept else None,
+            best=best_candidate,
             ranked=ranked,
             kept=pruning_result.kept,
             pruned=pruning_result.pruned,
@@ -207,6 +217,7 @@ class SearchRunner:
                 convergence_checker.trials_since_improvement()
                 if convergence_checker else 0
             ),
+            best_search_point=best_sp,
         )
 
     # ------------------------------------------------------------------
@@ -377,6 +388,33 @@ def _store_fail(store: Any, trial_id: str, reason: str) -> None:
         store.fail_trial(trial_id, reason)
     except Exception:
         pass
+
+
+def apply_best_to_recipe(
+    result: "SearchResult",
+    baseline: TrajectoryRecipe,
+) -> Optional[TrajectoryRecipe]:
+    """Return a new recipe with bounded_parameters updated from result.best_search_point.
+
+    Returns None if result has no best candidate or no search_point recorded
+    (e.g. all trials failed before any candidate was accepted).
+
+    The returned recipe has:
+    - recipe_id = "<baseline_id>_best_<trial_id[:8]>"
+    - source = "search_best"
+    - parent_recipe_id = baseline.recipe_id
+
+    All other fields (primitive_sequence, limits, arm, etc.) are copied from
+    the baseline unchanged.
+    """
+    if result.best is None or result.best_search_point is None:
+        return None
+    applied = _apply_point(baseline, result.best_search_point)
+    return dataclasses.replace(
+        applied,
+        recipe_id=f"{baseline.recipe_id}_best_{result.best.trial_id[:8]}",
+        source="search_best",
+    )
 
 
 def _maybe_update_convergence(
