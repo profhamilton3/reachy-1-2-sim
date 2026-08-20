@@ -66,6 +66,12 @@ class SearchConfig:
     # Multi-seed evaluation (fixes C3: single deterministic seed)
     eval_seeds: List[int] = dataclasses.field(default_factory=lambda: [0])
     eval_aggregation: str = "mean"  # "mean" | "pessimistic" (mean - std)
+    # Finalist re-evaluation (fixes C4: winner's curse / selection bias)
+    # After the main search loop, the top finalist_k kept candidates are
+    # re-evaluated on held-out finalist_seeds and re-ranked; the winner of
+    # that stage becomes `best`.  Empty list = stage disabled (default).
+    finalist_k: int = 3
+    finalist_seeds: List[int] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -81,6 +87,12 @@ class SearchResult:
     converged: bool = False         # True if convergence checker fired early
     trials_since_improvement: int = 0  # consecutive trailing non-improving trials
     best_search_point: Optional[SearchPoint] = None  # search point of the best candidate
+    # Finalist re-evaluation results (empty when finalist stage was skipped).
+    # Each entry is (trial_id, re-evaluation verdict) for one finalist candidate.
+    # `best` reflects the finalist winner when this list is non-empty.
+    finalist_verdicts: List[Tuple[str, EpisodeVerdict]] = dataclasses.field(
+        default_factory=list
+    )
 
 
 class SearchRunner:
@@ -246,6 +258,40 @@ class SearchRunner:
         best_candidate = pruning_result.kept[0] if pruning_result.kept else None
         best_sp = trial_point_map.get(best_candidate.trial_id) if best_candidate else None
 
+        # ---- Finalist re-evaluation (winner's-curse fix, issue #19) ----
+        # Re-evaluate the top-k kept candidates on held-out finalist_seeds.
+        # This breaks the selection bias that arises when a single lucky
+        # search-phase evaluation inflates a candidate's apparent quality.
+        # finalist_seeds must be disjoint from eval_seeds for a meaningful
+        # held-out guarantee.  Stage is skipped when finalist_seeds is empty.
+        finalist_verdicts: List[Tuple[str, EpisodeVerdict]] = []
+        if self._config.finalist_seeds:
+            pool = pruning_result.kept or ranked
+            finalists = pool[:self._config.finalist_k]
+            finalist_candidates: List[RankedCandidate] = []
+            for rc in finalists:
+                sp = trial_point_map.get(rc.trial_id)
+                if sp is None:
+                    continue
+                f_recipe = _apply_point(self._config.baseline_recipe, sp)
+                try:
+                    fv = _evaluate_multi_seed(
+                        evaluate_fn, f_recipe,
+                        self._config.finalist_seeds,
+                        self._config.eval_aggregation,
+                    )
+                except Exception:
+                    continue
+                fv.trial_id = rc.trial_id  # link back to the search-phase trial
+                finalist_verdicts.append((rc.trial_id, fv))
+                finalist_candidates.append(
+                    RankedCandidate(verdict=fv, trial_id=rc.trial_id)
+                )
+            if finalist_candidates:
+                finalist_ranked = rank_candidates(finalist_candidates)
+                best_candidate = finalist_ranked[0]
+                best_sp = trial_point_map.get(best_candidate.trial_id)
+
         return SearchResult(
             study_id=self._config.study_id,
             best=best_candidate,
@@ -260,6 +306,7 @@ class SearchRunner:
                 if convergence_checker else 0
             ),
             best_search_point=best_sp,
+            finalist_verdicts=finalist_verdicts,
         )
 
     # ------------------------------------------------------------------

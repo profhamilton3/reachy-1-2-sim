@@ -35,7 +35,7 @@ import argparse
 import json
 import sys
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from reachy_ai.evaluation.base import EpisodeVerdict
 from reachy_ai.evaluation.ranking import explain_ranking
@@ -98,6 +98,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         max_kept=args.max_kept,
         adaptive_top_k=args.adaptive_top_k,
         adaptive_exploration_weight=args.adaptive_exploration_weight,
+        finalist_k=args.finalist_k,
+        finalist_seeds=_parse_seed_list(getattr(args, "finalist_seeds", "")),
     )
     runner = SearchRunner(config)
 
@@ -330,6 +332,16 @@ def _cmd_compare(args: argparse.Namespace) -> int:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _parse_seed_list(raw: str) -> List[int]:
+    """Parse a comma-separated seed string into a list of ints (empty → [])."""
+    if not raw:
+        return []
+    try:
+        return [int(s.strip()) for s in raw.split(",") if s.strip()]
+    except ValueError:
+        return []
+
+
 def _make_checker(args: argparse.Namespace) -> Optional[ConvergenceChecker]:
     """Build a ConvergenceChecker from CLI args, or None if not requested."""
     window = getattr(args, "convergence_window", None)
@@ -348,18 +360,32 @@ def _print_result(result) -> None:
     conv_tag = ""
     if result.converged:
         conv_tag = f"  converged=True(+{result.trials_since_improvement})"
+    finalist_tag = (
+        f"  finalists={len(result.finalist_verdicts)}"
+        if result.finalist_verdicts
+        else ""
+    )
     print(
         f"study={result.study_id}  "
         f"trials_run={result.trials_run}  "
         f"skipped={result.trials_skipped}  "
         f"kept={len(result.kept)}  "
         f"pruned={len(result.pruned)}"
-        f"{conv_tag}"
+        f"{conv_tag}{finalist_tag}"
     )
+    if result.finalist_verdicts:
+        print(f"Finalist stage ({len(result.finalist_verdicts)} re-evaluated):")
+        for tid, fv in result.finalist_verdicts:
+            print(
+                f"  finalist trial={tid[:8]}  "
+                f"valid={fv.is_valid}  safe={fv.is_safe}  ok={fv.is_successful}  "
+                f"scores={json.dumps(fv.ranking_scores, separators=(',', ':'))}"
+            )
     if result.best:
         v = result.best.verdict
+        source = "finalist" if result.finalist_verdicts else "search"
         print(
-            f"Best: trial={result.best.trial_id[:8]}  "
+            f"Best ({source}): trial={result.best.trial_id[:8]}  "
             f"valid={v.is_valid}  safe={v.is_safe}  success={v.is_successful}"
         )
         print(f"  Ranking scores: {json.dumps(v.ranking_scores, separators=(',', ':'))}")
@@ -424,6 +450,24 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="min_trials",
         metavar="M",
         help="Minimum trials before convergence is checked (default: 5).",
+    )
+    shared.add_argument(
+        "--finalist-seeds",
+        default="",
+        dest="finalist_seeds",
+        metavar="S1,S2,...",
+        help=(
+            "Comma-separated held-out seeds for finalist re-evaluation (issue #19). "
+            "Omit or leave empty to skip the finalist stage (default: disabled)."
+        ),
+    )
+    shared.add_argument(
+        "--finalist-k",
+        type=int,
+        default=3,
+        dest="finalist_k",
+        metavar="K",
+        help="Number of top-kept candidates to re-evaluate as finalists (default: 3).",
     )
 
     run_p = sub.add_parser("run", parents=[shared], help="Start a new search run")

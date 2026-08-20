@@ -253,9 +253,15 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
     log.info("   SIDE_HIGH pad=(%.2f, %.2f, %.2f)", *side_pad)
     seed = side_seed
 
-    # Tilt the head/cameras down toward the tabletop workspace.
-    ws = scene.get(scene.manipulable_ids()[0]).center
-    P.look_at(robot, (ws[0], (ws[1] - 0.05), scene.table_surface_z), duration=1.0)
+    # Tilt the head/cameras down to the centroid of all manipulable objects on
+    # the table.  Using all object centres (not just the first one) ensures
+    # the gaze lands near the middle of the workspace cluster.
+    ids = scene.manipulable_ids()
+    gaze_x = sum(scene.get(oid).center[0] for oid in ids) / len(ids)
+    gaze_y = sum(scene.get(oid).center[1] for oid in ids) / len(ids)
+    log.info("── Tilting head to tabletop workspace (%.2f, %.2f, %.2f)",
+             gaze_x, gaze_y, scene.table_surface_z)
+    P.look_at(robot, (gaze_x, gaze_y, scene.table_surface_z), duration=1.5)
 
     for object_id in scene.manipulable_ids():
         log.info("=" * 56)

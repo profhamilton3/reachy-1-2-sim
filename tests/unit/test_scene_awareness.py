@@ -93,7 +93,9 @@ class TestCollisionAwareness:
         assert scene.check_point((0.42, -0.10, 0.70), surface_margin=0.005) is not None
 
     def test_validate_path_reports_all(self, scene):
-        path = [(0.0, -0.19, 0.47), (0.2, -0.15, 0.60), (0.42, -0.10, 0.86)]
+        # Two points inside the table XY footprint but below the surface (z<0.74),
+        # one point safely above — expects exactly 2 violations.
+        path = [(0.42, -0.19, 0.47), (0.50, -0.15, 0.60), (0.42, -0.10, 0.86)]
         violations = scene.validate_path(path)
         assert len(violations) == 2
         assert all(isinstance(v, CollisionViolation) for v in violations)

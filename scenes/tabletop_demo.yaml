@@ -55,7 +55,7 @@ objects:
       kind: box
       size: [0.90, 0.65, 0.04]
     pose:
-      position: [0.45, 0.0, 0.72]
+      position: [0.70, 0.0, 0.72]
       orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
     material:
       rgba: [0.42, 0.25, 0.12, 1.0]
