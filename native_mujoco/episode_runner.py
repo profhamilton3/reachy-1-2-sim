@@ -129,14 +129,31 @@ class EpisodeRunner:
         snapshots_collected: List[EvaluationSnapshot] = []
         forbidden_total = 0
         all_violations: List[str] = []
+        peak_object_z: dict = {}      # object_id → max z seen across all steps
+        peak_grip_force_n: float = 0.0
+        grasp_step_count: int = 0
 
         def _collect(snap: EvaluationSnapshot) -> None:
-            nonlocal forbidden_total
+            nonlocal forbidden_total, peak_grip_force_n, grasp_step_count
             forbidden_total += snap.forbidden_contact_count
             if snap.joint_limit_violations:
                 for v in snap.joint_limit_violations:
                     if v not in all_violations:
                         all_violations.append(v)
+            for obj in snap.objects:
+                oid = obj.get("object_id") or obj.get("id") or ""
+                xyz = obj.get("pos_xyz")
+                if oid and xyz and len(xyz) >= 3:
+                    z = float(xyz[2])
+                    if z > peak_object_z.get(oid, -1e9):
+                        peak_object_z[oid] = z
+            for g in snap.grippers:
+                if g.get("side") == "r":
+                    f = float(g.get("grip_force_n", 0.0))
+                    if f > peak_grip_force_n:
+                        peak_grip_force_n = f
+                    if g.get("grasping", False):
+                        grasp_step_count += 1
             if on_snapshot:
                 on_snapshot(snap)
 
@@ -198,12 +215,26 @@ class EpisodeRunner:
         for v in all_violations:
             hard_violations.append(f"joint_limit_violation: {v}")
 
+        # Extract final right-gripper state for release verification
+        final_grip_force_n = 0.0
+        final_grasping = False
+        for g in final_snap.grippers:
+            if g.get("side") == "r":
+                final_grip_force_n = float(g.get("grip_force_n", 0.0))
+                final_grasping = bool(g.get("grasping", False))
+
         metrics = {
             "total_steps": float(end_step - start_step),
             "forbidden_contact_count": float(forbidden_total),
             "sim_duration_s": float(self.core.data.time),
             "wall_duration_s": float(wall_duration),
+            "peak_grip_force_n": peak_grip_force_n,
+            "grasp_step_count": float(grasp_step_count),
+            "final_grip_force_n": final_grip_force_n,
+            "final_grasping": float(final_grasping),
         }
+        for oid, z in peak_object_z.items():
+            metrics[f"object_{oid}_peak_z_m"] = z
 
         # Saturation fraction across all steps and joints
         saturated_names = set(final_snap.saturated_joints)
@@ -230,7 +261,7 @@ class EpisodeRunner:
                 s["id"]: s for s in final_snap.interactive
             },
             final_object_states={
-                o.get("id", str(i)): o
+                o.get("object_id", o.get("id", str(i))): o
                 for i, o in enumerate(final_snap.objects)
             },
             warnings=[],

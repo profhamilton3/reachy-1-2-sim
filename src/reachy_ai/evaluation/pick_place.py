@@ -7,8 +7,11 @@ Success requires (all verified from EpisodeResult):
   2. Final object state is within target_pose_tolerance of target_pose.
   3. Gripper is open at the end (object released).
   4. Object velocity within settle threshold.
-  (5. Lift height, carry retention — not verifiable from EpisodeResult alone;
-      noted in explanation; per-step snapshots needed for full validation.)
+  5. Right gripper pinched the target object at least once during the episode.
+  6. Object reached required_lift_height (m) above table during transit.
+
+Checks 5 and 6 require per-step metrics written by EpisodeRunner (issue #18).
+When those metrics are absent (kinematic backend), the checks default to True.
 """
 
 from __future__ import annotations
@@ -29,7 +32,8 @@ from reachy_ai.evaluation.contacts import (
     compute_effort_metrics,
 )
 
-_GRIPPER_OPEN_THRESHOLD_RAD = -0.4  # r_gripper < this value → open
+_GRIPPER_OPEN_THRESHOLD_RAD = -0.4     # r_gripper < this value → open
+_GRIPPER_OPEN_FORCE_THRESHOLD_N = 0.1  # grip_force_n ≤ this → gripper open
 
 
 def _euclidean_distance(a: Sequence[float], b: Sequence[float]) -> float:
@@ -38,7 +42,7 @@ def _euclidean_distance(a: Sequence[float], b: Sequence[float]) -> float:
 
 def _object_position(obj_state: Dict) -> Optional[List[float]]:
     """Extract [x, y, z] from an object state dict produced by ObjectTracker."""
-    for key in ("pos", "position", "xyz"):
+    for key in ("pos", "position", "xyz", "pos_xyz"):
         val = obj_state.get(key)
         if val is not None and len(val) >= 3:
             return list(val[:3])
@@ -150,13 +154,82 @@ def evaluate_pick_place(
                 severity="soft",
             ))
 
-    # Gripper state — from final_control_states or final_object_states
-    gripper_open = True  # optimistic if not checkable
+    # ------------------------------------------------------------------ #
+    # 3b. Gripper open at end (object released)                           #
+    # ------------------------------------------------------------------ #
+    _final_force = result.metrics.get("final_grip_force_n")
+    if _final_force is None:
+        gripper_open = True  # kinematic backend — not checkable
+    else:
+        gripper_open = float(_final_force) <= _GRIPPER_OPEN_FORCE_THRESHOLD_N
+        if not gripper_open:
+            msg = (
+                f"Gripper not open at episode end "
+                f"(grip_force={_final_force:.3f} N > "
+                f"{_GRIPPER_OPEN_FORCE_THRESHOLD_N:.3f} N)."
+            )
+            violations.append(Violation(
+                kind=ViolationKind.TASK_FAILURE,
+                description=msg,
+                severity="soft",
+            ))
+            lines.append(f"TASK FAIL: {msg}")
 
-    is_successful = is_valid and is_safe and position_ok and velocity_ok
+    # ------------------------------------------------------------------ #
+    # 3c. Verified grasp (right gripper pinched the object)               #
+    # ------------------------------------------------------------------ #
+    _grasp_steps = result.metrics.get("grasp_step_count")
+    if _grasp_steps is None:
+        grasped = True  # kinematic backend — not checkable
+    else:
+        grasped = float(_grasp_steps) > 0
+        if not grasped:
+            msg = (
+                f"No verified grasp: right gripper never pinched "
+                f"'{task_spec.object_id}' during the episode."
+            )
+            violations.append(Violation(
+                kind=ViolationKind.TASK_FAILURE,
+                description=msg,
+                severity="soft",
+            ))
+            lines.append(f"TASK FAIL: {msg}")
+
+    # ------------------------------------------------------------------ #
+    # 3d. Lift height (object reached required height during transit)      #
+    # ------------------------------------------------------------------ #
+    _peak_z = result.metrics.get(f"object_{task_spec.object_id}_peak_z_m")
+    if _peak_z is None:
+        lift_ok = True  # kinematic backend — not checkable
+        lines.append(
+            f"NOTE: peak_z not tracked for '{task_spec.object_id}' "
+            "(lift height cannot be verified)."
+        )
+    elif task_spec.required_lift_height > 0.0:
+        lift_ok = float(_peak_z) >= task_spec.required_lift_height
+        if not lift_ok:
+            msg = (
+                f"Object '{task_spec.object_id}' peak height {_peak_z:.4f} m "
+                f"below required lift {task_spec.required_lift_height:.4f} m."
+            )
+            violations.append(Violation(
+                kind=ViolationKind.TASK_FAILURE,
+                description=msg,
+                severity="soft",
+            ))
+            lines.append(f"TASK FAIL: {msg}")
+    else:
+        lift_ok = True  # required_lift_height == 0 means no lift required
+
+    is_successful = (
+        is_valid and is_safe
+        and position_ok and velocity_ok
+        and gripper_open and grasped and lift_ok
+    )
     if is_successful:
         lines.append(
-            f"SUCCESS: Object at target (error={position_error:.4f} m)."
+            f"SUCCESS: Object at target (error={position_error:.4f} m), "
+            f"grasped={grasped}, lift_ok={lift_ok}, gripper_open={gripper_open}."
         )
     elif not position_ok and obj_pos and target_pos:
         pass  # already logged above
@@ -173,6 +246,9 @@ def evaluate_pick_place(
         "object_velocity_m_s": float(obj_vel) if obj_vel is not None else -1.0,
         "hard_violation_count": float(len([v for v in violations if v.severity == "hard"])),
         "soft_violation_count": float(len([v for v in violations if v.severity == "soft"])),
+        "peak_object_z_m": float(_peak_z) if _peak_z is not None else -1.0,
+        "grasp_step_count": float(_grasp_steps) if _grasp_steps is not None else -1.0,
+        "gripper_open_at_end": float(gripper_open),
     }
 
     # ------------------------------------------------------------------ #
