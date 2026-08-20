@@ -39,7 +39,7 @@ from reachy_ai.search.convergence import ConvergenceChecker
 from reachy_ai.search.pruning import (
     BudgetPruner, CompositePruner, DominancePruner, NoPruner, PruningStrategy,
 )
-from reachy_ai.search.samplers import GridSampler, RandomSampler, Sampler
+from reachy_ai.search.samplers import AdaptiveSampler, GridSampler, RandomSampler, Sampler
 from reachy_ai.search.space import SearchPoint, SearchSpace
 
 EvaluateFn = Callable[[TrajectoryRecipe], EpisodeVerdict]
@@ -52,10 +52,13 @@ class SearchConfig:
     study_id: str
     baseline_recipe: TrajectoryRecipe
     budget: int = 20
-    sampler: str = "grid"     # "grid" | "random"
+    sampler: str = "grid"     # "grid" | "random" | "adaptive"
     random_seed: int = 0
     pruner: str = "dominance" # "dominance" | "budget" | "none"
     max_kept: int = 10        # used by "budget" pruner
+    # Adaptive sampler settings (ignored for grid/random)
+    adaptive_top_k: int = 3
+    adaptive_exploration_weight: float = 0.3
 
 
 @dataclasses.dataclass
@@ -126,11 +129,32 @@ class SearchRunner:
             for _, v in prior
         ]
 
+        # When sampler="adaptive" and prior is available, build AdaptiveSampler
+        # from the ranked prior so exploitation targets the best-known points.
+        # Falls back to the pre-built sampler (RandomSampler) when prior is empty.
+        sampler: Sampler = self._sampler
+        if self._config.sampler == "adaptive" and prior:
+            ranked_prior = rank_candidates(candidates)
+            point_map = {
+                (v.trial_id or v.episode_id): pt for pt, v in prior
+            }
+            top_points = [
+                point_map[rc.trial_id]
+                for rc in ranked_prior
+                if rc.trial_id in point_map
+            ]
+            sampler = AdaptiveSampler(
+                top_points,
+                top_k=self._config.adaptive_top_k,
+                exploration_weight=self._config.adaptive_exploration_weight,
+                seed=self._config.random_seed,
+            )
+
         trials_run = 0
         budget = self._config.budget
 
         while trials_run < budget:
-            points = self._sampler.suggest(self._space, already_done, n=1)
+            points = sampler.suggest(self._space, already_done, n=1)
             if not points:
                 break  # grid fully exhausted or sampler gave up
 
@@ -276,6 +300,10 @@ def _apply_point(baseline: TrajectoryRecipe, point: SearchPoint) -> TrajectoryRe
 
 def _make_sampler(config: SearchConfig) -> Sampler:
     if config.sampler == "random":
+        return RandomSampler(seed=config.random_seed)
+    if config.sampler == "adaptive":
+        # No prior at construction time; run() overrides with AdaptiveSampler
+        # once prior_results are available.  Fall back to random when no prior.
         return RandomSampler(seed=config.random_seed)
     return GridSampler()
 
