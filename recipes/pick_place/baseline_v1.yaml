@@ -8,6 +8,17 @@ parent_recipe_id: ""
 # bounded_parameters: tunable scalars with units and search bounds.
 # Baseline values are the constants from the existing demo_pick_place.py and
 # the named poses in src/reachy_ai/motion/primitives.py.
+#
+# GRID SEARCH SUBSET (see issue #22)
+# Grid cost is the Cartesian product of the per-axis grid sizes, so only a
+# small subset carries a `step:` and is gridded; the remaining axes are left
+# step-less and stay pinned at their baseline value under the grid sampler.
+# The four grasp-critical phases below are stepped:
+#   descend_steps(4) x grasp_steps(4) x settle_grasp_steps(4) x lift_steps(4)
+#   = 256 grid points.
+# Drop `step:` from lift_steps to shrink this to 64 if per-episode cost is high.
+# To search every axis jointly instead, use --sampler random / adaptive
+# (no step: needed).
 bounded_parameters:
   # --- Object selection --------------------------------------------------------
   object_id:
@@ -40,23 +51,27 @@ bounded_parameters:
     value: 25
     min: 10
     max: 100
+    step: 30           # grid: 10, 40, 70, 100
     unit: steps
   grasp_steps:
     value: 15
     min: 5
     max: 60
+    step: 15           # grid: 5, 20, 35, 50
     unit: steps
     description: steps to close the gripper
   settle_grasp_steps:
     value: 20
     min: 5
     max: 80
+    step: 25           # grid: 5, 30, 55, 80
     unit: steps
     description: hold steps after grasp to confirm grip
   lift_steps:
     value: 30
     min: 15
     max: 120
+    step: 35           # grid: 15, 50, 85, 120
     unit: steps
   carry_steps:
     value: 50

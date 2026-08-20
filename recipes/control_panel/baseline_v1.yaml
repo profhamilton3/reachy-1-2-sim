@@ -8,6 +8,18 @@ parent_recipe_id: ""
 # bounded_parameters: every tunable scalar with declared units and search bounds.
 # The search engine (PR 8.5) will vary values within [min, max]; baseline defaults
 # are the known-good constants from the existing demo_control_panel.py logic.
+#
+# GRID SEARCH SUBSET (see issue #22)
+# Grid cost is the Cartesian product of the per-axis grid sizes, so only a
+# small subset carries a `step:` and is gridded; the remaining axes are left
+# step-less and stay pinned at their baseline value under the grid sampler.
+# The three contact-critical axes below are stepped — the two press deltas set
+# how deep the hand pushes into the control, and settle_steps sets how long the
+# state change is held to register:
+#   press_shoulder_pitch_delta_deg(5) x press_elbow_pitch_delta_deg(4)
+#     x settle_steps(4) = 80 grid points.
+# To search every axis jointly instead, use --sampler random / adaptive
+# (no step: needed).
 bounded_parameters:
   # --- Phase step counts -------------------------------------------------------
   guard_steps:
@@ -38,6 +50,7 @@ bounded_parameters:
     value: 20
     min: 5
     max: 80
+    step: 25           # grid: 5, 30, 55, 80
     unit: steps
     description: hold steps after contact to let physics settle
   retract_steps:
@@ -92,12 +105,14 @@ bounded_parameters:
     value: -8.0
     min: -20.0
     max: 0.0
+    step: 5.0          # grid: -20, -15, -10, -5, 0
     unit: deg
     description: additional shoulder pitch to push the hand into the control
   press_elbow_pitch_delta_deg:
     value: -4.0
     min: -15.0
     max: 0.0
+    step: 5.0          # grid: -15, -10, -5, 0
     unit: deg
     description: additional elbow bend during the press phase
 
