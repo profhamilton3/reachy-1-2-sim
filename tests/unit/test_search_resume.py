@@ -94,7 +94,7 @@ def _make_verdict(
 _call_log: list = []
 
 
-def _counting_evaluate(recipe: TrajectoryRecipe) -> EpisodeVerdict:
+def _counting_evaluate(recipe: TrajectoryRecipe, seed: int = 0) -> EpisodeVerdict:
     """Deterministic synthetic evaluator that records each call."""
     _call_log.append(recipe.recipe_id)
     return _make_verdict(is_safe=True, is_successful=True, duration=0.5)
@@ -315,7 +315,7 @@ class TestSearchRunnerBasic:
         assert result.trials_run == 1
 
     def test_evaluate_fn_exception_does_not_crash_runner(self):
-        def bad_fn(recipe: TrajectoryRecipe) -> EpisodeVerdict:
+        def bad_fn(recipe: TrajectoryRecipe, seed: int = 0) -> EpisodeVerdict:
             raise RuntimeError("evaluation failed")
 
         recipe = _small_recipe()
@@ -328,7 +328,7 @@ class TestSearchRunnerBasic:
 
     def test_ranked_is_sorted_best_first(self):
         # Evaluator returns varied duration scores based on parameter value.
-        def eval_fn(recipe: TrajectoryRecipe) -> EpisodeVerdict:
+        def eval_fn(recipe: TrajectoryRecipe, seed: int = 0) -> EpisodeVerdict:
             bp = recipe.bounded_parameters.get("x", {})
             val = float(bp.get("value", 0.5)) if isinstance(bp, dict) else float(bp)
             return _make_verdict(duration=val)
@@ -350,7 +350,7 @@ class TestSearchRunnerSafetyInvariant:
         """The safety tier must hold even if an unsafe path had a higher score."""
         call_n = [0]
 
-        def eval_fn(recipe: TrajectoryRecipe) -> EpisodeVerdict:
+        def eval_fn(recipe: TrajectoryRecipe, seed: int = 0) -> EpisodeVerdict:
             n = call_n[0]
             call_n[0] += 1
             # First evaluation: safe but slow.
@@ -383,7 +383,7 @@ class TestSearchRunnerResume:
         prior = [(first_pt, _make_verdict(duration=0.8))]
         evals = [0]
 
-        def eval_fn(recipe: TrajectoryRecipe) -> EpisodeVerdict:
+        def eval_fn(recipe: TrajectoryRecipe, seed: int = 0) -> EpisodeVerdict:
             evals[0] += 1
             return _make_verdict(duration=0.5)
 
@@ -484,7 +484,7 @@ class TestSearchRunnerStoreIntegration:
         runner = SearchRunner(config)
 
         evals = [0]
-        def counting_fn(r: TrajectoryRecipe) -> EpisodeVerdict:
+        def counting_fn(r: TrajectoryRecipe, seed: int = 0) -> EpisodeVerdict:
             evals[0] += 1
             return _make_verdict()
 
@@ -549,7 +549,7 @@ class TestSearchRunnerStoreIntegration:
             study_id="big_study", baseline_recipe=recipe, budget=10
         )
         resumed = SearchRunner(resume_cfg).run(
-            lambda r: _make_verdict(), prior_results=prior
+            lambda r, _seed: _make_verdict(), prior_results=prior
         )
         assert resumed.trials_run == 0
         assert resumed.trials_skipped == n_points

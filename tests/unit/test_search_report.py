@@ -149,7 +149,7 @@ class TestGenerateReport:
         db = str(tmp_path / "s.db")
         call = [0]
 
-        def ev(r):
+        def ev(r, _seed):
             call[0] += 1
             # 1st trial succeeds, rest fail the task
             return _verdict(is_successful=(call[0] == 1))
@@ -166,7 +166,7 @@ class TestGenerateReport:
 
         db = str(tmp_path / "s.db")
 
-        def ev(r):
+        def ev(r, _seed):
             val = float(r.bounded_parameters["x"]["value"])
             return _verdict(is_safe=(val < 2.0))  # x=0 and x=1 are safe, x=2 is not
 
@@ -181,7 +181,7 @@ class TestGenerateReport:
 
         db = str(tmp_path / "s.db")
 
-        def ev(r):
+        def ev(r, _seed):
             val = float(r.bounded_parameters["x"]["value"])
             return _verdict(accuracy=val / 2.0)  # x=2 → acc=1.0 is best
 
@@ -199,7 +199,7 @@ class TestGenerateReport:
         db = str(tmp_path / "s.db")
 
         with ExperienceStore.open(db) as store:
-            _run_study(store, "st", lambda r: _verdict())
+            _run_study(store, "st", lambda r, _seed: _verdict())
             report = generate_report(store, "st", top_n=2)
 
         assert len(report.top) <= 2
@@ -210,7 +210,7 @@ class TestGenerateReport:
         db = str(tmp_path / "s.db")
 
         with ExperienceStore.open(db) as store:
-            _run_study(store, "st", lambda r: _verdict())
+            _run_study(store, "st", lambda r, _seed: _verdict())
             report = generate_report(store, "st")
 
         # Every trial should have a non-empty search_point (from optimizer_metadata)
@@ -222,7 +222,7 @@ class TestGenerateReport:
         db = str(tmp_path / "s.db")
         v = Violation(kind=ViolationKind.FORBIDDEN_CONTACT, description="hit table")
 
-        def ev(r):
+        def ev(r, _seed):
             val = float(r.bounded_parameters["x"]["value"])
             viols = [v] if val == 0.0 else []
             return _verdict(is_safe=(val != 0.0), violations=viols)
@@ -240,7 +240,7 @@ class TestGenerateReport:
         db = str(tmp_path / "s.db")
 
         with ExperienceStore.open(db) as store:
-            _run_study(store, "st", lambda r: _verdict())
+            _run_study(store, "st", lambda r, _seed: _verdict())
             report = generate_report(store, "st")
 
         raw = report.to_json()
@@ -255,7 +255,7 @@ class TestGenerateReport:
         db = str(tmp_path / "s.db")
 
         with ExperienceStore.open(db) as store:
-            _run_study(store, "my_study", lambda r: _verdict())
+            _run_study(store, "my_study", lambda r, _seed: _verdict())
             report = generate_report(store, "my_study")
 
         text = report.summary_text()
@@ -283,8 +283,8 @@ class TestCompareStudies:
 
         db = str(tmp_path / "two.db")
         with ExperienceStore.open(db) as store:
-            _run_study(store, "A", lambda r: _verdict(accuracy=acc_a))
-            _run_study(store, "B", lambda r: _verdict(accuracy=acc_b))
+            _run_study(store, "A", lambda r, _seed: _verdict(accuracy=acc_a))
+            _run_study(store, "B", lambda r, _seed: _verdict(accuracy=acc_b))
         return db
 
     def test_a_wins_when_better_accuracy(self, tmp_path):
@@ -313,7 +313,7 @@ class TestCompareStudies:
 
         db = str(tmp_path / "one.db")
         with ExperienceStore.open(db) as store:
-            _run_study(store, "B", lambda r: _verdict(accuracy=0.7))
+            _run_study(store, "B", lambda r, _seed: _verdict(accuracy=0.7))
             result = compare_studies(store, "A", "B")
         assert result.winner == "b"
 
@@ -322,7 +322,7 @@ class TestCompareStudies:
 
         db = str(tmp_path / "one.db")
         with ExperienceStore.open(db) as store:
-            _run_study(store, "A", lambda r: _verdict(accuracy=0.7))
+            _run_study(store, "A", lambda r, _seed: _verdict(accuracy=0.7))
             result = compare_studies(store, "A", "B")
         assert result.winner == "a"
 
@@ -371,9 +371,9 @@ class TestCompareStudies:
         db = str(tmp_path / "safety.db")
         with ExperienceStore.open(db) as store:
             # Study A: safe, low accuracy
-            _run_study(store, "A", lambda r: _verdict(is_safe=True, accuracy=0.1))
+            _run_study(store, "A", lambda r, _seed: _verdict(is_safe=True, accuracy=0.1))
             # Study B: unsafe (!), high accuracy
-            _run_study(store, "B", lambda r: _verdict(is_safe=False, accuracy=0.99))
+            _run_study(store, "B", lambda r, _seed: _verdict(is_safe=False, accuracy=0.99))
             result = compare_studies(store, "A", "B")
 
         assert result.winner == "a"
@@ -388,7 +388,7 @@ class TestCliReport:
         from reachy_ai.experience.store import ExperienceStore
         db = str(tmp_path / "cli.db")
         with ExperienceStore.open(db) as store:
-            _run_study(store, study_id, lambda r: _verdict())
+            _run_study(store, study_id, lambda r, _seed: _verdict())
         return db
 
     def test_report_text_output(self, tmp_path, capsys):
@@ -428,8 +428,8 @@ class TestCliCompare:
         from reachy_ai.experience.store import ExperienceStore
         db = str(tmp_path / "cli2.db")
         with ExperienceStore.open(db) as store:
-            _run_study(store, "SA", lambda r: _verdict(accuracy=acc_a))
-            _run_study(store, "SB", lambda r: _verdict(accuracy=acc_b))
+            _run_study(store, "SA", lambda r, _seed: _verdict(accuracy=acc_a))
+            _run_study(store, "SB", lambda r, _seed: _verdict(accuracy=acc_b))
         return db
 
     def test_compare_text_output(self, tmp_path, capsys):

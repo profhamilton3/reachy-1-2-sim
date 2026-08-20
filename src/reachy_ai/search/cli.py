@@ -49,7 +49,7 @@ from reachy_ai.search.runner import SearchConfig, SearchRunner, apply_best_to_re
 # Built-in dry-run evaluator
 # ---------------------------------------------------------------------------
 
-def _dry_run_evaluate(recipe: TrajectoryRecipe) -> EpisodeVerdict:
+def _dry_run_evaluate(recipe: TrajectoryRecipe, seed: int = 0) -> EpisodeVerdict:
     """Synthetic evaluator: always succeeds; quality derived from param values."""
     scores: list[float] = []
     for spec in recipe.bounded_parameters.values():

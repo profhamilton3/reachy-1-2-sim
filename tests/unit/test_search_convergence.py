@@ -200,7 +200,7 @@ class TestSearchRunnerConvergence:
         config = self._make_config(budget=100)
         runner = SearchRunner(config)
 
-        def ev(r):
+        def ev(r, _seed):
             return _verdict(accuracy=0.5)
 
         result = runner.run(ev)
@@ -216,7 +216,7 @@ class TestSearchRunnerConvergence:
 
         call_count = 0
 
-        def ev(r):
+        def ev(r, _seed):
             nonlocal call_count
             call_count += 1
             return _verdict(accuracy=0.5)  # constant quality → converges quickly
@@ -231,7 +231,7 @@ class TestSearchRunnerConvergence:
         runner = SearchRunner(config)
         checker = ConvergenceChecker(window=2, min_trials=1)
 
-        result = runner.run(lambda r: _verdict(accuracy=0.5), convergence_checker=checker)
+        result = runner.run(lambda r, _seed: _verdict(accuracy=0.5), convergence_checker=checker)
 
         assert result.converged is True
         assert result.trials_since_improvement >= 2
@@ -247,7 +247,7 @@ class TestSearchRunnerConvergence:
 
         call_count = 0
 
-        def ev(r):
+        def ev(r, _seed):
             nonlocal call_count
             call_count += 1
             # Each trial gets a strictly increasing accuracy score
@@ -268,13 +268,13 @@ class TestSearchRunnerConvergence:
         runner = SearchRunner(config)
 
         # Run 1 trial to get a prior
-        prior_result = runner.run(lambda r: _verdict(accuracy=0.5))
+        prior_result = runner.run(lambda r, _seed: _verdict(accuracy=0.5))
         prior = [({"x": 0.0}, prior_result.ranked[0].verdict)]
 
         # Resume with checker that should fire quickly
         checker = ConvergenceChecker(window=1, min_trials=1)
         resumed = runner.resume(
-            lambda r: _verdict(accuracy=0.5),
+            lambda r, _seed: _verdict(accuracy=0.5),
             prior,
             extra_budget=10,
             convergence_checker=checker,
@@ -292,7 +292,7 @@ class TestSearchRunnerConvergence:
 
         call_count = 0
 
-        def ev(r):
+        def ev(r, _seed):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -307,6 +307,6 @@ class TestSearchRunnerConvergence:
         """SearchResult has converged=False and trials_since_improvement=0 by default."""
         config = self._make_config(budget=1)
         runner = SearchRunner(config)
-        result = runner.run(lambda r: _verdict())
+        result = runner.run(lambda r, _seed: _verdict())
         assert result.converged is False
         assert result.trials_since_improvement == 0

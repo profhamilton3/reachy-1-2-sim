@@ -95,7 +95,7 @@ class TestConstantTrialIdDoesNotCollapse:
         config = SearchConfig(study_id="s", baseline_recipe=baseline, budget=5)
         # accuracy peaks at x=2 -> best point is x=2.0 (not the last, x=4)
         result = SearchRunner(config).run(
-            lambda r: _sim_like_verdict(1.0 - abs(float(r.bounded_parameters["x"]["value"]) - 2.0) / 4.0)
+            lambda r, _seed: _sim_like_verdict(1.0 - abs(float(r.bounded_parameters["x"]["value"]) - 2.0) / 4.0)
         )
         assert result.best_search_point is not None
         assert result.best_search_point["x"] == pytest.approx(2.0)
@@ -106,7 +106,7 @@ class TestConstantTrialIdDoesNotCollapse:
         baseline = _gridded_recipe()
         config = SearchConfig(study_id="s", baseline_recipe=baseline, budget=5)
         result = SearchRunner(config).run(
-            lambda r: _sim_like_verdict(1.0 - abs(float(r.bounded_parameters["x"]["value"]) - 2.0) / 4.0)
+            lambda r, _seed: _sim_like_verdict(1.0 - abs(float(r.bounded_parameters["x"]["value"]) - 2.0) / 4.0)
         )
         exported = apply_best_to_recipe(result, baseline)
         assert exported is not None
@@ -118,7 +118,7 @@ class TestConstantTrialIdDoesNotCollapse:
         baseline = _gridded_recipe()
         config = SearchConfig(study_id="s", baseline_recipe=baseline, budget=5)
         result = SearchRunner(config).run(
-            lambda r: _sim_like_verdict(1.0 - abs(float(r.bounded_parameters["x"]["value"]) - 2.0) / 4.0)
+            lambda r, _seed: _sim_like_verdict(1.0 - abs(float(r.bounded_parameters["x"]["value"]) - 2.0) / 4.0)
         )
         ids = [c.trial_id for c in result.ranked]
         assert len(ids) == len(set(ids)) == 5
@@ -134,7 +134,7 @@ class TestConstantTrialIdDoesNotCollapse:
         with ExperienceStore.open(db) as store:
             config = SearchConfig(study_id="st", baseline_recipe=baseline, budget=5)
             SearchRunner(config).run(
-                lambda r: _sim_like_verdict(
+                lambda r, _seed: _sim_like_verdict(
                     1.0 - abs(float(r.bounded_parameters["x"]["value"]) - 2.0) / 4.0
                 ),
                 store=store,
@@ -160,20 +160,20 @@ class TestDegenerateGridRejected:
         config = SearchConfig(study_id="pp", baseline_recipe=baseline, budget=20,
                               sampler="grid")
         with pytest.raises(ValueError, match="grid sampler would evaluate only the baseline"):
-            SearchRunner(config).run(lambda r: _sim_like_verdict(0.5))
+            SearchRunner(config).run(lambda r, _seed: _sim_like_verdict(0.5))
 
     def test_error_names_the_offending_axes(self):
         baseline = _continuous_recipe()
         config = SearchConfig(study_id="pp", baseline_recipe=baseline, sampler="grid")
         with pytest.raises(ValueError, match="home_steps"):
-            SearchRunner(config).run(lambda r: _sim_like_verdict(0.5))
+            SearchRunner(config).run(lambda r, _seed: _sim_like_verdict(0.5))
 
     def test_random_sampler_is_unaffected(self):
         """Stepless axes are fine for random sampling — no raise, real search."""
         baseline = _continuous_recipe()
         config = SearchConfig(study_id="pp", baseline_recipe=baseline, budget=8,
                               sampler="random", random_seed=1)
-        result = SearchRunner(config).run(lambda r: _sim_like_verdict(0.5))
+        result = SearchRunner(config).run(lambda r, _seed: _sim_like_verdict(0.5))
         assert result.trials_run == 8
 
     def test_grid_with_stepped_axes_still_runs(self):
@@ -181,5 +181,5 @@ class TestDegenerateGridRejected:
         baseline = _gridded_recipe()
         config = SearchConfig(study_id="ok", baseline_recipe=baseline, budget=5,
                               sampler="grid")
-        result = SearchRunner(config).run(lambda r: _sim_like_verdict(0.5))
+        result = SearchRunner(config).run(lambda r, _seed: _sim_like_verdict(0.5))
         assert result.trials_run == 5

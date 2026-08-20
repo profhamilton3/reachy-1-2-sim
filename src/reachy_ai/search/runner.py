@@ -10,14 +10,17 @@ the search can be resumed later via load_prior_from_store() + run().
 
 evaluate_fn contract
 --------------------
-    def evaluate_fn(recipe: TrajectoryRecipe) -> EpisodeVerdict:
+    def evaluate_fn(recipe: TrajectoryRecipe, seed: int) -> EpisodeVerdict:
         ...
 
-The function receives a candidate recipe (bounded_parameters updated with the
-current search point) and must return an EpisodeVerdict.  It may run a real
-simulation or return a synthetic verdict for dry-run use.  Exceptions from
-evaluate_fn are caught: the trial is marked failed in the store (if any) and
-the search point is added to already_done so it is not re-tried.
+The function receives a candidate recipe and the simulation seed to use for
+this evaluation.  It must return an EpisodeVerdict.  When SearchConfig.eval_seeds
+contains more than one seed, evaluate_fn is called once per seed and the
+verdicts are aggregated into a single representative verdict before ranking.
+
+Exceptions from evaluate_fn are caught: the trial is marked failed in the
+store (if any) and the search point is added to already_done so it is not
+re-tried.
 
 Resume workflow
 ---------------
@@ -29,8 +32,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import uuid
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from reachy_ai.evaluation.base import EpisodeVerdict
 from reachy_ai.evaluation.ranking import RankedCandidate, rank_candidates
@@ -42,7 +46,7 @@ from reachy_ai.search.pruning import (
 from reachy_ai.search.samplers import AdaptiveSampler, GridSampler, RandomSampler, Sampler
 from reachy_ai.search.space import SearchPoint, SearchSpace
 
-EvaluateFn = Callable[[TrajectoryRecipe], EpisodeVerdict]
+EvaluateFn = Callable[[TrajectoryRecipe, int], EpisodeVerdict]
 PriorResults = List[Tuple[SearchPoint, EpisodeVerdict]]
 
 
@@ -52,13 +56,16 @@ class SearchConfig:
     study_id: str
     baseline_recipe: TrajectoryRecipe
     budget: int = 20
-    sampler: str = "grid"     # "grid" | "random" | "adaptive"
+    sampler: str = "grid"          # "grid" | "random" | "adaptive"
     random_seed: int = 0
-    pruner: str = "dominance" # "dominance" | "budget" | "none"
-    max_kept: int = 10        # used by "budget" pruner
+    pruner: str = "dominance"      # "dominance" | "budget" | "none"
+    max_kept: int = 10             # used by "budget" pruner
     # Adaptive sampler settings (ignored for grid/random)
     adaptive_top_k: int = 3
     adaptive_exploration_weight: float = 0.3
+    # Multi-seed evaluation (fixes C3: single deterministic seed)
+    eval_seeds: List[int] = dataclasses.field(default_factory=lambda: [0])
+    eval_aggregation: str = "mean"  # "mean" | "pessimistic" (mean - std)
 
 
 @dataclasses.dataclass
@@ -197,7 +204,11 @@ class SearchRunner:
                 )
 
             try:
-                verdict = evaluate_fn(recipe)
+                verdict = _evaluate_multi_seed(
+                    evaluate_fn, recipe,
+                    self._config.eval_seeds,
+                    self._config.eval_aggregation,
+                )
             except Exception as exc:
                 if store is not None and store_trial_id is not None:
                     _store_fail(store, store_trial_id, str(exc))
@@ -453,6 +464,93 @@ def apply_best_to_recipe(
         applied,
         recipe_id=f"{baseline.recipe_id}_best_{result.best.trial_id[:8]}",
         source="search_best",
+    )
+
+
+def _evaluate_multi_seed(
+    evaluate_fn: EvaluateFn,
+    recipe: TrajectoryRecipe,
+    seeds: Sequence[int],
+    aggregation: str,
+) -> EpisodeVerdict:
+    """Call evaluate_fn once per seed and aggregate into a single verdict."""
+    verdicts = [evaluate_fn(recipe, seed) for seed in seeds]
+    return _aggregate_verdicts(verdicts, list(seeds), aggregation)
+
+
+def _aggregate_verdicts(
+    verdicts: List[EpisodeVerdict],
+    seeds: List[int],
+    aggregation: str,
+) -> EpisodeVerdict:
+    """Aggregate per-seed verdicts into one representative verdict.
+
+    Boolean gates (is_valid, is_safe, is_successful) use AND: all seeds must
+    pass.  Numeric ranking scores are averaged; "pessimistic" aggregation
+    subtracts one standard deviation to penalise high-variance recipes.
+    Variance is always recorded in metrics regardless of aggregation mode.
+    """
+    if len(verdicts) == 1:
+        return verdicts[0]
+
+    is_valid = all(v.is_valid for v in verdicts)
+    is_safe = all(v.is_safe for v in verdicts)
+    is_successful = all(v.is_successful for v in verdicts)
+
+    score_keys = (
+        "accuracy_score", "clearance_score", "effort_score",
+        "smoothness_score", "duration_score",
+    )
+    ranking_scores: Dict[str, float] = {}
+    score_stds: Dict[str, float] = {}
+    for key in score_keys:
+        vals = [v.ranking_scores.get(key, 0.0) for v in verdicts]
+        n = len(vals)
+        mean = sum(vals) / n
+        variance = sum((x - mean) ** 2 for x in vals) / n
+        std = math.sqrt(variance)
+        ranking_scores[key] = mean - std if aggregation == "pessimistic" else mean
+        score_stds[f"{key}_std"] = std
+
+    all_metric_keys: set = set()
+    for v in verdicts:
+        all_metric_keys.update(v.metrics.keys())
+    metrics: Dict[str, float] = {}
+    for key in all_metric_keys:
+        vals = [v.metrics.get(key, 0.0) for v in verdicts]
+        metrics[key] = sum(vals) / len(vals)
+    metrics["eval_seed_count"] = float(len(verdicts))
+    metrics.update(score_stds)
+
+    seen: set = set()
+    deduped_violations = []
+    for v in verdicts:
+        for viol in v.violations:
+            key = (viol.kind, viol.description)
+            if key not in seen:
+                deduped_violations.append(viol)
+                seen.add(key)
+
+    seed_strs = "; ".join(
+        f"seed={s}: valid={v.is_valid} safe={v.is_safe} ok={v.is_successful}"
+        for s, v in zip(seeds, verdicts)
+    )
+    explanation = (
+        f"Aggregated over {len(verdicts)} seeds ({aggregation}). {seed_strs}"
+    )
+
+    return EpisodeVerdict(
+        episode_id=verdicts[0].episode_id,
+        trial_id=verdicts[0].trial_id,
+        task_type=verdicts[0].task_type,
+        policy_version=verdicts[0].policy_version,
+        is_valid=is_valid,
+        is_safe=is_safe,
+        is_successful=is_successful,
+        violations=deduped_violations,
+        metrics=metrics,
+        ranking_scores=ranking_scores,
+        explanation=explanation,
     )
 
 

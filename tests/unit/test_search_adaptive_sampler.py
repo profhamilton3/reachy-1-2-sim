@@ -229,7 +229,7 @@ class TestSearchRunnerAdaptive:
         prior = self._make_prior(3)
 
         results = []
-        def ev(r):
+        def ev(r, _seed):
             results.append(dict(r.bounded_parameters))
             return _verdict(accuracy=float(r.bounded_parameters["x"]["value"]) / 10)
 
@@ -254,7 +254,7 @@ class TestSearchRunnerAdaptive:
             random_seed=42,
         )
         runner = SearchRunner(config)
-        result = runner.run(lambda r: _verdict())
+        result = runner.run(lambda r, _seed: _verdict())
         assert result.trials_run == 5
 
     def test_adaptive_respects_top_k(self):
@@ -275,7 +275,7 @@ class TestSearchRunnerAdaptive:
         prior = [({"x": 4.0}, _verdict(accuracy=0.99))]  # best = x=4
 
         suggested_x = []
-        def ev(r):
+        def ev(r, _seed):
             suggested_x.append(float(r.bounded_parameters["x"]["value"]))
             return _verdict()
 
@@ -301,7 +301,7 @@ class TestSearchRunnerAdaptive:
         prior = [({"x": 0.0}, _verdict(accuracy=0.99))]
 
         x_vals = []
-        def ev(r):
+        def ev(r, _seed):
             x_vals.append(float(r.bounded_parameters["x"]["value"]))
             return _verdict()
 
@@ -325,7 +325,7 @@ class TestSearchRunnerAdaptive:
         # First run: plain grid to build a prior
         with ExperienceStore.open(db) as store:
             config = SearchConfig(study_id="study", baseline_recipe=recipe, budget=5)
-            SearchRunner(config).run(lambda r: _verdict(accuracy=0.5), store=store)
+            SearchRunner(config).run(lambda r, _seed: _verdict(accuracy=0.5), store=store)
 
         # Second run: adaptive resume
         with ExperienceStore.open(db) as store:
@@ -337,7 +337,7 @@ class TestSearchRunnerAdaptive:
                 sampler="adaptive",
             )
             result = SearchRunner(config2).run(
-                lambda r: _verdict(accuracy=0.7),
+                lambda r, _seed: _verdict(accuracy=0.7),
                 prior_results=prior,
                 store=store,
             )

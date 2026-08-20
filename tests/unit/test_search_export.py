@@ -62,7 +62,7 @@ def _run(recipe=None, budget=None, evaluate_fn=None) -> SearchResult:
         baseline_recipe=r,
         budget=budget or 50,
     )
-    ev = evaluate_fn or (lambda rec: _verdict(
+    ev = evaluate_fn or (lambda rec, _seed: _verdict(
         accuracy=float(rec.bounded_parameters["x"]["value"]) / 4.0
     ))
     return SearchRunner(config).run(ev)
@@ -165,14 +165,14 @@ class TestApplyBestToRecipe:
         config = SearchConfig(study_id="s", baseline_recipe=baseline, budget=0)
         runner = SearchRunner(config)
         prior = [({"x": 3.0, "y": 1.0}, _verdict(accuracy=0.9))]
-        result = runner.run(lambda r: _verdict(), prior_results=prior)
+        result = runner.run(lambda r, _seed: _verdict(), prior_results=prior)
         assert result.best_search_point == {"x": 3.0, "y": 1.0}
 
     def test_highest_ranked_point_selected(self):
         """apply_best_to_recipe uses the highest-ranked candidate's point."""
         baseline = _recipe()
         # x=4 gets acc=1.0 (best), x=0 gets acc=0.0 (worst)
-        result = _run(recipe=baseline, evaluate_fn=lambda r: _verdict(
+        result = _run(recipe=baseline, evaluate_fn=lambda r, _seed: _verdict(
             accuracy=float(r.bounded_parameters["x"]["value"]) / 4.0
         ))
         exported = apply_best_to_recipe(result, baseline)
@@ -199,7 +199,7 @@ class TestBestSearchPointAcrossSamplers:
         baseline = _recipe()
         config = SearchConfig(study_id="s", baseline_recipe=baseline, budget=5, sampler=sampler)
         runner = SearchRunner(config)
-        result = runner.run(lambda r: _verdict(accuracy=0.5), prior_results=prior)
+        result = runner.run(lambda r, _seed: _verdict(accuracy=0.5), prior_results=prior)
         assert result.best_search_point is not None
         assert runner.space.validate_point(result.best_search_point)
 
@@ -232,7 +232,7 @@ class TestCliExport:
         with ExperienceStore.open(db) as store:
             config = SearchConfig(study_id=study_id, baseline_recipe=baseline, budget=5)
             SearchRunner(config).run(
-                lambda r: _verdict(accuracy=float(r.bounded_parameters["x"]["value"]) / 4.0),
+                lambda r, _seed: _verdict(accuracy=float(r.bounded_parameters["x"]["value"]) / 4.0),
                 store=store,
             )
         return db, baseline
