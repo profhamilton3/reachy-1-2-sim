@@ -123,6 +123,29 @@ class SearchRunner:
                                   Pass a freshly constructed checker; do not share
                                   instances across run() calls.
         """
+        # Guard against a silently-degenerate grid search.  When sampler="grid"
+        # and every searchable axis is continuous (no "step"), grid_points()
+        # yields only the baseline, so the "study" is really N=1 — a common and
+        # invisible source of invalid conclusions.  Fail loudly with an
+        # actionable message instead of producing a one-trial study.
+        if (
+            self._config.sampler == "grid"
+            and not self._space.is_empty()
+            and self._space.num_grid_points() <= 1
+        ):
+            cont = self._space.continuous_axes()
+            detail = (
+                f"axes {list(cont)} have no 'step' and cannot be gridded"
+                if cont
+                else "all axes collapse to a single value"
+            )
+            raise ValueError(
+                f"grid sampler would evaluate only the baseline for study "
+                f"'{self._config.study_id}' ({self._space.num_grid_points()} "
+                f"grid point(s)): {detail}. Add a 'step' to each searchable "
+                f"parameter, or use sampler='random' or sampler='adaptive'."
+            )
+
         prior = list(prior_results or [])
         already_done: List[SearchPoint] = [pt for pt, _ in prior]
         candidates: List[RankedCandidate] = [
@@ -189,7 +212,15 @@ class SearchRunner:
                 _store_complete(store, store_trial_id, verdict, pt)
 
             already_done.append(pt)
-            trial_id = verdict.trial_id or verdict.episode_id or store_trial_id or uuid.uuid4().hex
+            # Trial identity MUST be unique per trial.  verdict.trial_id comes
+            # from the evaluator/simulator and may be a constant — EpisodeRunner
+            # sets it to `scene_revision or "standalone"` — which would collapse
+            # every trial to one key in trial_point_map and make
+            # best_search_point resolve to the wrong recipe.  Prefer the
+            # store-assigned trial_id (guaranteed unique); fall back to a fresh
+            # uuid when running store-less.  We do NOT trust verdict.trial_id.
+            trial_id = store_trial_id or uuid.uuid4().hex
+            verdict.trial_id = trial_id  # keep the verdict consistent downstream
             candidates.append(RankedCandidate(verdict=verdict, trial_id=trial_id))
             trial_point_map[trial_id] = pt
             trials_run += 1
@@ -281,6 +312,14 @@ class SearchRunner:
                 verdict = EpisodeVerdict.from_json(verdict_json)
             except Exception:
                 continue
+            # Canonicalise trial identity to the store's unique trial_id.  A
+            # verdict persisted from the simulator may carry a constant
+            # trial_id ("standalone"); using it would collapse every trial to
+            # one identity in ranking, report, and export.  The store row's
+            # trial_id is the authoritative per-trial key.
+            row_trial_id = row.get("trial_id")
+            if row_trial_id:
+                verdict.trial_id = row_trial_id
             results.append((search_point, verdict))
         return results
 

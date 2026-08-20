@@ -135,6 +135,15 @@ class SearchSpace:
             total *= len(b.grid_values())
         return total
 
+    def continuous_axes(self) -> Tuple[str, ...]:
+        """Names of bounded axes with no grid step (step == 0).
+
+        The grid sampler cannot explore these axes — grid_values() pins them at
+        their baseline value — so a search space made up entirely of continuous
+        axes collapses to a single grid point (the baseline).
+        """
+        return tuple(b.name for b in self.bounds if b.step == 0.0)
+
     def point_key(self, point: SearchPoint) -> str:
         """Canonical JSON key for exact deduplication of search points."""
         return json.dumps(
