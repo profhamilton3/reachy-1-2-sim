@@ -35,6 +35,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from reachy_ai.evaluation.base import EpisodeVerdict
 from reachy_ai.evaluation.ranking import RankedCandidate, rank_candidates
 from reachy_ai.motion.recipe import TrajectoryRecipe
+from reachy_ai.search.convergence import ConvergenceChecker
 from reachy_ai.search.pruning import (
     BudgetPruner, CompositePruner, DominancePruner, NoPruner, PruningStrategy,
 )
@@ -67,6 +68,8 @@ class SearchResult:
     pruned: List[RankedCandidate]   # discarded by pruner
     trials_run: int                 # evaluations performed this run
     trials_skipped: int             # prior results reused without re-evaluation
+    converged: bool = False         # True if convergence checker fired early
+    trials_since_improvement: int = 0  # consecutive trailing non-improving trials
 
 
 class SearchRunner:
@@ -94,21 +97,27 @@ class SearchRunner:
         store: Optional[Any] = None,        # ExperienceStore (imported lazily)
         task_spec: Optional[Any] = None,    # TaskSpec for store recording
         episode_config: Optional[Any] = None,  # EpisodeConfig for store recording
+        convergence_checker: Optional[ConvergenceChecker] = None,
     ) -> SearchResult:
         """Run the search, optionally extending prior results.
 
         Args:
-            evaluate_fn:    Caller-provided evaluator — recipe → EpisodeVerdict.
-            prior_results:  (search_point, verdict) pairs from a previous run or
-                            loaded via load_prior_from_store().  These seed the
-                            already_done set so their points are not re-sampled.
-            store:          Optional ExperienceStore.  When provided, each trial
-                            is persisted with search_point and verdict_json in
-                            optimizer_metadata.
-            task_spec:      Passed to store.create_trial(); defaults to a minimal
-                            synthetic TaskSpec derived from the baseline recipe.
-            episode_config: Passed to store.create_trial(); defaults to a minimal
-                            synthetic EpisodeConfig.
+            evaluate_fn:          Caller-provided evaluator — recipe → EpisodeVerdict.
+            prior_results:        (search_point, verdict) pairs from a previous run or
+                                  loaded via load_prior_from_store().  These seed the
+                                  already_done set so their points are not re-sampled.
+            store:                Optional ExperienceStore.  When provided, each trial
+                                  is persisted with search_point and verdict_json in
+                                  optimizer_metadata.
+            task_spec:            Passed to store.create_trial(); defaults to a minimal
+                                  synthetic TaskSpec derived from the baseline recipe.
+            episode_config:       Passed to store.create_trial(); defaults to a minimal
+                                  synthetic EpisodeConfig.
+            convergence_checker:  Optional ConvergenceChecker.  When provided, the
+                                  search loop calls checker.update() after every trial
+                                  and breaks early when checker.is_converged() is True.
+                                  Pass a freshly constructed checker; do not share
+                                  instances across run() calls.
         """
         prior = list(prior_results or [])
         already_done: List[SearchPoint] = [pt for pt, _ in prior]
@@ -141,6 +150,9 @@ class SearchRunner:
                     _store_fail(store, store_trial_id, str(exc))
                 already_done.append(pt)
                 trials_run += 1
+                _maybe_update_convergence(convergence_checker, candidates)
+                if convergence_checker is not None and convergence_checker.is_converged():
+                    break
                 continue
 
             if store is not None and store_trial_id is not None:
@@ -150,6 +162,10 @@ class SearchRunner:
             trial_id = verdict.trial_id or verdict.episode_id or store_trial_id or uuid.uuid4().hex
             candidates.append(RankedCandidate(verdict=verdict, trial_id=trial_id))
             trials_run += 1
+
+            _maybe_update_convergence(convergence_checker, candidates)
+            if convergence_checker is not None and convergence_checker.is_converged():
+                break
 
         ranked = rank_candidates(candidates)
         pruning_result = self._pruner.prune(ranked)
@@ -162,6 +178,11 @@ class SearchRunner:
             pruned=pruning_result.pruned,
             trials_run=trials_run,
             trials_skipped=len(prior),
+            converged=convergence_checker.is_converged() if convergence_checker else False,
+            trials_since_improvement=(
+                convergence_checker.trials_since_improvement()
+                if convergence_checker else 0
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -177,6 +198,7 @@ class SearchRunner:
         store: Optional[Any] = None,
         task_spec: Optional[Any] = None,
         episode_config: Optional[Any] = None,
+        convergence_checker: Optional[ConvergenceChecker] = None,
     ) -> SearchResult:
         """Continue search from prior results with extra_budget new trials."""
         extended = dataclasses.replace(self._config, budget=extra_budget)
@@ -187,6 +209,7 @@ class SearchRunner:
             store=store,
             task_spec=task_spec,
             episode_config=episode_config,
+            convergence_checker=convergence_checker,
         )
 
     # ------------------------------------------------------------------
@@ -326,3 +349,15 @@ def _store_fail(store: Any, trial_id: str, reason: str) -> None:
         store.fail_trial(trial_id, reason)
     except Exception:
         pass
+
+
+def _maybe_update_convergence(
+    checker: Optional[ConvergenceChecker],
+    candidates: List[RankedCandidate],
+) -> None:
+    """Push the current best rank_key into the checker (no-op if no checker or
+    no candidates yet)."""
+    if checker is None or not candidates:
+        return
+    best_rk = max(c.rank_key for c in candidates)
+    checker.update(best_rk)
