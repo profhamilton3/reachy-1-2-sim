@@ -41,6 +41,7 @@ from reachy_ai.evaluation.base import EpisodeVerdict
 from reachy_ai.evaluation.ranking import explain_ranking
 from reachy_ai.motion.recipe import TrajectoryRecipe
 from reachy_ai.search.convergence import ConvergenceChecker
+from reachy_ai.search.report import compare_studies, generate_report
 from reachy_ai.search.runner import SearchConfig, SearchRunner
 
 
@@ -207,6 +208,48 @@ def _cmd_show(args: argparse.Namespace) -> int:
 # Helpers
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Subcommand: report
+# ---------------------------------------------------------------------------
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    if not args.db:
+        print("ERROR: --db is required for report", file=sys.stderr)
+        return 1
+    store = _open_store(args.db)
+    with store as s:
+        report = generate_report(s, args.study_id, top_n=args.top_n)
+    fmt = getattr(args, "format", "text")
+    if fmt == "json":
+        print(report.to_json())
+    else:
+        print(report.summary_text())
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: compare
+# ---------------------------------------------------------------------------
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    if not args.db:
+        print("ERROR: --db is required for compare", file=sys.stderr)
+        return 1
+    store = _open_store(args.db)
+    with store as s:
+        result = compare_studies(s, args.study_a, args.study_b, top_n=args.top_n)
+    fmt = getattr(args, "format", "text")
+    if fmt == "json":
+        print(result.to_json())
+    else:
+        print(result.summary_text())
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _make_checker(args: argparse.Namespace) -> Optional[ConvergenceChecker]:
     """Build a ConvergenceChecker from CLI args, or None if not requested."""
     window = getattr(args, "convergence_window", None)
@@ -292,6 +335,31 @@ def _build_parser() -> argparse.ArgumentParser:
 
     show_p = sub.add_parser("show", parents=[shared], help="Show ranking from store")
 
+    # report and compare do not use the convergence flags from shared
+    _report_shared = argparse.ArgumentParser(add_help=False)
+    _report_shared.add_argument("--db", default=None, help="ExperienceStore SQLite path")
+    _report_shared.add_argument(
+        "--top-n", type=int, default=5, dest="top_n",
+        help="Number of top candidates to include (default: 5)",
+    )
+    _report_shared.add_argument(
+        "--format", choices=["text", "json"], default="text",
+        help="Output format (default: text)",
+    )
+
+    report_p = sub.add_parser(
+        "report", parents=[_report_shared],
+        help="Generate a structured report for one study",
+    )
+    report_p.add_argument("--study-id", required=True, dest="study_id")
+
+    compare_p = sub.add_parser(
+        "compare", parents=[_report_shared],
+        help="Compare the best candidates from two studies",
+    )
+    compare_p.add_argument("--study-a", required=True, dest="study_a")
+    compare_p.add_argument("--study-b", required=True, dest="study_b")
+
     return parser
 
 
@@ -304,6 +372,10 @@ def main(argv=None) -> int:
         return _cmd_resume(args)
     if args.subcommand == "show":
         return _cmd_show(args)
+    if args.subcommand == "report":
+        return _cmd_report(args)
+    if args.subcommand == "compare":
+        return _cmd_compare(args)
     parser.print_help()
     return 1
 
