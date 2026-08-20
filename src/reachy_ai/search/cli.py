@@ -98,6 +98,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         random_seed=args.seed,
         pruner=args.pruner,
         max_kept=args.max_kept,
+        adaptive_top_k=args.adaptive_top_k,
+        adaptive_exploration_weight=args.adaptive_exploration_weight,
     )
     runner = SearchRunner(config)
 
@@ -155,6 +157,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             random_seed=args.seed,
             pruner=args.pruner,
             max_kept=args.max_kept,
+            adaptive_top_k=args.adaptive_top_k,
+            adaptive_exploration_weight=args.adaptive_exploration_weight,
         )
         runner = SearchRunner(config)
         checker = _make_checker(args)
@@ -303,10 +307,29 @@ def _build_parser() -> argparse.ArgumentParser:
     shared.add_argument("--study-id", required=True, help="Unique study identifier")
     shared.add_argument("--db", default=None, help="ExperienceStore SQLite path")
     shared.add_argument("--budget", type=int, default=20, help="Max new trials to run")
-    shared.add_argument("--sampler", choices=["grid", "random"], default="grid")
+    shared.add_argument("--sampler", choices=["grid", "random", "adaptive"], default="grid")
     shared.add_argument("--seed", type=int, default=0, help="RNG seed for random sampler")
     shared.add_argument("--pruner", choices=["dominance", "budget", "none"], default="dominance")
     shared.add_argument("--max-kept", type=int, default=10, dest="max_kept")
+    shared.add_argument(
+        "--adaptive-top-k",
+        type=int,
+        default=3,
+        dest="adaptive_top_k",
+        metavar="K",
+        help="Top-K prior points to exploit when --sampler=adaptive (default: 3).",
+    )
+    shared.add_argument(
+        "--adaptive-exploration",
+        type=float,
+        default=0.3,
+        dest="adaptive_exploration_weight",
+        metavar="W",
+        help=(
+            "Exploration fraction for adaptive sampler: 0.0=pure exploit, "
+            "1.0=pure explore (default: 0.3)."
+        ),
+    )
     shared.add_argument(
         "--convergence-window",
         type=int,
