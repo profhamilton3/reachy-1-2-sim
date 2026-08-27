@@ -1,15 +1,52 @@
 schema_version: "1.0"
 name: tabletop-demo-reachable
-# Pick-and-place demo scene.  Objects are positioned inside the right arm's
-# reachable workspace (x in [0.38, 0.46], y in [-0.22, +0.02] at table height)
-# so the demo in scripts/demo_pick_place.py can grasp and relocate both with
-# the right arm only.  See src/reachy_ai/scene/awareness.py for the table
-# surface / collision model that keeps the gripper above the tabletop.
+# ═════════════════════════════════════════════════════════════════════════════
+# SYNTHETIC DEMO FIXTURE — NOT A MODEL OF THE PHYSICAL LAB
+#
+# Every dimension here was chosen for demo convenience: a table sized and
+# placed so the right arm can comfortably reach two objects.  None of it was
+# measured off the real robot's workspace.  Do not read these numbers as
+# facts about the lab, and do not derive real-world geometry from them.
+#
+# For the measured FWD Center (MCC) setup — real board size, the 19 in taped
+# grid, the 80/20 rig frame — use scenes/FWDCenterLabMCC.yaml.  Its provenance
+# is in IITG-Reachy-Project/docs/LAB_EVIDENCE.md.
+#
+# Concretely, this scene disagrees with the lab on nearly everything:
+#
+#            this fixture              measured lab
+#   table    0.90 x 0.65 m             0.587 x 0.699 m
+#   centre   x = 0.70                  x = 0.4534
+#   grid     none                      19 in, 3x3, nine addressable cells
+#   frame    none                      80/20 ladder the arm hangs through
+#
+# WHY IT IS STILL HERE, AND WHY IT SHOULD STAY FOR NOW
+#
+# It is the only scene in the repo with anything to pick up —
+# FWDCenterLabMCC ships deliberately empty.  Removing it would take with it:
+# the default scene for docker-compose / supervisord / start_sim.sh; ~115
+# tests; the tuned grasp constants in motion/primitives.py (OVER_RED,
+# GRASP_RED, PLACE_BLUE ...), which are the repo's only validated grasp poses
+# and the starting point for deriving new ones; the Epic 8 search corpus,
+# whose results were all produced against this geometry; and the notebooks
+# under notebooks/.
+#
+# Retire it once FWDCenterLabMCC has manipulation objects AND a validated
+# pose set for them — not before.
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Objects are positioned inside the right arm's reachable workspace
+# (x in [0.38, 0.46], y in [-0.22, +0.02] at table height) so the demo in
+# scripts/demo_pick_place.py can grasp and relocate both with the right arm
+# only.  See src/reachy_ai/scene/awareness.py for the table surface /
+# collision model that keeps the gripper above the tabletop.
 frame_id: pedestal
 seed: 42
 description: >-
+  SYNTHETIC DEMO FIXTURE, not a model of the physical lab — see the header.
   Reachable tabletop scene for the right-arm pick-and-place demo.  Table
   surface is at world z = 0.74 (table_top centre 0.72 + half-height 0.02).
+  For measured lab geometry use FWDCenterLabMCC.yaml.
 
 world:
   gravity: [0.0, 0.0, -9.81]

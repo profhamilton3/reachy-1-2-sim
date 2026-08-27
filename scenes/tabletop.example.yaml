@@ -1,11 +1,15 @@
 schema_version: "1.0"
 name: tabletop-calibration
 # All units are SI. Poses are relative to frame_id.
+#
+# SCHEMA EXAMPLE — the dimensions here are illustrative, not measured.  For
+# real FWD Center lab geometry use scenes/FWDCenterLabMCC.yaml.
 frame_id: pedestal
 seed: 42
 description: >-
-  Small deterministic tabletop scene for RViz markers, stereo camera geometry,
-  and the first MuJoCo rendering tests.
+  Schema example, not measured geometry — see FWDCenterLabMCC.yaml for the real
+  lab.  Small deterministic tabletop scene for RViz markers, stereo camera
+  geometry, and the first MuJoCo rendering tests.
 
 world:
   gravity: [0.0, 0.0, -9.81]
