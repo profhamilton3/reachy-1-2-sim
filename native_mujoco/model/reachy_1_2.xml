@@ -97,10 +97,20 @@
       <!-- ── Torso ─────────────────────────────────────────────── -->
       <body name="torso" pos="0 0 1">
         <inertial pos="0 0 0" mass="12" diaginertia="0.15 0.15 0.08"/>
+        <!-- Bust box from the official URDF torso collision:
+               origin xyz="0 0 -0.1" rpy="0 0.05 0"  box size="0.11 0.2 0.32"
+             i.e. half-extents 0.055 0.10 0.16, hanging BELOW the shoulder line
+             (the shoulders sit at the top of the bust, y = +/-0.19).
+
+             Previously this was 0.10 0.18 0.12 centred on the torso origin,
+             which pushed the chest 0.12 m ABOVE the shoulders — 0.023 m under
+             the cameras and inside their footprint.  The head cameras rendered
+             100% torso: the robot could see nothing but its own chest. -->
         <geom name="torso_main" class="visual" type="box"
-              size="0.10 0.18 0.12" pos="0 0 0" material="frame"/>
+              size="0.055 0.10 0.16" pos="0 0 -0.1" euler="0 0.05 0"
+              material="frame"/>
         <geom name="torso_col" class="collision" type="box"
-              size="0.10 0.18 0.12" pos="0 0 0"/>
+              size="0.055 0.10 0.16" pos="0 0 -0.1" euler="0 0.05 0"/>
 
         <!-- ════════════════════ RIGHT ARM ════════════════════════ -->
         <!-- r_shoulder — URDF: torso→r_shoulder xyz=0 -0.19 0 -->
@@ -274,8 +284,16 @@
         </body>
 
         <!-- ════════════════════ HEAD / NECK ══════════════════════ -->
-        <!-- head_x — URDF: torso→head_x  neck_roll joint, xyz=0.015 0 0.095 -->
-        <body name="head_x" pos="0.015 0 0.095">
+        <!-- head_x — URDF: torso→head_x  neck_roll joint,
+             xyz=0.015 0 0.095  rpy="0 0.174 0".
+             The 0.174 rad (10°) forward pitch is part of the official
+             reachy_description URDF and was previously dropped here, which left
+             the head's neutral gaze 10° too high: the home-pose camera
+             depression came out at 25.8° where the real captures in
+             IITG-Reachy-Project/tests/Pictures/ cluster near 36°.  The joint
+             axis below is expressed in this rotated body frame, matching the
+             URDF's child-frame convention. -->
+        <body name="head_x" pos="0.015 0 0.095" euler="0 0.174 0">
           <joint name="neck_roll" type="hinge" axis="1 0 0"
                  range="-0.8 0.8" damping="0.6"/>
           <geom name="head_x_marker" class="visual" type="sphere" size="0.005"
@@ -306,15 +324,25 @@
                      URDF camera frames from head:
                        left:  xyz=0.0033  0.03625 0.061
                        right: xyz=0.0033 -0.03625 0.061
-                     euler="0 -1.5708 0" rotates -90° about Y so the
-                     camera's -Z (look direction) points in head's +X.     -->
+
+                     Orientation is given as xyaxes rather than euler, because
+                     euler="0 -1.5708 0" got the LOOK direction right (-Z into
+                     head's +X) while leaving the camera rolled 90°: image-up
+                     mapped to head +Y, so every rendered frame came out
+                     sideways with the horizon running vertically.
+
+                     xyaxes gives both axes explicitly, in the head frame:
+                       image right = -Y_head   (robot's right)
+                       image up    = +Z_head
+                     which puts the look direction (X cross Y = -Z_cam) on
+                     +X_head, unchanged.                                  -->
                 <camera name="left_camera"
                         pos="0.0033  0.03625 0.061"
-                        euler="0 -1.5708 0"
+                        xyaxes="0 -1 0  0 0 1"
                         fovy="1.0472"/>
                 <camera name="right_camera"
                         pos="0.0033 -0.03625 0.061"
-                        euler="0 -1.5708 0"
+                        xyaxes="0 -1 0  0 0 1"
                         fovy="1.0472"/>
 
                 <!-- ── Left antenna — URDF: head→l_antenna_link xyz=-0.052 0.057 0.086 -->

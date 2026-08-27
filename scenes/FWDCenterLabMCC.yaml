@@ -1,0 +1,480 @@
+schema_version: "1.0"
+name: FWDCenterLabMCC
+frame_id: pedestal
+seed: 42
+description: >-
+  FWD Center lab (MCC) tabletop, built from the measured physical setup in
+  docs/ActualLabSetupNotes.txt rather than from demo-convenience values.  The
+  table is empty: this scene establishes the surface, the 3x3 taped grid, and
+  nine addressable cell targets.  Manipulation objects are added in a later
+  slice once the geometry and physics are verified.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MEASURED GEOMETRY  (1 in = 0.0254 m; all scene values are SI)
+#
+#   Board            ~27.5 in wide (y) x ~23.1 in deep (x) = 0.699 x 0.587 m
+#   Rig frame        80/20 ladder, top flush with the table at z = 0.74,
+#                    one 9 in (y) x 19 in (x) opening each side of the mast;
+#                    27.0 in wide x 22.0 in deep, extending BACK from the table
+#   Surface height   z = 0.74  (table_top centre 0.72 + half-thickness 0.02)
+#
+#   Grid  3 cells of 5 in + 4 tape borders of 1 in = 19 in = 0.4826 m, i.e.
+#   the INTERIOR borders AND a full outer border, centred on the board.
+#
+#   The "8 inches" in the setup notes is the pedestal axis to the near edge of
+#   the taped PATTERN, not to the edge of the board.  With the grid centred at
+#   x = 0.4318 the pattern's near edge lands at 0.1905 m = 7.5 in, and the
+#   board extends ~3 in closer still.  The reach cross-check below corroborates
+#   this placement.
+#
+# PROVENANCE
+#   Calibrated from tests/Pictures/ (20 stereo pairs; the 5 in cells are the
+#   metric target, sub-pixel reprojection) and cross-checked against Siva's
+#   phone photos in IITG-Reachy-Project/docs/pics/, rectified through the same
+#   pattern.  The two independent methods put the board's far edge at 12.4 and
+#   12.5 in from grid centre.  Cells measured 5.06/5.12/5.12 in, tape
+#   0.85-0.91 in — so 5 in cells and 1 in tape are confirmed, and the earlier
+#   17 in reading (interior borders only) was wrong.
+#
+#   The board's ROBOT-SIDE edge could not be measured — a white board against a
+#   white glossy floor gives no edge signal — but it is BOUNDED, not assumed:
+#   it must clear the rig frame's front rail at x = 0.1524 and still carry the
+#   tape pattern whose near edge is at x = 0.1905.  Lateral extent is solid:
+#   13.7 and 13.8 in from two independent scans.
+#
+#   Cell pitch  5 in + 1 in = 6 in = 0.1524 m
+#   Cell centres    x: 0.2794 (near) | 0.4318 (mid) | 0.5842 (far)
+#                   y: 0.1524 (left) | 0.0000 (mid) | -0.1524 (right)
+#   Interior tape   x: 0.3556, 0.5080     y: +0.0762, -0.0762
+#   Outer border    x: 0.2032, 0.6604     y: +0.2286, -0.2286
+#
+# CELL NAMING  cell_r<row>c<col>, from the ROBOT's point of view:
+#   row 1..3 = increasing x, nearest the robot to farthest
+#   col 1..3 = decreasing y, the robot's LEFT (+y) to its RIGHT (-y)
+#   So cell_r1c3 is the near-right cell — the one the right arm reaches most
+#   easily — and cell_r2c2 is the centre square.
+#
+# RIGHT-ARM REACHABILITY — UPPER BOUND ONLY
+#
+# Measured in MuJoCo with 40-restart damped-least-squares IK on the r_tip site,
+# target 5 cm above the surface, ORIENTATION UNCONSTRAINED.  Max r_tip reach is
+# 0.609 m from the right shoulder at world (0, -0.19, 1.0).  Distances below are
+# shoulder-to-cell:
+#
+#        col 1 (+y, left)   col 2 (mid)      col 3 (-y, right)
+#   r1     0.489  reach      0.398  reach     0.352  reach
+#   r2     0.590  reach      0.516  reach     0.482  reach
+#   r3     0.709  NO         0.649  NO        0.622  reach
+#
+# Read this as a NECESSARY, NOT SUFFICIENT condition:
+#
+#   * cell_r3c1 and cell_r3c2 are definitively OUT.  0.709 m and 0.649 m both
+#     exceed the 0.609 m maximum, so no orientation reaches them.  On a
+#     right-arm-only robot they cannot be pick or place targets.  Either the
+#     task uses the other seven cells, or the table moves closer / shifts
+#     toward -y before the full grid is usable.
+#   * "reach" does NOT mean graspable.  It only means the tip can touch the
+#     point in SOME orientation.  A usable top-down-ish grasp is a much tighter
+#     constraint: the tuned demo workspace was only y in [-0.22, +0.02], and the
+#     right arm cannot point straight down at all.  Every cell at y = +0.1524
+#     (col 1) is therefore suspect for grasping even though the tip reaches it.
+#
+# Grasp-capable reach per cell is still UNVERIFIED.  It needs the tool-frame
+# CartesianPlanner in src/reachy_ai/motion/kinematics.py, which requires a live
+# arm object, so it belongs in the next slice once objects are on the table.
+#
+# NOT MODELLED YET
+#   * The mast.  Siva's photos (IITG-Reachy-Project/docs/pics/) show the torso
+#     sits on a vertical post rising out of the frame above; reachy_1_2.xml
+#     still models a plain 0.08 m cylinder running to the floor.  The rig frame
+#     IS now in this scene (see rig_rail_*), but the post holding the robot up
+#     is not — the pedestal cylinder stands in for it, at the wrong diameter
+#     and running all the way to the floor.  Harmless for arm collision, wrong
+#     for renders.
+#
+#   * The frame's legs and the black skirt hanging below it.  Irrelevant to arm
+#     collision; they matter only for camera realism.
+#   * Camera intrinsics.  The real Reachy 1.2 cameras are visibly wide-angle
+#     (see tests/Pictures/), but the values below are inherited from
+#     tabletop_demo.yaml, NOT calibrated.  Do not treat renders from this
+#     scene as geometrically faithful to the lab photos until R12-600
+#     calibration ingestion supplies real intrinsics.
+#   * Surface friction is inherited from the working demo scene, not measured
+#     off the real laminate.
+# ─────────────────────────────────────────────────────────────────────────────
+
+world:
+  gravity: [0.0, 0.0, -9.81]
+  # Bright lab: pale walls, high-gloss light floor.
+  background_rgba: [0.86, 0.88, 0.90, 1.0]
+  floor:
+    enabled: true
+    z: 0.0
+    size: [6.0, 6.0]
+    material:
+      rgba: [0.82, 0.83, 0.85, 1.0]
+      roughness: 0.15
+    friction: [0.8, 0.01, 0.001]
+  lights:
+    - id: key_light
+      kind: directional
+      pose:
+        position: [1.0, -1.0, 2.5]
+        rpy: [0.0, 0.65, 2.35]
+      color: [1.0, 0.98, 0.95, 1.0]
+      intensity: 1.2
+      cast_shadows: true
+    - id: fill_light
+      kind: directional
+      pose:
+        position: [-1.0, 1.0, 2.5]
+        rpy: [0.0, 0.65, -0.8]
+      color: [0.95, 0.97, 1.0, 1.0]
+      intensity: 0.5
+      cast_shadows: false
+
+cameras:
+  # Inherited, uncalibrated — see NOT MODELLED YET above.
+  left:
+    width: 640
+    height: 480
+    fovy_radians: 0.78
+    near: 0.02
+    far: 10.0
+    jpeg_quality: 85
+    fps: 15
+  right:
+    width: 640
+    height: 480
+    fovy_radians: 0.78
+    near: 0.02
+    far: 10.0
+    jpeg_quality: 85
+    fps: 15
+
+objects:
+  # ── Table ──────────────────────────────────────────────────────────────────
+  # ~23.1 in deep x ~27.5 in wide, white laminate.  Modelled as an axis-aligned
+  # box; the real top has rounded corners, which the collision model does not
+  # represent.
+  #
+  # Far edge x = 0.7468 is measured (grid centre + 12.4 in, two independent
+  # methods).  The robot-side edge cannot be measured, but it is now BOUNDED
+  # rather than assumed: it has to clear the rig frame's front rail at x =
+  # 0.1524, and it has to sit under the tape pattern whose near edge is at
+  # x = 0.1905.  Placed at 0.1600, in that 38 mm window.
+  - id: table_top
+    geometry:
+      kind: box
+      size: [0.5868, 0.6985, 0.04]
+    pose:
+      position: [0.4534, 0.0, 0.72]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.93, 0.93, 0.94, 1.0]
+      roughness: 0.25
+    physics:
+      dynamic: false
+      collision: true
+      friction: [0.9, 0.02, 0.001]
+    semantic_class: furniture.table
+    tags: [fixture, tabletop]
+
+  # ── Rig frame (the "railing system") ───────────────────────────────────────
+  # Horizontal 80/20 aluminium extrusion ladder that Reachy's mast is bolted
+  # to.  Six 1.5 in square rails whose top faces are flush with the tabletop at
+  # z = 0.74, forming one 9 x 19 in opening each side of the mast — the notes'
+  # "opening 9 inches by 19 inches on both sides".
+  #
+  # Orientation: 9 in is the LATERAL span, 19 in the FORE-AFT one, so each
+  # opening's short edge faces the table and the long edge runs back behind the
+  # robot.  The frame is NOT centred on the mast — it extends backward, which is
+  # what the rig photos show.
+  #
+  # The check that settles it is the frame's overall width.  Two 19 in lateral
+  # openings would make the frame 47 in wide against a 27.5 in board, with the
+  # rails sticking far out past the table on both sides — which the photos
+  # plainly contradict.  Two 9 in lateral openings give 27.0 in overall, just
+  # inside the board's 27.5 in.
+  #
+  # The right arm hangs at (x=0, y=-0.19) with its elbow at z = 0.72 — dead
+  # centre of the right-hand opening, 4.5 in of clearance to the rail either
+  # side, and level with them.  That is exactly the "arms easily fit in the
+  # default position by his side" the notes describe, and why this frame has to
+  # exist in the collision model.
+  #
+  # collision: fixture -> collides with robot links (contype=2) but not with the
+  # model's pedestal cylinder (world channel) or the tabletop (object channel),
+  # so the mast passing through the rails generates no spurious contacts.
+  #
+  # ASSUMED, not measured: the 1.5 in profile size, the rails' flush-with-table
+  # height, and the frame's outer footprint.  The opening dimensions and the
+  # arm-through-the-opening geometry are the parts that are pinned down.
+  # Not modelled: the frame's legs and the black skirt below it (irrelevant to
+  # arm collision), and the mast itself — reachy_1_2.xml's pedestal cylinder
+  # stands in for it and is NOT the real mast's diameter or extent.
+
+  - id: rig_rail_inner_right
+    geometry: {kind: box, size: [0.5588, 0.0381, 0.0381]}
+    pose: {position: [-0.127, -0.0567, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
+    physics: {dynamic: false, collision: "fixture"}
+    semantic_class: fixture.frame
+    tags: [fixture, rig-frame]
+
+  - id: rig_rail_inner_left
+    geometry: {kind: box, size: [0.5588, 0.0381, 0.0381]}
+    pose: {position: [-0.127, 0.0567, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
+    physics: {dynamic: false, collision: "fixture"}
+    semantic_class: fixture.frame
+    tags: [fixture, rig-frame]
+
+  - id: rig_rail_outer_right
+    geometry: {kind: box, size: [0.5588, 0.0381, 0.0381]}
+    pose: {position: [-0.127, -0.3234, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
+    physics: {dynamic: false, collision: "fixture"}
+    semantic_class: fixture.frame
+    tags: [fixture, rig-frame]
+
+  - id: rig_rail_outer_left
+    geometry: {kind: box, size: [0.5588, 0.0381, 0.0381]}
+    pose: {position: [-0.127, 0.3234, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
+    physics: {dynamic: false, collision: "fixture"}
+    semantic_class: fixture.frame
+    tags: [fixture, rig-frame]
+
+  - id: rig_rail_front
+    geometry: {kind: box, size: [0.0381, 0.685, 0.0381]}
+    pose: {position: [0.1334, 0.0, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
+    physics: {dynamic: false, collision: "fixture"}
+    semantic_class: fixture.frame
+    tags: [fixture, rig-frame]
+
+  - id: rig_rail_back
+    geometry: {kind: box, size: [0.0381, 0.685, 0.0381]}
+    pose: {position: [-0.3874, 0.0, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
+    physics: {dynamic: false, collision: "fixture"}
+    semantic_class: fixture.frame
+    tags: [fixture, rig-frame]
+
+  # ── Grid tape ──────────────────────────────────────────────────────────────
+  # 1 in black tape: two interior borders per axis plus a full outer border,
+  # giving the measured 19 in pattern.  Visual sheet on the surface:
+  # non-colliding, so it never obstructs a descend or place motion.
+
+  # Outer border — the four sides of the 19 in pattern.  Corners overlap by
+  # design (both strips are the same black).
+  - id: grid_border_near
+    geometry:
+      kind: box
+      size: [0.0254, 0.4826, 0.0012]
+    pose:
+      position: [0.2032, 0.0, 0.7406]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.09, 0.09, 0.10, 1.0]
+      roughness: 0.9
+    physics:
+      dynamic: false
+      collision: false
+    semantic_class: marking.tape
+    tags: [grid, marking]
+
+  - id: grid_border_far
+    geometry:
+      kind: box
+      size: [0.0254, 0.4826, 0.0012]
+    pose:
+      position: [0.6604, 0.0, 0.7406]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.09, 0.09, 0.10, 1.0]
+      roughness: 0.9
+    physics:
+      dynamic: false
+      collision: false
+    semantic_class: marking.tape
+    tags: [grid, marking]
+
+  - id: grid_border_left
+    geometry:
+      kind: box
+      size: [0.4826, 0.0254, 0.0012]
+    pose:
+      position: [0.4318, 0.2286, 0.7406]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.09, 0.09, 0.10, 1.0]
+      roughness: 0.9
+    physics:
+      dynamic: false
+      collision: false
+    semantic_class: marking.tape
+    tags: [grid, marking]
+
+  - id: grid_border_right
+    geometry:
+      kind: box
+      size: [0.4826, 0.0254, 0.0012]
+    pose:
+      position: [0.4318, -0.2286, 0.7406]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.09, 0.09, 0.10, 1.0]
+      roughness: 0.9
+    physics:
+      dynamic: false
+      collision: false
+    semantic_class: marking.tape
+    tags: [grid, marking]
+
+  # Interior borders — the tic-tac-toe cross bars.
+  - id: grid_tape_row_near
+    geometry:
+      kind: box
+      size: [0.0254, 0.4318, 0.0012]
+    pose:
+      position: [0.3556, 0.0, 0.7406]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.09, 0.09, 0.10, 1.0]
+      roughness: 0.9
+    physics:
+      dynamic: false
+      collision: false
+    semantic_class: marking.tape
+    tags: [grid, marking]
+
+  - id: grid_tape_row_far
+    geometry:
+      kind: box
+      size: [0.0254, 0.4318, 0.0012]
+    pose:
+      position: [0.5080, 0.0, 0.7406]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.09, 0.09, 0.10, 1.0]
+      roughness: 0.9
+    physics:
+      dynamic: false
+      collision: false
+    semantic_class: marking.tape
+    tags: [grid, marking]
+
+  - id: grid_tape_col_left
+    geometry:
+      kind: box
+      size: [0.4318, 0.0254, 0.0012]
+    pose:
+      position: [0.4318, 0.0762, 0.7406]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.09, 0.09, 0.10, 1.0]
+      roughness: 0.9
+    physics:
+      dynamic: false
+      collision: false
+    semantic_class: marking.tape
+    tags: [grid, marking]
+
+  - id: grid_tape_col_right
+    geometry:
+      kind: box
+      size: [0.4318, 0.0254, 0.0012]
+    pose:
+      position: [0.4318, -0.0762, 0.7406]
+      orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
+    material:
+      rgba: [0.09, 0.09, 0.10, 1.0]
+      roughness: 0.9
+    physics:
+      dynamic: false
+      collision: false
+    semantic_class: marking.tape
+    tags: [grid, marking]
+
+  # ── Addressable grid cells ─────────────────────────────────────────────────
+  # 5 in squares, flush with the surface and the same white as the table, so
+  # they are invisible in a render but resolvable by id.  Non-colliding and
+  # non-dynamic: they are placement targets, not obstacles.  SceneModel exposes
+  # them via grid_cells() / cell_center() (see scene/awareness.py).
+
+  # Row 1 — nearest the robot (x = 0.2794)
+  - id: cell_r1c1
+    geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
+    pose: {position: [0.2794, 0.1524, 0.7405], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
+    physics: {dynamic: false, collision: false}
+    semantic_class: grid.cell
+    tags: [grid, grid-cell, placement-target]
+
+  - id: cell_r1c2
+    geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
+    pose: {position: [0.2794, 0.0, 0.7405], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
+    physics: {dynamic: false, collision: false}
+    semantic_class: grid.cell
+    tags: [grid, grid-cell, placement-target]
+
+  - id: cell_r1c3
+    geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
+    pose: {position: [0.2794, -0.1524, 0.7405], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
+    physics: {dynamic: false, collision: false}
+    semantic_class: grid.cell
+    tags: [grid, grid-cell, placement-target]
+
+  # Row 2 — mid (x = 0.4318)
+  - id: cell_r2c1
+    geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
+    pose: {position: [0.4318, 0.1524, 0.7405], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
+    physics: {dynamic: false, collision: false}
+    semantic_class: grid.cell
+    tags: [grid, grid-cell, placement-target]
+
+  - id: cell_r2c2
+    geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
+    pose: {position: [0.4318, 0.0, 0.7405], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
+    physics: {dynamic: false, collision: false}
+    semantic_class: grid.cell
+    tags: [grid, grid-cell, placement-target]
+
+  - id: cell_r2c3
+    geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
+    pose: {position: [0.4318, -0.1524, 0.7405], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
+    physics: {dynamic: false, collision: false}
+    semantic_class: grid.cell
+    tags: [grid, grid-cell, placement-target]
+
+  # Row 3 — farthest from the robot (x = 0.5842)
+  - id: cell_r3c1
+    geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
+    pose: {position: [0.5842, 0.1524, 0.7405], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
+    physics: {dynamic: false, collision: false}
+    semantic_class: grid.cell
+    tags: [grid, grid-cell, placement-target]
+
+  - id: cell_r3c2
+    geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
+    pose: {position: [0.5842, 0.0, 0.7405], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
+    physics: {dynamic: false, collision: false}
+    semantic_class: grid.cell
+    tags: [grid, grid-cell, placement-target]
+
+  - id: cell_r3c3
+    geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
+    pose: {position: [0.5842, -0.1524, 0.7405], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
+    physics: {dynamic: false, collision: false}
+    semantic_class: grid.cell
+    tags: [grid, grid-cell, placement-target]

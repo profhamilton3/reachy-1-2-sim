@@ -45,6 +45,9 @@ class SceneObject:
     # Interactive control metadata (None for plain objects).
     control_type: Optional[str] = None      # button | switch | lever
     articulation: Optional[dict] = None      # {joint, axis, range, handle_offset, ...}
+    # False only for scene objects with physics.collision == false (markings,
+    # placement targets, calibration decals).  "fixture" counts as colliding.
+    collides: bool = True
 
     @property
     def is_control(self) -> bool:
@@ -217,6 +220,7 @@ class SceneModel:
                 quat=_quat_of(raw.get("pose", {})),
                 control_type=inter.get("type"),
                 articulation=raw.get("articulation"),
+                collides=phys.get("collision", True) is not False,
             )
             objects.append(obj)
             if table_id is None and (
@@ -254,16 +258,18 @@ class SceneModel:
     def static_obstacles(self) -> List[SceneObject]:
         # Controls are small and intentionally contacted by the gripper, so they
         # are NOT planning obstacles; large fixtures (console/table) are.
+        # Non-colliding statics (tape markings, grid cells, calibration decals)
+        # have no physical presence, so they are not obstacles either.
         return [
             o for o in self._objects.values()
-            if not o.dynamic and not o.is_control
+            if not o.dynamic and not o.is_control and o.collides
         ]
 
     def panel_obstacles(self) -> List[SceneObject]:
         """Console/panel fixture boxes the arm should route around."""
         return [
             o for o in self._objects.values()
-            if not o.is_control and (
+            if not o.is_control and o.collides and (
                 "fixture" in o.tags or "panel" in o.tags
                 or (o.semantic_class or "").startswith("furniture.")
             )
@@ -331,6 +337,30 @@ class SceneModel:
             actuate_dir=tangent, off_dir=(-tangent[0], -tangent[1], -tangent[2]),
             preferred_arm=self.preferred_arm(o.id),
         )
+
+    # ── Taped grid cells ──────────────────────────────────────────────────────
+
+    def grid_cells(self) -> List[str]:
+        """IDs of the taped grid's addressable cells, sorted by id.
+
+        Cells are non-colliding, non-dynamic markers flush with the tabletop
+        (see scenes/FWDCenterLabMCC.yaml).  Scenes without a grid return [].
+        """
+        return sorted(
+            o.id for o in self._objects.values() if "grid-cell" in o.tags
+        )
+
+    def cell_center(self, cell_id: str) -> XYZ:
+        """World point at the centre of a grid cell, on the table surface.
+
+        The z returned is the tabletop surface — not the marker's own z, which
+        sits a fraction of a millimetre above it so the decal renders.  Pair
+        with ``rest_point`` to place an object standing in the cell.
+        """
+        o = self._objects[cell_id]
+        if "grid-cell" not in o.tags:
+            raise KeyError(f"{cell_id!r} is not a grid cell")
+        return (o.center[0], o.center[1], self.table_surface_z)
 
     # ── Grasp / place geometry ────────────────────────────────────────────────
 
