@@ -15,6 +15,11 @@ services:
       # to 0.0.0.0 and ensure the host firewall restricts access appropriately.
     volumes:
       - ./notebooks:/notebooks   # Hot-reload notebooks without rebuild
+      # Scenes are also COPYed into the image at build time, but bind-mounting
+      # them means a new or edited scene shows up in RViz without a rebuild —
+      # otherwise the native MuJoCo server renders the new scene while the
+      # container still has only the baked-in set and RViz draws nothing.
+      - ./scenes:/opt/scenes
     environment:
       - DISPLAY=:1
       # Backend selector (overridable from the shell):
