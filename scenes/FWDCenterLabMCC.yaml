@@ -12,11 +12,13 @@ description: >-
 # ─────────────────────────────────────────────────────────────────────────────
 # MEASURED GEOMETRY  (1 in = 0.0254 m; all scene values are SI)
 #
-#   Board            ~27.5 in wide (y) x ~23.1 in deep (x) = 0.699 x 0.587 m
-#   Rig frame        80/20 ladder, top flush with the table at z = 0.74,
-#                    one 9 in (y) x 19 in (x) opening each side of the mast;
-#                    27.0 in wide x 22.0 in deep, extending BACK from the table
-#   Surface height   z = 0.74  (table_top centre 0.72 + half-thickness 0.02)
+#   Board            ~27.5 in wide (y) x ~23.1 in deep (x) = 0.699 x 0.587 m,
+#                    ~1 in thick, RESTING ON TOP OF the rig frame
+#   Rig frame        80/20 ladder, rail tops at the board's UNDERSIDE
+#                    (z = 0.7146), one 9 in (y) x 19 in (x) opening each side of
+#                    the mast; 27.0 in wide, extending BACK from the table.
+#                    NO cross rail in front of the board — see the rig section.
+#   Surface height   z = 0.74  (table_top centre 0.7273 + half-thickness 0.0127)
 #
 #   Grid  3 cells of 5 in + 4 tape borders of 1 in = 19 in = 0.4826 m, i.e.
 #   the INTERIOR borders AND a full outer border, centred on the board.
@@ -37,10 +39,12 @@ description: >-
 #   17 in reading (interior borders only) was wrong.
 #
 #   The board's ROBOT-SIDE edge could not be measured — a white board against a
-#   white glossy floor gives no edge signal — but it is BOUNDED, not assumed:
-#   it must clear the rig frame's front rail at x = 0.1524 and still carry the
-#   tape pattern whose near edge is at x = 0.1905.  Lateral extent is solid:
-#   13.7 and 13.8 in from two independent scans.
+#   white glossy floor gives no edge signal.  It has to carry the tape pattern
+#   whose near edge is at x = 0.1905, so it is somewhere at or before that;
+#   placed at 0.1600.  (It used to be described as "bounded" by a front rail at
+#   x = 0.1524.  That rail does not exist — see the rig frame section — so this
+#   edge is now a genuinely open number awaiting a tape measure.)  Lateral
+#   extent is solid: 13.7 and 13.8 in from two independent scans.
 #
 #   Cell pitch  5 in + 1 in = 6 in = 0.1524 m
 #   Cell centres    x: 0.2794 (near) | 0.4318 (mid) | 0.5842 (far)
@@ -159,16 +163,23 @@ objects:
   # represent.
   #
   # Far edge x = 0.7468 is measured (grid centre + 12.4 in, two independent
-  # methods).  The robot-side edge cannot be measured, but it is now BOUNDED
-  # rather than assumed: it has to clear the rig frame's front rail at x =
-  # 0.1524, and it has to sit under the tape pattern whose near edge is at
-  # x = 0.1905.  Placed at 0.1600, in that 38 mm window.
+  # methods).  The robot-side edge is still unmeasured; it has to sit under the
+  # tape pattern whose near edge is at x = 0.1905.  Placed at 0.1600.
+  #
+  # THICKNESS ~1 in (0.0254), confirmed by the operator and consistent with
+  # docs/pics/80903696209, where the board's laminate edge is visibly proud of
+  # the rail beneath it.  The board SITS ON TOP OF the rails; its underside, not
+  # its surface, is what the rail tops meet.  The earlier 0.04 m slab with rail
+  # tops flush to the surface was an assumption, and it was wrong.
+  #
+  # Surface stays at z = 0.740 pending the operator's height measurement; the
+  # centre moved to keep it there while the slab got thinner.
   - id: table_top
     geometry:
       kind: box
-      size: [0.5868, 0.6985, 0.04]
+      size: [0.5868, 0.6985, 0.0254]
     pose:
-      position: [0.4534, 0.0, 0.72]
+      position: [0.4534, 0.0, 0.7273]
       orientation_wxyz: [1.0, 0.0, 0.0, 0.0]
     material:
       rgba: [0.93, 0.93, 0.94, 1.0]
@@ -182,9 +193,25 @@ objects:
 
   # ── Rig frame (the "railing system") ───────────────────────────────────────
   # Horizontal 80/20 aluminium extrusion ladder that Reachy's mast is bolted
-  # to.  Six 1.5 in square rails whose top faces are flush with the tabletop at
-  # z = 0.74, forming one 9 x 19 in opening each side of the mast — the notes'
-  # "opening 9 inches by 19 inches on both sides".
+  # to.  FIVE 1.5 in square rails, forming one 9 x 19 in opening each side of
+  # the mast — the notes' "opening 9 inches by 19 inches on both sides".
+  #
+  # RAIL HEIGHT.  The rail tops sit at the board's UNDERSIDE (z = 0.7146), not
+  # flush with its surface.  docs/pics/80903696209 shows the board's laminate
+  # edge standing proud of the rail below it, and the operator confirms the
+  # board rests on top of the frame.  This is a correction: the rails used to be
+  # modelled with their tops at z = 0.740, which put 40 mm of phantom aluminium
+  # in the plane the arm has to cross.
+  #
+  # NO FRONT CROSS RAIL.  There is no rail along the board's robot-side edge.
+  # docs/pics/80903693586 shows that edge finished with a wooden trim strip
+  # overhanging open air above the skirt, with the only aluminium nearby running
+  # perpendicular and away from the viewer.  The operator confirms it: if a
+  # front member exists at all, it does not block the path in or out of the
+  # pocket.  A `rig_rail_front` used to be modelled at x in [0.114, 0.152],
+  # squarely across the arm's route; it has been removed.  The opening's 19 in
+  # fore-aft length is therefore bounded by the back rail and the board's near
+  # edge, not by a front cross member.
   #
   # Orientation: 9 in is the LATERAL span, 19 in the FORE-AFT one, so each
   # opening's short edge faces the table and the long edge runs back behind the
@@ -199,24 +226,26 @@ objects:
   #
   # The right arm hangs at (x=0, y=-0.19) with its elbow at z = 0.72 — dead
   # centre of the right-hand opening, 4.5 in of clearance to the rail either
-  # side, and level with them.  That is exactly the "arms easily fit in the
-  # default position by his side" the notes describe, and why this frame has to
-  # exist in the collision model.
+  # side.  Measured against the model, the nearest approach at that rest pose is
+  # 79 mm of clear air between the upper-arm capsule and the inner-right rail.
+  # That is the "arms easily fit in the default position by his side" the notes
+  # describe, and why this frame has to exist in the collision model.
   #
   # collision: fixture -> collides with robot links (contype=2) but not with the
   # model's pedestal cylinder (world channel) or the tabletop (object channel),
   # so the mast passing through the rails generates no spurious contacts.
   #
-  # ASSUMED, not measured: the 1.5 in profile size, the rails' flush-with-table
-  # height, and the frame's outer footprint.  The opening dimensions and the
-  # arm-through-the-opening geometry are the parts that are pinned down.
+  # ASSUMED, not measured: the 1.5 in profile size and the frame's outer
+  # footprint.  Pinned down: the opening dimensions, the arm-through-the-opening
+  # geometry, the rails-under-the-board relationship, and the absence of a
+  # blocking front member.
   # Not modelled: the frame's legs and the black skirt below it (irrelevant to
   # arm collision), and the mast itself — reachy_1_2.xml's pedestal cylinder
   # stands in for it and is NOT the real mast's diameter or extent.
 
   - id: rig_rail_inner_right
     geometry: {kind: box, size: [0.5588, 0.0381, 0.0381]}
-    pose: {position: [-0.127, -0.0567, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    pose: {position: [-0.127, -0.0567, 0.69555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
     physics: {dynamic: false, collision: "fixture"}
     semantic_class: fixture.frame
@@ -224,7 +253,7 @@ objects:
 
   - id: rig_rail_inner_left
     geometry: {kind: box, size: [0.5588, 0.0381, 0.0381]}
-    pose: {position: [-0.127, 0.0567, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    pose: {position: [-0.127, 0.0567, 0.69555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
     physics: {dynamic: false, collision: "fixture"}
     semantic_class: fixture.frame
@@ -232,7 +261,7 @@ objects:
 
   - id: rig_rail_outer_right
     geometry: {kind: box, size: [0.5588, 0.0381, 0.0381]}
-    pose: {position: [-0.127, -0.3234, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    pose: {position: [-0.127, -0.3234, 0.69555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
     physics: {dynamic: false, collision: "fixture"}
     semantic_class: fixture.frame
@@ -240,15 +269,7 @@ objects:
 
   - id: rig_rail_outer_left
     geometry: {kind: box, size: [0.5588, 0.0381, 0.0381]}
-    pose: {position: [-0.127, 0.3234, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
-    material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
-    physics: {dynamic: false, collision: "fixture"}
-    semantic_class: fixture.frame
-    tags: [fixture, rig-frame]
-
-  - id: rig_rail_front
-    geometry: {kind: box, size: [0.0381, 0.685, 0.0381]}
-    pose: {position: [0.1334, 0.0, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    pose: {position: [-0.127, 0.3234, 0.69555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
     physics: {dynamic: false, collision: "fixture"}
     semantic_class: fixture.frame
@@ -256,7 +277,7 @@ objects:
 
   - id: rig_rail_back
     geometry: {kind: box, size: [0.0381, 0.685, 0.0381]}
-    pose: {position: [-0.3874, 0.0, 0.72095], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    pose: {position: [-0.3874, 0.0, 0.69555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.72, 0.73, 0.75, 1.0], metallic: 0.8, roughness: 0.35}
     physics: {dynamic: false, collision: "fixture"}
     semantic_class: fixture.frame

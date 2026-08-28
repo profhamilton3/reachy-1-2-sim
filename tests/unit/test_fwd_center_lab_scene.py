@@ -62,14 +62,21 @@ class TestMeasuredTable:
         far = scene.table.center[0] + scene.table.size[0] / 2.0
         assert far == pytest.approx(0.7468, abs=1e-3)
 
-    def test_board_near_edge_clears_the_frame_and_carries_the_pattern(self, scene):
-        """Not measurable — bounded between the rig frame and the tape."""
+    def test_board_near_edge_carries_the_pattern(self, scene):
+        """Not measurable.  It only has to sit under the tape it carries.
+
+        This used to also assert the edge cleared a front rail.  That rail does
+        not exist (see TestRigFrame.test_no_cross_rail_in_front_of_the_board),
+        so the lower bound went with it — this edge is now an open number.
+        """
         near = scene.table.center[0] - scene.table.size[0] / 2.0
-        frame_front = (scene.get("rig_rail_front").center[0]
-                       + scene.get("rig_rail_front").size[0] / 2.0)
         pattern_near = (scene.get("grid_border_near").center[0]
                         - scene.get("grid_border_near").size[0] / 2.0)
-        assert frame_front < near < pattern_near
+        assert near < pattern_near
+
+    def test_board_is_one_inch_thick(self, scene):
+        """Operator-confirmed, and consistent with docs/pics/80903696209."""
+        assert scene.table.size[2] == pytest.approx(1 * IN, abs=1e-6)
 
     def test_board_width_matches_the_measured_edges(self, scene):
         # +/-13.75 in from grid centre along y
@@ -202,24 +209,48 @@ class TestRigFrame:
 
     RAILS = ("rig_rail_inner_right", "rig_rail_inner_left",
              "rig_rail_outer_right", "rig_rail_outer_left",
-             "rig_rail_front", "rig_rail_back")
+             "rig_rail_back")
 
     def _span(self, scene, oid, axis):
         o = scene.get(oid)
         return o.center[axis] - o.size[axis] / 2, o.center[axis] + o.size[axis] / 2
 
-    def test_all_six_rails_present(self, scene):
+    def test_all_five_rails_present(self, scene):
         for r in self.RAILS:
             assert "rig-frame" in scene.get(r).tags
 
-    def test_opening_is_9_lateral_by_19_fore_aft(self, scene):
+    def test_no_cross_rail_in_front_of_the_board(self, scene):
+        """docs/pics/80903693586 shows the board's robot-side edge finished with
+        a wooden trim strip overhanging open air above the skirt; the only
+        aluminium nearby runs perpendicular, away from the camera.  The operator
+        confirms nothing there blocks the arm's path in or out of the pocket.
+
+        A rig_rail_front used to be modelled at x in [0.114, 0.152] — squarely
+        across that path, and the single largest obstruction in the scene.
+        """
+        assert "rig_rail_front" not in scene.objects
+        rail_fronts = [self._span(scene, r, 0)[1] for r in self.RAILS]
+        board_near = self._span(scene, "table_top", 0)[0]
+        assert max(rail_fronts) <= board_near
+
+    def test_opening_is_9_inches_laterally(self, scene):
         """The short (9 in) edge faces the table; the long edge runs back."""
-        fore_aft = (self._span(scene, "rig_rail_front", 0)[0]
-                    - self._span(scene, "rig_rail_back", 0)[1])
         lateral = (self._span(scene, "rig_rail_inner_right", 1)[0]
                    - self._span(scene, "rig_rail_outer_right", 1)[1])
         assert lateral == pytest.approx(9 * IN, abs=2e-4)
-        assert fore_aft == pytest.approx(19 * IN, abs=2e-4)
+
+    def test_opening_is_at_least_19_inches_fore_aft(self, scene):
+        """OPEN QUESTION.  The notes measure the opening at 9 x 19 in, but with
+        no front cross member the fore-aft extent is bounded only by the back
+        rail and the board's near edge, which comes out at ~20.8 in rather than
+        19.  Either a front member exists further forward than the photos show,
+        or the board's near edge is closer to the robot than the 0.160 placed
+        here.  Both are questions for the next tape measure; assert only that
+        the arm has at least the 19 in the notes describe.
+        """
+        fore_aft = (self._span(scene, "table_top", 0)[0]
+                    - self._span(scene, "rig_rail_back", 0)[1])
+        assert fore_aft >= 19 * IN
 
     def test_frame_does_not_overhang_the_board_sideways(self, scene):
         """The rig photos show the rails inside the board's width, not past it.
@@ -249,10 +280,20 @@ class TestRigFrame:
         left = self._span(scene, "rig_rail_outer_left", 1)[0]
         assert right == pytest.approx(-left, abs=1e-6)
 
-    def test_rail_tops_are_flush_with_the_tabletop(self, scene):
+    def test_rail_tops_meet_the_board_underside(self, scene):
+        """The board RESTS ON the frame — docs/pics/80903696209 shows its
+        laminate edge proud of the rail beneath it.  The rail tops therefore
+        meet the board's underside, not its surface.  Modelling them flush with
+        the surface put 25 mm of phantom aluminium in the plane the arm crosses.
+        """
+        board_bottom = self._span(scene, "table_top", 2)[0]
         for r in self.RAILS:
-            assert self._span(scene, r, 2)[1] == pytest.approx(
-                scene.table_surface_z, abs=1e-6)
+            assert self._span(scene, r, 2)[1] == pytest.approx(board_bottom, abs=1e-6)
+
+    def test_rails_sit_entirely_below_the_board(self, scene):
+        board_bottom = self._span(scene, "table_top", 2)[0]
+        for r in self.RAILS:
+            assert self._span(scene, r, 2)[1] <= board_bottom + 1e-9
 
     def test_frame_does_not_intersect_the_board(self, scene):
         frame_front = max(self._span(scene, r, 0)[1] for r in self.RAILS)
@@ -260,15 +301,21 @@ class TestRigFrame:
         assert frame_front < board_near
 
     def test_rest_pose_arm_passes_through_the_right_opening(self, scene):
-        """The right arm hangs at (0, -0.19); it must clear the rails."""
+        """The right arm hangs at (0, -0.19); it must clear the rails.
+
+        Fore-aft the pocket now runs from the back rail to the board's near
+        edge, there being no front cross member.
+        """
         x, y = 0.0, -0.19
         ox = (self._span(scene, "rig_rail_back", 0)[1],
-              self._span(scene, "rig_rail_front", 0)[0])
+              self._span(scene, "table_top", 0)[0])
         oy = (self._span(scene, "rig_rail_outer_right", 1)[1],
               self._span(scene, "rig_rail_inner_right", 1)[0])
         assert ox[0] < x < ox[1]
         assert oy[0] < y < oy[1]
-        # "arms easily fit" — want real clearance, not a squeak-through
+        # "arms easily fit" — want real clearance, not a squeak-through.
+        # Measured against the collision model this is 79 mm of clear air
+        # between the upper-arm capsule and the inner-right rail.
         assert min(y - oy[0], oy[1] - y) > 0.05
 
     def test_frame_is_on_the_fixture_collision_channel(self, doc):
