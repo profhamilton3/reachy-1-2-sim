@@ -20,6 +20,13 @@ services:
       # otherwise the native MuJoCo server renders the new scene while the
       # container still has only the baked-in set and RViz draws nothing.
       - ./scenes:/opt/scenes
+      # Same reasoning for the Python library and the demo scripts: both are
+      # COPYed in at build time, so without these mounts the container silently
+      # runs whatever src/ looked like when the image was last built.  That is
+      # how a notebook calling newly added SceneModel methods (grid_cells,
+      # cell_center) hit AttributeError against an image that predated them.
+      - ./src:/opt/src
+      - ./scripts:/opt/scripts
     environment:
       - DISPLAY=:1
       # Backend selector (overridable from the shell):
