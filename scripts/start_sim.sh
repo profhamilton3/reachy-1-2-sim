@@ -73,6 +73,14 @@ cd "$REPO"
 REACHY_SIM_BACKEND=mujoco-remote REACHY_SIM_SCENE_FILE="$SCENE_FILE" \
     docker compose up -d
 
+# `up -d` leaves an already-running, unchanged container alone — so the bridge
+# keeps the joint goals it held before the native server was restarted, and
+# re-asserts them the moment it reconnects.  The arm then does NOT return to its
+# home pose, which makes this script useless as the "reset the sim" escape hatch
+# it is documented to be.  Restart the container so the bridge starts clean.
+echo "▶ Restarting the container so the bridge drops its stale joint goals …"
+docker compose restart reachy-sim
+
 echo
 echo "✓ Sim running with the MuJoCo physics backend."
 echo "    RViz   : http://localhost:6080"
