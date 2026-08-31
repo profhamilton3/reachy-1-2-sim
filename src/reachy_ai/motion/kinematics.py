@@ -82,6 +82,45 @@ _TOOL_LEN = 0.12
 _TOOL = np.array([0.0, 0.0, _TOOL_LEN])
 
 
+# ── Whole-arm link geometry ───────────────────────────────────────────────────
+#
+# The IK/FK surface above knows one point on the robot: the gripper pad.  That
+# is not the robot.  The upper arm and forearm sweep a far larger volume, and
+# they are what actually reach an object sitting on the near half of the board.
+# Worked example, from the pose the motion notebook used to sweep from: the pad
+# was 21 cm above the table and the *elbow* was 3.8 cm above it, directly over
+# the near-right grid cell, with the forearm 5 mm inside the cube standing
+# there.  Every check that watched the pad called that pose safe.
+#
+# Link lengths are the URDF/MJCF frame offsets, and the radii are the arm's
+# `class="collision"` geoms, both read from native_mujoco/model/reachy_1_2.xml:
+#
+#     r_upper_arm_col   capsule fromto "0 0 0  0 0 -0.28"   size 0.035
+#     r_forearm_col     capsule fromto "0 0 0  0 0 -0.25"   size 0.030
+#     r_thumb_col       box  pos "0  0.005 -0.085"  size 0.014 0.008 0.022
+#     r_finger_col      box  pos "0  0     -0.055"  size 0.014 0.008 0.014
+#
+# The two gripper pads are wrapped in one capsule rather than tracked
+# separately: they are 4 cm apart at most, they move with the same wrist, and a
+# capsule that bounds both is both simpler and conservative.  Its length reaches
+# the far face of the thumb pad (0.0325 + 0.085 + 0.022 = 0.1395 m below the
+# wrist frame) and its radius bounds the widest visual shell (0.047 m).
+_SHOULDER_Y = {"right": -0.19, "left": 0.19}
+_UPPER_ARM_LEN = 0.28
+_FOREARM_LEN = 0.25
+_HAND_LEN = 0.145
+_UPPER_ARM_RADIUS = 0.035
+_FOREARM_RADIUS = 0.030
+_HAND_RADIUS = 0.050
+
+Capsule = Tuple[str, XYZ, XYZ, float]
+
+
+def _rotx(a: float) -> np.ndarray:
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
+
+
 def _rotz(a: float) -> np.ndarray:
     c, s = np.cos(a), np.sin(a)
     return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
@@ -90,6 +129,59 @@ def _rotz(a: float) -> np.ndarray:
 def _roty(a: float) -> np.ndarray:
     c, s = np.cos(a), np.sin(a)
     return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+
+def link_frames(joints: Sequence[float], side: str = "right"):
+    """World positions of the shoulder, elbow and wrist, plus the hand rotation.
+
+    Reproduces the arm's kinematic chain rather than calling the SDK, so this
+    works on the host with no simulator running — and so a whole path can be
+    checked without a round trip per pose.  It is the same chain the FK service
+    itself evaluates (fake_reachy_server._arm_fk), which
+    test_arm_clearance.py asserts by comparing the wrist frame joint-for-joint.
+    """
+    q = np.radians(np.asarray(list(joints)[:7], dtype=float))
+    sign = 1.0 if side == "right" else -1.0
+    shoulder = _BASE + np.array([0.0, _SHOULDER_Y[side], 0.0])
+    R = _roty(q[0]) @ _rotx(sign * q[1]) @ _rotz(q[2])
+    elbow = shoulder + R @ np.array([0.0, 0.0, -_UPPER_ARM_LEN])
+    R = R @ _roty(q[3]) @ _rotz(q[4])
+    wrist = elbow + R @ np.array([0.0, 0.0, -_FOREARM_LEN])
+    R = R @ _roty(q[5]) @ _rotx(q[6])
+    return shoulder, elbow, wrist, R
+
+
+def link_capsules(joints: Sequence[float], side: str = "right") -> List[Capsule]:
+    """The arm's collision volume as (name, end, end, radius) world capsules.
+
+    Feed straight to ``SceneModel.clearance``.  Only the three moving links are
+    modelled: the torso and head do not move here, and the shoulder ball is
+    inside the upper-arm capsule already.
+    """
+    shoulder, elbow, wrist, R = link_frames(joints, side)
+    tip = wrist + R @ np.array([0.0, 0.0, -_HAND_LEN])
+
+    def xyz(v) -> XYZ:
+        return (float(v[0]), float(v[1]), float(v[2]))
+
+    return [
+        ("upper_arm", xyz(shoulder), xyz(elbow), _UPPER_ARM_RADIUS),
+        ("forearm", xyz(elbow), xyz(wrist), _FOREARM_RADIUS),
+        ("hand", xyz(wrist), xyz(tip), _HAND_RADIUS),
+    ]
+
+
+def joint_path(q_from: Sequence[float], q_to: Sequence[float], steps: int = 13):
+    """Poses along a joint-space straight line, endpoints included.
+
+    This is the shape a `goto` actually flies.  Minimum jerk retimes *when* each
+    joint gets where it is going, but every joint still runs monotonically from
+    its start to its goal, so the poses visited are these — which is why a check
+    at the two endpoints alone proves nothing about the move between them.
+    """
+    a = np.asarray(list(q_from)[:7], dtype=float)
+    b = np.asarray(list(q_to)[:7], dtype=float)
+    return [list(a + (i / (steps - 1)) * (b - a)) for i in range(steps)]
 
 
 class UnreachableError(RuntimeError):
@@ -213,6 +305,73 @@ class CartesianPlanner:
             raise CollisionError(
                 f"Path would collide ({len(violations)} pts): {first}"
             )
+
+    # ── Whole-arm clearance ───────────────────────────────────────────────────
+
+    def clearance(self, joints: Sequence[float], **kw):
+        """Worst approach of any arm link to any tracked object, at one pose."""
+        if self._scene is None:
+            return None
+        return self._scene.clearance(link_capsules(joints, self.side), **kw)
+
+    def path_clearance(
+        self, q_from: Sequence[float], q_to: Sequence[float],
+        steps: int = 13, **kw,
+    ):
+        """Worst clearance anywhere along the joint-space move q_from → q_to.
+
+        Checking only the endpoints is the mistake this method exists to stop:
+        a move between two poses that both clear the table can still drag the
+        forearm through an object halfway along, and it does.
+        """
+        if self._scene is None:
+            return None
+        worst = None
+        for q in joint_path(q_from, q_to, steps):
+            c = self._scene.clearance(link_capsules(q, self.side), **kw)
+            if c is not None and (worst is None or c.distance < worst.distance):
+                worst = c
+        return worst
+
+    def safe_fraction(
+        self, q_from: Sequence[float], q_to: Sequence[float],
+        margin: float = 0.03, steps: int = 13, tol: float = 1e-3, **kw,
+    ) -> Tuple[float, object]:
+        """How much of the move q_from → q_to keeps ``margin`` metres of air.
+
+        Returns (fraction in [0, 1], the Clearance at that fraction).  1.0 means
+        the whole move is clear; 0.0 means the arm is already inside the margin
+        where it stands and no part of the move is safe.
+
+        Clipping rather than skipping is deliberate: a sweep that stops at +22°
+        because red_cube is under the forearm still demonstrates the joint, and
+        it reports the real limit.  A skipped sweep demonstrates nothing.
+        """
+        full = self.path_clearance(q_from, q_to, steps, **kw)
+        if full is None or full.distance >= margin:
+            return 1.0, full
+        lo, hi = 0.0, 1.0
+        a = np.asarray(list(q_from)[:7], dtype=float)
+        b = np.asarray(list(q_to)[:7], dtype=float)
+        while hi - lo > tol:
+            mid = 0.5 * (lo + hi)
+            c = self.path_clearance(a, list(a + mid * (b - a)), steps, **kw)
+            if c is not None and c.distance >= margin:
+                lo = mid
+            else:
+                hi = mid
+        return lo, self.path_clearance(a, list(a + lo * (b - a)), steps, **kw)
+
+    def clip(
+        self, q_from: Sequence[float], q_to: Sequence[float],
+        margin: float = 0.03, steps: int = 13, **kw,
+    ) -> Tuple[List[float], float, object]:
+        """``safe_fraction`` applied — the furthest pose along the move that is
+        still clear, as (joints, fraction, Clearance)."""
+        frac, c = self.safe_fraction(q_from, q_to, margin, steps, **kw)
+        a = np.asarray(list(q_from)[:7], dtype=float)
+        b = np.asarray(list(q_to)[:7], dtype=float)
+        return list(a + frac * (b - a)), frac, c
 
     def plan_segment(
         self,

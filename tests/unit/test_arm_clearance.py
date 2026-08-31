@@ -1,0 +1,481 @@
+"""Unit tests for whole-arm clearance against scene objects.
+
+Covers the two failures that made the notebook's old pad-only check useless:
+
+  * the arm is not its pad — the forearm and upper arm sweep a much larger
+    volume, and they are what actually reach an object on the near half of the
+    board;
+  * a collision happens in TRANSIT — checking the two endpoints of a move says
+    nothing about the poses between them.
+
+All offline: link_frames reproduces the arm's kinematic chain in-process, so
+none of this needs a simulator, ROS, or reachy_sdk.
+"""
+
+import math
+import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
+
+from reachy_ai.motion.kinematics import (  # noqa: E402
+    CartesianPlanner,
+    R_ARM_JOINTS,
+    _FOREARM_LEN,
+    _FOREARM_RADIUS,
+    _HAND_LEN,
+    _HAND_RADIUS,
+    _UPPER_ARM_LEN,
+    _UPPER_ARM_RADIUS,
+    joint_path,
+    link_capsules,
+    link_frames,
+)
+from reachy_ai.scene.awareness import (  # noqa: E402
+    SceneModel,
+    SceneObject,
+    object_sdf,
+    segment_object_distance,
+)
+
+_ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
+_SCENE_PATH = os.path.join(_ROOT, "scenes", "FWDCenterLabMCC.yaml")
+
+
+def q(**kw):
+    """A 7-element right-arm pose in R_ARM_JOINTS order, degrees."""
+    d = dict.fromkeys(R_ARM_JOINTS, 0.0)
+    d.update(kw)
+    return [d[j] for j in R_ARM_JOINTS]
+
+
+# The pose Routine 2 used to sweep from, and the one it sweeps from now.
+OLD_PRESENT = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+PRESENT = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
+
+
+@pytest.fixture
+def scene():
+    return SceneModel.from_yaml(_SCENE_PATH)
+
+
+@pytest.fixture
+def planner(scene):
+    # None for the arm: every clearance method is pure geometry and never
+    # touches the SDK, which is what makes this testable off the robot.
+    return CartesianPlanner(arm=None, scene=scene, side="right")
+
+
+def _dist(a, b):
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+
+
+class TestLinkFrames:
+    """link_frames must reproduce the SDK's own FK, not approximate it.
+
+    The reference values were read off the running simulator by calling
+    reachy.r_arm.forward_kinematics() and comparing element by element; the
+    agreement was exact to float precision.  If a link length or an axis order
+    ever drifts, these numbers catch it.
+    """
+
+    def test_zero_pose_hangs_straight_down(self):
+        shoulder, elbow, wrist, _ = link_frames(q())
+        assert shoulder == pytest.approx((0.0, -0.19, 1.0))
+        assert elbow == pytest.approx((0.0, -0.19, 1.0 - _UPPER_ARM_LEN))
+        assert wrist == pytest.approx(
+            (0.0, -0.19, 1.0 - _UPPER_ARM_LEN - _FOREARM_LEN))
+
+    def test_matches_sdk_forward_kinematics_at_present(self):
+        _, elbow, wrist, _ = link_frames(OLD_PRESENT)
+        assert wrist == pytest.approx((0.3921, -0.2013, 0.8935), abs=5e-4)
+        assert elbow == pytest.approx((0.1703, -0.1998, 0.7780), abs=5e-4)
+
+    def test_link_lengths_are_invariant_under_joint_angles(self):
+        for pose in (q(), OLD_PRESENT, PRESENT,
+                     q(r_shoulder_pitch=-20.0, r_arm_yaw=35.0,
+                       r_elbow_pitch=-100.0, r_forearm_yaw=60.0)):
+            shoulder, elbow, wrist, _ = link_frames(pose)
+            assert _dist(shoulder, elbow) == pytest.approx(_UPPER_ARM_LEN)
+            assert _dist(elbow, wrist) == pytest.approx(_FOREARM_LEN)
+
+    def test_wrist_and_forearm_joints_do_not_move_the_elbow(self):
+        _, base_elbow, _, _ = link_frames(OLD_PRESENT)
+        moved = dict(zip(R_ARM_JOINTS, OLD_PRESENT))
+        moved.update(r_forearm_yaw=90.0, r_wrist_pitch=45.0, r_wrist_roll=-45.0)
+        _, elbow, _, _ = link_frames([moved[j] for j in R_ARM_JOINTS])
+        assert elbow == pytest.approx(base_elbow)
+
+    def test_left_arm_mirrors_the_right(self):
+        pose = q(r_shoulder_pitch=-40.0, r_shoulder_roll=-25.0, r_arm_yaw=15.0)
+        _, r_elbow, r_wrist, _ = link_frames(pose, side="right")
+        mirrored = list(pose)
+        mirrored[2] = -mirrored[2]                       # arm_yaw flips with y
+        _, l_elbow, l_wrist, _ = link_frames(mirrored, side="left")
+        assert l_elbow == pytest.approx((r_elbow[0], -r_elbow[1], r_elbow[2]))
+        assert l_wrist == pytest.approx((r_wrist[0], -r_wrist[1], r_wrist[2]))
+
+
+class TestLinkCapsules:
+    def test_three_links_with_the_mjcf_collision_radii(self):
+        caps = link_capsules(PRESENT)
+        assert [c[0] for c in caps] == ["upper_arm", "forearm", "hand"]
+        assert [c[3] for c in caps] == [
+            _UPPER_ARM_RADIUS, _FOREARM_RADIUS, _HAND_RADIUS]
+
+    def test_capsules_are_chained_end_to_end(self):
+        caps = link_capsules(PRESENT)
+        assert caps[0][2] == pytest.approx(caps[1][1])   # elbow
+        assert caps[1][2] == pytest.approx(caps[2][1])   # wrist
+
+    def test_hand_capsule_spans_the_gripper(self):
+        _, _, hand = link_capsules(PRESENT)
+        assert _dist(hand[1], hand[2]) == pytest.approx(_HAND_LEN)
+
+    def test_the_elbow_sits_far_below_the_pad_at_the_old_present(self, planner):
+        """The reason the pad-height check was worthless."""
+        _, elbow, wrist, _ = link_frames(OLD_PRESENT)
+        assert elbow[2] < 0.79            # 5 cm above a 0.740 tabletop
+        assert wrist[2] > elbow[2]        # while the hand points up and away
+
+
+class TestObjectSdf:
+    def _box(self, **kw):
+        base = dict(id="b", kind="box", center=(0.0, 0.0, 0.0),
+                    size=(0.2, 0.1, 0.4), dynamic=True, tracked=True)
+        base.update(kw)
+        return SceneObject(**base)
+
+    def test_box_face_distance(self):
+        o = self._box()
+        assert object_sdf(o, (0.3, 0.0, 0.0)) == pytest.approx(0.2)
+        assert object_sdf(o, (0.0, 0.0, 0.5)) == pytest.approx(0.3)
+
+    def test_box_surface_is_zero(self):
+        o = self._box()
+        assert object_sdf(o, (0.1, 0.0, 0.0)) == pytest.approx(0.0)
+
+    def test_box_interior_is_negative_and_measures_penetration(self):
+        o = self._box()
+        # 1 cm inside the +y face, which is the nearest one.
+        assert object_sdf(o, (0.0, 0.04, 0.0)) == pytest.approx(-0.01)
+
+    def test_box_corner_distance_is_euclidean_not_axis_wise(self):
+        o = self._box()
+        d = object_sdf(o, (0.1 + 0.03, 0.05 + 0.04, 0.0))
+        assert d == pytest.approx(0.05)
+
+    def test_yawed_box_is_measured_in_its_own_frame(self):
+        upright = self._box(size=(0.2, 0.2, 0.2))
+        yaw45 = (math.cos(math.pi / 8), 0.0, 0.0, math.sin(math.pi / 8))
+        yawed = self._box(size=(0.2, 0.2, 0.2), quat=yaw45)
+        # Turned 45 deg the cube points a corner at +x, so it reaches further.
+        assert object_sdf(upright, (0.3, 0.0, 0.0)) == pytest.approx(0.2)
+        assert object_sdf(yawed, (0.3, 0.0, 0.0)) == pytest.approx(
+            0.3 - 0.1 * math.sqrt(2))
+
+    def test_a_square_box_is_unchanged_by_a_quarter_turn(self):
+        quarter = (math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
+        turned = self._box(size=(0.2, 0.2, 0.2), quat=quarter)
+        assert object_sdf(turned, (0.3, 0.0, 0.0)) == pytest.approx(0.2)
+
+    def test_cylinder_uses_flat_ends_not_a_dome(self):
+        """A capsule model would invent up to `radius` of extra height.
+
+        On the scene's 6 cm cube that is 3 cm of imaginary object, which is the
+        difference between an honest clearance report and a false collision.
+        """
+        o = SceneObject(id="c", kind="cylinder", center=(0.0, 0.0, 0.0),
+                        size=(0.1, 0.1, 0.2), dynamic=True, tracked=True)
+        assert object_sdf(o, (0.0, 0.0, 0.15)) == pytest.approx(0.05)
+        assert object_sdf(o, (0.2, 0.0, 0.0)) == pytest.approx(0.15)
+
+
+class TestSegmentObjectDistance:
+    def _cube(self):
+        return SceneObject(id="cube", kind="box", center=(0.0, 0.0, 0.0),
+                           size=(0.1, 0.1, 0.1), dynamic=True, tracked=True)
+
+    def test_parallel_segment_above_the_object(self):
+        d, at = segment_object_distance(self._cube(), (-1.0, 0, 0.2), (1.0, 0, 0.2))
+        assert d == pytest.approx(0.15)
+        assert at[2] == pytest.approx(0.2)
+
+    def test_the_minimum_can_lie_between_the_endpoints(self):
+        """Endpoint sampling is exactly what the old check got wrong."""
+        obj = self._cube()
+        a, b = (-1.0, 0.0, 0.06), (1.0, 0.0, 0.06)
+        interior, _ = segment_object_distance(obj, a, b)
+        endpoints = min(object_sdf(obj, a), object_sdf(obj, b))
+        assert interior == pytest.approx(0.01)
+        assert endpoints > 0.9
+        assert interior < endpoints
+
+    def test_radius_is_subtracted(self):
+        obj = self._cube()
+        bare, _ = segment_object_distance(obj, (-1, 0, 0.2), (1, 0, 0.2))
+        fat, _ = segment_object_distance(obj, (-1, 0, 0.2), (1, 0, 0.2), radius=0.05)
+        assert fat == pytest.approx(bare - 0.05)
+
+    def test_a_link_that_overlaps_reports_negative(self):
+        d, _ = segment_object_distance(self._cube(), (-1, 0, 0.0), (1, 0, 0.0),
+                                       radius=0.02)
+        assert d < 0
+
+    def test_degenerate_segment_reduces_to_a_point(self):
+        obj = self._cube()
+        d, at = segment_object_distance(obj, (0.3, 0.0, 0.0), (0.3, 0.0, 0.0))
+        assert d == pytest.approx(object_sdf(obj, (0.3, 0.0, 0.0)))
+        assert at == pytest.approx((0.3, 0.0, 0.0))
+
+
+class TestJointPath:
+    def test_includes_both_endpoints(self):
+        path = joint_path(q(), PRESENT, steps=5)
+        assert len(path) == 5
+        assert path[0] == pytest.approx(q())
+        assert path[-1] == pytest.approx(PRESENT)
+
+    def test_interpolates_linearly(self):
+        path = joint_path(q(r_elbow_pitch=0.0), q(r_elbow_pitch=-100.0), steps=3)
+        assert path[1][R_ARM_JOINTS.index("r_elbow_pitch")] == pytest.approx(-50.0)
+
+
+class TestSceneClearance:
+    def test_manipulable_objects_are_obstacles_here_but_not_in_static(self, scene):
+        """The gap that let the sweeps knock things over."""
+        assert "red_cube" in scene.obstacle_ids()
+        assert "red_cube" not in [o.id for o in scene.static_obstacles()]
+
+    def test_old_present_pose_overlapped_the_red_cube(self, scene):
+        c = scene.clearance(link_capsules(OLD_PRESENT))
+        assert c.object_id == "red_cube"
+        assert c.link == "forearm"
+        assert c.distance < 0
+
+    def test_new_present_pose_clears_every_object(self, scene):
+        c = scene.clearance(link_capsules(PRESENT))
+        assert c.distance > 0.10
+
+    def test_per_object_report_covers_every_manipulable(self, scene):
+        per = scene.clearances(link_capsules(PRESENT))
+        assert set(per) == set(scene.manipulable_ids())
+
+    def test_worst_matches_the_per_object_minimum(self, scene):
+        per = scene.clearances(link_capsules(OLD_PRESENT))
+        assert scene.clearance(link_capsules(OLD_PRESENT)).distance == pytest.approx(
+            min(c.distance for c in per.values()))
+
+    def test_including_statics_can_only_lower_the_clearance(self, scene):
+        caps = link_capsules(PRESENT)
+        assert (scene.clearance(caps, include_static=True).distance
+                <= scene.clearance(caps).distance)
+
+    def test_statics_bring_in_the_rails_but_not_the_tabletop(self, scene):
+        statics = scene.obstacle_ids(include_static=True)
+        assert "rig_rail_outer_right" in statics
+        assert "table_top" not in statics
+        assert "table_top" in scene.obstacle_ids(include_static=True,
+                                                 include_table=True)
+
+    def test_the_tabletop_is_a_support_surface_not_an_obstacle(self, scene):
+        """Why it takes a separate opt-in.
+
+        REST is a waypoint from the notebook's verified placement route, and
+        the arm is resting ON the board there — so a guard that counts the
+        tabletop rejects the route the rig was measured against.  It rejected
+        all nine grid cells in section 4.7 before this was separated out.
+        """
+        rest = q(r_shoulder_pitch=-40.0, r_shoulder_roll=-10.0,
+                 r_elbow_pitch=-45.0, r_wrist_pitch=-10.0, r_wrist_roll=30.0)
+        caps = link_capsules(rest)
+        assert scene.clearance(caps, ids=["table_top"]).distance < 0
+        assert scene.clearance(caps, include_static=True).distance > 0.02
+
+    def test_every_verified_waypoint_clears_the_rig_rails(self, scene):
+        """The other half: the rails ARE a real no-go volume.
+
+        Nothing on the placement route comes within 9 mm of a rail, so unlike
+        the tabletop they can be guarded without rejecting known-good poses.
+        """
+        rails = [o.id for o in scene.static_obstacles() if "rig-frame" in o.tags]
+        route = [
+            q(),                                                    # HOME
+            q(r_shoulder_pitch=40.0),                               # BACK
+            q(r_shoulder_pitch=40.0, r_elbow_pitch=-125.0, r_wrist_pitch=45.0),
+            q(r_shoulder_pitch=70.0, r_elbow_pitch=-120.0, r_wrist_pitch=-45.0),
+            q(r_shoulder_pitch=37.5, r_shoulder_roll=-32.5,         # SWING_1
+              r_elbow_pitch=-120.0, r_wrist_pitch=-45.0),
+            q(r_shoulder_pitch=-17.5, r_shoulder_roll=-37.5,        # SWING_3
+              r_elbow_pitch=-120.0, r_wrist_pitch=-45.0),
+            q(r_shoulder_pitch=-40.0, r_shoulder_roll=-10.0,        # HOVER
+              r_elbow_pitch=-60.0, r_wrist_pitch=-15.0),
+        ]
+        for pose in route:
+            assert scene.clearance(link_capsules(pose), ids=rails).distance > 0.008
+
+    def test_no_obstacles_reports_nothing(self, scene):
+        assert scene.clearance(link_capsules(PRESENT), ids=[]) is None
+
+
+class TestUpdatePoses:
+    """The guard has to check where objects ARE, not where they were placed."""
+
+    def test_moving_an_object_changes_the_clearance(self, scene):
+        caps = link_capsules(PRESENT)
+        before = scene.clearance(caps, ids=["red_cube"]).distance
+        scene.update_poses({"red_cube": (0.279, -0.152, 0.90)})
+        after = scene.clearance(caps, ids=["red_cube"]).distance
+        assert after != pytest.approx(before)
+
+    def test_reports_only_the_ids_it_actually_moved(self, scene):
+        here = scene.get("red_cube").center
+        assert scene.update_poses({"red_cube": here}) == []
+        assert scene.update_poses({"red_cube": (0.3, -0.15, 0.77)}) == ["red_cube"]
+
+    def test_unknown_ids_are_ignored(self, scene):
+        """The live feed carries whatever the simulator tracks, not this scene."""
+        assert scene.update_poses({"not_in_this_scene": (0, 0, 0)}) == []
+
+    def test_derived_geometry_follows_the_new_centre(self, scene):
+        scene.update_poses({"red_cube": (0.4, 0.1, 0.90)})
+        cube = scene.get("red_cube")
+        assert cube.top_z == pytest.approx(0.90 + cube.half_height)
+        assert cube.center == pytest.approx((0.4, 0.1, 0.90))
+
+    def test_a_stale_model_can_call_a_collision_clear(self, scene):
+        """The failure this exists to prevent, on the real scene.
+
+        Observed live: red_cube was dragged 7.9 cm off its cell by a routine
+        that is not guarded, and the guard then went on measuring against the
+        cell it had left.
+        """
+        caps = link_capsules(PRESENT)
+        assert scene.clearance(caps, ids=["red_cube"]).distance > 0.10
+        scene.update_poses({"red_cube": (0.29, -0.24, 0.90)})
+        assert scene.clearance(caps, ids=["red_cube"]).distance < 0.10
+
+
+class TestPathClearance:
+    def test_endpoints_can_both_clear_while_the_move_does_not(self, planner):
+        """The transit failure, on the real scene.
+
+        Both ends of this move keep the arm off the cube; the middle does not.
+        """
+        a = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
+        b = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0,
+              r_arm_yaw=40.0)
+        ends = min(planner.clearance(a).distance, planner.clearance(b).distance)
+        assert planner.path_clearance(a, b).distance <= ends
+
+    def test_a_move_into_an_object_is_caught(self, planner):
+        stationary = planner.clearance(PRESENT).distance
+        into = planner.path_clearance(PRESENT, OLD_PRESENT).distance
+        assert stationary > 0.10
+        assert into < 0
+
+    def test_more_steps_never_report_a_larger_clearance(self, planner):
+        coarse = planner.path_clearance(PRESENT, OLD_PRESENT, steps=3).distance
+        fine = planner.path_clearance(PRESENT, OLD_PRESENT, steps=41).distance
+        assert fine <= coarse + 1e-9
+
+
+class TestSafeFraction:
+    def test_a_clear_move_is_not_clipped(self, planner):
+        target = dict(zip(R_ARM_JOINTS, PRESENT))
+        target["r_wrist_roll"] = 45.0
+        frac, _ = planner.safe_fraction(
+            PRESENT, [target[j] for j in R_ARM_JOINTS], margin=0.03)
+        assert frac == 1.0
+
+    def test_a_move_into_the_cube_is_clipped_short(self, planner):
+        frac, c = planner.safe_fraction(PRESENT, OLD_PRESENT, margin=0.03)
+        assert 0.0 < frac < 1.0
+        assert c.object_id == "red_cube"
+
+    def test_the_clipped_pose_actually_clears_the_margin(self, planner):
+        clipped, frac, _ = planner.clip(PRESENT, OLD_PRESENT, margin=0.03)
+        assert planner.path_clearance(PRESENT, clipped).distance >= 0.03 - 1e-3
+        assert frac < 1.0
+
+    def test_a_tighter_margin_allows_more_of_the_move(self, planner):
+        loose, _ = planner.safe_fraction(PRESENT, OLD_PRESENT, margin=0.01)
+        tight, _ = planner.safe_fraction(PRESENT, OLD_PRESENT, margin=0.08)
+        assert loose > tight
+
+    def test_starting_inside_the_margin_yields_nothing_safe(self, planner):
+        target = dict(zip(R_ARM_JOINTS, OLD_PRESENT))
+        target["r_wrist_roll"] = 45.0
+        frac, _ = planner.safe_fraction(
+            OLD_PRESENT, [target[j] for j in R_ARM_JOINTS], margin=0.03)
+        assert frac == 0.0
+
+    def test_clip_of_a_clear_move_returns_the_target_unchanged(self, planner):
+        target = dict(zip(R_ARM_JOINTS, PRESENT))
+        target["r_wrist_pitch"] = -45.0
+        want = [target[j] for j in R_ARM_JOINTS]
+        clipped, frac, _ = planner.clip(PRESENT, want, margin=0.03)
+        assert frac == 1.0
+        assert clipped == pytest.approx(want)
+
+    def test_without_a_scene_there_is_nothing_to_clip(self):
+        bare = CartesianPlanner(arm=None, scene=None, side="right")
+        assert bare.clearance(PRESENT) is None
+        assert bare.safe_fraction(PRESENT, OLD_PRESENT)[0] == 1.0
+
+
+class TestRoutineTwoSweepsAreSafe:
+    """The whole point: every sweep Routine 2 performs must clear the table.
+
+    Sweep ranges mirror notebooks/tlh_motion-routine.ipynb section 4.  The big
+    joints sweep RELATIVE to the base pose, which is what keeps them safe when
+    the base pose moves.
+    """
+
+    ABSOLUTE = [("r_wrist_pitch", (45.0, -45.0)),
+                ("r_wrist_roll", (45.0, -45.0)),
+                ("r_forearm_yaw", (90.0, -90.0)),
+                ("r_arm_yaw", (-40.0, 40.0))]
+    RELATIVE = [("r_shoulder_roll", (-18.0, 7.0)),
+                ("r_elbow_pitch", (-15.0, 15.0)),
+                ("r_shoulder_pitch", (-12.5, 12.5))]
+    WAVES = [dict(r_forearm_yaw=-60.0, r_wrist_pitch=25.0, r_wrist_roll=-30.0),
+             dict(r_forearm_yaw=60.0, r_wrist_pitch=-25.0, r_wrist_roll=30.0)]
+
+    def _targets(self, base):
+        bd = dict(zip(R_ARM_JOINTS, base))
+        for joint, values in self.ABSOLUTE:
+            for v in values:
+                t = dict(bd, **{joint: v})
+                yield f"{joint}={v:+.0f}", [t[j] for j in R_ARM_JOINTS]
+        for joint, deltas in self.RELATIVE:
+            for d in deltas:
+                t = dict(bd, **{joint: bd[joint] + d})
+                yield f"{joint}{d:+.1f}", [t[j] for j in R_ARM_JOINTS]
+        for i, wave in enumerate(self.WAVES):
+            t = dict(bd, **wave)
+            yield f"wave{'AB'[i]}", [t[j] for j in R_ARM_JOINTS]
+
+    def test_every_sweep_clears_the_objects_from_the_new_present(self, planner):
+        for label, target in self._targets(PRESENT):
+            c = planner.path_clearance(PRESENT, target)
+            assert c.distance > 0.05, f"{label}: {c}"
+
+    def test_every_sweep_also_clears_the_rig_and_the_table(self, planner):
+        for label, target in self._targets(PRESENT):
+            c = planner.path_clearance(PRESENT, target, include_static=True)
+            assert c.distance > 0.05, f"{label}: {c}"
+
+    def test_the_old_base_pose_could_not_have_been_saved_by_clipping(self, planner):
+        """Why PRESENT had to move rather than the sweeps merely being clipped.
+
+        red_cube's nearest surface is 0.320 m from the shoulder and the upper
+        arm's own surface reaches 0.315 m, so the near-right cell sits inside
+        the elbow's arc.  From the old pose the arm is already inside the
+        margin, and no fraction of any sweep is safe.
+        """
+        for _, target in self._targets(OLD_PRESENT):
+            frac, _ = planner.safe_fraction(OLD_PRESENT, target, margin=0.03)
+            assert frac == 0.0
