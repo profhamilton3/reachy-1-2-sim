@@ -396,6 +396,64 @@ class TestAcknowledgedReset:
         assert not e2.is_set()
 
 
+# ── R12-605: zoom forwarding ───────────────────────────────────────────────────
+
+class TestRequestZoom:
+    """The container-side half of zoom.
+
+    Before this existed, FakeCameraService stored the SDK's zoom level and
+    dropped it — the native renderer never heard about it, so `reachy.left_camera`
+    zoom calls silently did nothing over the Docker bridge.  These cover the
+    queueing contract; that the level actually changes cam_fovy is the native
+    server's job and is tested in tests/unit/test_zoom.py.
+    """
+
+    def test_pending_zoom_starts_empty(self):
+        b = _make_remote_backend()
+        assert b._pending_zoom is None
+
+    def test_request_zoom_queues_level(self):
+        b = _make_remote_backend()
+        b.request_zoom("in")
+        with b._lock:
+            assert b._pending_zoom == "in"
+
+    def test_request_zoom_normalises_case_and_whitespace(self):
+        """The protobuf enum names are upper-case; the native side wants lower."""
+        b = _make_remote_backend()
+        b.request_zoom("  OUT ")
+        with b._lock:
+            assert b._pending_zoom == "out"
+
+    def test_request_zoom_keeps_only_the_last_level(self):
+        """A lens has no queue — a client that flips levels wants the final one."""
+        b = _make_remote_backend()
+        b.request_zoom("in")
+        b.request_zoom("out")
+        b.request_zoom("inter")
+        with b._lock:
+            assert b._pending_zoom == "inter"
+
+    def test_request_zoom_does_not_touch_joint_commands(self):
+        """Zoom must not ride on the joint path: it is sent even with no motion."""
+        b = _make_remote_backend()
+        b.request_zoom("in")
+        with b._lock:
+            assert b._pending_cmds == []
+            assert b._pending_reset is False
+
+    def test_request_zoom_accepts_unknown_level_without_raising(self):
+        """Validation belongs to the native server, which owns ZoomLevel.
+
+        Rejecting here too would give two sources of truth that could disagree;
+        the native side logs and ignores a level it does not recognise.
+        """
+        b = _make_remote_backend()
+        b.request_zoom("telephoto")
+        with b._lock:
+            assert b._pending_zoom == "telephoto"
+
+
 # ── Gate 8-A: live lifecycle test against a stub WebSocket server ──────────────
 
 try:

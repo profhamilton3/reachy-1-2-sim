@@ -108,6 +108,10 @@ class MujocoRemoteBackend:
         self._cmd_seq = 0
         self._pending_cmds: List[JointCommand] = []
         self._pending_reset = False
+        # R12-605: zoom level awaiting forwarding to the native server.  Holds
+        # only the LAST requested level — the lens has no queue, and a client
+        # that flips in→out→in before the next send tick wants the final state.
+        self._pending_zoom: Optional[str] = None
         self._last_target: Optional[List[float]] = None
         self._shutdown = threading.Event()
         self._reconnect_count = 0
@@ -174,6 +178,19 @@ class MujocoRemoteBackend:
     def submit_commands(self, cmds: List[JointCommand]) -> None:
         with self._lock:
             self._pending_cmds.extend(cmds)
+
+    def request_zoom(self, level: str) -> None:
+        """Ask the native server to change the camera zoom level (R12-605).
+
+        `level` is an SDK ZoomLevelPossibilities name, lower-cased:
+        in / out / inter / zero.  Fire-and-forget — the native server applies it
+        on its render thread and logs a warning if it refuses; there is no ack,
+        and a level sent while disconnected is simply dropped along with every
+        other pending command.  Validation lives on the native side (zoom.py)
+        so there is one source of truth for what the lens can do.
+        """
+        with self._lock:
+            self._pending_zoom = str(level).strip().lower()
 
     def latest_snapshot(self) -> RemoteSnapshot:
         with self._lock:
@@ -331,6 +348,17 @@ class MujocoRemoteBackend:
                     asyncio.get_event_loop().call_later(
                         self._reset_timeout, self._on_reset_timeout
                     )
+
+                # R12-605: forward a requested zoom level.  Sent outside the
+                # `cmds` block because zoom is independent of joint motion — a
+                # client may zoom without ever commanding a joint.
+                with self._lock:
+                    zoom, self._pending_zoom = self._pending_zoom, None
+                if zoom is not None:
+                    await ws.send(json.dumps(
+                        {"type": "zoom_command", "level": zoom, "camera": ""}
+                    ))
+                    log.info("Zoom command forwarded: %s", zoom)
 
                 if cmds:
                     target, compliant, speed, torque = self._build_command(cmds)
