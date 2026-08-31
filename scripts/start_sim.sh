@@ -15,6 +15,23 @@
 #   REACHY_SIM_SCENE=control_panel ./scripts/start_sim.sh   # control console
 #   REACHY_SIM_SCENE=/abs/path/to/scene.yaml ./scripts/start_sim.sh
 #
+# Camera/render switches (all optional, all default off unless noted):
+#   REACHY_SIM_CALIBRATION=<name|path>  camera profile
+#                                       (default: calibration_measured_2026_08_27)
+#   REACHY_SIM_DISTORTION=1             barrel-warp frames to match the real lens
+#   REACHY_SIM_DEPTH=1                  add a float16 depth map to every frame
+#   REACHY_SIM_SEGMENTATION=1           add a uint16 body-ID map to every frame
+#   REACHY_SIM_EFFECTS=<path.yaml>      sensor noise/blur/dropout profile
+#   REACHY_SIM_RECORD=<dir>             record states+commands under <dir>
+#
+# The measured lab scene with the full camera model:
+#   REACHY_SIM_SCENE=FWDCenterLabMCC REACHY_SIM_DISTORTION=1 ./scripts/start_sim.sh
+#
+# DEPTH and SEGMENTATION each add ~820 kB to every camera_frame.  Setting BOTH
+# pushes the frame past the 1 MiB limit the container's websocket client uses,
+# which drops the bridge into a silent reconnect loop — read the note at their
+# definition below before switching them on.
+#
 # Then run the matching demo, e.g.:
 #   docker compose exec reachy-sim python3 /opt/scripts/demo_pick_place.py
 #   docker compose exec reachy-sim python3 /opt/scripts/demo_control_panel.py
@@ -80,12 +97,83 @@ case "${REACHY_SIM_DISTORTION:-0}" in
         ;;
 esac
 
+# Depth and segmentation channels (R12-601).  Both OFF by default, and that
+# default is load-bearing: TURNING BOTH ON AT ONCE BREAKS THE DOCKER BRIDGE.
+#
+# Measured on the wire, one 640x480 left_camera frame:
+#     jpeg_b64  54,780 B   depth_b64 819,200 B   seg_b64 819,200 B   (+246 JSON)
+#     neither      55 kB   depth only  874 kB    seg only  874 kB    both 1.61 MiB
+# The container's client (mujoco_remote_backend.py) calls websockets.connect()
+# without max_size, so it takes the library default of 1 MiB.  With both flags
+# on, every camera_frame exceeds it and the client kills the connection with
+# close code 1009 "message too big", reconnects, and dies again ~6 s later —
+# a silent reconnect loop in which RViz object poses and the :8080 preview
+# simply stop updating.  Either flag ALONE fits, but only just: 874 kB leaves
+# ~170 kB of headroom that a more detailed frame's larger JPEG eats into.
+#
+# Nothing in the container reads either channel — the bridge takes only
+# `jpeg_b64` off a camera_frame — so over Docker they are cost with no payoff.
+# Turn them on when a client talks to ws://…:8765 DIRECTLY (that client can set
+# max_size itself); leave them off for RViz/preview/notebook-over-gRPC work.
+# For bulk labelled data prefer native_mujoco/cli/generate_dataset.py, which
+# renders segmentation in-process with no socket in the path.
+#
+# Raising the container client's max_size would lift the 1 MiB ceiling, but the
+# extra render pass per camera per frame remains — so that is a change to make
+# when something in the container actually consumes depth or segmentation.
+EXTRA_ARGS=""
+DEPTH_NOTE="off"
+case "${REACHY_SIM_DEPTH:-0}" in
+    1|true|TRUE|yes|YES|on|ON)
+        EXTRA_ARGS="$EXTRA_ARGS --depth"
+        DEPTH_NOTE="ON — float16 depth map per frame"
+        ;;
+esac
+SEG_NOTE="off"
+case "${REACHY_SIM_SEGMENTATION:-0}" in
+    1|true|TRUE|yes|YES|on|ON)
+        EXTRA_ARGS="$EXTRA_ARGS --segmentation"
+        SEG_NOTE="ON — uint16 body-ID map per frame"
+        ;;
+esac
+
+# Sensor effects (R12-602): noise, blur, dropped frames, latency.  A path to a
+# YAML config; there is no default profile, so this is off unless you point it
+# at one.  Deliberately NOT enabled alongside the calibration work — effects
+# degrade frames on purpose, which is the opposite of what you want when
+# comparing sim frames against real ones.
+EFFECTS_ARGS=""
+EFFECTS_NOTE="off"
+if [ -n "${REACHY_SIM_EFFECTS:-}" ]; then
+    if [ ! -f "$REACHY_SIM_EFFECTS" ]; then
+        echo "✖ Sensor effects config not found: $REACHY_SIM_EFFECTS" >&2
+        exit 1
+    fi
+    EFFECTS_ARGS="--effects $REACHY_SIM_EFFECTS"
+    EFFECTS_NOTE="$(basename "$REACHY_SIM_EFFECTS")"
+fi
+
+# Recording (R12-603): states + commands to a timestamped run dir.  Off unless
+# REACHY_SIM_RECORD names a directory.
+RECORD_ARGS=""
+RECORD_NOTE="off"
+if [ -n "${REACHY_SIM_RECORD:-}" ]; then
+    mkdir -p "$REACHY_SIM_RECORD"
+    RECORD_ARGS="--record $REACHY_SIM_RECORD"
+    RECORD_NOTE="$REACHY_SIM_RECORD"
+fi
+
 echo "▶ Starting native MuJoCo server …"
-echo "    scene       : $(basename "$SCENE")"
-echo "    calibration : $(basename "$CALIB")"
-echo "    distortion  : $DISTORT_NOTE"
+echo "    scene        : $(basename "$SCENE")"
+echo "    calibration  : $(basename "$CALIB")"
+echo "    distortion   : $DISTORT_NOTE"
+echo "    depth        : $DEPTH_NOTE"
+echo "    segmentation : $SEG_NOTE"
+echo "    effects      : $EFFECTS_NOTE"
+echo "    recording    : $RECORD_NOTE"
 ( cd "$REPO/native_mujoco" && nohup mjpython server.py \
-    --scene "$SCENE" --calibration "$CALIB" $DISTORT_ARGS \
+    --scene "$SCENE" --calibration "$CALIB" \
+    $DISTORT_ARGS $EXTRA_ARGS $EFFECTS_ARGS $RECORD_ARGS \
     --host 0.0.0.0 --port 8765 --log-level INFO \
     >"$LOG" 2>&1 & )
 

@@ -64,7 +64,8 @@ from calibration import (
 )
 from recorder import Recorder
 from renderer import StereoRenderer, jpeg_to_b64
-from distortion import LensDistorter
+from distortion import LensDistorter, auto_margin
+from zoom import ZoomLevel, fov_y_for_level, parse_level
 from sensor_effects import EffectConfig, SensorEffectPipeline
 
 log = logging.getLogger("reachy12.mujoco.server")
@@ -80,6 +81,12 @@ _HB_INTERVAL  = 2.0        # heartbeat period (s)
 _HB_DEADLINE  = 6.0        # max time without heartbeat before disconnect (s)
 _CAM_WIDTH    = int(os.environ.get("REACHY_SIM_CAMERA_WIDTH", "640"))
 _CAM_HEIGHT   = int(os.environ.get("REACHY_SIM_CAMERA_HEIGHT", "480"))
+# Distortion source-render margin.  Unset = auto (smallest factor with no dark
+# corners).  Set to 1.0 to render at the output size and accept dark corners.
+_CAM_MARGIN = (
+    float(os.environ["REACHY_SIM_DISTORTION_MARGIN"])
+    if os.environ.get("REACHY_SIM_DISTORTION_MARGIN") else None
+)
 
 
 class SimState:
@@ -265,6 +272,8 @@ class ReachyMujocoServer:
     ) -> None:
         self._calibration = calibration
         self._enable_distortion = enable_distortion
+        self._zoom_level = ZoomLevel.INTER   # the calibrated level
+        self._pending_zoom: Optional[ZoomLevel] = None
         self._enable_depth = enable_depth
         self._enable_seg = enable_seg
         self._effects = effects or EffectConfig()
@@ -315,19 +324,39 @@ class ReachyMujocoServer:
         # of view can never disagree.
         self._distorters: Dict[str, LensDistorter] = {}
         if self._enable_distortion:
-            for cam_name, intr in (
+            cams = (
                 ("left_camera", self._calibration.left_camera),
                 ("right_camera", self._calibration.right_camera),
-            ):
-                d = LensDistorter(intr, _CAM_WIDTH, _CAM_HEIGHT)
+            )
+            # One shared margin: a single mujoco.Renderer serves both cameras,
+            # so they must render at the same source size.  Take the wider of
+            # the two requirements — a margin larger than a camera needs only
+            # costs pixels, while one too small reintroduces its dark corners.
+            margin = 1.0
+            if _CAM_MARGIN is not None:
+                margin = _CAM_MARGIN
+            else:
+                try:
+                    margin = max(auto_margin(i, _CAM_WIDTH, _CAM_HEIGHT) for _, i in cams)
+                except ValueError as exc:
+                    log.warning("auto margin failed (%s); falling back to 1.0 "
+                                "— frames will have dark corners", exc)
+            for cam_name, intr in cams:
+                d = LensDistorter(intr, _CAM_WIDTH, _CAM_HEIGHT, margin=margin)
                 if d.is_identity:
                     log.warning(
-                        "Distortion requested but %s profile '%s' has zero radial "
-                        "coefficients for %s - frames will be unchanged",
-                        "calibration", self._calibration.provenance, cam_name)
+                        "Distortion requested but calibration profile '%s' has zero "
+                        "radial coefficients for %s — frames will be unchanged",
+                        self._calibration.provenance, cam_name)
                 self._distorters[cam_name] = d
-            log.info("Lens distortion ENABLED for both cameras (profile: %s)",
-                     self._calibration.provenance)
+            sample = self._distorters["left_camera"]
+            log.info(
+                "Lens distortion ENABLED (profile: %s, margin %.2f, "
+                "source render %dx%d @ %.1f° -> output %dx%d, corners %s)",
+                self._calibration.provenance, margin,
+                *sample.source_size, sample.source_fov_y_deg,
+                _CAM_WIDTH, _CAM_HEIGHT,
+                "filled" if sample.fully_covered else "DARK")
 
         self._sim = SimState(
             self._model,
@@ -415,6 +444,24 @@ class ReachyMujocoServer:
                 data_copy = self._sim.copy_data()
                 frames = renderer.render_stereo(data_copy)
                 for cam_name, fr in frames.items():
+                    # R12-605: apply a pending zoom on this thread, where the
+                    # renderer's cam_fovy and distortion maps are owned.
+                    if self._pending_zoom is not None:
+                        lvl, self._pending_zoom = self._pending_zoom, None
+                        fov = fov_y_for_level(
+                            lvl, _CAM_WIDTH, _CAM_HEIGHT,
+                            self._calibration.left_camera.fov_y_deg)
+                        try:
+                            renderer.set_zoom(fov)
+                        except ValueError as exc:
+                            log.warning("Zoom to %s refused: %s", lvl.value, exc)
+                        else:
+                            self._zoom_level = lvl
+                            log.info("Zoom now %s (fov_y %.1f°)%s", lvl.value, fov,
+                                     "" if lvl in (ZoomLevel.INTER, ZoomLevel.ZERO)
+                                     else " — barrel profile approximate off the "
+                                          "calibrated level")
+
                     # Apply sensor effects (R12-602)
                     pipe = effect_pipelines[cam_name]
                     jpeg = pipe.apply_pixels(fr.jpeg_bytes)
@@ -569,6 +616,19 @@ class ReachyMujocoServer:
 
                 elif mtype == "pause":
                     self._sim.submit_pause(bool(decoded.get("paused", True)))
+
+                elif mtype == "zoom_command":
+                    # R12-605. Applied on the render thread's next frame, not
+                    # here: cam_fovy and the distortion maps are the renderer's
+                    # state, and mutating them from the websocket task would
+                    # race a render in progress.
+                    try:
+                        lvl = parse_level(decoded.get("level", "inter"))
+                    except ValueError as exc:
+                        await ws.send(Error(message=str(exc)).encode())
+                    else:
+                        self._pending_zoom = lvl
+                        log.info("Zoom command: %s", lvl.value)
 
                 elif mtype == "heartbeat":
                     last_hb_recv = time.monotonic()

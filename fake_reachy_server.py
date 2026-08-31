@@ -535,12 +535,19 @@ class FakeCameraService(camera_reachy_pb2_grpc.CameraServiceServicer):
 
     GetImage returns the latest buffered frame.
     StreamImage yields frames at _STREAM_FRAME_HZ until the client cancels.
-    Zoom/focus RPCs return stable simulated values with success=True.
+    Focus RPCs return stable simulated values with success=True.
+    Zoom is real under the mujoco-remote backend — see __init__.
     """
 
-    def __init__(self, fixture: CameraFixture) -> None:
+    def __init__(self, fixture: CameraFixture, remote_backend=None) -> None:
         self._fixture = fixture
-        # Simulated zoom/focus state — optical effects not modelled.
+        # R12-605: under mujoco-remote, zoom is REAL — SendZoomCommand forwards
+        # the level to the native server, which retunes cam_fovy (and the
+        # distortion maps with it).  Under the kinematic/fixture backends there
+        # is no renderer to retune, so remote_backend is None and the level is
+        # only stored and reported back, as it was for every backend before.
+        self._remote = remote_backend
+        # Focus stays simulated: the model has no focal plane to move.
         self._zoom_level = camera_reachy_pb2.ZoomLevelPossibilities.ZERO
         self._zoom_speed = 10000
         self._left_focus = 0
@@ -569,15 +576,36 @@ class FakeCameraService(camera_reachy_pb2_grpc.CameraServiceServicer):
     def GetZoomSpeed(self, request, context):
         return camera_reachy_pb2.ZoomSpeed(speed=self._zoom_speed)
 
+    def _forward_zoom(self) -> None:
+        """Push the current level to the native renderer, if there is one.
+
+        The protobuf enum names (ZERO/IN/INTER/OUT) lower-case exactly onto the
+        native ZoomLevel values, so no mapping table is needed — and none should
+        be added, since a table would silently drift from the enum.
+        """
+        if self._remote is None:
+            return
+        try:
+            name = camera_reachy_pb2.ZoomLevelPossibilities.Name(self._zoom_level)
+            self._remote.request_zoom(name.lower())
+        except Exception:
+            # A zoom that fails to forward must not fail the RPC: the SDK call
+            # is advisory, and the level is still recorded for GetZoomLevel.
+            log.exception("Failed to forward zoom level %r", self._zoom_level)
+
     def SendZoomCommand(self, request, context):
         which = request.WhichOneof("command")
         if which == "level_command":
             self._zoom_level = request.level_command.level
+            self._forward_zoom()
         elif which == "speed_command":
+            # Speed is not modelled: the native server applies a level in one
+            # render tick rather than driving a lens motor over time.
             self._zoom_speed = request.speed_command.speed
         # homing_command resets to zero
         elif which == "homing_command":
             self._zoom_level = camera_reachy_pb2.ZoomLevelPossibilities.ZERO
+            self._forward_zoom()
         return camera_reachy_pb2.ZoomCommandAck(success=True)
 
     def GetZoomFocus(self, request, context):
@@ -632,6 +660,7 @@ def serve() -> None:
         sensor_backend = mujoco
         camera = _MujocoRemoteCameraAdapter()
         camera.start()
+        remote_zoom_backend = mujoco
         threading.Thread(
             target=object_overrides_writer, args=(mujoco,), daemon=True,
             name="object-overrides-writer",
@@ -654,6 +683,7 @@ def serve() -> None:
         sensor_backend = None
         camera = CameraFixture()
         camera.start()
+        remote_zoom_backend = None
         threading.Thread(
             target=frame_file_writer, args=(camera,), daemon=True, name="frame-writer"
         ).start()
@@ -674,7 +704,10 @@ def serve() -> None:
         FakeArmKinematicsService(), server
     )
     camera_reachy_pb2_grpc.add_CameraServiceServicer_to_server(
-        FakeCameraService(camera), server
+        # remote_zoom_backend is the MujocoRemoteBackend under mujoco-remote and
+        # None otherwise, which is what makes zoom real on one backend and a
+        # stored value on the others.
+        FakeCameraService(camera, remote_backend=remote_zoom_backend), server
     )
 
     server.add_insecure_port(f"[::]:{PORT}")

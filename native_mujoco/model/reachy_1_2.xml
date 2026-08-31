@@ -56,6 +56,14 @@
     <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
     <rgba haze="0.15 0.25 0.35 1"/>
     <quality shadowsize="2048"/>
+    <!-- Offscreen framebuffer.  MuJoCo defaults to 640x480 and refuses any
+         render larger than this, so it caps every camera buffer in the repo.
+         The lens-distortion pass (native_mujoco/distortion.py) renders a source
+         frame WIDER than the output — 851x638 at the measured left profile's
+         auto margin of 1.33 — so 640x480 is not enough.  1280x960 leaves room
+         for a 2x margin on a 640x480 output, or for a 960x720 output at 1.33.
+         Costs GPU memory only when a renderer actually asks for the size. -->
+    <global offwidth="1280" offheight="960"/>
   </visual>
 
   <asset>

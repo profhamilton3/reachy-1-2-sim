@@ -499,3 +499,150 @@ objects:
     physics: {dynamic: false, collision: false}
     semantic_class: grid.cell
     tags: [grid, grid-cell, placement-target]
+
+  # ── Manipulation objects ───────────────────────────────────────────────────
+  # Added 2026-08-31.  The scene shipped deliberately empty ("Manipulation
+  # objects are added in a later slice once the geometry and physics are
+  # verified"); the geometry is now verified and the camera is calibrated
+  # (PR #30), so renders of these objects come through the real 61.1 deg lens.
+  #
+  # DIMENSIONS, PHYSICS AND semantic_class ARE COPIED VERBATIM FROM
+  # scenes/tabletop_demo.yaml, deliberately.  Two reasons:
+  #
+  #   1. Siva's Coral classifier (IITG-Reachy-Project/scripts/reachy_classifier.tflite,
+  #      labels: empty / cube / cylinder) was trained on photos of the real cube
+  #      and cylinder.  Keeping the sim objects identical makes a sim render
+  #      directly comparable to what that model already learned, so it can be
+  #      evaluated against sim frames without retraining anything.
+  #   2. tabletop_demo's table surface is at z = 0.7400 — exactly this board's
+  #      height — so the resting z values transfer unchanged, and any pose work
+  #      that starts from the tuned constants in motion/primitives.py differs
+  #      only in x/y, not in height.
+  #
+  # WHAT THESE ARE AND ARE NOT FOR
+  #   FOR: rendering labelled training data.  Every object carries a
+  #   semantic_class, and native_mujoco/renderer.py emits a body-ID
+  #   segmentation buffer, so bounding boxes come out of the scene itself with
+  #   no hand annotation.
+  #   NOT FOR: pick-and-place, yet.  The tuned grasp poses in
+  #   motion/primitives.py (OVER_RED, GRASP_RED, CARRY_RED, OVER_PLACE_BLUE,
+  #   PLACE_BLUE) were derived against tabletop_demo, whose table sits at
+  #   x = 0.70 against this board's x = 0.4534 — 250 mm closer.  None of them
+  #   transfer.  tabletop_demo stays the manipulation scene until a validated
+  #   pose set exists here; see its header for the retirement condition.
+  #
+  # PLACEMENT
+  #   Both objects sit on reachable cells.  The 65 cm shoulder sphere puts
+  #   cell_r3c1 and cell_r3c2 out of the right arm's range (confirmed
+  #   physically by Siva), so nothing is placed there.
+  #     red_cube      -> cell_r1c3, the near-right cell, the easiest reach
+  #     blue_cylinder -> cell_r2c2, the centre square
+  #   Resting height is the board surface (z = 0.7400) plus half the object's
+  #   height, so each sits ON the board rather than intersecting it.
+
+  - id: red_cube
+    geometry: {kind: box, size: [0.06, 0.06, 0.06]}
+    pose: {position: [0.2794, -0.1524, 0.7700], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.78, 0.16, 0.14, 1.0], roughness: 0.55}
+    physics:
+      dynamic: true
+      collision: true
+      mass: 0.12
+      friction: [0.8, 0.01, 0.001]
+      restitution: 0.05
+    tracked: true
+    semantic_class: block.red
+    tags: [manipulable, pickable, cube, detector-target]
+
+  - id: blue_cylinder
+    geometry: {kind: cylinder, radius: 0.035, length: 0.1}
+    pose: {position: [0.4318, 0.0, 0.7900], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.16, 0.33, 0.75, 1.0], roughness: 0.45}
+    physics:
+      dynamic: true
+      collision: true
+      mass: 0.1
+      friction: [0.75, 0.01, 0.001]
+      restitution: 0.03
+    tracked: true
+    semantic_class: cylinder.blue
+    tags: [manipulable, pickable, cylinder, detector-target]
+
+  # ── Sort destinations and sortable items ───────────────────────────────────
+  # Added 2026-08-31, driven by the research goal rather than by demo need.
+  #
+  # IITG-Reachy-Project/src/reachy_ai/planner/schema.py already ships
+  # Destination.left_tray / Destination.right_tray and TaskType.sort, and the
+  # README's worked example is "Put the recyclable item in the left tray."
+  # Until now NO scene in this repo contained a tray, so a plan naming one had
+  # nothing to resolve against and a sort task could not be executed or
+  # evaluated.  These four objects close that gap.
+  #
+  # LEFT / RIGHT are from the ROBOT's point of view, matching the grid cell
+  # naming above: the robot's left is +y.
+  #
+  # REACHABILITY — all four verified against the 65 cm right-shoulder sphere
+  # (shoulder at 0, -0.19, 1.0; the same model that correctly predicts
+  # cell_r3c1 and cell_r3c2 unreachable, which Siva confirmed physically):
+  #     left_tray   0.605 m      soda_can    0.609 m
+  #     right_tray  0.392 m      foam_block  0.426 m
+  # left_tray is the tightest at 0.605 m.  It sits on the near row for that
+  # reason; moving it back to the middle row puts it at 0.641 m, effectively on
+  # the boundary, which is not somewhere to put a placement target.
+  #
+  # TRAYS ARE FLAT ZONES, NOT WALLED CONTAINERS.  A real tray needs four wall
+  # geoms and turns every place into a gripper-vs-wall clearance problem.  A
+  # marked zone is enough to define "in the left tray" for planning, grounding
+  # and scoring, and defers that clearance work until there is a validated
+  # grasp pose set for this scene.  Revisit when placement accuracy is being
+  # measured rather than planned.
+  #
+  # The two sortable items give TaskType.sort a real binary decision to make
+  # (recyclable aluminium vs non-recyclable foam) using primitives only.  They
+  # are deliberately NOT modelled as detailed meshes: the detector work in
+  # reachy-tabletop-ai #12 trains on cube/cylinder-class shapes, and inventing
+  # photoreal clutter here would not match anything the real robot has seen.
+
+  - id: left_tray
+    geometry: {kind: box, size: [0.16, 0.10, 0.01]}
+    pose: {position: [0.2794, 0.28, 0.7450], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.20, 0.45, 0.30, 1.0], roughness: 0.6}
+    physics: {dynamic: false, collision: false}
+    semantic_class: destination.tray
+    tags: [tray, destination, placement-target, sort-target]
+
+  - id: right_tray
+    geometry: {kind: box, size: [0.16, 0.10, 0.01]}
+    pose: {position: [0.2794, -0.28, 0.7450], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.45, 0.28, 0.15, 1.0], roughness: 0.6}
+    physics: {dynamic: false, collision: false}
+    semantic_class: destination.tray
+    tags: [tray, destination, placement-target, sort-target]
+
+  - id: soda_can
+    geometry: {kind: cylinder, radius: 0.033, length: 0.115}
+    pose: {position: [0.4318, 0.1524, 0.7975], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.85, 0.85, 0.88, 1.0], roughness: 0.15}
+    physics:
+      dynamic: true
+      collision: true
+      mass: 0.015          # empty aluminium can
+      friction: [0.7, 0.01, 0.001]
+      restitution: 0.15
+    tracked: true
+    semantic_class: recyclable.can
+    tags: [manipulable, pickable, recyclable, detector-target, sort-item]
+
+  - id: foam_block
+    geometry: {kind: box, size: [0.07, 0.07, 0.05]}
+    pose: {position: [0.2794, 0.0, 0.7650], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.94, 0.90, 0.80, 1.0], roughness: 0.9}
+    physics:
+      dynamic: true
+      collision: true
+      mass: 0.01           # foam: light, so a bad grasp shows up as a launch
+      friction: [0.9, 0.02, 0.002]
+      restitution: 0.02
+    tracked: true
+    semantic_class: nonrecyclable.foam
+    tags: [manipulable, pickable, non-recyclable, detector-target, sort-item]

@@ -9,9 +9,15 @@ Depth output (R12-601):
   Encoded as base64(raw float16 bytes) for transmission.
 
 Segmentation output (R12-601):
-  uint16 numpy array, shape H×W, values are MuJoCo body IDs.
+  uint16 numpy array, shape H×W, values are MuJoCo BODY IDs.
   Encoded as base64(raw uint16 bytes).
-  Body ID 0 = world/background.
+  Body ID 0 = world/background, and also what MuJoCo's -1 "nothing here"
+  is mapped to.
+
+  MuJoCo's own segmentation pixel is [object_id, object_TYPE], and for a
+  scene render the type is uniformly mjOBJ_GEOM — so the raw buffer holds
+  GEOM ids.  _encode_seg maps them through model.geom_bodyid, so one object
+  gets one label even when it is built from several geoms.  See _encode_seg.
 
 Design constraints (from ADR-0001 and CLAUDE.md):
   * Do not hold the state mutation lock while encoding images.
@@ -85,8 +91,6 @@ class StereoRenderer:
         self._enable_seg = enable_seg
         self._distorters: Dict[str, LensDistorter] = distorters or {}
 
-        self._renderer = mujoco.Renderer(model, height=height, width=width)
-
         # Resolve camera IDs once
         self._cam_ids: Dict[str, int] = {}
         for name in ("left_camera", "right_camera"):
@@ -95,6 +99,28 @@ class StereoRenderer:
                 raise RuntimeError(f"Camera '{name}' not found in model")
             self._cam_ids[name] = cid
 
+        # A distorter with a margin samples a LARGER source render than it
+        # emits, so the internal renderer is sized to that source and each
+        # camera's cam_fovy is widened to make the extra pixels real field
+        # rather than a zoom.  One mujoco.Renderer serves both cameras, so all
+        # active distorters must agree on the source size — the server builds
+        # them with a single shared margin for exactly this reason.
+        self._src_w, self._src_h = width, height
+        active = [d for d in self._distorters.values() if not d.is_identity]
+        if active:
+            sizes = {d.source_size for d in active}
+            if len(sizes) != 1:
+                raise ValueError(
+                    f"distorters disagree on source size: {sorted(sizes)}; "
+                    "build them with one shared margin"
+                )
+            self._src_w, self._src_h = sizes.pop()
+            for cam_name, d in self._distorters.items():
+                if not d.is_identity:
+                    model.cam_fovy[self._cam_ids[cam_name]] = d.source_fov_y_deg
+
+        self._renderer = mujoco.Renderer(model, height=self._src_h, width=self._src_w)
+
     @property
     def width(self) -> int:
         return self._width
@@ -102,6 +128,14 @@ class StereoRenderer:
     @property
     def height(self) -> int:
         return self._height
+
+    @property
+    def source_size(self) -> tuple:
+        """(width, height) actually rendered before distortion maps it down.
+
+        Equals (width, height) when no distorter has a margin.
+        """
+        return (self._src_w, self._src_h)
 
     def render_stereo(
         self,
@@ -155,13 +189,16 @@ class StereoRenderer:
         seg_b64 = ""
         if self._enable_seg:
             self._renderer.enable_segmentation_rendering()
-            seg_raw = self._renderer.render()          # H×W×2 int32 [body, geom]
+            seg_raw = self._renderer.render()   # H×W×2 int32 [object_id, object_TYPE]
             self._renderer.disable_segmentation_rendering()
+            # Map geom -> body BEFORE any warp, so the warp moves final labels
+            # rather than intermediate ids.
+            seg_b64 = _encode_seg(seg_raw, self._model)
             if distorter is not None:
-                # Warp the body-ID channel only; fill 0 = world/background.
-                body = distorter.apply_label(seg_raw[:, :, 0], fill=0)
-                seg_raw = np.stack([body, np.zeros_like(body)], axis=-1)
-            seg_b64 = _encode_seg(seg_raw)
+                body = decode_seg(seg_b64, self._src_h, self._src_w)
+                body = distorter.apply_label(body, fill=0)
+                seg_b64 = base64.b64encode(
+                    body.astype(np.uint16).tobytes()).decode("ascii")
 
         elapsed_us = (time.monotonic_ns() - t0) // 1_000
         return RenderedFrame(
@@ -173,6 +210,51 @@ class StereoRenderer:
             depth_b64=depth_b64,
             seg_b64=seg_b64,
         )
+
+    def set_zoom(self, fov_y_deg: float) -> None:
+        """Retune both cameras to a new vertical field of view (R12-605).
+
+        Zoom changes the focal length, which invalidates any distortion map
+        built for the old one, so the maps are rebuilt here rather than left to
+        warp the frame by the wrong amount.  The distortion COEFFICIENTS are
+        kept as-is: we have no measurement of how k1/k2 move with zoom on this
+        lens, so a frame away from the calibrated level has a trustworthy field
+        of view and an approximate barrel profile.  See native_mujoco/zoom.py.
+
+        Raises if the new zoom would need a different source buffer than the
+        internal renderer was built with -- rebuild the StereoRenderer for that
+        rather than silently rendering at the wrong size.
+        """
+        import math
+
+        from calibration import CameraIntrinsics
+
+        for cam_name, cid in self._cam_ids.items():
+            d = self._distorters.get(cam_name)
+            if d is None or d.is_identity:
+                self._model.cam_fovy[cid] = fov_y_deg
+                continue
+
+            # Focal length implied by the requested output field of view.
+            fy = (self._height / 2.0) / math.tan(math.radians(fov_y_deg) / 2.0)
+            fx = fy  # square pixels; the measured fx/fy differ by 0.3%
+            rebuilt = LensDistorter(
+                CameraIntrinsics(
+                    resolution=(self._width, self._height),
+                    fx=fx, fy=fy,
+                    cx=self._width / 2.0, cy=self._height / 2.0,
+                    distortion=d.distortion,
+                ),
+                self._width, self._height, margin=d.margin,
+            )
+            if rebuilt.source_size != (self._src_w, self._src_h):
+                raise ValueError(
+                    f"zoom to {fov_y_deg:.1f}° needs source "
+                    f"{rebuilt.source_size}, renderer built for "
+                    f"{(self._src_w, self._src_h)}; rebuild the StereoRenderer"
+                )
+            self._distorters[cam_name] = rebuilt
+            self._model.cam_fovy[cid] = rebuilt.source_fov_y_deg
 
     def close(self) -> None:
         self._renderer.close()
@@ -195,11 +277,37 @@ def _encode_depth(depth_f32: np.ndarray) -> str:
     return base64.b64encode(depth_f16.tobytes()).decode("ascii")
 
 
-def _encode_seg(seg_raw: np.ndarray) -> str:
-    """Encode an H×W×2 int32 segmentation array as base64(uint16 body-ID map)."""
-    # MuJoCo segmentation pixel: [body_id, geom_id]; take body_id channel.
-    body_ids = seg_raw[:, :, 0].astype(np.uint16)
-    return base64.b64encode(body_ids.tobytes()).decode("ascii")
+def _encode_seg(seg_raw: np.ndarray, model: "mujoco.MjModel" = None) -> str:
+    """Encode MuJoCo's segmentation render as a base64 uint16 BODY-ID map.
+
+    MuJoCo's segmentation pixel is [object_id, object_TYPE] — not
+    [body_id, geom_id], as this function previously assumed.  For a normal
+    scene render object_type is uniformly mjOBJ_GEOM (5), so channel 0 holds
+    GEOM ids.  Emitting those raw was wrong in two ways:
+
+      * a body built from several geoms produced several different labels for
+        one object.  Every robot link is such a body, and so is any scene
+        object compiled with more than one geom — so "one object, one label"
+        silently did not hold;
+      * the ids happened to coincide with body ids for the late-declared scene
+        objects, which is why it looked correct when spot-checked on a cube.
+
+    Mapping geom -> body via model.geom_bodyid fixes both.  Background is -1
+    from MuJoCo and is emitted as 0 (the world body), so an unobserved pixel
+    and the world read the same, as callers already assume.
+
+    model may be None only for pre-mapped input (tests); then channel 0 is
+    passed through unchanged.
+    """
+    obj_ids = seg_raw[:, :, 0]
+    if model is not None:
+        # -1 (background) must not index geom_bodyid; send it to world (0).
+        safe = np.where(obj_ids >= 0, obj_ids, 0)
+        body_ids = np.asarray(model.geom_bodyid)[safe]
+        body_ids = np.where(obj_ids >= 0, body_ids, 0)
+    else:
+        body_ids = np.where(obj_ids >= 0, obj_ids, 0)
+    return base64.b64encode(body_ids.astype(np.uint16).tobytes()).decode("ascii")
 
 
 def decode_depth(depth_b64: str, height: int, width: int) -> np.ndarray:

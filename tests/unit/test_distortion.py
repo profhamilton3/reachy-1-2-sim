@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "native_mujoco"))
 
 from calibration import CameraIntrinsics, load_calibration
-from distortion import LensDistorter, _undistort_normalised
+from distortion import LensDistorter, _undistort_normalised, auto_margin
 
 W, H = 64, 48
 _MEASURED_K = (-0.3163, 0.1027, 0.0, 0.0, 0.0)
@@ -156,3 +156,60 @@ class TestMeasuredProfileFile:
         for intr in (p.left_camera, p.right_camera):
             d = LensDistorter(intr, intr.width, intr.height)
             assert not d.is_identity, "measured profile must carry real barrel k1"
+
+
+class TestMargin:
+    """The source-render margin that removes the dark corners."""
+
+    def test_default_margin_is_one_and_leaves_corners_dark(self):
+        d = LensDistorter(_intr(), W, H)
+        assert d.margin == 1.0
+        assert d.source_size == (W, H)
+        assert not d.fully_covered
+
+    def test_auto_margin_covers_the_frame(self):
+        m = auto_margin(_intr(), W, H)
+        assert m > 1.0
+        assert LensDistorter(_intr(), W, H, margin=m).fully_covered
+
+    def test_auto_margin_is_one_for_a_pinhole_profile(self):
+        assert auto_margin(_intr(distortion=(0.0,) * 5), W, H) == 1.0
+
+    def test_margin_below_one_rejected(self):
+        with pytest.raises(ValueError, match="margin must be"):
+            LensDistorter(_intr(), W, H, margin=0.9)
+
+    def test_margin_widens_the_source_field_not_the_scale(self):
+        """More margin must mean more field of view, not a zoom."""
+        base = LensDistorter(_intr(), W, H, margin=1.0)
+        wide = LensDistorter(_intr(), W, H, margin=1.4)
+        assert wide.source_size[0] > base.source_size[0]
+        assert wide.source_fov_y_deg > base.source_fov_y_deg
+
+    def test_wrong_source_size_is_rejected_not_silently_warped(self):
+        """Handing the output size to a margined distorter would produce a frame
+        with the wrong field of view — it must raise instead."""
+        d = LensDistorter(_intr(), W, H, margin=1.4)
+        with pytest.raises(ValueError, match="expected a"):
+            d.apply_rgb(np.zeros((H, W, 3), dtype=np.uint8))
+        with pytest.raises(ValueError, match="expected a"):
+            d.apply_label(np.zeros((H, W), dtype=np.uint16), fill=0)
+
+    def test_margined_warp_has_no_black_corners(self):
+        m = auto_margin(_intr(), W, H)
+        d = LensDistorter(_intr(), W, H, margin=m)
+        sw, sh = d.source_size
+        out = d.apply_rgb(np.full((sh, sw, 3), 200, dtype=np.uint8))
+        assert out.shape == (H, W, 3)
+        assert out[0, 0].sum() > 0, "corner should now carry real data"
+        assert out.min() > 0
+
+    def test_measured_profiles_need_a_real_margin(self):
+        path = os.path.join(
+            os.path.dirname(__file__), "..", "..",
+            "scenes", "calibration_measured_2026_08_27.yaml")
+        p = load_calibration(path)
+        for intr in (p.left_camera, p.right_camera):
+            m = auto_margin(intr, 640, 480)
+            assert 1.0 < m < 1.6, f"unexpected margin {m}"
+            assert LensDistorter(intr, 640, 480, margin=m).fully_covered

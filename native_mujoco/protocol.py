@@ -138,6 +138,23 @@ class Pause:
 
 
 @dataclass
+class ZoomCommand:
+    """Set the motorised zoom level on one or both cameras (R12-605).
+
+    level is an SDK ZoomLevelPossibilities name: in / out / inter / zero.
+    camera is "left_camera", "right_camera", or "" for both.  The physical
+    lens moves both eyes independently, but a stereo pair at mismatched zoom
+    has no usable disparity, so "" is the normal case.
+    """
+    type: str = field(default="zoom_command", init=False)
+    level: str = "inter"
+    camera: str = ""
+
+    def encode(self) -> str:
+        return encode(asdict(self))
+
+
+@dataclass
 class Heartbeat:
     type: str = field(default="heartbeat", init=False)
     sent_ns: int = field(default_factory=_now_ns)
@@ -298,6 +315,7 @@ class Shutdown:
 _CLIENT_TYPES = {
     "hello", "joint_command", "scene_load",
     "reset", "pause", "heartbeat", "heartbeat_ack", "disconnect",
+    "zoom_command",
 }
 _SERVER_TYPES = {
     "hello_ack", "state", "camera_frame", "scene_ack",
