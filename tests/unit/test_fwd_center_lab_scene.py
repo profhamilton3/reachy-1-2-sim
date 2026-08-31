@@ -330,13 +330,65 @@ class TestRigFrame:
             assert r in ids
 
 
-class TestEmptyTable:
-    """The scene ships with no manipulation objects (added in a later slice)."""
+class TestManipulationObjects:
+    """The scene shipped empty; the cube and cylinder were added 2026-08-31.
 
-    def test_no_manipulable_objects(self, scene):
-        assert scene.manipulable_ids() == []
+    Dimensions, physics and semantic_class are copied verbatim from
+    tabletop_demo.yaml so Siva's Coral classifier (labels: empty/cube/cylinder,
+    trained on the real objects) can be evaluated against sim renders without
+    retraining.  These tests pin that correspondence: if the two scenes drift
+    apart, the sim stops being a valid stand-in for that model.
+    """
 
-    def test_no_dynamic_objects(self, doc):
-        assert not [
-            o for o in doc["objects"] if (o.get("physics") or {}).get("dynamic")
-        ]
+    OBJECTS = ("red_cube", "blue_cylinder")
+    SURFACE_Z = 0.7400          # board top; see the scene header
+
+    def _obj(self, doc, oid):
+        return next(o for o in doc["objects"] if o["id"] == oid)
+
+    def test_both_objects_present_and_manipulable(self, scene):
+        assert sorted(scene.manipulable_ids()) == sorted(self.OBJECTS)
+
+    def test_both_are_dynamic_and_tracked(self, doc):
+        for oid in self.OBJECTS:
+            o = self._obj(doc, oid)
+            assert o["physics"]["dynamic"] is True
+            assert o["tracked"] is True, f"{oid} must stream its pose"
+
+    def test_objects_rest_on_the_board_not_inside_it(self, doc):
+        """Resting z = surface + half height.  A wrong value here silently
+        drops the object through the board or floats it."""
+        for oid, half in (("red_cube", 0.06 / 2), ("blue_cylinder", 0.1 / 2)):
+            z = self._obj(doc, oid)["pose"]["position"][2]
+            assert z == pytest.approx(self.SURFACE_Z + half, abs=1e-4), oid
+
+    def test_objects_sit_on_reachable_cells(self, doc):
+        """cell_r3c1/r3c2 are outside the 65 cm shoulder sphere — confirmed
+        physically by Siva — so nothing may be placed there."""
+        cells = {o["id"]: o["pose"]["position"][:2]
+                 for o in doc["objects"] if o["id"].startswith("cell_")}
+        unreachable = {tuple(cells[c]) for c in ("cell_r3c1", "cell_r3c2")}
+        for oid in self.OBJECTS:
+            xy = tuple(self._obj(doc, oid)["pose"]["position"][:2])
+            assert xy not in unreachable, f"{oid} placed on an unreachable cell"
+            assert xy in {tuple(v) for v in cells.values()}, \
+                f"{oid} is not centred on a grid cell"
+
+    def test_geometry_matches_tabletop_demo(self):
+        """The correspondence that makes Siva's classifier transferable."""
+        import os
+        import yaml
+        base = os.path.join(os.path.dirname(__file__), "..", "..", "scenes")
+        demo = {o["id"]: o for o in
+                yaml.safe_load(open(os.path.join(base, "tabletop_demo.yaml")))["objects"]}
+        fwd = {o["id"]: o for o in
+               yaml.safe_load(open(os.path.join(base, "FWDCenterLabMCC.yaml")))["objects"]}
+        for oid in self.OBJECTS:
+            assert fwd[oid]["geometry"] == demo[oid]["geometry"], oid
+            assert fwd[oid]["semantic_class"] == demo[oid]["semantic_class"], oid
+            assert fwd[oid]["physics"]["mass"] == demo[oid]["physics"]["mass"], oid
+
+    def test_objects_are_labelled_as_detector_targets(self, doc):
+        """The synthetic-training-data generator selects on this tag."""
+        for oid in self.OBJECTS:
+            assert "detector-target" in self._obj(doc, oid)["tags"], oid

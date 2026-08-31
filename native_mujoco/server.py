@@ -64,7 +64,7 @@ from calibration import (
 )
 from recorder import Recorder
 from renderer import StereoRenderer, jpeg_to_b64
-from distortion import LensDistorter
+from distortion import LensDistorter, auto_margin
 from sensor_effects import EffectConfig, SensorEffectPipeline
 
 log = logging.getLogger("reachy12.mujoco.server")
@@ -80,6 +80,12 @@ _HB_INTERVAL  = 2.0        # heartbeat period (s)
 _HB_DEADLINE  = 6.0        # max time without heartbeat before disconnect (s)
 _CAM_WIDTH    = int(os.environ.get("REACHY_SIM_CAMERA_WIDTH", "640"))
 _CAM_HEIGHT   = int(os.environ.get("REACHY_SIM_CAMERA_HEIGHT", "480"))
+# Distortion source-render margin.  Unset = auto (smallest factor with no dark
+# corners).  Set to 1.0 to render at the output size and accept dark corners.
+_CAM_MARGIN = (
+    float(os.environ["REACHY_SIM_DISTORTION_MARGIN"])
+    if os.environ.get("REACHY_SIM_DISTORTION_MARGIN") else None
+)
 
 
 class SimState:
@@ -315,19 +321,39 @@ class ReachyMujocoServer:
         # of view can never disagree.
         self._distorters: Dict[str, LensDistorter] = {}
         if self._enable_distortion:
-            for cam_name, intr in (
+            cams = (
                 ("left_camera", self._calibration.left_camera),
                 ("right_camera", self._calibration.right_camera),
-            ):
-                d = LensDistorter(intr, _CAM_WIDTH, _CAM_HEIGHT)
+            )
+            # One shared margin: a single mujoco.Renderer serves both cameras,
+            # so they must render at the same source size.  Take the wider of
+            # the two requirements — a margin larger than a camera needs only
+            # costs pixels, while one too small reintroduces its dark corners.
+            margin = 1.0
+            if _CAM_MARGIN is not None:
+                margin = _CAM_MARGIN
+            else:
+                try:
+                    margin = max(auto_margin(i, _CAM_WIDTH, _CAM_HEIGHT) for _, i in cams)
+                except ValueError as exc:
+                    log.warning("auto margin failed (%s); falling back to 1.0 "
+                                "— frames will have dark corners", exc)
+            for cam_name, intr in cams:
+                d = LensDistorter(intr, _CAM_WIDTH, _CAM_HEIGHT, margin=margin)
                 if d.is_identity:
                     log.warning(
-                        "Distortion requested but %s profile '%s' has zero radial "
-                        "coefficients for %s - frames will be unchanged",
-                        "calibration", self._calibration.provenance, cam_name)
+                        "Distortion requested but calibration profile '%s' has zero "
+                        "radial coefficients for %s — frames will be unchanged",
+                        self._calibration.provenance, cam_name)
                 self._distorters[cam_name] = d
-            log.info("Lens distortion ENABLED for both cameras (profile: %s)",
-                     self._calibration.provenance)
+            sample = self._distorters["left_camera"]
+            log.info(
+                "Lens distortion ENABLED (profile: %s, margin %.2f, "
+                "source render %dx%d @ %.1f° -> output %dx%d, corners %s)",
+                self._calibration.provenance, margin,
+                *sample.source_size, sample.source_fov_y_deg,
+                _CAM_WIDTH, _CAM_HEIGHT,
+                "filled" if sample.fully_covered else "DARK")
 
         self._sim = SimState(
             self._model,

@@ -85,8 +85,6 @@ class StereoRenderer:
         self._enable_seg = enable_seg
         self._distorters: Dict[str, LensDistorter] = distorters or {}
 
-        self._renderer = mujoco.Renderer(model, height=height, width=width)
-
         # Resolve camera IDs once
         self._cam_ids: Dict[str, int] = {}
         for name in ("left_camera", "right_camera"):
@@ -95,6 +93,28 @@ class StereoRenderer:
                 raise RuntimeError(f"Camera '{name}' not found in model")
             self._cam_ids[name] = cid
 
+        # A distorter with a margin samples a LARGER source render than it
+        # emits, so the internal renderer is sized to that source and each
+        # camera's cam_fovy is widened to make the extra pixels real field
+        # rather than a zoom.  One mujoco.Renderer serves both cameras, so all
+        # active distorters must agree on the source size — the server builds
+        # them with a single shared margin for exactly this reason.
+        self._src_w, self._src_h = width, height
+        active = [d for d in self._distorters.values() if not d.is_identity]
+        if active:
+            sizes = {d.source_size for d in active}
+            if len(sizes) != 1:
+                raise ValueError(
+                    f"distorters disagree on source size: {sorted(sizes)}; "
+                    "build them with one shared margin"
+                )
+            self._src_w, self._src_h = sizes.pop()
+            for cam_name, d in self._distorters.items():
+                if not d.is_identity:
+                    model.cam_fovy[self._cam_ids[cam_name]] = d.source_fov_y_deg
+
+        self._renderer = mujoco.Renderer(model, height=self._src_h, width=self._src_w)
+
     @property
     def width(self) -> int:
         return self._width
@@ -102,6 +122,14 @@ class StereoRenderer:
     @property
     def height(self) -> int:
         return self._height
+
+    @property
+    def source_size(self) -> tuple:
+        """(width, height) actually rendered before distortion maps it down.
+
+        Equals (width, height) when no distorter has a margin.
+        """
+        return (self._src_w, self._src_h)
 
     def render_stereo(
         self,

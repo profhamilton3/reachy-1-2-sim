@@ -499,3 +499,71 @@ objects:
     physics: {dynamic: false, collision: false}
     semantic_class: grid.cell
     tags: [grid, grid-cell, placement-target]
+
+  # ── Manipulation objects ───────────────────────────────────────────────────
+  # Added 2026-08-31.  The scene shipped deliberately empty ("Manipulation
+  # objects are added in a later slice once the geometry and physics are
+  # verified"); the geometry is now verified and the camera is calibrated
+  # (PR #30), so renders of these objects come through the real 61.1 deg lens.
+  #
+  # DIMENSIONS, PHYSICS AND semantic_class ARE COPIED VERBATIM FROM
+  # scenes/tabletop_demo.yaml, deliberately.  Two reasons:
+  #
+  #   1. Siva's Coral classifier (IITG-Reachy-Project/scripts/reachy_classifier.tflite,
+  #      labels: empty / cube / cylinder) was trained on photos of the real cube
+  #      and cylinder.  Keeping the sim objects identical makes a sim render
+  #      directly comparable to what that model already learned, so it can be
+  #      evaluated against sim frames without retraining anything.
+  #   2. tabletop_demo's table surface is at z = 0.7400 — exactly this board's
+  #      height — so the resting z values transfer unchanged, and any pose work
+  #      that starts from the tuned constants in motion/primitives.py differs
+  #      only in x/y, not in height.
+  #
+  # WHAT THESE ARE AND ARE NOT FOR
+  #   FOR: rendering labelled training data.  Every object carries a
+  #   semantic_class, and native_mujoco/renderer.py emits a body-ID
+  #   segmentation buffer, so bounding boxes come out of the scene itself with
+  #   no hand annotation.
+  #   NOT FOR: pick-and-place, yet.  The tuned grasp poses in
+  #   motion/primitives.py (OVER_RED, GRASP_RED, CARRY_RED, OVER_PLACE_BLUE,
+  #   PLACE_BLUE) were derived against tabletop_demo, whose table sits at
+  #   x = 0.70 against this board's x = 0.4534 — 250 mm closer.  None of them
+  #   transfer.  tabletop_demo stays the manipulation scene until a validated
+  #   pose set exists here; see its header for the retirement condition.
+  #
+  # PLACEMENT
+  #   Both objects sit on reachable cells.  The 65 cm shoulder sphere puts
+  #   cell_r3c1 and cell_r3c2 out of the right arm's range (confirmed
+  #   physically by Siva), so nothing is placed there.
+  #     red_cube      -> cell_r1c3, the near-right cell, the easiest reach
+  #     blue_cylinder -> cell_r2c2, the centre square
+  #   Resting height is the board surface (z = 0.7400) plus half the object's
+  #   height, so each sits ON the board rather than intersecting it.
+
+  - id: red_cube
+    geometry: {kind: box, size: [0.06, 0.06, 0.06]}
+    pose: {position: [0.2794, -0.1524, 0.7700], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.78, 0.16, 0.14, 1.0], roughness: 0.55}
+    physics:
+      dynamic: true
+      collision: true
+      mass: 0.12
+      friction: [0.8, 0.01, 0.001]
+      restitution: 0.05
+    tracked: true
+    semantic_class: block.red
+    tags: [manipulable, pickable, cube, detector-target]
+
+  - id: blue_cylinder
+    geometry: {kind: cylinder, radius: 0.035, length: 0.1}
+    pose: {position: [0.4318, 0.0, 0.7900], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.16, 0.33, 0.75, 1.0], roughness: 0.45}
+    physics:
+      dynamic: true
+      collision: true
+      mass: 0.1
+      friction: [0.75, 0.01, 0.001]
+      restitution: 0.03
+    tracked: true
+    semantic_class: cylinder.blue
+    tags: [manipulable, pickable, cylinder, detector-target]
