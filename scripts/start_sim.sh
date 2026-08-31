@@ -66,9 +66,26 @@ if [ ! -f "$CALIB" ]; then
     exit 1
 fi
 
-echo "▶ Starting native MuJoCo server (scene: $SCENE, calibration: $(basename "$CALIB")) …"
+# Lens distortion.  Off by default: renders are ground truth for the collision
+# and evaluation paths.  Set REACHY_SIM_DISTORTION=1 to warp camera frames (and
+# depth/segmentation with them) to match the real lens's barrel — for eyeballing
+# sim against real frames, and for generating training data that matches the raw
+# camera.  See native_mujoco/distortion.py.
+DISTORT_ARGS=""
+DISTORT_NOTE="off"
+case "${REACHY_SIM_DISTORTION:-0}" in
+    1|true|TRUE|yes|YES|on|ON)
+        DISTORT_ARGS="--distortion"
+        DISTORT_NOTE="ON — frames are barrel-warped; corners will be black"
+        ;;
+esac
+
+echo "▶ Starting native MuJoCo server …"
+echo "    scene       : $(basename "$SCENE")"
+echo "    calibration : $(basename "$CALIB")"
+echo "    distortion  : $DISTORT_NOTE"
 ( cd "$REPO/native_mujoco" && nohup mjpython server.py \
-    --scene "$SCENE" --calibration "$CALIB" \
+    --scene "$SCENE" --calibration "$CALIB" $DISTORT_ARGS \
     --host 0.0.0.0 --port 8765 --log-level INFO \
     >"$LOG" 2>&1 & )
 

@@ -1,5 +1,42 @@
 schema_version: "1.0"
 name: control-panel-practice
+# ═════════════════════════════════════════════════════════════════════════════
+# SYNTHETIC PRACTICE FIXTURE — NOT A MODEL OF THE PHYSICAL LAB
+#
+# There is no control console in the FWD Center lab.  This scene is invented
+# whole: an interaction target for practising two-arm button/lever/switch work.
+# Every dimension was chosen so both grippers can comfortably reach the
+# controls — "a realistic lab distance" below means plausible, not measured.
+# Do not read these numbers as facts about the lab.
+#
+# For measured FWD Center (MCC) geometry — real board size, the 19 in taped
+# grid, the 80/20 rig frame — use scenes/FWDCenterLabMCC.yaml.  Its provenance
+# is in IITG-Reachy-Project/docs/LAB_EVIDENCE.md.
+#
+# Where it differs from the lab:
+#
+#            this fixture                   measured lab
+#   surface  z = 0.76 (console ledge)       z = 0.74 (board top)
+#   support  floor-standing pedestal,       board resting on an 80/20 rig
+#            console_base at z = 0.36       frame, rail tops at its underside
+#   frame    none                           80/20 ladder, one 9 x 19 in
+#                                           opening each side of the mast,
+#                                           that the arm hangs through
+#   grid     none                           19 in, 3x3, nine addressable cells
+#
+# The 20 mm height difference is NOT an error to correct.  This console is a
+# free-standing pedestal, not something sitting on the lab table, so its
+# surface height is a property of the fixture rather than a claim about the lab.
+#
+# The MISSING RIG FRAME is the difference that matters.  No motion validated in
+# this scene ever has to thread the rail opening, so this scene cannot exercise
+# the rail-avoidance work EPIC 9 is built around.  Only FWDCenterLabMCC can.
+#
+# This header was added late.  Commit 7e1b5f6 labelled tabletop_demo.yaml and
+# tabletop.example.yaml as synthetic and skipped this file, which is equally
+# invented and carried no warning at all.
+# ═════════════════════════════════════════════════════════════════════════════
+#
 # Interactive control console for Reachy 1.2 to practice on (both arms).
 #
 # Layout (world / pedestal frame; shoulders at z≈1.0, right at y=-0.19, left at
@@ -17,9 +54,11 @@ name: control-panel-practice
 frame_id: pedestal
 seed: 7
 description: >-
-  Reachy 1.2 practice console: colored spring buttons on a flat top and
-  grippable levers/switches plus buttons on a slanted face, all within
-  two-arm reach.  Buttons latch on/off when pressed; switches/levers snap.
+  SYNTHETIC practice fixture, not measured lab geometry — there is no control
+  console in the FWD Center lab.  Reachy 1.2 practice console: colored spring
+  buttons on a flat top and grippable levers/switches plus buttons on a slanted
+  face, all within two-arm reach.  Buttons latch on/off when pressed;
+  switches/levers snap.  For measured lab geometry use FWDCenterLabMCC.
 
 world:
   gravity: [0.0, 0.0, -9.81]
