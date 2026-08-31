@@ -19,7 +19,7 @@ MuJoCo, or reachy_sdk dependency and is unit-testable on any host.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import yaml
@@ -69,6 +69,26 @@ class SceneObject:
     def footprint_radius(self) -> float:
         """Conservative XY radius for overlap checks."""
         return max(self.size[0], self.size[1]) / 2.0
+
+
+@dataclass(frozen=True)
+class Clearance:
+    """Closest approach between one arm segment and one scene object.
+
+    ``distance`` is a true signed distance in metres: positive is air between
+    the link's surface and the object's surface, negative means they overlap by
+    that much.  ``point`` is where on the link the closest approach happened,
+    which is what tells you *which part of the arm* is the problem.
+    """
+    distance: float
+    object_id: str
+    link: str
+    point: XYZ
+
+    def __str__(self) -> str:
+        verb = "clears" if self.distance >= 0 else "OVERLAPS"
+        return (f"{self.link} {verb} {self.object_id} by "
+                f"{abs(self.distance) * 100:.1f} cm")
 
 
 @dataclass(frozen=True)
@@ -170,6 +190,96 @@ def _full_extents(geo: dict) -> Tuple[float, float, float]:
         return float(sx), float(sy), 0.01
     sx, sy, sz = geo.get("size", [0.1, 0.1, 0.1])
     return float(sx), float(sy), float(sz)
+
+
+# ── Signed distance to a single object ────────────────────────────────────────
+#
+# `check_point` below answers "is this point inside something?".  That is not
+# enough to keep the arm off the table: the arm is a set of long links, not a
+# point, and the link that reaches an object is usually not the one being
+# watched.  The motion notebook's section 4.3 sweeps the WRIST and used to push
+# red_cube across the board with the FOREARM, somewhere the gripper pad never
+# went.  The functions here answer the harder question — how far is a whole
+# link from an object — so a move can be refused or shortened before it is
+# commanded, rather than diagnosed from the wreckage afterwards.
+#
+# Both primitives are exact outside the solid and use the standard signed
+# distance field inside it, so a report of "-1.2 cm" means a real 1.2 cm of
+# interpenetration rather than an arbitrary negative number.
+
+
+def _box_sdf(half: XYZ, p: XYZ) -> float:
+    """Signed distance from p to an origin-centred axis-aligned box."""
+    q = (abs(p[0]) - half[0], abs(p[1]) - half[1], abs(p[2]) - half[2])
+    outside = math.sqrt(sum(max(v, 0.0) ** 2 for v in q))
+    inside = min(max(q[0], q[1], q[2]), 0.0)
+    return outside + inside
+
+
+def _cylinder_sdf(radius: float, half_height: float, p: XYZ) -> float:
+    """Signed distance from p to an origin-centred upright cylinder."""
+    dr = math.hypot(p[0], p[1]) - radius
+    dz = abs(p[2]) - half_height
+    outside = math.hypot(max(dr, 0.0), max(dz, 0.0))
+    inside = min(max(dr, dz), 0.0)
+    return outside + inside
+
+
+def object_sdf(obj: SceneObject, point: XYZ) -> float:
+    """Signed distance from a world point to ``obj``'s bounding solid.
+
+    Boxes are evaluated in their own frame (so a yawed box is not inflated to
+    its world-axis-aligned bounds); cylinders, capsules and spheres are treated
+    as upright cylinders of ``footprint_radius``.  Rounding a cylinder's ends
+    into a capsule would add a phantom dome of up to ``radius`` above the
+    object's real top — on a 6 cm cube that is 3 cm of imaginary height, enough
+    to make an honest clearance report read as a collision.
+    """
+    rel = (point[0] - obj.center[0],
+           point[1] - obj.center[1],
+           point[2] - obj.center[2])
+    w, x, y, z = obj.quat
+    local = _rotate((w, -x, -y, -z), rel)          # world -> object frame
+    if obj.kind == "box" or obj.kind == "plane":
+        half = (obj.size[0] / 2.0, obj.size[1] / 2.0, obj.size[2] / 2.0)
+        return _box_sdf(half, local)
+    return _cylinder_sdf(obj.footprint_radius, obj.half_height, local)
+
+
+def segment_object_distance(
+    obj: SceneObject, p0: XYZ, p1: XYZ, radius: float = 0.0,
+) -> Tuple[float, XYZ]:
+    """Closest approach between a capsule (p0→p1, ``radius``) and ``obj``.
+
+    Returns (signed distance, closest point on the segment axis).  The object's
+    SDF is convex, so its restriction to the segment is convex too and a coarse
+    scan followed by a golden-section refinement finds the true minimum — no
+    sampling resolution to tune, and no minimum missed between samples.
+    """
+    def at(t: float) -> XYZ:
+        return (p0[0] + t * (p1[0] - p0[0]),
+                p0[1] + t * (p1[1] - p0[1]),
+                p0[2] + t * (p1[2] - p0[2]))
+
+    n = 8
+    ts = [i / n for i in range(n + 1)]
+    vals = [object_sdf(obj, at(t)) for t in ts]
+    k = min(range(len(ts)), key=lambda i: vals[i])
+    lo, hi = ts[max(k - 1, 0)], ts[min(k + 1, n)]
+    inv_phi = (math.sqrt(5.0) - 1.0) / 2.0
+    a, b = lo + (1 - inv_phi) * (hi - lo), lo + inv_phi * (hi - lo)
+    fa, fb = object_sdf(obj, at(a)), object_sdf(obj, at(b))
+    for _ in range(24):
+        if fa < fb:
+            hi, b, fb = b, a, fa
+            a = lo + (1 - inv_phi) * (hi - lo)
+            fa = object_sdf(obj, at(a))
+        else:
+            lo, a, fa = a, b, fb
+            b = lo + inv_phi * (hi - lo)
+            fb = object_sdf(obj, at(b))
+    t = 0.5 * (lo + hi)
+    return object_sdf(obj, at(t)) - radius, at(t)
 
 
 class SceneModel:
@@ -440,4 +550,117 @@ class SceneModel:
             v = self.check_point(p, surface_margin=surface_margin, ignore=ignore)
             if v is not None:
                 out.append(v)
+        return out
+
+    # ── Keeping the model honest ──────────────────────────────────────────────
+
+    def update_poses(self, poses: Dict[str, Sequence[float]]) -> List[str]:
+        """Move objects to new world centres; returns the ids actually moved.
+
+        A SceneModel loaded from YAML knows where its objects were *placed*.
+        Objects move — the robot moves them on purpose, and until the motion
+        notebook's section 4 was fixed it moved them by accident.  A clearance
+        check run against a stale position is the same class of error as
+        checking the gripper pad instead of the whole arm: the model and the
+        world disagree, and the model wins an argument it should lose.  Feed
+        this the live poses (under mujoco-remote the container mirrors tracked
+        objects into /tmp/reachy_scene_overrides.json at 15 Hz) before asking
+        for a clearance that a robot is about to act on.
+
+        Unknown ids are ignored rather than raising: the live feed carries
+        whatever the simulator is tracking, which need not match this scene.
+        """
+        moved: List[str] = []
+        for oid, center in poses.items():
+            obj = self._objects.get(oid)
+            if obj is None:
+                continue
+            c = (float(center[0]), float(center[1]), float(center[2]))
+            if c != obj.center:
+                self._objects[oid] = replace(obj, center=c)
+                moved.append(oid)
+        return moved
+
+    # ── Whole-arm clearance ───────────────────────────────────────────────────
+
+    def obstacle_ids(
+        self, include_static: bool = False, include_table: bool = False,
+    ) -> List[str]:
+        """Objects a moving link must not touch.
+
+        Defaults to the manipulable objects alone — the ones that get knocked
+        over.  ``static_obstacles()`` deliberately excludes them (they are grasp
+        targets, not scenery), which is why nothing in the planner noticed the
+        arm sweeping them off the board.
+
+        ``include_static`` adds the rig fixtures.  It does NOT add the tabletop:
+        that is a separate opt-in, because the tabletop is a SUPPORT SURFACE
+        rather than an obstacle.  Working on it is the arm's whole job, and the
+        poses that do are already inside it.  Measured across the motion
+        notebook's placement route, whose waypoints were verified against the
+        rig at 0.2 deg resolution:
+
+            REST     hand      -2.1 cm  vs the tabletop — it is resting on it
+            HOVER    upper arm +1.4 cm  vs the tabletop
+            SWING_1  hand      +0.9 cm  vs rig_rail_outer_right (worst rail)
+
+        So a guard that counts the tabletop refuses every pose that reaches
+        across the board — it blocked all nine grid cells in section 4.7 of the
+        notebook, none of them for a reason involving an object.  The rails are
+        the opposite case: nothing on the verified route comes closer than
+        9 mm, so they are a real no-go volume and worth checking.
+        """
+        ids = list(self.manipulable_ids())
+        if include_static:
+            ids += [o.id for o in self.static_obstacles()
+                    if o.id not in ids and o.id != self._table_id]
+        if include_table and self._table_id and self._table_id not in ids:
+            ids.append(self._table_id)
+        return ids
+
+    def clearance(
+        self,
+        segments: Sequence[Tuple[str, XYZ, XYZ, float]],
+        ids: Optional[Sequence[str]] = None,
+        include_static: bool = False,
+        include_table: bool = False,
+    ) -> Optional[Clearance]:
+        """Closest approach between any arm segment and any tracked object.
+
+        ``segments`` are (link name, end, end, radius) capsules in world
+        coordinates — see ``motion.kinematics.link_capsules``.  Returns the
+        single worst Clearance, or None if there is nothing to check.
+        """
+        want = (list(ids) if ids is not None
+                else self.obstacle_ids(include_static, include_table))
+        worst: Optional[Clearance] = None
+        for oid in want:
+            obj = self._objects.get(oid)
+            if obj is None or not obj.collides:
+                continue
+            for name, p0, p1, radius in segments:
+                d, at = segment_object_distance(obj, p0, p1, radius)
+                if worst is None or d < worst.distance:
+                    worst = Clearance(d, oid, name, at)
+        return worst
+
+    def clearances(
+        self,
+        segments: Sequence[Tuple[str, XYZ, XYZ, float]],
+        ids: Optional[Sequence[str]] = None,
+        include_static: bool = False,
+        include_table: bool = False,
+    ) -> Dict[str, Clearance]:
+        """Per-object worst clearance — the detail behind ``clearance()``."""
+        want = (list(ids) if ids is not None
+                else self.obstacle_ids(include_static, include_table))
+        out: Dict[str, Clearance] = {}
+        for oid in want:
+            obj = self._objects.get(oid)
+            if obj is None or not obj.collides:
+                continue
+            for name, p0, p1, radius in segments:
+                d, at = segment_object_distance(obj, p0, p1, radius)
+                if oid not in out or d < out[oid].distance:
+                    out[oid] = Clearance(d, oid, name, at)
         return out
