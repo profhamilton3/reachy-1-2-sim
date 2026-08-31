@@ -9,9 +9,15 @@ Depth output (R12-601):
   Encoded as base64(raw float16 bytes) for transmission.
 
 Segmentation output (R12-601):
-  uint16 numpy array, shape H×W, values are MuJoCo body IDs.
+  uint16 numpy array, shape H×W, values are MuJoCo BODY IDs.
   Encoded as base64(raw uint16 bytes).
-  Body ID 0 = world/background.
+  Body ID 0 = world/background, and also what MuJoCo's -1 "nothing here"
+  is mapped to.
+
+  MuJoCo's own segmentation pixel is [object_id, object_TYPE], and for a
+  scene render the type is uniformly mjOBJ_GEOM — so the raw buffer holds
+  GEOM ids.  _encode_seg maps them through model.geom_bodyid, so one object
+  gets one label even when it is built from several geoms.  See _encode_seg.
 
 Design constraints (from ADR-0001 and CLAUDE.md):
   * Do not hold the state mutation lock while encoding images.
@@ -183,13 +189,16 @@ class StereoRenderer:
         seg_b64 = ""
         if self._enable_seg:
             self._renderer.enable_segmentation_rendering()
-            seg_raw = self._renderer.render()          # H×W×2 int32 [body, geom]
+            seg_raw = self._renderer.render()   # H×W×2 int32 [object_id, object_TYPE]
             self._renderer.disable_segmentation_rendering()
+            # Map geom -> body BEFORE any warp, so the warp moves final labels
+            # rather than intermediate ids.
+            seg_b64 = _encode_seg(seg_raw, self._model)
             if distorter is not None:
-                # Warp the body-ID channel only; fill 0 = world/background.
-                body = distorter.apply_label(seg_raw[:, :, 0], fill=0)
-                seg_raw = np.stack([body, np.zeros_like(body)], axis=-1)
-            seg_b64 = _encode_seg(seg_raw)
+                body = decode_seg(seg_b64, self._src_h, self._src_w)
+                body = distorter.apply_label(body, fill=0)
+                seg_b64 = base64.b64encode(
+                    body.astype(np.uint16).tobytes()).decode("ascii")
 
         elapsed_us = (time.monotonic_ns() - t0) // 1_000
         return RenderedFrame(
@@ -223,11 +232,37 @@ def _encode_depth(depth_f32: np.ndarray) -> str:
     return base64.b64encode(depth_f16.tobytes()).decode("ascii")
 
 
-def _encode_seg(seg_raw: np.ndarray) -> str:
-    """Encode an H×W×2 int32 segmentation array as base64(uint16 body-ID map)."""
-    # MuJoCo segmentation pixel: [body_id, geom_id]; take body_id channel.
-    body_ids = seg_raw[:, :, 0].astype(np.uint16)
-    return base64.b64encode(body_ids.tobytes()).decode("ascii")
+def _encode_seg(seg_raw: np.ndarray, model: "mujoco.MjModel" = None) -> str:
+    """Encode MuJoCo's segmentation render as a base64 uint16 BODY-ID map.
+
+    MuJoCo's segmentation pixel is [object_id, object_TYPE] — not
+    [body_id, geom_id], as this function previously assumed.  For a normal
+    scene render object_type is uniformly mjOBJ_GEOM (5), so channel 0 holds
+    GEOM ids.  Emitting those raw was wrong in two ways:
+
+      * a body built from several geoms produced several different labels for
+        one object.  Every robot link is such a body, and so is any scene
+        object compiled with more than one geom — so "one object, one label"
+        silently did not hold;
+      * the ids happened to coincide with body ids for the late-declared scene
+        objects, which is why it looked correct when spot-checked on a cube.
+
+    Mapping geom -> body via model.geom_bodyid fixes both.  Background is -1
+    from MuJoCo and is emitted as 0 (the world body), so an unobserved pixel
+    and the world read the same, as callers already assume.
+
+    model may be None only for pre-mapped input (tests); then channel 0 is
+    passed through unchanged.
+    """
+    obj_ids = seg_raw[:, :, 0]
+    if model is not None:
+        # -1 (background) must not index geom_bodyid; send it to world (0).
+        safe = np.where(obj_ids >= 0, obj_ids, 0)
+        body_ids = np.asarray(model.geom_bodyid)[safe]
+        body_ids = np.where(obj_ids >= 0, body_ids, 0)
+    else:
+        body_ids = np.where(obj_ids >= 0, obj_ids, 0)
+    return base64.b64encode(body_ids.astype(np.uint16).tobytes()).decode("ascii")
 
 
 def decode_depth(depth_b64: str, height: int, width: int) -> np.ndarray:
