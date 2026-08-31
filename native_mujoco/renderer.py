@@ -211,6 +211,51 @@ class StereoRenderer:
             seg_b64=seg_b64,
         )
 
+    def set_zoom(self, fov_y_deg: float) -> None:
+        """Retune both cameras to a new vertical field of view (R12-605).
+
+        Zoom changes the focal length, which invalidates any distortion map
+        built for the old one, so the maps are rebuilt here rather than left to
+        warp the frame by the wrong amount.  The distortion COEFFICIENTS are
+        kept as-is: we have no measurement of how k1/k2 move with zoom on this
+        lens, so a frame away from the calibrated level has a trustworthy field
+        of view and an approximate barrel profile.  See native_mujoco/zoom.py.
+
+        Raises if the new zoom would need a different source buffer than the
+        internal renderer was built with -- rebuild the StereoRenderer for that
+        rather than silently rendering at the wrong size.
+        """
+        import math
+
+        from calibration import CameraIntrinsics
+
+        for cam_name, cid in self._cam_ids.items():
+            d = self._distorters.get(cam_name)
+            if d is None or d.is_identity:
+                self._model.cam_fovy[cid] = fov_y_deg
+                continue
+
+            # Focal length implied by the requested output field of view.
+            fy = (self._height / 2.0) / math.tan(math.radians(fov_y_deg) / 2.0)
+            fx = fy  # square pixels; the measured fx/fy differ by 0.3%
+            rebuilt = LensDistorter(
+                CameraIntrinsics(
+                    resolution=(self._width, self._height),
+                    fx=fx, fy=fy,
+                    cx=self._width / 2.0, cy=self._height / 2.0,
+                    distortion=d.distortion,
+                ),
+                self._width, self._height, margin=d.margin,
+            )
+            if rebuilt.source_size != (self._src_w, self._src_h):
+                raise ValueError(
+                    f"zoom to {fov_y_deg:.1f}° needs source "
+                    f"{rebuilt.source_size}, renderer built for "
+                    f"{(self._src_w, self._src_h)}; rebuild the StereoRenderer"
+                )
+            self._distorters[cam_name] = rebuilt
+            self._model.cam_fovy[cid] = rebuilt.source_fov_y_deg
+
     def close(self) -> None:
         self._renderer.close()
 

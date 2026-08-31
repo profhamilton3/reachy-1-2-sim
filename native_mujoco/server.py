@@ -65,6 +65,7 @@ from calibration import (
 from recorder import Recorder
 from renderer import StereoRenderer, jpeg_to_b64
 from distortion import LensDistorter, auto_margin
+from zoom import ZoomLevel, fov_y_for_level, parse_level
 from sensor_effects import EffectConfig, SensorEffectPipeline
 
 log = logging.getLogger("reachy12.mujoco.server")
@@ -271,6 +272,8 @@ class ReachyMujocoServer:
     ) -> None:
         self._calibration = calibration
         self._enable_distortion = enable_distortion
+        self._zoom_level = ZoomLevel.INTER   # the calibrated level
+        self._pending_zoom: Optional[ZoomLevel] = None
         self._enable_depth = enable_depth
         self._enable_seg = enable_seg
         self._effects = effects or EffectConfig()
@@ -441,6 +444,24 @@ class ReachyMujocoServer:
                 data_copy = self._sim.copy_data()
                 frames = renderer.render_stereo(data_copy)
                 for cam_name, fr in frames.items():
+                    # R12-605: apply a pending zoom on this thread, where the
+                    # renderer's cam_fovy and distortion maps are owned.
+                    if self._pending_zoom is not None:
+                        lvl, self._pending_zoom = self._pending_zoom, None
+                        fov = fov_y_for_level(
+                            lvl, _CAM_WIDTH, _CAM_HEIGHT,
+                            self._calibration.left_camera.fov_y_deg)
+                        try:
+                            renderer.set_zoom(fov)
+                        except ValueError as exc:
+                            log.warning("Zoom to %s refused: %s", lvl.value, exc)
+                        else:
+                            self._zoom_level = lvl
+                            log.info("Zoom now %s (fov_y %.1f°)%s", lvl.value, fov,
+                                     "" if lvl in (ZoomLevel.INTER, ZoomLevel.ZERO)
+                                     else " — barrel profile approximate off the "
+                                          "calibrated level")
+
                     # Apply sensor effects (R12-602)
                     pipe = effect_pipelines[cam_name]
                     jpeg = pipe.apply_pixels(fr.jpeg_bytes)
@@ -595,6 +616,19 @@ class ReachyMujocoServer:
 
                 elif mtype == "pause":
                     self._sim.submit_pause(bool(decoded.get("paused", True)))
+
+                elif mtype == "zoom_command":
+                    # R12-605. Applied on the render thread's next frame, not
+                    # here: cam_fovy and the distortion maps are the renderer's
+                    # state, and mutating them from the websocket task would
+                    # race a render in progress.
+                    try:
+                        lvl = parse_level(decoded.get("level", "inter"))
+                    except ValueError as exc:
+                        await ws.send(Error(message=str(exc)).encode())
+                    else:
+                        self._pending_zoom = lvl
+                        log.info("Zoom command: %s", lvl.value)
 
                 elif mtype == "heartbeat":
                     last_hb_recv = time.monotonic()

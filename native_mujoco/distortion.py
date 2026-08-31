@@ -140,6 +140,7 @@ class LensDistorter:
                 p1, p2,
             )
         self._identity = (k1 == 0.0 and k2 == 0.0 and k3 == 0.0)
+        self._distortion = tuple(k[:5])
 
         sx = width / float(intrinsics.width)
         sy = height / float(intrinsics.height)
@@ -210,6 +211,11 @@ class LensDistorter:
     @property
     def margin(self) -> float:
         return self._margin
+
+    @property
+    def distortion(self) -> tuple:
+        """The radial/tangential coefficients this map was built from."""
+        return self._distortion
 
     @property
     def fully_covered(self) -> bool:
