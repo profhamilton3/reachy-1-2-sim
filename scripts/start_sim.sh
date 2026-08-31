@@ -52,9 +52,41 @@ echo "▶ Stopping any existing native server on :8765 …"
 lsof -tiTCP:8765 -sTCP:LISTEN 2>/dev/null | xargs -r kill -9 || true
 sleep 1
 
-echo "▶ Starting native MuJoCo server (scene: $SCENE) …"
+# Camera calibration profile.  Defaults to the measured 2026-08-27 lab
+# calibration; set REACHY_SIM_CALIBRATION to a short name or a path to override
+# (e.g. REACHY_SIM_CALIBRATION=calibration_defaults for the synthetic pinhole).
+CALIB_IN="${REACHY_SIM_CALIBRATION:-calibration_measured_2026_08_27}"
+case "$CALIB_IN" in
+    /*)      CALIB="$CALIB_IN" ;;
+    *.yaml)  CALIB="$REPO/scenes/$(basename "$CALIB_IN")" ;;
+    *)       CALIB="$REPO/scenes/${CALIB_IN}.yaml" ;;
+esac
+if [ ! -f "$CALIB" ]; then
+    echo "✖ Calibration profile not found: $CALIB" >&2
+    exit 1
+fi
+
+# Lens distortion.  Off by default: renders are ground truth for the collision
+# and evaluation paths.  Set REACHY_SIM_DISTORTION=1 to warp camera frames (and
+# depth/segmentation with them) to match the real lens's barrel — for eyeballing
+# sim against real frames, and for generating training data that matches the raw
+# camera.  See native_mujoco/distortion.py.
+DISTORT_ARGS=""
+DISTORT_NOTE="off"
+case "${REACHY_SIM_DISTORTION:-0}" in
+    1|true|TRUE|yes|YES|on|ON)
+        DISTORT_ARGS="--distortion"
+        DISTORT_NOTE="ON — frames are barrel-warped; corners will be black"
+        ;;
+esac
+
+echo "▶ Starting native MuJoCo server …"
+echo "    scene       : $(basename "$SCENE")"
+echo "    calibration : $(basename "$CALIB")"
+echo "    distortion  : $DISTORT_NOTE"
 ( cd "$REPO/native_mujoco" && nohup mjpython server.py \
-    --scene "$SCENE" --host 0.0.0.0 --port 8765 --log-level INFO \
+    --scene "$SCENE" --calibration "$CALIB" $DISTORT_ARGS \
+    --host 0.0.0.0 --port 8765 --log-level INFO \
     >"$LOG" 2>&1 & )
 
 echo "▶ Waiting for ws://0.0.0.0:8765 …"

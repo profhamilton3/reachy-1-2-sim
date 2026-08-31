@@ -1,0 +1,92 @@
+# Reachy 1.2 Simulator — MEASURED Stereo Camera Calibration
+#
+# provenance: measured_2026_08_27
+#   Solved with cv2.stereoCalibrate from 20 stereo pairs of the taped 3x3 lab
+#   board (9 cells x 4 corners, 5 in cells on a 6 in pitch), captured from the
+#   physical robot's head cameras.  Reprojection RMS 0.97 px (left, 17 views) /
+#   0.84 px (right, 9 views).
+#
+#   Source images : IITG-Reachy-Project/tests/Pictures/
+#   Solver output : IITG-Reachy-Project/scripts/stereo_calibration.npz
+#   Method + provenance: IITG-Reachy-Project/docs/LAB_EVIDENCE.md
+#
+#   This replaces scenes/calibration_defaults.yaml as the runtime default (see
+#   scripts/start_sim.sh).  The synthetic profile is kept as a named
+#   alternative for tests and for runs that want a clean pinhole camera.
+#
+# WHAT THIS FIXES
+#   The synthetic profile used fx = fy = 480 at 640x480, giving a 53.1 deg
+#   vertical / 67.4 deg horizontal field.  The real focal length is ~408 px,
+#   about 18% shorter, so the simulator was seeing roughly 85% of the real
+#   linear field on each axis and clipping the outer edge of the scene.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# OPEN QUESTION — read before trusting cx / cy
+#
+#   The calibration was solved on 480x640 files.  Every capture we have, from
+#   both eyes, is 480x640 with upright content, and nothing in our capture code
+#   rotates it (scripts/CollectImages.ipynb writes reachy_sdk's last_frame
+#   straight through cv2.imwrite).  Pollen's docs show a 1280x720 SDK frame, so
+#   the robot-side vision service transforms the frame before it reaches Python.
+#
+#   Pollen's own reachy_controllers/examples/view_cam.py rotates the two eyes in
+#   OPPOSITE directions -- np.rot90(im, 3) for the left camera, np.rot90(im, 1)
+#   for the right -- so there is no single transpose rule, and a shared one
+#   would put one eye's principal point ~90 mm wrong.  Their forum thread
+#   https://forum.pollen-robotics.com/t/vr-image-rotation-issue/584 has Pollen
+#   acknowledging the SDK "is mistaken about the direction of rotation required
+#   (+90 or -90)", with no published resolution.
+#
+#   Until `print(reachy.left_camera.last_frame.shape)` is run on the NUC:
+#     * resolution stays [640, 480] -- the orientation the simulator already
+#       renders, fixed in 31fe0d5, and not changed here;
+#     * fx / fy carry the measured magnitudes.  The two differ by only 0.3%
+#       (407.0 vs 408.4 left), so the axis assignment barely affects the render,
+#       and MuJoCo derives fov_y from fy alone;
+#     * cx / cy are set to the IMAGE CENTRE, deliberately, rather than guessing
+#       a transpose.  The measured principal points are recorded below but not
+#       applied.  MuJoCo cannot express an off-centre principal point anyway
+#       (calibration.apply_to_model writes only cam_fovy), so this affects only
+#       external post-processing such as native_mujoco/distortion.py.
+#
+#   Measured principal points, in the 480x640 stored frame, for whoever
+#   resolves this:
+#     left  cx 253.6  cy 296.4    (offset from centre: +13.6, -23.6)
+#     right cx 225.6  cy 331.1    (offset from centre: -14.4, +11.1)
+#   Both offsets flip sign between the eyes, which is consistent with the
+#   opposite rotations above -- suggestive, not proof.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# MuJoCo limitation: distortion is NOT applied to rendered pixels by the
+# simulator itself.  The coefficients below are real and are consumed by
+# native_mujoco/distortion.py as an opt-in post-render pass (server --distortion).
+# fov_y = 2*atan(height / (2*fy)) is written to model.cam_fovy at startup.
+
+format_version: 1
+provenance: measured_2026_08_27
+
+left_camera:
+  resolution: [640, 480]
+  fx: 408.4         # long-axis focal length (measured fy in the 480x640 frame)
+  fy: 407.0         # fov_y = 61.1 deg at height 480
+  cx: 320.0         # image centre — see OPEN QUESTION above
+  cy: 240.0
+  distortion: [-0.3163, 0.1027, 0.0, 0.0, 0.0]   # k1 k2 p1 p2 k3 — strong barrel
+
+right_camera:
+  resolution: [640, 480]
+  fx: 400.9
+  fy: 398.8         # fov_y = 62.1 deg at height 480
+  cx: 320.0         # image centre — see OPEN QUESTION above
+  cy: 240.0
+  distortion: [-0.3895, 0.1838, 0.0, 0.0, 0.0]
+
+stereo:
+  # Photogrammetry from the 20 pairs gives ~80 mm.  The Reachy 1.2 URDF says
+  # 72.5 mm.  Metric depth error scales directly with this, so it is on the
+  # hardware-measurement list (docs/LAB_EVIDENCE.md) and must be confirmed with
+  # a ruler on the physical robot before any depth result is signed off.
+  baseline_m: 0.080
+  rectified: false
+  R: null
+  T: null

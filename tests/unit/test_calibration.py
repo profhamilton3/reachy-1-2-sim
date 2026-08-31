@@ -196,3 +196,61 @@ class TestYAMLRoundTrip:
         assert p.is_synthetic()
         assert p.left_camera.width == 640
         assert p.stereo.baseline_m > 0
+
+
+class TestMeasuredProfile:
+    """The committed measured lab calibration (scenes/calibration_measured_2026_08_27.yaml).
+
+    This is the runtime default that scripts/start_sim.sh passes to the server,
+    so a break here silently changes every render's field of view.
+    """
+
+    def _load(self):
+        path = os.path.join(
+            os.path.dirname(__file__), "..", "..",
+            "scenes", "calibration_measured_2026_08_27.yaml")
+        return load_calibration(path)
+
+    def test_parses_and_is_not_synthetic(self):
+        p = self._load()
+        assert p.provenance == "measured_2026_08_27"
+        assert not p.is_synthetic()
+
+    def test_landscape_resolution_unchanged(self):
+        """640x480 is the orientation the sim renders (fixed in 31fe0d5).  The
+        portrait-vs-landscape question is still open on the hardware side; until
+        it is settled this file must not quietly flip the render aspect."""
+        p = self._load()
+        assert p.left_camera.resolution == (640, 480)
+        assert p.right_camera.resolution == (640, 480)
+
+    def test_field_of_view_matches_the_measurement(self):
+        p = self._load()
+        assert p.left_camera.fov_y_deg == pytest.approx(61.1, abs=0.2)
+        assert p.right_camera.fov_y_deg == pytest.approx(62.1, abs=0.2)
+
+    def test_wider_than_the_synthetic_default(self):
+        """The whole point of this profile: the synthetic 53.1 deg camera was
+        clipping the outer edge of the scene."""
+        p = self._load()
+        synth = synthetic_defaults(640, 480)
+        assert p.left_camera.fov_y_deg > synth.left_camera.fov_y_deg
+
+    def test_carries_real_barrel_distortion(self):
+        p = self._load()
+        assert p.left_camera.distortion[0] == pytest.approx(-0.3163)
+        assert p.right_camera.distortion[0] == pytest.approx(-0.3895)
+
+    def test_measured_baseline(self):
+        p = self._load()
+        assert p.stereo.baseline_m == pytest.approx(0.080)
+
+    def test_principal_point_is_centred_pending_the_transpose_question(self):
+        """cx/cy are deliberately the image centre, not the measured principal
+        point: the 480x640 -> 640x480 transpose direction differs per eye and is
+        unresolved.  If someone fills in real values, this test should be
+        updated in the same commit as the evidence that settled it."""
+        p = self._load()
+        for intr in (p.left_camera, p.right_camera):
+            assert intr.cx == pytest.approx(intr.width / 2.0)
+            assert intr.cy == pytest.approx(intr.height / 2.0)

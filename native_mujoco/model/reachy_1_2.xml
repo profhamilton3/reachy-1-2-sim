@@ -336,14 +336,25 @@
                        image up    = +Z_head
                      which puts the look direction (X cross Y = -Z_cam) on
                      +X_head, unchanged.                                  -->
+                <!-- fovy UNITS: MuJoCo reads cam_fovy in DEGREES, always —
+                     compiler angle="radian" does not apply to it.  This was
+                     previously fovy="1.0472", intending 60° in radians; as
+                     written that declared a 1.05° telephoto.  It was masked at
+                     runtime because calibration.apply_to_model() overwrites
+                     cam_fovy on startup, so only a direct MJCF load saw it.
+
+                     The values below are the measured vertical fields from
+                     scenes/calibration_measured_2026_08_27.yaml (fy 407.0 /
+                     398.8 px at height 480), so a direct load now matches what
+                     the default calibration profile applies.                -->
                 <camera name="left_camera"
                         pos="0.0033  0.03625 0.061"
                         xyaxes="0 -1 0  0 0 1"
-                        fovy="1.0472"/>
+                        fovy="61.1"/>
                 <camera name="right_camera"
                         pos="0.0033 -0.03625 0.061"
                         xyaxes="0 -1 0  0 0 1"
-                        fovy="1.0472"/>
+                        fovy="62.1"/>
 
                 <!-- ── Left antenna — URDF: head→l_antenna_link xyz=-0.052 0.057 0.086 -->
                 <body name="l_antenna_link" pos="-0.052 0.057 0.086">
