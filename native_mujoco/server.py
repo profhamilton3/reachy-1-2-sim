@@ -64,6 +64,7 @@ from calibration import (
 )
 from recorder import Recorder
 from renderer import StereoRenderer, jpeg_to_b64
+from distortion import LensDistorter
 from sensor_effects import EffectConfig, SensorEffectPipeline
 
 log = logging.getLogger("reachy12.mujoco.server")
@@ -260,8 +261,10 @@ class ReachyMujocoServer:
         enable_seg: bool = False,
         effects: Optional[EffectConfig] = None,
         record_dir: Optional[str] = None,
+        enable_distortion: bool = False,
     ) -> None:
         self._calibration = calibration
+        self._enable_distortion = enable_distortion
         self._enable_depth = enable_depth
         self._enable_seg = enable_seg
         self._effects = effects or EffectConfig()
@@ -307,6 +310,25 @@ class ReachyMujocoServer:
                      self._calibration.left_camera.fov_y_deg)
         apply_to_model(self._calibration, self._model)
 
+        # Opt-in post-render barrel distortion (see native_mujoco/distortion.py).
+        # Built from the SAME profile that set fov_y, so the warp and the field
+        # of view can never disagree.
+        self._distorters: Dict[str, LensDistorter] = {}
+        if self._enable_distortion:
+            for cam_name, intr in (
+                ("left_camera", self._calibration.left_camera),
+                ("right_camera", self._calibration.right_camera),
+            ):
+                d = LensDistorter(intr, _CAM_WIDTH, _CAM_HEIGHT)
+                if d.is_identity:
+                    log.warning(
+                        "Distortion requested but %s profile '%s' has zero radial "
+                        "coefficients for %s - frames will be unchanged",
+                        "calibration", self._calibration.provenance, cam_name)
+                self._distorters[cam_name] = d
+            log.info("Lens distortion ENABLED for both cameras (profile: %s)",
+                     self._calibration.provenance)
+
         self._sim = SimState(
             self._model,
             tracked_ids=tracked_ids,
@@ -342,6 +364,7 @@ class ReachyMujocoServer:
             width=_CAM_WIDTH, height=_CAM_HEIGHT,
             enable_depth=self._enable_depth,
             enable_seg=self._enable_seg,
+            distorters=self._distorters,
         )
         self._renderer = renderer
 
@@ -696,6 +719,11 @@ def main() -> None:
                     help="include depth map in camera_frame messages (R12-601)")
     ap.add_argument("--segmentation", action="store_true",
                     help="include body-ID segmentation in camera_frame messages (R12-601)")
+    ap.add_argument("--distortion", action="store_true",
+                    help="apply the calibration profile's barrel distortion to "
+                         "rendered frames (and to depth/segmentation, so labels "
+                         "stay aligned). Off by default: renders are ground "
+                         "truth for the collision and evaluation paths.")
     # R12-602: sensor effects
     ap.add_argument("--effects", default=None,
                     help="sensor effect config YAML file (R12-602)")
@@ -729,6 +757,7 @@ def main() -> None:
         enable_depth=args.depth,
         enable_seg=args.segmentation,
         effects=effects,
+        enable_distortion=args.distortion,
         record_dir=args.record,
     )
     try:

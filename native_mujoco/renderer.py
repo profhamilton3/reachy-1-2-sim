@@ -30,6 +30,7 @@ from typing import Dict, Optional
 
 import mujoco
 import numpy as np
+from distortion import LensDistorter
 from PIL import Image
 
 _DEFAULT_WIDTH   = 640
@@ -57,6 +58,13 @@ class StereoRenderer:
         jpeg_quality:     JPEG compression quality (1–95).
         enable_depth:     If True, also produce a depth map per frame (R12-601).
         enable_seg:       If True, also produce a body-ID segmentation per frame (R12-601).
+        distorters:       Optional {camera_name: LensDistorter}.  When supplied, each
+                          camera's frame is warped to match the real lens's barrel
+                          distortion before encoding, and the SAME warp is applied to
+                          the depth and segmentation buffers so auto-generated labels
+                          stay aligned with the RGB they came from.  Absent unless
+                          explicitly passed: renders are ground truth for the
+                          collision and evaluation paths.
     """
 
     def __init__(
@@ -67,6 +75,7 @@ class StereoRenderer:
         jpeg_quality: int = _DEFAULT_QUALITY,
         enable_depth: bool = False,
         enable_seg: bool = False,
+        distorters: Optional[Dict[str, LensDistorter]] = None,
     ) -> None:
         self._model = model
         self._width = width
@@ -74,6 +83,7 @@ class StereoRenderer:
         self._quality = jpeg_quality
         self._enable_depth = enable_depth
         self._enable_seg = enable_seg
+        self._distorters: Dict[str, LensDistorter] = distorters or {}
 
         self._renderer = mujoco.Renderer(model, height=height, width=width)
 
@@ -117,8 +127,16 @@ class StereoRenderer:
 
         self._renderer.update_scene(data, camera=cam_name)
 
+        # Lens distortion, when configured for this camera.  Applied to every
+        # buffer with the same map so labels keep matching the pixels.
+        distorter = self._distorters.get(cam_name)
+        if distorter is not None and distorter.is_identity:
+            distorter = None
+
         # RGB (always)
         rgb = self._renderer.render()
+        if distorter is not None:
+            rgb = distorter.apply_rgb(rgb)
         jpeg_bytes = _encode_jpeg(rgb, self._quality)
 
         # Depth (R12-601) — float16 base64
@@ -127,6 +145,10 @@ class StereoRenderer:
             self._renderer.enable_depth_rendering()
             depth_f32 = self._renderer.render()       # H×W float32, metres
             self._renderer.disable_depth_rendering()
+            if distorter is not None:
+                # 0 m marks "no data" in the undefined corners; a real depth
+                # sample is never 0, so consumers can mask on it.
+                depth_f32 = distorter.apply_label(depth_f32, fill=0.0)
             depth_b64 = _encode_depth(depth_f32)
 
         # Segmentation (R12-601) — uint16 body-ID base64
@@ -135,6 +157,10 @@ class StereoRenderer:
             self._renderer.enable_segmentation_rendering()
             seg_raw = self._renderer.render()          # H×W×2 int32 [body, geom]
             self._renderer.disable_segmentation_rendering()
+            if distorter is not None:
+                # Warp the body-ID channel only; fill 0 = world/background.
+                body = distorter.apply_label(seg_raw[:, :, 0], fill=0)
+                seg_raw = np.stack([body, np.zeros_like(body)], axis=-1)
             seg_b64 = _encode_seg(seg_raw)
 
         elapsed_us = (time.monotonic_ns() - t0) // 1_000
