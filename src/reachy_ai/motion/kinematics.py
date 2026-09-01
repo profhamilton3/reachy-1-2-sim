@@ -434,6 +434,19 @@ class CartesianPlanner:
 
     # ── Whole-arm clearance ───────────────────────────────────────────────────
 
+    @property
+    def scene(self):
+        """The SceneModel this planner guards against, or None."""
+        return self._scene
+
+    def clearances(self, joints: Sequence[float],
+                   gripper_deg: Optional[float] = None, **kw):
+        """Per-object clearance at one pose, as {id: Clearance}."""
+        if self._scene is None:
+            return {}
+        return self._scene.clearances(
+            link_capsules(joints, self.side, gripper_deg), **kw)
+
     def clearance(self, joints: Sequence[float],
                   gripper_deg: Optional[float] = None, **kw):
         """Worst approach of any arm link to any tracked object, at one pose.
@@ -464,6 +477,29 @@ class CartesianPlanner:
                 link_capsules(q, self.side, gripper_deg), **kw)
             if c is not None and (worst is None or c.distance < worst.distance):
                 worst = c
+        return worst
+
+    def path_clearances(
+        self, q_from: Sequence[float], q_to: Sequence[float],
+        steps: int = 13, gripper_deg: Optional[float] = None, **kw,
+    ):
+        """Per-object worst clearance along q_from → q_to, as {id: Clearance}.
+
+        ``path_clearance`` collapses this to the single tightest object, which
+        is the right answer only while every object is held to the same margin.
+        It is not, once the arm is deliberately approaching one of them: hovering
+        6 cm over the can puts the hand 6 cm from the can, so the can has to be
+        allowed closer than everything else on the board.  Judging that needs to
+        know which object each distance belongs to.
+        """
+        if self._scene is None:
+            return {}
+        worst: dict = {}
+        for q in joint_path(q_from, q_to, steps):
+            for oid, c in self._scene.clearances(
+                    link_capsules(q, self.side, gripper_deg), **kw).items():
+                if oid not in worst or c.distance < worst[oid].distance:
+                    worst[oid] = c
         return worst
 
     def safe_fraction(

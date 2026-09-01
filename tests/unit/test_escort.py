@@ -16,12 +16,17 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
-from reachy_ai.motion.escort import EscortResult, Leg, escort  # noqa: E402
+from reachy_ai.motion.escort import (  # noqa: E402
+    EscortResult,
+    Leg,
+    binding,
+    escort,
+)
 from reachy_ai.motion.kinematics import (  # noqa: E402
     CartesianPlanner,
     R_ARM_JOINTS,
 )
-from reachy_ai.scene.awareness import SceneModel  # noqa: E402
+from reachy_ai.scene.awareness import Clearance, SceneModel  # noqa: E402
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 _SCENE_PATH = os.path.join(_ROOT, "scenes", "FWDCenterLabMCC.yaml")
@@ -136,6 +141,24 @@ CLEAR_GOAL = q(r_shoulder_pitch=-50.0, r_shoulder_roll=-30.0,
 # not the hand, and not at either end of the move.  This is the measured shape
 # of the failure that made the module necessary.
 BOW_JOINT, BOW_DEG = "r_shoulder_roll", 30.0
+
+# A pose whose FOREARM ends up 1.8 cm from red_cube while every other object and
+# rail stays 8.5 cm clear — the shape of a deliberate approach.  Under one global
+# 5 cm margin this move is refused outright, which is the problem per-object
+# margins exist to solve.
+HOVER_OVER_CUBE = q(r_shoulder_pitch=-45.0, r_shoulder_roll=-10.0,
+                    r_elbow_pitch=-50.0, r_arm_yaw=15.0)
+
+# +15 deg of arm_yaw appearing mid-move walks the forearm through the cube:
+# per leg, red_cube goes 11.4, 9.4, 7.5, 5.7, 2.4, -0.6 cm while nothing else
+# drops below 8.0 cm.  An approach that turns into a collision.
+INTO_CUBE = ("r_arm_yaw", 15.0)
+
+
+def _fake_clearance(object_id, distance):
+    """A Clearance with only the two fields the margin logic reads."""
+    return Clearance(distance=distance, object_id=object_id, link="forearm",
+                     point=(0.0, 0.0, 0.0))
 
 
 class TestTheFixtureItself:
@@ -425,6 +448,92 @@ class TestTheAbortMargin:
                    margin=-1.0, abort_margin=-1.0, legs=6,
                    gripper_deg=SHUT, **STATIC)
         assert r.completed
+
+
+class TestPerObjectMargins:
+    """Approaching an object without either refusing it or ignoring it.
+
+    A single margin has no right answer here.  Hold the target to the full 5 cm
+    and no approach is ever allowed — hovering 6 cm over a can puts the hand,
+    which is a 5.2 cm capsule, about 1 cm from it.  Drop the target from the
+    obstacle set, which is what this module did first, and nothing whatsoever
+    guards the object being reached for: measured live, `blue_cylinder` hovered
+    to 1.6 cm with 6.1 cm reported, moved 0.123 m, and `degraded` read +0.6 cm
+    because the loop was not looking at it.
+    """
+
+    def test_binding_picks_least_slack_not_least_distance(self):
+        near = _fake_clearance("soda_can", 0.01)
+        far = _fake_clearance("red_cube", 0.04)
+        c, req = binding({"soda_can": near, "red_cube": far},
+                         margin=0.05, margins={"soda_can": 0.005})
+        assert c.object_id == "red_cube"      # 4 cm short of 5 beats 1 cm of 0.5
+        assert req == 0.05
+
+    def test_without_an_override_it_is_the_nearest(self):
+        near = _fake_clearance("soda_can", 0.01)
+        far = _fake_clearance("red_cube", 0.04)
+        c, req = binding({"soda_can": near, "red_cube": far}, margin=0.05)
+        assert c.object_id == "soda_can"
+        assert req == 0.05
+
+    def test_the_full_margin_refuses_the_approach(self, planner, scene):
+        """The state of affairs an override exists to escape."""
+        arm = TracedArm(PRESENT, HOVER_OVER_CUBE)
+        r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
+                   margin=0.05, legs=6, gripper_deg=SHUT, **STATIC)
+        assert not r.completed
+        assert "red_cube" in r.reason
+
+    def test_an_override_lets_it_through(self, planner):
+        arm = TracedArm(PRESENT, HOVER_OVER_CUBE)
+        r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
+                   margin=0.05, margins={"red_cube": 0.005}, legs=6,
+                   gripper_deg=SHUT, **STATIC)
+        assert r.completed
+
+    def test_but_the_target_is_still_watched(self, planner):
+        """The point of the override over an exclusion: 0.5 cm is a limit, and
+        a flight that drives INTO the cube still gets stopped."""
+        arm = TracedArm(PRESENT, HOVER_OVER_CUBE,
+                        bow=slip_on(*INTO_CUBE, after=0.55))
+        r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
+                   margin=0.05, margins={"red_cube": 0.005}, legs=6,
+                   gripper_deg=SHUT, **STATIC)
+        assert not r.completed
+        assert "red_cube" in r.reason
+
+    def test_dropping_it_from_the_set_sees_nothing(self, planner, scene):
+        """The old behaviour, kept as a test so the regression is visible."""
+        others = [o for o in scene.obstacle_ids(include_static=True)
+                  if o != "red_cube"]
+        arm = TracedArm(PRESENT, HOVER_OVER_CUBE,
+                        bow=slip_on(*INTO_CUBE, after=0.55))
+        r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
+                   margin=0.05, legs=6, gripper_deg=SHUT, ids=others,
+                   include_static=True)
+        assert r.completed          # flown straight into the cube, unremarked
+
+    def test_an_overridden_object_gets_half_its_own_floor(self, planner):
+        """Not half the global one — that would hold a 0.5 cm target to 2.5 cm
+        and refuse every approach anyway, which is the bug in disguise."""
+        arm = TracedArm(PRESENT, HOVER_OVER_CUBE)
+        r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
+                   margin=0.05, margins={"red_cube": 0.005}, legs=6,
+                   gripper_deg=SHUT, **STATIC)
+        assert r.completed
+        cube = [l.realised_all["red_cube"].distance
+                for l in r.legs if "red_cube" in l.realised_all]
+        assert min(cube) < 0.025    # would have tripped a global floor
+
+    def test_degradation_is_compared_per_object(self, planner):
+        """Which object binds can change between plan and flight — that is the
+        cell_r2c1 failure — so the two must not simply be subtracted."""
+        planned = {"a": _fake_clearance("a", 0.10), "b": _fake_clearance("b", 0.20)}
+        realised = {"a": _fake_clearance("a", 0.09), "b": _fake_clearance("b", 0.12)}
+        leg = Leg(1, 1.0, q(), q(), planned["a"], realised["a"], True,
+                  planned, realised)
+        assert leg.degraded == pytest.approx(0.08)   # object b, not a
 
 
 class TestTheSceneIsRefreshed:
