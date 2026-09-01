@@ -18,6 +18,7 @@ unit-tested separately on the host.
 from __future__ import annotations
 
 import logging
+import math
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -104,14 +105,39 @@ _TOOL = np.array([0.0, 0.0, _TOOL_LEN])
 # separately: they are 4 cm apart at most, they move with the same wrist, and a
 # capsule that bounds both is both simpler and conservative.  Its length reaches
 # the far face of the thumb pad (0.0325 + 0.085 + 0.022 = 0.1395 m below the
-# wrist frame) and its radius bounds the widest visual shell (0.047 m).
+# wrist frame).
+#
+# ITS RADIUS DEPENDS ON THE GRIPPER ANGLE, and getting that wrong is not a
+# rounding error.  The moving finger hangs off the thumb at y = -0.037 and
+# swings about the wrist's local X, so opening the gripper throws it outward:
+#
+#     r_gripper   +20 (shut)   3.4 cm      0 (neutral)   4.7 cm
+#                 -45 (open)   7.4 cm    -68 (wide)      8.2 cm   from the axis
+#
+# A fixed 5.0 cm radius, taken from the closed hand, was wrong by 3.2 cm exactly
+# when it mattered — the notebook holds the gripper OPEN while hovering over the
+# board.  Measured consequence: the guard reported 6.98 cm of clearance to
+# foam_block along a hover approach, at every path sampling resolution from 13
+# to 801 steps, and the physics threw the block 0.81 m.
+#
+# So the radius is computed from the aperture, and defaults to the worst case
+# when the aperture is unknown.  A guard that has to guess should guess wide.
 _SHOULDER_Y = {"right": -0.19, "left": 0.19}
 _UPPER_ARM_LEN = 0.28
 _FOREARM_LEN = 0.25
 _HAND_LEN = 0.145
 _UPPER_ARM_RADIUS = 0.035
 _FOREARM_RADIUS = 0.030
-_HAND_RADIUS = 0.050
+
+# Gripper geometry, from the MJCF: the finger body hangs at y = -0.037 from the
+# thumb frame and its shell is a box of half-extents (0.012, 0.010, 0.038)
+# centred 0.038 below its own origin; the fixed thumb shell is
+# (0.025, 0.028, 0.038) at y = -0.018.
+_FINGER_HINGE_Y = -0.037
+_FINGER_ARM = 0.038
+_FINGER_HALF = (0.012, 0.010)
+_THUMB_RADIUS = math.hypot(0.025, 0.046)      # fixed shell, gripper-independent
+_GRIPPER_OPEN_LIMIT_DEG = -68.8               # MJCF range lower bound, -1.2 rad
 
 Capsule = Tuple[str, XYZ, XYZ, float]
 
@@ -151,12 +177,31 @@ def link_frames(joints: Sequence[float], side: str = "right"):
     return shoulder, elbow, wrist, R
 
 
-def link_capsules(joints: Sequence[float], side: str = "right") -> List[Capsule]:
+def hand_radius(gripper_deg: Optional[float] = None) -> float:
+    """Radius of the capsule that bounds the gripper at a given aperture.
+
+    ``None`` returns the worst case — the fully open hand — because a guard
+    asked to check a hand whose aperture it does not know must assume the widest
+    one.  See the constants above for what a wrong answer here costs.
+    """
+    if gripper_deg is None:
+        gripper_deg = _GRIPPER_OPEN_LIMIT_DEG
+    y = _FINGER_HINGE_Y + _FINGER_ARM * math.sin(math.radians(gripper_deg))
+    finger = math.hypot(_FINGER_HALF[0], abs(y) + _FINGER_HALF[1])
+    return max(_THUMB_RADIUS, finger)
+
+
+def link_capsules(joints: Sequence[float], side: str = "right",
+                  gripper_deg: Optional[float] = None) -> List[Capsule]:
     """The arm's collision volume as (name, end, end, radius) world capsules.
 
     Feed straight to ``SceneModel.clearance``.  Only the three moving links are
     modelled: the torso and head do not move here, and the shoulder ball is
     inside the upper-arm capsule already.
+
+    ``gripper_deg`` sizes the hand capsule to the actual aperture; omitting it
+    assumes the hand is wide open, which is the safe assumption and costs about
+    3.5 cm of reported clearance against a closed hand.
     """
     shoulder, elbow, wrist, R = link_frames(joints, side)
     tip = wrist + R @ np.array([0.0, 0.0, -_HAND_LEN])
@@ -167,7 +212,7 @@ def link_capsules(joints: Sequence[float], side: str = "right") -> List[Capsule]
     return [
         ("upper_arm", xyz(shoulder), xyz(elbow), _UPPER_ARM_RADIUS),
         ("forearm", xyz(elbow), xyz(wrist), _FOREARM_RADIUS),
-        ("hand", xyz(wrist), xyz(tip), _HAND_RADIUS),
+        ("hand", xyz(wrist), xyz(tip), hand_radius(gripper_deg)),
     ]
 
 
@@ -241,6 +286,10 @@ class CartesianPlanner:
         seed: Optional[Sequence[float]] = None,
         prefer: Optional[Tuple[float, float]] = None,
         return_orientation: bool = False,
+        maximise_clearance: bool = False,
+        from_joints: Optional[Sequence[float]] = None,
+        gripper_deg: Optional[float] = None,
+        **clearance_kw,
     ):
         """Return right-arm joint angles (deg) putting the gripper *pads* at pad
         world point xyz (tool-frame IK).
@@ -249,7 +298,37 @@ class CartesianPlanner:
         ``prefer`` (a (yaw, pitch) pair) is tried first — passing the previous
         point's winning orientation makes contiguous path planning near-instant.
         Raises UnreachableError if none is within tolerance.
+
+        ``maximise_clearance`` changes what "best" means, and on a board with
+        objects on it that matters more than the last millimetre of pad error.
+        The arm is redundant: many orientations put the pad on the same point
+        with the elbow somewhere completely different, and the default rule
+        (lowest pad error, stop at 1 mm) picks among them by a criterion that
+        knows nothing about the table.  Measured over the notebook's grid, the
+        difference between the solution it picked and the best one available at
+        the same target:
+
+            cell_r2c2 @ 28 cm hover    +0.6 cm  ->  +12.1 cm
+            cell_r2c3 @ 28 cm hover    +0.8 cm  ->  +13.4 cm
+            cell_r3c3 @ 18 cm hover    +1.9 cm  ->  +13.4 cm
+
+        So the redundancy was there the whole time and the solver was spending
+        it on nothing.  With this set, every candidate inside ``tol`` is scored
+        by whole-arm clearance and the roomiest wins; pad error only has to be
+        good enough, which is what "hover over the cell" actually needs.
+
+        ``from_joints`` scores the whole PATH from that pose rather than the end
+        pose alone — the same distinction that makes path_clearance worth having.
+        Pass it whenever you know where the arm is starting from.  Extra keyword
+        arguments go to SceneModel.clearance (``ids``, ``include_static``).
+
+        Costs one clearance evaluation per candidate orientation, so this is for
+        event-level planning, not a servo loop.
         """
+        if maximise_clearance and self._scene is not None:
+            return self._solve_roomiest(
+                xyz, seed, return_orientation, from_joints, gripper_deg,
+                **clearance_kw)
         pad = np.array(xyz)
         q0 = list(seed) if seed is not None else None
         best_q: Optional[List[float]] = None
@@ -277,6 +356,53 @@ class CartesianPlanner:
                 f"No IK solution for pad {xyz} (best err={best_err:.4f} m)"
             )
         return (best_q, best_pair) if return_orientation else best_q
+
+    def _solve_roomiest(
+        self,
+        xyz: XYZ,
+        seed: Optional[Sequence[float]],
+        return_orientation: bool,
+        from_joints: Optional[Sequence[float]],
+        gripper_deg: Optional[float],
+        **clearance_kw,
+    ):
+        """solve() scored by whole-arm clearance instead of pad error.
+
+        Every orientation is tried — no early exit, since the first solution to
+        land on the target says nothing about where it puts the elbow.
+        """
+        pad = np.array(xyz)
+        q0 = list(seed) if seed is not None else None
+        best: Optional[Tuple[float, List[float], Tuple[float, float]]] = None
+        best_err = float("inf")
+        for (yaw, pit) in self._orientations(None):
+            R = _rotz(yaw) @ _roty(pit) @ self._R0
+            wrist = pad + R @ _TOOL
+            M = np.eye(4)
+            M[:3, :3] = R
+            M[:3, 3] = wrist - _BASE
+            try:
+                q = self._arm.inverse_kinematics(M, q0=q0)
+            except Exception:
+                continue
+            F = self._arm.forward_kinematics(q)
+            pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
+            err = float(np.linalg.norm(pad_fk - pad))
+            best_err = min(best_err, err)
+            if err > self._tol:
+                continue
+            room = (self.path_clearance(from_joints, q,
+                                        gripper_deg=gripper_deg, **clearance_kw)
+                    if from_joints is not None
+                    else self.clearance(q, gripper_deg, **clearance_kw))
+            score = float("inf") if room is None else room.distance
+            if best is None or score > best[0]:
+                best = (score, list(q), (yaw, pit))
+        if best is None:
+            raise UnreachableError(
+                f"No IK solution for pad {xyz} (best err={best_err:.4f} m)"
+            )
+        return (best[1], best[2]) if return_orientation else best[1]
 
     # ── Cartesian paths ─────────────────────────────────────────────────────────
 
@@ -308,15 +434,21 @@ class CartesianPlanner:
 
     # ── Whole-arm clearance ───────────────────────────────────────────────────
 
-    def clearance(self, joints: Sequence[float], **kw):
-        """Worst approach of any arm link to any tracked object, at one pose."""
+    def clearance(self, joints: Sequence[float],
+                  gripper_deg: Optional[float] = None, **kw):
+        """Worst approach of any arm link to any tracked object, at one pose.
+
+        ``gripper_deg`` sizes the hand to its actual aperture; omitting it
+        assumes the hand is wide open.  See ``hand_radius``.
+        """
         if self._scene is None:
             return None
-        return self._scene.clearance(link_capsules(joints, self.side), **kw)
+        return self._scene.clearance(
+            link_capsules(joints, self.side, gripper_deg), **kw)
 
     def path_clearance(
         self, q_from: Sequence[float], q_to: Sequence[float],
-        steps: int = 13, **kw,
+        steps: int = 13, gripper_deg: Optional[float] = None, **kw,
     ):
         """Worst clearance anywhere along the joint-space move q_from → q_to.
 
@@ -328,14 +460,16 @@ class CartesianPlanner:
             return None
         worst = None
         for q in joint_path(q_from, q_to, steps):
-            c = self._scene.clearance(link_capsules(q, self.side), **kw)
+            c = self._scene.clearance(
+                link_capsules(q, self.side, gripper_deg), **kw)
             if c is not None and (worst is None or c.distance < worst.distance):
                 worst = c
         return worst
 
     def safe_fraction(
         self, q_from: Sequence[float], q_to: Sequence[float],
-        margin: float = 0.03, steps: int = 13, tol: float = 1e-3, **kw,
+        margin: float = 0.03, steps: int = 13, tol: float = 1e-3,
+        gripper_deg: Optional[float] = None, **kw,
     ) -> Tuple[float, object]:
         """How much of the move q_from → q_to keeps ``margin`` metres of air.
 
@@ -347,7 +481,7 @@ class CartesianPlanner:
         because red_cube is under the forearm still demonstrates the joint, and
         it reports the real limit.  A skipped sweep demonstrates nothing.
         """
-        full = self.path_clearance(q_from, q_to, steps, **kw)
+        full = self.path_clearance(q_from, q_to, steps, gripper_deg, **kw)
         if full is None or full.distance >= margin:
             return 1.0, full
         lo, hi = 0.0, 1.0
@@ -355,20 +489,24 @@ class CartesianPlanner:
         b = np.asarray(list(q_to)[:7], dtype=float)
         while hi - lo > tol:
             mid = 0.5 * (lo + hi)
-            c = self.path_clearance(a, list(a + mid * (b - a)), steps, **kw)
+            c = self.path_clearance(a, list(a + mid * (b - a)), steps,
+                                    gripper_deg, **kw)
             if c is not None and c.distance >= margin:
                 lo = mid
             else:
                 hi = mid
-        return lo, self.path_clearance(a, list(a + lo * (b - a)), steps, **kw)
+        return lo, self.path_clearance(a, list(a + lo * (b - a)), steps,
+                                       gripper_deg, **kw)
 
     def clip(
         self, q_from: Sequence[float], q_to: Sequence[float],
-        margin: float = 0.03, steps: int = 13, **kw,
+        margin: float = 0.03, steps: int = 13,
+        gripper_deg: Optional[float] = None, **kw,
     ) -> Tuple[List[float], float, object]:
         """``safe_fraction`` applied — the furthest pose along the move that is
         still clear, as (joints, fraction, Clearance)."""
-        frac, c = self.safe_fraction(q_from, q_to, margin, steps, **kw)
+        frac, c = self.safe_fraction(q_from, q_to, margin, steps,
+                                     gripper_deg=gripper_deg, **kw)
         a = np.asarray(list(q_from)[:7], dtype=float)
         b = np.asarray(list(q_to)[:7], dtype=float)
         return list(a + frac * (b - a)), frac, c
