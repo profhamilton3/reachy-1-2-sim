@@ -677,3 +677,74 @@ class TestClearanceMaximisingIK:
                       key=lambda c: _dist(CartesianPlanner(
                           arm, None, "right").fk_world(c), target))
         assert chosen == pytest.approx(nearest)
+
+
+class TestJointLimits:
+    """The IK returned poses the arm cannot hold, and nothing checked.
+
+    Measured on the running simulator before this was enforced — solved against
+    reached, after the arm had settled:
+
+        cell_r2c3   r_arm_yaw      +119.7  ->   +90.0   (stop is +90)
+                    r_forearm_yaw  -136.0  ->  -101.5   (stop is -100)
+        cell_r1c1   r_arm_yaw      +101.9  ->   +90.2
+                    r_forearm_yaw  -137.6  ->  -102.1
+
+    The arm clamps, sits 12-36 deg from the pose it was given, and the pad lands
+    20 cm from the target — while every clearance check passes, because the
+    guard is asked about the pose that was COMMANDED and the arm never went
+    there.  A whole class of "it tracked badly" that was never tracking at all.
+    """
+
+    def test_the_limits_match_the_mjcf(self):
+        import os
+        import re
+        from reachy_ai.motion.kinematics import JOINT_LIMITS_DEG
+        path = os.path.join(_ROOT, "native_mujoco", "model", "reachy_1_2.xml")
+        xml = open(path).read()
+        for name, (lo, hi) in JOINT_LIMITS_DEG.items():
+            m = re.search(r'<joint[^>]*name="%s"[^>]*>' % name, xml)
+            assert m, f"{name} not in the MJCF"
+            r = re.search(r'range="([-\d.]+)\s+([-\d.]+)"', m.group(0))
+            assert r, f"{name} has no range"
+            assert math.degrees(float(r.group(1))) == pytest.approx(lo, abs=0.5)
+            assert math.degrees(float(r.group(2))) == pytest.approx(hi, abs=0.5)
+
+    def test_a_pose_inside_the_travel_passes(self):
+        from reachy_ai.motion.kinematics import within_limits
+        assert within_limits(PRESENT)
+
+    def test_the_arm_yaw_overshoot_is_rejected(self):
+        """The exact value solve() returned for cell_r2c3."""
+        from reachy_ai.motion.kinematics import within_limits
+        assert not within_limits(q(r_arm_yaw=119.7))
+
+    def test_the_forearm_yaw_overshoot_is_rejected(self):
+        from reachy_ai.motion.kinematics import within_limits
+        assert not within_limits(q(r_forearm_yaw=-136.0))
+
+    def test_a_pose_exactly_on_a_stop_is_allowed(self):
+        """Reachable in principle; rejecting it would refuse poses the arm can
+        actually hold."""
+        from reachy_ai.motion.kinematics import within_limits
+        assert within_limits(q(r_arm_yaw=90.0))
+        assert within_limits(q(r_forearm_yaw=-100.0))
+
+    def test_the_left_arm_mirrors_roll_and_yaw(self):
+        from reachy_ai.motion.kinematics import joint_limits
+        right = dict(zip(R_ARM_JOINTS, joint_limits("right")))
+        left = dict(zip(R_ARM_JOINTS, joint_limits("left")))
+        # shoulder_roll is -180..+10 on the right, so +(-10)..+180 on the left
+        assert left["r_shoulder_roll"] == (-10.0, 180.0)
+        assert right["r_shoulder_roll"] == (-180.0, 10.0)
+        # symmetric joints are unchanged by mirroring
+        assert left["r_arm_yaw"] == right["r_arm_yaw"] == (-90.0, 90.0)
+        # pitch axes are shared
+        assert left["r_elbow_pitch"] == right["r_elbow_pitch"]
+
+    def test_every_verified_waypoint_is_inside_the_travel(self, planner):
+        """If a verified route needed an out-of-range pose, the limits would be
+        wrong — this pins that they are not."""
+        from reachy_ai.motion.kinematics import within_limits
+        for pose in (PRESENT, OLD_PRESENT):
+            assert within_limits(pose)
