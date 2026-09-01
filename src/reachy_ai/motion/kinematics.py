@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -191,6 +191,51 @@ def hand_radius(gripper_deg: Optional[float] = None) -> float:
     return max(_THUMB_RADIUS, finger)
 
 
+# Joint travel, in degrees, read from the MJCF `range` attributes.
+#
+# THE IK DOES NOT ENFORCE THESE and the SDK exposes no `limits` on a joint, so
+# nothing was checking them.  Measured cost: solve() happily returned
+# r_arm_yaw=+119.7 against a +90 stop and r_forearm_yaw=-136.0 against -100.
+# The arm clamps, lands 12-36 deg from the pose it was given, and the pad misses
+# its target by 20 cm — while every clearance check passes, because the guard is
+# asked about the pose that was COMMANDED and the arm never went there.
+#
+# Left/right differ only in the sign of the roll and yaw axes; mirrored below.
+JOINT_LIMITS_DEG: Dict[str, Tuple[float, float]] = {
+    "r_shoulder_pitch": (-150.0, 90.0),
+    "r_shoulder_roll": (-180.0, 10.0),
+    "r_arm_yaw": (-90.0, 90.0),
+    "r_elbow_pitch": (-125.0, 0.0),
+    "r_forearm_yaw": (-100.0, 100.0),
+    "r_wrist_pitch": (-45.0, 45.0),
+    "r_wrist_roll": (-45.0, 45.0),
+}
+
+
+def joint_limits(side: str = "right") -> List[Tuple[float, float]]:
+    """(lo, hi) per joint in R_ARM_JOINTS order, for the given arm."""
+    lims = [JOINT_LIMITS_DEG[j] for j in _joints_for("right")]
+    if side == "right":
+        return lims
+    out = []
+    for j, (lo, hi) in zip(_joints_for("right"), lims):
+        # roll and yaw mirror; pitch axes are shared.
+        out.append((-hi, -lo) if ("roll" in j or "yaw" in j) else (lo, hi))
+    return out
+
+
+def within_limits(joints: Sequence[float], side: str = "right",
+                  tol: float = 0.5) -> bool:
+    """True if every joint is inside its travel, allowing ``tol`` degrees.
+
+    ``tol`` exists because a solution sitting exactly on a stop is reachable in
+    principle and unreachable in practice; half a degree keeps the check from
+    rejecting poses the arm can actually hold.
+    """
+    return all(lo - tol <= v <= hi + tol
+               for v, (lo, hi) in zip(list(joints)[:7], joint_limits(side)))
+
+
 def link_capsules(joints: Sequence[float], side: str = "right",
                   gripper_deg: Optional[float] = None) -> List[Capsule]:
     """The arm's collision volume as (name, end, end, radius) world capsules.
@@ -344,6 +389,11 @@ class CartesianPlanner:
                 q = self._arm.inverse_kinematics(M, q0=q0)
             except Exception:
                 continue
+            # A pose outside the joint travel is not a solution.  The arm
+            # clamps it, ends up somewhere else, and every downstream check is
+            # then answering questions about a pose that never existed.
+            if not within_limits(q, self.side):
+                continue
             F = self._arm.forward_kinematics(q)
             pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
             err = float(np.linalg.norm(pad_fk - pad))
@@ -384,6 +434,8 @@ class CartesianPlanner:
             try:
                 q = self._arm.inverse_kinematics(M, q0=q0)
             except Exception:
+                continue
+            if not within_limits(q, self.side):
                 continue
             F = self._arm.forward_kinematics(q)
             pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
