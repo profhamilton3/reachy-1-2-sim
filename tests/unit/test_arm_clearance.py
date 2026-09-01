@@ -26,9 +26,9 @@ from reachy_ai.motion.kinematics import (  # noqa: E402
     _FOREARM_LEN,
     _FOREARM_RADIUS,
     _HAND_LEN,
-    _HAND_RADIUS,
     _UPPER_ARM_LEN,
     _UPPER_ARM_RADIUS,
+    hand_radius,
     joint_path,
     link_capsules,
     link_frames,
@@ -123,7 +123,7 @@ class TestLinkCapsules:
         caps = link_capsules(PRESENT)
         assert [c[0] for c in caps] == ["upper_arm", "forearm", "hand"]
         assert [c[3] for c in caps] == [
-            _UPPER_ARM_RADIUS, _FOREARM_RADIUS, _HAND_RADIUS]
+            _UPPER_ARM_RADIUS, _FOREARM_RADIUS, hand_radius(None)]
 
     def test_capsules_are_chained_end_to_end(self):
         caps = link_capsules(PRESENT)
@@ -139,6 +139,45 @@ class TestLinkCapsules:
         _, elbow, wrist, _ = link_frames(OLD_PRESENT)
         assert elbow[2] < 0.79            # 5 cm above a 0.740 tabletop
         assert wrist[2] > elbow[2]        # while the hand points up and away
+
+
+class TestHandRadius:
+    """The gripper's own width, which a fixed radius got wrong by 3.2 cm.
+
+    The moving finger hangs off the thumb and swings outward as the hand opens,
+    so a capsule sized for a closed hand under-models an open one — and the
+    notebook hovers with the hand OPEN.
+    """
+
+    def test_opening_the_hand_widens_it(self):
+        # Shut and neutral are both bounded by the fixed thumb shell, so they
+        # tie; past that the swinging finger is what sets the width.
+        assert hand_radius(20.0) <= hand_radius(0.0) < hand_radius(-45.0)
+        assert hand_radius(-45.0) < hand_radius(-68.8)
+
+    def test_the_working_open_position_exceeds_the_old_fixed_radius(self):
+        """The bug, as an assertion: 5 cm did not bound an open hand."""
+        assert hand_radius(-45.0) > 0.05
+        assert hand_radius(-45.0) == pytest.approx(0.075, abs=0.002)
+
+    def test_a_closed_hand_is_bounded_by_the_fixed_thumb_shell(self):
+        assert hand_radius(20.0) == pytest.approx(hand_radius(0.0))
+
+    def test_an_unknown_aperture_assumes_the_widest(self):
+        """A guard that has to guess must guess wide."""
+        assert hand_radius(None) == max(hand_radius(g)
+                                        for g in (20.0, 0.0, -45.0, -68.8))
+
+    def test_capsules_use_the_aperture_when_given(self):
+        wide = link_capsules(PRESENT)[2][3]
+        shut = link_capsules(PRESENT, gripper_deg=20.0)[2][3]
+        assert shut < wide
+        assert wide == pytest.approx(hand_radius(None))
+
+    def test_a_wider_hand_can_only_reduce_clearance(self, scene):
+        shut = scene.clearance(link_capsules(PRESENT, gripper_deg=20.0))
+        wide = scene.clearance(link_capsules(PRESENT))
+        assert wide.distance <= shut.distance
 
 
 class TestObjectSdf:
@@ -294,27 +333,51 @@ class TestSceneClearance:
         assert scene.clearance(caps, ids=["table_top"]).distance < 0
         assert scene.clearance(caps, include_static=True).distance > 0.02
 
+    # The placement route, with the gripper angle each waypoint actually
+    # commands.  PLACE_ROUTE holds the hand SHUT for the whole trip through the
+    # rig and only opens it at REST, which turns out to be load-bearing — see
+    # the test below.
+    ROUTE = [
+        (q(), 20.0),                                                # HOME
+        (q(r_shoulder_pitch=40.0), 20.0),                           # BACK
+        (q(r_shoulder_pitch=40.0, r_elbow_pitch=-125.0,
+           r_wrist_pitch=45.0), 20.0),                              # CURL
+        (q(r_shoulder_pitch=70.0, r_elbow_pitch=-120.0,
+           r_wrist_pitch=-45.0), 20.0),                             # TUCK
+        (q(r_shoulder_pitch=37.5, r_shoulder_roll=-32.5,
+           r_elbow_pitch=-120.0, r_wrist_pitch=-45.0), 20.0),       # SWING_1
+        (q(r_shoulder_pitch=-17.5, r_shoulder_roll=-37.5,
+           r_elbow_pitch=-120.0, r_wrist_pitch=-45.0), 20.0),       # SWING_3
+        (q(r_shoulder_pitch=-40.0, r_shoulder_roll=-10.0,
+           r_elbow_pitch=-60.0, r_wrist_pitch=-15.0), 20.0),        # HOVER
+    ]
+
     def test_every_verified_waypoint_clears_the_rig_rails(self, scene):
         """The other half: the rails ARE a real no-go volume.
 
-        Nothing on the placement route comes within 9 mm of a rail, so unlike
-        the tabletop they can be guarded without rejecting known-good poses.
+        Nothing on the placement route touches a rail, so unlike the tabletop
+        they can be guarded without rejecting known-good poses.
         """
         rails = [o.id for o in scene.static_obstacles() if "rig-frame" in o.tags]
-        route = [
-            q(),                                                    # HOME
-            q(r_shoulder_pitch=40.0),                               # BACK
-            q(r_shoulder_pitch=40.0, r_elbow_pitch=-125.0, r_wrist_pitch=45.0),
-            q(r_shoulder_pitch=70.0, r_elbow_pitch=-120.0, r_wrist_pitch=-45.0),
-            q(r_shoulder_pitch=37.5, r_shoulder_roll=-32.5,         # SWING_1
-              r_elbow_pitch=-120.0, r_wrist_pitch=-45.0),
-            q(r_shoulder_pitch=-17.5, r_shoulder_roll=-37.5,        # SWING_3
-              r_elbow_pitch=-120.0, r_wrist_pitch=-45.0),
-            q(r_shoulder_pitch=-40.0, r_shoulder_roll=-10.0,        # HOVER
-              r_elbow_pitch=-60.0, r_wrist_pitch=-15.0),
-        ]
-        for pose in route:
-            assert scene.clearance(link_capsules(pose), ids=rails).distance > 0.008
+        for pose, grip in self.ROUTE:
+            c = scene.clearance(link_capsules(pose, gripper_deg=grip), ids=rails)
+            assert c.distance > 0.005, str(c)
+
+    def test_the_swing_only_clears_the_rail_because_the_hand_is_shut(self, scene):
+        """Why PLACE_ROUTE carries r_gripper=SHUT through the whole rig.
+
+        It reads like tidiness and is not: at SWING_1 the shut hand passes the
+        outer-right rail with 6 mm to spare, and an open one fouls it by 16 mm.
+        The margin is the gripper's own width.
+        """
+        rails = [o.id for o in scene.static_obstacles() if "rig-frame" in o.tags]
+        swing1 = q(r_shoulder_pitch=37.5, r_shoulder_roll=-32.5,
+                   r_elbow_pitch=-120.0, r_wrist_pitch=-45.0)
+        shut = scene.clearance(link_capsules(swing1, gripper_deg=20.0), ids=rails)
+        opened = scene.clearance(link_capsules(swing1, gripper_deg=-45.0), ids=rails)
+        assert shut.distance > 0
+        assert opened.distance < 0
+        assert shut.link == opened.link == "hand"
 
     def test_no_obstacles_reports_nothing(self, scene):
         assert scene.clearance(link_capsules(PRESENT), ids=[]) is None
@@ -479,3 +542,138 @@ class TestRoutineTwoSweepsAreSafe:
         for _, target in self._targets(OLD_PRESENT):
             frac, _ = planner.safe_fraction(OLD_PRESENT, target, margin=0.03)
             assert frac == 0.0
+
+
+class TestGaze:
+    """Head aiming — see motion/gaze.py for the two measured facts behind it."""
+
+    def test_straight_ahead_is_level_but_for_the_two_offsets(self):
+        from reachy_ai.motion.gaze import (BUILT_IN_PITCH_DEG, PITCH_BIAS_DEG,
+                                           NECK_PIVOT_IN_WORLD, neck_angles_for)
+        ahead = (NECK_PIVOT_IN_WORLD[0] + 1.0,
+                 NECK_PIVOT_IN_WORLD[1], NECK_PIVOT_IN_WORLD[2])
+        pitch, yaw = neck_angles_for(ahead)
+        assert yaw == pytest.approx(0.0)
+        assert pitch == pytest.approx(PITCH_BIAS_DEG - BUILT_IN_PITCH_DEG)
+
+    def test_looking_at_the_table_pitches_down(self, scene):
+        """Positive pitch is DOWN — the sign that had to be measured."""
+        from reachy_ai.motion.gaze import neck_angles_for
+        pitch, _ = neck_angles_for((0.43, 0.0, scene.table_surface_z))
+        assert pitch > 25.0
+
+    def test_lower_targets_need_more_pitch(self):
+        from reachy_ai.motion.gaze import neck_angles_for
+        high, _ = neck_angles_for((0.45, 0.0, 1.20))
+        low, _ = neck_angles_for((0.45, 0.0, 0.74))
+        assert low > high
+
+    def test_yaw_follows_the_target_across_the_midline(self):
+        from reachy_ai.motion.gaze import neck_angles_for
+        _, right = neck_angles_for((0.40, -0.30, 0.90))   # robot's right
+        _, centre = neck_angles_for((0.40, 0.0, 0.90))
+        _, left = neck_angles_for((0.40, +0.30, 0.90))
+        assert right < centre < left
+        assert centre == pytest.approx(0.0)
+
+    def test_the_raised_arm_pose_is_something_the_head_can_watch(self, planner):
+        """The whole reason this module exists: PRESENT is off to the right."""
+        from reachy_ai.motion.gaze import can_look_at, neck_angles_for
+        _, _, wrist, _ = link_frames(PRESENT)
+        target = (float(wrist[0]), float(wrist[1]), float(wrist[2]))
+        assert can_look_at(target)
+        pitch, yaw = neck_angles_for(target)
+        assert yaw < -20.0            # it really is off to the right
+        assert -45.0 <= pitch <= 64.0
+
+    def test_clamping_keeps_an_impossible_target_inside_the_travel(self):
+        from reachy_ai.motion.gaze import (PITCH_LIMITS, can_look_at,
+                                           neck_angles_for)
+        underneath = (0.02, 0.0, 0.0)          # essentially straight down
+        assert not can_look_at(underneath)
+        pitch, _ = neck_angles_for(underneath)
+        assert pitch == pytest.approx(PITCH_LIMITS[1])
+
+
+class TestClearanceMaximisingIK:
+    """solve(maximise_clearance=True) spends the arm's redundancy on the table.
+
+    These use a stub arm rather than the SDK: the point under test is which
+    candidate gets chosen, not the IK itself.
+    """
+
+    class _StubArm:
+        """Two 'orientations' that reach the same pad point very differently."""
+        def __init__(self, solutions):
+            self._solutions = solutions
+            self._i = 0
+
+        def inverse_kinematics(self, M, q0=None):
+            sol = self._solutions[self._i % len(self._solutions)]
+            self._i += 1
+            return list(sol)
+
+        def forward_kinematics(self, q):
+            import numpy as np
+            from reachy_ai.motion.kinematics import _BASE, _TOOL, link_frames
+            _, _, wrist, R = link_frames(q)
+            F = np.eye(4)
+            F[:3, :3] = R
+            F[:3, 3] = np.asarray(wrist) - _BASE
+            return F
+
+    def _planner_returning(self, scene, solutions):
+        arm = self._StubArm(solutions)
+        p = CartesianPlanner(arm, scene, side="right",
+                             yaw_samples=len(solutions), yaw_range=1.0,
+                             pitch_samples=(0.0,), tol=10.0)
+        return p, arm
+
+    def test_it_picks_the_roomier_of_two_reaching_solutions(self, scene):
+        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
+        assert scene.clearance(link_capsules(low)).distance < 0
+        assert scene.clearance(link_capsules(high)).distance > 0.10
+
+        p, _ = self._planner_returning(scene, [low, high])
+        chosen = p.solve((0.4, 0.0, 0.95), maximise_clearance=True)
+        assert chosen == pytest.approx(high)
+
+    def test_order_does_not_matter(self, scene):
+        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
+        p, _ = self._planner_returning(scene, [high, low])
+        assert p.solve((0.4, 0.0, 0.95), maximise_clearance=True) == pytest.approx(high)
+
+    def test_it_tries_every_orientation_rather_than_stopping_at_the_first(self, scene):
+        """The default solver breaks out at 1 mm of pad error; this must not."""
+        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
+        p, arm = self._planner_returning(scene, [low, high])
+        p.solve((0.4, 0.0, 0.95), maximise_clearance=True)
+        assert arm._i == 2
+
+    def test_scoring_the_path_can_beat_scoring_the_endpoint(self, scene):
+        """from_joints scores the whole move, which is the honest question."""
+        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
+        p, _ = self._planner_returning(scene, [low, high])
+        chosen = p.solve((0.4, 0.0, 0.95), maximise_clearance=True,
+                         from_joints=high)
+        assert chosen == pytest.approx(high)
+
+    def test_without_a_scene_it_falls_back_to_the_pad_error_rule(self):
+        """Nothing to score against, so the flag is inert rather than fatal."""
+        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
+        arm = self._StubArm([low, high])
+        p = CartesianPlanner(arm, scene=None, side="right", yaw_samples=2,
+                             pitch_samples=(0.0,), tol=10.0)
+        target = (0.4, 0.0, 0.95)
+        chosen = p.solve(target, maximise_clearance=True)
+        # Scored by pad error, which is the default rule — and here that picks
+        # the pose with the WORSE clearance, which is the whole problem.
+        nearest = min((low, high),
+                      key=lambda c: _dist(CartesianPlanner(
+                          arm, None, "right").fk_world(c), target))
+        assert chosen == pytest.approx(nearest)
