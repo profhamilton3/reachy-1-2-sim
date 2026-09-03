@@ -83,6 +83,16 @@ _ZOOM_SAMPLE_WEIGHTS = [0.5, 0.25, 0.25]
 _MIN_BOX_PIXELS = 60
 # An object clipped to a thin strip at the frame edge is likewise not a sample.
 _MIN_BOX_SIDE_PX = 4
+# Fill ratio (object pixels / bounding-box area) below which the mask is
+# checked for disconnected blobs.  A solid primitive seen at any angle fills
+# 0.65-0.85 of its box, so 0.5 clears every honest label without paying for the
+# component search on it.
+_SPLIT_CHECK_FILL = 0.5
+# Once split, a blob smaller than this share of the largest is a warp-fold
+# artifact rather than part of the object, and is dropped.  0.25 sits well
+# clear of both populations: measured folds ran 3-18% of the object's pixels,
+# while an occluder splitting an object leaves halves of comparable size.
+_SATELLITE_SHARE = 0.25
 
 
 @dataclass(frozen=True)
@@ -139,6 +149,67 @@ def _bodies_for(model: mujoco.MjModel, ids: Sequence[str]) -> dict[str, int]:
     return out
 
 
+def _drop_satellites(mask: np.ndarray, share: float) -> np.ndarray:
+    """Drop 4-connected blobs far smaller than the object's largest blob.
+
+    An object's label is min/max over its pixels, which is only a box if those
+    pixels belong to the object.  At the wide zoom the barrel warp folds the
+    source render's extreme corners back into frame, so a sliver of an object
+    reappears far from the object itself and the span of the two is a box
+    holding mostly background.  Measured on the 300-frame run that produced the
+    first handoff set: 10 of 1177 boxes, every one at OUT (3.5% of that zoom's
+    boxes), the worst covering 198x217 px for 1317 px of object — 3% fill.
+    Those are not loose labels, they are labels pointing at empty board.
+
+    The test is RELATIVE SIZE, not connectivity, because the two things that
+    split a mask need opposite treatment.  A genuine occluder — the arm across
+    the object — leaves two comparable halves, and one box spanning both is
+    exactly what a detector should predict, so those are kept.  A warp fold
+    leaves a few percent of the object's pixels somewhere unrelated, and those
+    are discarded.  `share` is where the line sits.
+
+    Iterative BFS over the mask's own bounding box.  Objects are small, this
+    only runs on masks that already look suspicious, and it keeps scipy off the
+    dependency list for one function.
+    """
+    ys, xs = np.where(mask)
+    if len(ys) == 0:
+        return mask
+    y0, y1 = int(ys.min()), int(ys.max()) + 1
+    x0, x1 = int(xs.min()), int(xs.max()) + 1
+    sub = mask[y0:y1, x0:x1]
+    h, w = sub.shape
+
+    seen = np.zeros_like(sub, dtype=bool)
+    blobs: list[tuple[int, np.ndarray]] = []
+    for sy, sx in zip(*np.where(sub)):
+        if seen[sy, sx]:
+            continue
+        blob = np.zeros_like(sub, dtype=bool)
+        stack = [(int(sy), int(sx))]
+        seen[sy, sx] = True
+        while stack:
+            cy, cx = stack.pop()
+            blob[cy, cx] = True
+            for ny, nx in ((cy - 1, cx), (cy + 1, cx), (cy, cx - 1), (cy, cx + 1)):
+                if 0 <= ny < h and 0 <= nx < w and sub[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    stack.append((ny, nx))
+        blobs.append((int(blob.sum()), blob))
+
+    if len(blobs) == 1:
+        return mask
+    biggest = max(b[0] for b in blobs)
+    keep = np.zeros_like(sub, dtype=bool)
+    for size, blob in blobs:
+        if size >= share * biggest:
+            keep |= blob
+
+    out = np.zeros_like(mask, dtype=bool)
+    out[y0:y1, x0:x1] = keep
+    return out
+
+
 def boxes_from_segmentation(
     seg: np.ndarray,
     body_ids: dict[str, int],
@@ -146,6 +217,8 @@ def boxes_from_segmentation(
     class_index: dict[str, int],
     min_pixels: int = _MIN_BOX_PIXELS,
     min_side: int = _MIN_BOX_SIDE_PX,
+    split_check_fill: float = _SPLIT_CHECK_FILL,
+    satellite_share: float = _SATELLITE_SHARE,
 ) -> list[BoxLabel]:
     """Derive exact boxes from a body-ID segmentation map.
 
@@ -159,7 +232,19 @@ def boxes_from_segmentation(
         count = int(mask.sum())
         if count < min_pixels:
             continue
+        # Only pay for component labelling when the pixels do not already fill
+        # their own bounding box reasonably well — that check is two min/max
+        # passes, the BFS is not, and the overwhelming majority of objects are
+        # a single blob.
         ys, xs = np.where(mask)
+        span = ((int(ys.max()) - int(ys.min()) + 1) *
+                (int(xs.max()) - int(xs.min()) + 1))
+        if count < split_check_fill * span:
+            mask = _drop_satellites(mask, satellite_share)
+            count = int(mask.sum())
+            if count < min_pixels:
+                continue
+            ys, xs = np.where(mask)
         x0, x1 = int(xs.min()), int(xs.max())
         y0, y1 = int(ys.min()), int(ys.max())
         if (x1 - x0 + 1) < min_side or (y1 - y0 + 1) < min_side:
@@ -196,7 +281,10 @@ class DatasetGenerator:
         distort: bool = False,
         seed: int = 0,
         object_tag: str = "detector-target",
+        allow_no_targets: bool = False,
+        pitch_range: tuple[float, float] = (15.0, 55.0),
     ) -> None:
+        self._pitch_range = pitch_range
         self._model = model
         self._scene = scene_doc
         self._cal = calibration
@@ -208,8 +296,13 @@ class DatasetGenerator:
         objects = scene_doc.get("objects") or []
         self._targets = [o["id"] for o in objects
                          if object_tag in (o.get("tags") or [])]
-        if not self._targets:
-            raise ValueError(f"no objects tagged {object_tag!r} in the scene")
+        if not self._targets and not allow_no_targets:
+            # A scene with nothing to label is normally a mistake.  It is
+            # deliberate in one case: rendering the bare board as the negative
+            # class, which is a real category for the classifier fed from here.
+            raise ValueError(
+                f"no objects tagged {object_tag!r} in the scene — pass "
+                f"allow_no_targets=True if empty frames are the point")
         self._classes = {o["id"]: o["semantic_class"] for o in objects
                          if o["id"] in self._targets}
         self._class_names = sorted(set(self._classes.values()))
@@ -268,7 +361,7 @@ class DatasetGenerator:
         chosen: dict[str, float] = {}
         for jname, (adr, lo, hi) in self._neck.items():
             if jname == "neck_pitch":
-                val = math.radians(self._rng.uniform(15.0, 55.0))
+                val = math.radians(self._rng.uniform(*self._pitch_range))
             elif jname == "neck_yaw":
                 val = math.radians(self._rng.uniform(-12.0, 12.0))
             else:
@@ -338,8 +431,20 @@ class DatasetGenerator:
         out_dir: str | pathlib.Path,
         count: int,
         camera: str = "left_camera",
+        zoom: ZoomLevel | None = None,
     ) -> dict:
-        """Render `count` samples and write images, labels and provenance."""
+        """Render `count` samples and write images, labels and provenance.
+
+        `zoom` pins every frame to one level instead of sampling.  Worth doing
+        whenever the frames are going to be compared against real captures,
+        which are themselves taken at one zoom, and necessary while distortion
+        is on: the barrel profile is measured at INTER only, and the render
+        margin that keeps the warp inside its source buffer is computed once
+        from that field.  At OUT (98 deg against 61) the warp reads past the
+        buffer and folds the frame back on itself — visible as a duplicated
+        board and objects smeared along the corner.  See the README written
+        beside any handoff set built from this.
+        """
         out = pathlib.Path(out_dir)
         for sub in ("images", "labels", "annotations"):
             (out / sub).mkdir(parents=True, exist_ok=True)
@@ -352,7 +457,7 @@ class DatasetGenerator:
         empty = 0
         for i in range(count):
             stem = f"{i:06d}"
-            jpeg, rec = self.render_one(data, stem, camera=camera)
+            jpeg, rec = self.render_one(data, stem, camera=camera, zoom=zoom)
             (out / "images" / f"{stem}.jpg").write_bytes(jpeg)
             (out / "labels" / f"{stem}.txt").write_text(
                 "\n".join(b.to_yolo(self._w, self._h) for b in rec.boxes) + "\n"
@@ -368,6 +473,7 @@ class DatasetGenerator:
             "seed": self._seed,
             "count": count,
             "camera": camera,
+            "zoom_pinned": zoom.value if zoom is not None else None,
             "resolution": [self._w, self._h],
             "distorted": self._distort,
             "classes": self._class_names,

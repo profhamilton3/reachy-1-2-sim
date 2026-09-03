@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+from collections.abc import Mapping as _MappingABC   # for isinstance checks
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Sequence
 
@@ -132,6 +133,68 @@ class ObjectTracker:
 # Model composition
 # ---------------------------------------------------------------------------
 
+def _rgb(values: object, scale: float = 1.0) -> Optional[str]:
+    """First three channels of an rgba list as an MJCF `r g b` string."""
+    if not isinstance(values, (list, tuple)) or len(values) < 3:
+        return None
+    return " ".join(f"{min(1.0, max(0.0, float(c) * scale)):.4f}"
+                    for c in values[:3])
+
+
+def apply_world_appearance(xml: str, scene_doc: Mapping[str, object]) -> str:
+    """Repaint the base model's sky and floor from the scene's `world` block.
+
+    reachy_1_2.xml hardcodes MuJoCo's demo environment — a blue gradient sky
+    and a blue-on-blue checkerboard ground.  Scenes have carried
+    `world.background_rgba` and `world.floor.material` since the format was
+    written and NOTHING read them, so FWDCenterLabMCC declared a pale lab and
+    rendered as a dark blue checkerboard.  Harmless while the renders were only
+    watched by people; not harmless once frames became detector training data,
+    where the background is most of every image.
+
+    Only the two named assets are touched, and only where the scene supplies a
+    value, so a scene with no `world` block compiles exactly as before.
+    """
+    world = scene_doc.get("world")
+    if not isinstance(world, _MappingABC):
+        return xml
+
+    sky = _rgb(world.get("background_rgba"))
+    if sky:
+        # Keep a gradient rather than flooding a flat colour: rgb2 is the
+        # horizon, and a real room is darker at the bottom of the view.
+        horizon = _rgb(world.get("background_rgba"), 0.78)
+        xml = re.sub(
+            r'(<texture name="skybox"[^>]*?)rgb1="[^"]*"(.*?)rgb2="[^"]*"',
+            lambda m: f'{m.group(1)}rgb1="{sky}"{m.group(2)}rgb2="{horizon}"',
+            xml, count=1, flags=re.DOTALL)
+
+    floor = world.get("floor")
+    material = floor.get("material") if isinstance(floor, _MappingABC) else None
+    if isinstance(material, _MappingABC):
+        ground = _rgb(material.get("rgba"))
+        if ground:
+            # A near-uniform checker: the real floor is large pale tiles, so the
+            # two squares differ only enough to show a seam.
+            xml = re.sub(
+                r'(<texture name="groundtex"[^>]*?)rgb1="[^"]*"(.*?)'
+                r'rgb2="[^"]*"(.*?)markrgb="[^"]*"',
+                lambda m: (f'{m.group(1)}rgb1="{ground}"{m.group(2)}'
+                           f'rgb2="{_rgb(material.get("rgba"), 0.96)}"'
+                           f'{m.group(3)}markrgb="{_rgb(material.get("rgba"), 0.92)}"'),
+                xml, count=1, flags=re.DOTALL)
+        roughness = material.get("roughness")
+        if isinstance(roughness, (int, float)):
+            # MuJoCo has no roughness; reflectance is the nearest control it
+            # does have, and a gloss-15 lab floor should still catch highlights.
+            refl = min(0.5, max(0.0, (1.0 - float(roughness)) * 0.35))
+            xml = re.sub(
+                r'(<material name="groundplane"[^>]*?)reflectance="[^"]*"',
+                lambda m: f'{m.group(1)}reflectance="{refl:.3f}"',
+                xml, count=1, flags=re.DOTALL)
+    return xml
+
+
 def build_scene_model_xml(
     scene_doc: Mapping[str, object],
     robot_model_path: Optional[str] = None,
@@ -139,10 +202,11 @@ def build_scene_model_xml(
     """Return an MJCF string = robot model + compiled scene objects.
 
     Scene object <body> elements are inserted before the robot's closing
-    </worldbody>; scene <asset> (meshes) are merged into the robot's <asset>.
+    </worldbody>; scene <asset> (meshes) are merged into the robot's <asset>;
+    the sky and ground are repainted from the scene's `world` block.
     """
     path = pathlib.Path(robot_model_path) if robot_model_path else _ROBOT_MODEL
-    xml = path.read_text()
+    xml = apply_world_appearance(path.read_text(), scene_doc)
 
     asset_xml, body_xml = compile_scene_body_fragment(scene_doc)
 

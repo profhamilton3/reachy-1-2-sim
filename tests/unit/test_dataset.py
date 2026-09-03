@@ -134,3 +134,74 @@ class TestZoomSampling:
         w = dict(zip(_ZOOM_SAMPLE_LEVELS, _ZOOM_SAMPLE_WEIGHTS))
         assert w[ZoomLevel.INTER] > w[ZoomLevel.IN]
         assert w[ZoomLevel.INTER] > w[ZoomLevel.OUT]
+
+
+class TestSplitMasks:
+    """A label is min/max over an object's pixels, which is only a box when
+    those pixels all belong to the object.
+
+    The wide zoom's barrel warp folds the source render's extreme corners back
+    into frame, so a sliver of an object reappears far from the object.  On the
+    300-frame run that produced the first handoff set this hit 10 of 1177
+    boxes — all at OUT, 3.5% of that zoom — the worst spanning 198x217 px for
+    1317 px of object.  A detector trained on those learns that the class looks
+    like empty board.
+    """
+
+    def test_a_distant_fold_does_not_stretch_the_box(self):
+        seg = _seg()
+        seg[10:24, 10:24] = 48          # the object
+        seg[44:47, 60:63] = 48          # its fold, far corner, same body id
+        b = boxes_from_segmentation(seg, BODIES, CLASSES, INDEX)[0]
+        assert (b.x_min, b.y_min, b.x_max, b.y_max) == (10, 10, 23, 23)
+        assert b.pixel_count == 14 * 14
+
+    def test_a_solid_object_is_untouched(self):
+        seg = _seg()
+        seg[10:30, 10:30] = 48
+        b = boxes_from_segmentation(seg, BODIES, CLASSES, INDEX)[0]
+        assert (b.x_min, b.y_min, b.x_max, b.y_max) == (10, 10, 29, 29)
+        assert b.pixel_count == 400
+
+    def test_a_concave_but_connected_shape_survives_whole(self):
+        """Fill ratio alone would condemn this; connectivity is the real test.
+        An L is one object and its box legitimately covers both arms."""
+        seg = _seg()
+        seg[10:30, 10:16] = 48
+        seg[24:30, 10:30] = 48
+        b = boxes_from_segmentation(seg, BODIES, CLASSES, INDEX)[0]
+        assert (b.x_min, b.y_min, b.x_max, b.y_max) == (10, 10, 29, 29)
+
+    def test_comparable_halves_are_both_kept(self):
+        """The rule is relative size, not connectivity.  An arm across the
+        object leaves two halves of similar size, and one box spanning both is
+        what a detector should predict — see
+        TestBoxDerivation.test_disjoint_regions_share_one_box, which this must
+        not break."""
+        seg = _seg()
+        seg[10:20, 5:15] = 48           # 100 px
+        seg[10:20, 40:50] = 48          # 100 px
+        b = boxes_from_segmentation(seg, BODIES, CLASSES, INDEX)[0]
+        assert (b.x_min, b.x_max) == (5, 49)
+        assert b.pixel_count == 200
+
+    def test_the_line_sits_between_the_two_populations(self):
+        """Measured folds ran 3-18% of the object's pixels; halves of a split
+        object are comparable.  A blob at 20% goes, one at 30% stays."""
+        for share, kept in ((0.20, False), (0.30, True)):
+            seg = _seg(h=120, w=120)   # room for the satellite to fit whole;
+            seg[10:30, 10:30] = 48     # a clipped one would test the clipping
+            side = int(round((400 * share) ** 0.5))
+            seg[80:80 + side, 90:90 + side] = 48
+            b = boxes_from_segmentation(seg, BODIES, CLASSES, INDEX)[0]
+            reaches = b.y_max >= 80
+            assert reaches is kept, f"share {share}: expected kept={kept}"
+
+    def test_a_fold_that_leaves_too_little_behind_is_dropped(self):
+        """Trimming to the main blob can take an object under the minimum.
+        It must then be dropped, not emitted as a sliver."""
+        seg = _seg()
+        seg[10:17, 10:17] = 48          # 49 px, under _MIN_BOX_PIXELS (60)
+        seg[40:43, 55:58] = 48          # 9 px fold (18%); 58 px total is over
+                                        # the minimum only because of the fold
+        assert boxes_from_segmentation(seg, BODIES, CLASSES, INDEX) == []

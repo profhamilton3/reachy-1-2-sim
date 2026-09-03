@@ -18,6 +18,7 @@ from scene_compiler import (  # noqa: E402
     compile_scene,
     compile_scene_body_fragment,
     dynamic_object_ids,
+    joint_name,
     tracked_object_ids,
 )
 
@@ -94,11 +95,18 @@ class TestMaterial:
 class TestPhysics:
     def test_static_default_no_freejoint(self):
         xml = compile_scene(_box())
-        assert "<freejoint/>" not in xml
+        assert "<freejoint" not in xml
 
     def test_dynamic_has_freejoint(self):
         xml = compile_scene(_box(physics={"dynamic": True, "mass": 0.1}))
-        assert "<freejoint/>" in xml
+        assert "<freejoint" in xml
+
+    def test_the_freejoint_carries_the_name_joint_name_promises(self):
+        """joint_name() is the documented way to address an object's pose.  It
+        named a joint the compiled model did not have, so every lookup through
+        it returned -1 and failed by doing nothing at all."""
+        xml = compile_scene(_box(physics={"dynamic": True, "mass": 0.1}))
+        assert f'<freejoint name="{joint_name("test_box")}"/>' in xml
 
     def test_dynamic_mass(self):
         xml = compile_scene(_box(physics={"dynamic": True, "mass": 0.123}))
