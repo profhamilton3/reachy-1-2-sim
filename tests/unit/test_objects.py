@@ -148,3 +148,95 @@ class TestSeededReset:
         # object dof velocities zeroed
         for o in tr._objects:
             assert np.allclose(d.qvel[o.qvel_adr:o.qvel_adr + 6], 0.0)
+
+
+class TestWorldAppearance:
+    """`world.background_rgba` and `world.floor.material` were in the scene
+    format from the start and nothing read them, so FWDCenterLabMCC declared a
+    pale lab and rendered as MuJoCo's blue demo checkerboard.  Cosmetic while
+    people were watching the renders; not cosmetic once the frames became
+    detector training data, where the background is most of every image.
+    """
+
+    BASE = (
+        '<mujoco><asset>\n'
+        '  <texture name="skybox" type="skybox" builtin="gradient"\n'
+        '           rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>\n'
+        '  <texture name="groundtex" type="2d" builtin="checker" mark="edge"\n'
+        '           rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8"\n'
+        '           width="300" height="300"/>\n'
+        '  <material name="groundplane" texture="groundtex" texuniform="true"\n'
+        '            texrepeat="5 5" reflectance="0.2"/>\n'
+        '</asset></mujoco>'
+    )
+
+    def test_the_background_repaints_the_sky(self):
+        from objects import apply_world_appearance
+        out = apply_world_appearance(
+            self.BASE, {"world": {"background_rgba": [0.86, 0.88, 0.90, 1.0]}})
+        assert 'rgb1="0.8600 0.8800 0.9000"' in out
+        assert 'rgb1="0.3 0.5 0.7"' not in out
+
+    def test_the_horizon_stays_darker_than_the_sky(self):
+        """A flat flood reads as a void; a room is darker low in the view."""
+        from objects import apply_world_appearance
+        out = apply_world_appearance(
+            self.BASE, {"world": {"background_rgba": [0.8, 0.8, 0.8, 1.0]}})
+        sky = float(out.split('rgb1="')[1].split()[0])
+        horizon = float(out.split('rgb2="')[1].split()[0])
+        assert 0.0 < horizon < sky
+
+    def test_the_floor_checker_goes_near_uniform(self):
+        """The real lab floor is large pale tiles: a seam, not a chessboard."""
+        from objects import apply_world_appearance
+        out = apply_world_appearance(
+            self.BASE,
+            {"world": {"floor": {"material": {"rgba": [0.82, 0.83, 0.85, 1.0]}}}})
+        block = out.split('name="groundtex"')[1].split("/>")[0]
+        a = float(block.split('rgb1="')[1].split()[0])
+        b = float(block.split('rgb2="')[1].split()[0])
+        assert abs(a - b) < 0.06 and a > 0.5
+
+    def test_roughness_becomes_reflectance(self):
+        from objects import apply_world_appearance
+        glossy = apply_world_appearance(
+            self.BASE, {"world": {"floor": {"material": {"roughness": 0.15}}}})
+        matte = apply_world_appearance(
+            self.BASE, {"world": {"floor": {"material": {"roughness": 0.9}}}})
+        g = float(glossy.split('reflectance="')[1].split('"')[0])
+        m = float(matte.split('reflectance="')[1].split('"')[0])
+        assert g > m
+
+    def test_a_scene_with_no_world_block_is_untouched(self):
+        from objects import apply_world_appearance
+        assert apply_world_appearance(self.BASE, {"objects": []}) == self.BASE
+
+    def test_a_partial_world_block_only_changes_what_it_names(self):
+        from objects import apply_world_appearance
+        out = apply_world_appearance(
+            self.BASE, {"world": {"background_rgba": [0.9, 0.9, 0.9, 1.0]}})
+        assert 'rgb1="0.2 0.3 0.4"' in out          # ground untouched
+        assert 'reflectance="0.2"' in out
+
+
+class TestFreejointsAreNamed:
+    def test_every_dynamic_object_joint_is_addressable_by_id(self, model):
+        """joint_name(obj_id) promised f"{id}__j" while the compiler emitted
+        <freejoint/> unnamed, so mj_name2id returned -1 and every lookup that
+        trusted the promise failed by doing nothing.  The dataset generator's
+        placement randomiser was one: it skipped all four objects and rendered
+        the scene's default layout for every frame of every run.
+        """
+        import mujoco
+        from scene_compiler import joint_name
+
+        free = [j for j in range(model.njnt)
+                if model.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE]
+        assert free, "fixture scene has no dynamic objects to check"
+        for jid in free:
+            body = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY,
+                                     int(model.jnt_bodyid[jid]))
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, jid)
+            assert name == joint_name(body)
+            assert mujoco.mj_name2id(
+                model, mujoco.mjtObj.mjOBJ_JOINT, joint_name(body)) == jid

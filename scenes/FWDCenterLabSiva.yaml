@@ -1,0 +1,102 @@
+schema_version: "1.0"
+extends: FWDCenterLabMCC.yaml
+name: FWDCenterLabSiva
+
+description: >-
+  FWDCenterLabMCC with the manipulation objects repainted to match the ones
+  actually on the lab board, for generating detector training data that a model
+  trained on real frames has a chance of recognising.  Geometry, calibration,
+  grid and reachability are inherited unchanged — this file changes appearance
+  and nothing else.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THIS SCENE EXISTS
+#
+# FWDCenterLabMCC paints its objects for human legibility: a red cube and a
+# blue cylinder are instantly readable in a viewer window, and that was the
+# right call while the renders were being watched rather than trained on.
+#
+# The real objects are neither.  Sampled from Siva's captures in
+# IITG-Reachy-Project/data/calibration/annotation/ (480x640, robot left camera,
+# 2026-08 lab session), object pixels read:
+#
+#     cube      median RGB  (75,74,71) (87,85,83) (76,80,78) (44,43,41)
+#     cylinder  median RGB  (59,62,60) (85,87,85) (64,66,67) (63,62,60)
+#     board     median RGB  (125,134,130)
+#
+# Two things matter there.  They are ACHROMATIC — R, G and B agree to within a
+# few counts on every sample, so hue carries no information and a detector
+# keying on "red" or "blue" learns a feature the real feed does not have.  And
+# they are DARK relative to the board: the object/board luminance ratio is
+# about 0.50, clustered 0.33-0.66 across samples.
+#
+# So both objects are set to a neutral grey chosen to reproduce that ratio
+# against the inherited board (rgba 0.93).  See the README in
+# IITG-Reachy-Project/data/annotations/ for the measured ratio achieved.
+#
+# WHAT IS STILL NOT MATCHED — read before trusting a transfer number:
+#
+#   * EXPOSURE.  The real frames are dim and low-contrast because the camera's
+#     auto-exposure is dragged down by a bright glossy floor filling half the
+#     view; the board photographs at 130, not 255.  MuJoCo renders with fixed
+#     lighting and no auto-exposure, and the scene's own `lighting:` block is
+#     not read by the compiler at all (same silent no-op that `world:` had
+#     until 2026-09-02).  Sim frames come out brighter and punchier.
+#   * BACKGROUND.  Beyond the board the real frames show lab benches, monitors,
+#     a structural column and a glass wall.  The sim shows a flat pale room.
+#     This is most of every frame and is the largest remaining domain gap.
+#   * THE CAN AND THE FOAM BLOCK have NO real reference at all — nobody has
+#     photographed them yet.  Their colours here are plausible guesses, not
+#     measurements, and a transfer result for those two classes means nothing
+#     until someone captures them on the real board.
+#
+#   * OBJECT SIZE IS WRONG, and it is inherited, so it is wrong for the motion
+#     work too.  FWDCenterLabMCC says the cube and cylinder are "deliberately at
+#     the same dimensions as the real ones".  Checked against a grid cell — a
+#     known 5 in / 12.7 cm — in the lab captures, the real cube spans about a
+#     THIRD of a cell (~4 cm) while this model is 6 cm, half a cell.  The
+#     cylinder looks similarly oversized: 7 cm modelled diameter against
+#     something nearer 4 cm.
+#
+#     Read off a barrel-distorted photo against a known reference, so the
+#     direction is certain and the magnitude is approximate.  A tape measure on
+#     the two objects settles it.  Not corrected here because object width sets
+#     gripper aperture and approach clearance as well as pixel scale, so
+#     changing it moves the motion routines' verified geometry, and that should
+#     happen once against a real measurement rather than twice against a guess.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The trays are a planning fiction — flat coloured zones added so TaskType.sort
+# has something to resolve against.  Nothing on the real board corresponds to
+# them, so a detector trained with two large saturated rectangles always in
+# frame would be learning the simulator.
+drop_objects: [left_tray, right_tray]
+
+objects:
+  # Neutral grey at 0.50 of the board's 0.93, matching the measured ratio.
+  # Roughness raised from the MCC values: the real objects are matte and show
+  # no specular highlight, while a glossy sim face reads as a bright blob the
+  # real feed never produces.
+  # semantic_class is renamed off the MCC values too.  "block.red" and
+  # "cylinder.blue" become the class strings in classes.txt and every label
+  # file, and a class literally named for a colour the object no longer has is
+  # a trap for whoever reads the dataset next.  These names also line up with
+  # the folder names in the existing real set (cube/ cylinder/ empty/).
+  - id: red_cube
+    semantic_class: cube
+    material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
+
+  - id: blue_cylinder
+    semantic_class: cylinder
+    material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
+
+  # UNMEASURED — no real counterpart photographed.  Bare aluminium, kept
+  # brighter than the board so it is at least separable from it.
+  - id: soda_can
+    semantic_class: can
+    material: {rgba: [0.72, 0.73, 0.75, 1.0], roughness: 0.35}
+
+  # UNMEASURED — see above.  Off-white matte foam.
+  - id: foam_block
+    semantic_class: foam
+    material: {rgba: [0.88, 0.86, 0.80, 1.0], roughness: 0.95}

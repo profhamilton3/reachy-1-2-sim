@@ -193,7 +193,14 @@ def _compile_object(obj: Mapping[str, Any]) -> Tuple[str, str]:
     if articulated:
         joint = _compile_articulation(articulation, obj_id)
     elif dynamic:
-        joint = "\n      <freejoint/>"
+        # NAMED, so joint_name(obj_id) is true of the compiled model and a
+        # caller can address the object's pose by id.  It was emitted unnamed
+        # until 2026-09-02, which made mj_name2id(f"{id}__j") return -1 and any
+        # lookup that trusted joint_name() fail SILENTLY: the dataset
+        # generator's placement randomiser skipped every object and rendered
+        # the scene's default layout for every frame.  A joint name costs
+        # nothing; a lookup that can only fail by doing nothing is expensive.
+        joint = f'\n      <freejoint name="{_xml_attr(joint_name(obj_id))}"/>'
     else:
         joint = ""
 
