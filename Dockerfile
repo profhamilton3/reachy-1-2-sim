@@ -87,6 +87,13 @@ COPY src/ /opt/src/
 COPY scenes/ /opt/scenes/
 COPY ros/ /opt/ros_nodes/
 COPY scene_loader.py /opt/scene_loader.py
+# The shared scene-inheritance resolver.  scene_loader.py imports it to follow
+# `extends:`, and ros/scene_marker_publisher.py loads scenes through that — so
+# without this file an inherited scene draws its own objects in RViz with no
+# board under them.  Copied beside scene_loader rather than reimplemented: two
+# copies of the merge rules that could drift would mean one scene file
+# compiling to two different worlds depending which side loaded it.
+COPY native_mujoco/scene_io.py /opt/scene_io.py
 COPY camera_fixture.py /opt/camera_fixture.py
 COPY web/ /opt/web/
 

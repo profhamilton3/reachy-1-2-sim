@@ -451,16 +451,19 @@ class TestServerPath:
         assert not res[0]["accepted"]
         assert "colour" in res[0]["error"] and "rgba" in res[0]["error"]
 
-    def test_an_unresolved_child_scene_says_why_rather_than_naming_a_key(self):
-        """Validating a child as-is fails on whichever required key the parent
-        happened to supply — "'world' is a required property" — which says
-        nothing about the real cause."""
-        from scene_loader import SceneValidationError
+    def test_a_child_scene_resolves_itself_when_validated(self):
+        """Every caller gets inheritance, not just the ones that know to ask.
+
+        ros/scene_marker_publisher.py draws RViz markers through scene_loader
+        and cannot reach the resolver on its own; without this, an inherited
+        scene renders its own objects with no board under them.
+        """
         from scene_loader import load_scene as validate
-        with pytest.raises(SceneValidationError, match="extends"):
-            validate(_POOL_SCENE)
-        # resolved first, it validates — including the parent's objects
-        assert validate(_POOL_SCENE, document=load_scene(_POOL_SCENE)).objects
+        direct = validate(_POOL_SCENE)
+        assert len(direct.objects) == 33            # the parent's, not just 10
+        assert any(o.id == "table_top" for o in direct.objects)
+        # and passing an already-resolved document agrees with it
+        assert len(validate(_POOL_SCENE, document=load_scene(_POOL_SCENE)).objects) == 33
 
     def test_the_pending_queue_is_capped(self, sim_state):
         """Network-facing: a client submitting faster than the sim drains would

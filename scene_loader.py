@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Sequence, Tuple, Union
 
+import sys
+
 import yaml
 
 try:
@@ -178,6 +180,32 @@ def _parse_object(obj_dict: dict, scene_root: Path) -> SceneObject:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _resolve_inheritance(yaml_path: Path) -> dict:
+    """Follow `extends:` via the shared resolver in scene_io.
+
+    ONE implementation, two locations.  scene_io.py lives under native_mujoco/
+    on the host and is copied beside this file into the container image, because
+    the container gets scene_loader.py but not the native_mujoco tree.  Merge
+    semantics that drifted between a host copy and a container copy would be a
+    genuinely horrible bug to chase: the same scene file would compile to two
+    different worlds depending on which side loaded it.
+    """
+    here = Path(__file__).resolve().parent
+    for candidate in (here / "native_mujoco", here):
+        if (candidate / "scene_io.py").is_file() and str(candidate) not in sys.path:
+            sys.path.append(str(candidate))
+    try:
+        from scene_io import SceneLoadError, load_scene as _resolve
+    except ImportError as exc:                                 # pragma: no cover
+        raise SceneValidationError(
+            f"'{yaml_path.name}' uses `extends:` but the resolver (scene_io.py) "
+            f"is not importable from {here}") from exc
+    try:
+        return _resolve(yaml_path)
+    except SceneLoadError as exc:
+        raise SceneValidationError(str(exc)) from exc
+
+
 def load_scene(
     path: Union[str, Path],
     scene_root: Optional[Path] = None,
@@ -222,15 +250,16 @@ def load_scene(
         raise SceneValidationError(f"Scene file must be a YAML mapping, got {type(doc).__name__}")
 
     # A child scene is not a complete document: it inherits `world`, the cameras
-    # and most of its objects.  Validating it as-is fails on whichever required
-    # key the parent happened to supply — "'world' is a required property" — which
-    # says nothing about the real cause.  Say the real cause.
+    # and most of its objects, so validating it as-is fails on whichever required
+    # key the parent happened to supply.  Resolve the chain here rather than
+    # making every caller know to.
+    #
+    # This is not optional politeness.  ros/scene_marker_publisher.py loads
+    # scenes through this function to draw RViz markers, and it has no way to
+    # reach the resolver on its own — so without this, launching an inherited
+    # scene renders the child's objects floating with no board under them.
     if document is None and "extends" in doc:
-        raise SceneValidationError(
-            f"'{yaml_path.name}' extends '{doc['extends']}' and is not a complete "
-            f"scene on its own.  Resolve the inheritance first "
-            f"(native_mujoco/scene_io.load_scene) and pass the result as "
-            f"document=, which is what validates the parent's objects too.")
+        doc = _resolve_inheritance(yaml_path)
 
     # ── Pre-flight path safety (runs before jsonschema for clear messages) ───
     for obj in doc.get("objects", []) if isinstance(doc, dict) else []:
