@@ -180,6 +180,7 @@ class SimState:
         with self._lock:
             if len(self._pending_places) >= _MAX_PENDING_PLACES:
                 self._place_results.append({
+                    "_conn_id": msg.get("_conn_id"),
                     "request_id": str(msg.get("request_id", "")),
                     "accepted": False,
                     "error": f"placement queue full ({_MAX_PENDING_PLACES} "
@@ -252,9 +253,10 @@ class SimState:
         from placement import PlacementError
         for msg in pending:
             rid = str(msg.get("request_id", ""))
+            conn = {"_conn_id": msg.get("_conn_id")}
             if self.placer is None:
                 self._place_results.append({
-                    "request_id": rid, "accepted": False,
+                    **conn, "request_id": rid, "accepted": False,
                     "error": "placement unavailable: server was started without "
                              "a scene, so there are no grid cells and no objects"})
                 continue
@@ -280,10 +282,10 @@ class SimState:
                     )
             except (PlacementError, ValueError, TypeError) as exc:
                 self._place_results.append({
-                    "request_id": rid, "accepted": False, "error": str(exc)})
+                    **conn, "request_id": rid, "accepted": False, "error": str(exc)})
             else:
                 self._place_results.append({
-                    "request_id": rid, "accepted": True,
+                    **conn, "request_id": rid, "accepted": True,
                     "placement": placed.as_dict()})
 
     def drain_place_results(self) -> list[Dict[str, Any]]:
@@ -481,7 +483,14 @@ class ReachyMujocoServer:
         self._state_q: asyncio.Queue = None   # type: ignore[assignment]
         self._frame_q: asyncio.Queue = None   # type: ignore[assignment]
         self._reset_ack_q: asyncio.Queue = None  # type: ignore[assignment]
-        self._place_ack_q: asyncio.Queue = None  # type: ignore[assignment]
+        # One queue PER CONNECTION, keyed by connection id.  A single shared
+        # queue is wrong here: the server accepts concurrent clients, each with
+        # its own send loop, so whichever loop called get_nowait() first took
+        # the ack — a notebook's placement ack would be delivered to the Docker
+        # bridge, which discards it, and the notebook would wait forever for a
+        # placement that had in fact already happened.  Observed exactly that.
+        self._place_ack_qs: dict = {}
+        self._next_conn_id = 0
 
         self._renderer: Optional[StereoRenderer] = None
 
@@ -611,10 +620,15 @@ class ReachyMujocoServer:
             # the next camera frame up with a placement whose pose it knows.
             if self._loop:
                 for res in self._sim.drain_place_results():
+                    conn_id = res.pop("_conn_id", None)
+                    queue = self._place_ack_qs.get(conn_id)
+                    if queue is None:
+                        # The client disconnected between asking and landing.
+                        # The placement still happened — it is a world change,
+                        # not a reply — so this only drops the receipt.
+                        continue
                     pack = PlaceAck(sim_step=self._sim.step, **res)
-                    asyncio.run_coroutine_threadsafe(
-                        self._place_ack_q.put(pack), self._loop
-                    )
+                    asyncio.run_coroutine_threadsafe(queue.put(pack), self._loop)
 
         if self._recorder is not None:
             wall = time.monotonic() - sim_start
@@ -673,6 +687,9 @@ class ReachyMujocoServer:
         )
         await ws.send(ack.encode())
         self._connected_ws = ws
+        conn_id = self._next_conn_id
+        self._next_conn_id += 1
+        self._place_ack_qs[conn_id] = asyncio.Queue(maxsize=32)
         log.info("Handshake complete with %s", addr)
 
         last_hb_recv = time.monotonic()
@@ -697,11 +714,11 @@ class ReachyMujocoServer:
                     await ws.send(rack.encode())
                 except asyncio.QueueEmpty:
                     pass
-                # Drain placement acks
+                # Drain THIS connection's placement acks
                 try:
-                    pack = self._place_ack_q.get_nowait()
+                    pack = self._place_ack_qs[conn_id].get_nowait()
                     await ws.send(pack.encode())
-                except asyncio.QueueEmpty:
+                except (asyncio.QueueEmpty, KeyError):
                     pass
                 await asyncio.sleep(0.002)
 
@@ -775,6 +792,7 @@ class ReachyMujocoServer:
                     # Queued for the sim thread; the ack comes back from there
                     # once it has actually run, so an accepted ack means the
                     # object is on the board, not that the request parsed.
+                    decoded["_conn_id"] = conn_id
                     self._sim.submit_place(decoded)
 
                 elif mtype == "disconnect":
@@ -804,6 +822,7 @@ class ReachyMujocoServer:
             log.exception("Error in handler for %s: %s", addr, exc)
         finally:
             self._connected_ws = None
+            self._place_ack_qs.pop(conn_id, None)
             log.info("Handler exited for %s", addr)
 
     def _build_recorder_manifest(self) -> dict:
@@ -868,7 +887,6 @@ class ReachyMujocoServer:
         self._state_q = asyncio.Queue(maxsize=10)
         self._frame_q = asyncio.Queue(maxsize=4)
         self._reset_ack_q = asyncio.Queue(maxsize=4)
-        self._place_ack_q = asyncio.Queue(maxsize=32)
         self._loop = asyncio.get_running_loop()
 
         sim_thread = threading.Thread(

@@ -465,6 +465,32 @@ class TestServerPath:
         # and passing an already-resolved document agrees with it
         assert len(validate(_POOL_SCENE, document=load_scene(_POOL_SCENE)).objects) == 33
 
+    def test_each_result_names_the_connection_that_asked(self, sim_state):
+        """The ack has to go back to the client that requested it.
+
+        The server takes concurrent connections, each with its own send loop.
+        A single shared ack queue meant whichever loop polled first took the
+        ack — a notebook's placement ack delivered to the Docker bridge, which
+        discards it, leaving the notebook waiting forever for a placement that
+        had already happened.  Observed live before this was routed.
+        """
+        sim_state.submit_place({"object_id": "pool_box_1", "cell": "r2c2",
+                                "_conn_id": 7, "request_id": "a"})
+        sim_state.submit_place({"object_id": "pool_box_2", "cell": "r1c1",
+                                "_conn_id": 9, "request_id": "b"})
+        sim_state.apply_pending()
+        got = {r["request_id"]: r["_conn_id"]
+               for r in sim_state.drain_place_results()}
+        assert got == {"a": 7, "b": 9}
+
+    def test_a_refusal_also_names_the_connection(self, sim_state):
+        """Otherwise a rejected placement is the one that hangs the client."""
+        sim_state.submit_place({"object_id": "pool_box_1", "cell": "r3c1",
+                                "_conn_id": 4, "request_id": "z"})
+        sim_state.apply_pending()
+        res = sim_state.drain_place_results()[0]
+        assert res["_conn_id"] == 4 and not res["accepted"]
+
     def test_the_pending_queue_is_capped(self, sim_state):
         """Network-facing: a client submitting faster than the sim drains would
         otherwise grow the list without bound."""
@@ -493,6 +519,7 @@ class TestServerPath:
         sim_state.submit_place({"object_id": "pool_box_1", "cell": "r2c2"})
         sim_state.apply_pending()
         res = sim_state.drain_place_results()[0]
+        res.pop("_conn_id")
         ack = PlaceAck(sim_step=sim_state.step, **res)
         assert ack.accepted and ack.sim_step == sim_state.step
         assert ack.encode()
