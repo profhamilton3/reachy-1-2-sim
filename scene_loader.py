@@ -181,6 +181,7 @@ def _parse_object(obj_dict: dict, scene_root: Path) -> SceneObject:
 def load_scene(
     path: Union[str, Path],
     scene_root: Optional[Path] = None,
+    document: Optional[dict] = None,
 ) -> SceneDocument:
     """Load and validate a scene YAML file.
 
@@ -188,6 +189,11 @@ def load_scene(
         path:       Absolute or relative path to the scene YAML.
         scene_root: Directory used as the approved root for mesh asset resolution.
                     Defaults to the directory containing the YAML file.
+        document:   Already-loaded scene mapping to validate instead of re-reading
+                    `path`.  `path` is still used to resolve mesh assets.  This is
+                    how a caller validates a scene AFTER `extends:` has been
+                    resolved (native_mujoco/scene_io.py), so the parent's objects
+                    are checked too rather than only the child's overrides.
 
     Returns:
         Validated SceneDocument.
@@ -203,14 +209,28 @@ def load_scene(
     effective_root = (scene_root or yaml_path.parent).resolve()
 
     # ── Load YAML safely ─────────────────────────────────────────────────────
-    try:
-        with open(yaml_path) as f:
-            doc = yaml.safe_load(f)
-    except yaml.YAMLError as exc:
-        raise SceneValidationError(f"YAML parse error in '{yaml_path}': {exc}") from exc
+    if document is not None:
+        doc = document
+    else:
+        try:
+            with open(yaml_path) as f:
+                doc = yaml.safe_load(f)
+        except yaml.YAMLError as exc:
+            raise SceneValidationError(f"YAML parse error in '{yaml_path}': {exc}") from exc
 
     if not isinstance(doc, dict):
         raise SceneValidationError(f"Scene file must be a YAML mapping, got {type(doc).__name__}")
+
+    # A child scene is not a complete document: it inherits `world`, the cameras
+    # and most of its objects.  Validating it as-is fails on whichever required
+    # key the parent happened to supply — "'world' is a required property" — which
+    # says nothing about the real cause.  Say the real cause.
+    if document is None and "extends" in doc:
+        raise SceneValidationError(
+            f"'{yaml_path.name}' extends '{doc['extends']}' and is not a complete "
+            f"scene on its own.  Resolve the inheritance first "
+            f"(native_mujoco/scene_io.load_scene) and pass the result as "
+            f"document=, which is what validates the parent's objects too.")
 
     # ── Pre-flight path safety (runs before jsonschema for clear messages) ───
     for obj in doc.get("objects", []) if isinstance(doc, dict) else []:

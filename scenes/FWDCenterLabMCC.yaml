@@ -482,7 +482,10 @@ objects:
     material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
     physics: {dynamic: false, collision: false}
     semantic_class: grid.cell
-    tags: [grid, grid-cell, placement-target]
+    tags: [grid, grid-cell, placement-target, no-right-arm]
+    # 0.709 m from the right shoulder, past the arm's measured reach.
+    # Read by native_mujoco/placement.py, which refuses to place here
+    # unless the caller explicitly asks for an unreachable target.
 
   - id: cell_r3c2
     geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}
@@ -490,7 +493,10 @@ objects:
     material: {rgba: [0.93, 0.93, 0.94, 1.0], roughness: 0.25}
     physics: {dynamic: false, collision: false}
     semantic_class: grid.cell
-    tags: [grid, grid-cell, placement-target]
+    tags: [grid, grid-cell, placement-target, no-right-arm]
+    # 0.649 m from the right shoulder, past the arm's measured reach.
+    # Read by native_mujoco/placement.py, which refuses to place here
+    # unless the caller explicitly asks for an unreachable target.
 
   - id: cell_r3c3
     geometry: {kind: box, size: [0.1270, 0.1270, 0.0010]}

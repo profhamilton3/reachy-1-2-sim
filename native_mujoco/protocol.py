@@ -119,6 +119,51 @@ class SceneLoad:
 
 
 @dataclass
+class PlaceObject:
+    """Client -> server: put a free-joint object on a named grid cell.
+
+    `cell=None` stows the object back at the pose it was compiled at.  Optional
+    `reshape` sets size/colour/mass on the live model first, so one slot can
+    stand in for different objects across a run without a recompile.
+
+    Applied on the sim thread, never here — see server._sim_thread.  Writing
+    qpos or geom_size from the websocket task would race a step in progress,
+    the same reason zoom_command defers to the render thread.
+    """
+    type: str = field(default="place_object", init=False)
+    object_id: str = ""
+    cell: Optional[str] = None
+    yaw_deg: float = 0.0
+    allow_unreachable: bool = False
+    allow_occupied: bool = False
+    reshape: Optional[Dict[str, Any]] = None
+    request_id: str = ""
+
+    def encode(self) -> str:
+        return encode(asdict(self))
+
+
+@dataclass
+class PlaceAck:
+    """Server -> client: what the placement actually did, and when.
+
+    `sim_step` is the point of it: a client that knows the step an object
+    landed on can align the next camera frame with a placement whose position
+    it already knows, which is what turns this into a perception check rather
+    than a demo.
+    """
+    type: str = field(default="place_ack", init=False)
+    request_id: str = ""
+    accepted: bool = False
+    placement: Optional[Dict[str, Any]] = None
+    sim_step: int = 0
+    error: str = ""
+
+    def encode(self) -> str:
+        return encode(asdict(self))
+
+
+@dataclass
 class Reset:
     type: str = field(default="reset", init=False)
     seed: Optional[int] = None
