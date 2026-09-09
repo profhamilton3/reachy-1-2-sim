@@ -480,8 +480,15 @@ class ReachyMujocoServer:
         self._recorder: Optional[Recorder] = None   # set in _sim_thread
 
         # queues for thread→asyncio communication
-        self._state_q: asyncio.Queue = None   # type: ignore[assignment]
-        self._frame_q: asyncio.Queue = None   # type: ignore[assignment]
+        # State and camera frames are BROADCASTS: every connected client is
+        # entitled to all of them.  They were single shared queues drained by
+        # whichever connection's send loop polled first, which silently SPLIT
+        # the stream — measured, one client got 13.2 camera_frame/s and two got
+        # 7.8 each.  So opening a second client (a browser panel, a notebook)
+        # halved the Docker bridge's frame rate and slowed RViz, with nothing
+        # anywhere saying why.  One queue per connection, fanned out below.
+        self._state_qs: dict = {}
+        self._frame_qs: dict = {}
         self._reset_ack_q: asyncio.Queue = None  # type: ignore[assignment]
         # One queue PER CONNECTION, keyed by connection id.  A single shared
         # queue is wrong here: the server accepts concurrent clients, each with
@@ -547,7 +554,7 @@ class ReachyMujocoServer:
             if self._sim.step % state_every == 0 and self._loop:
                 state = self._build_state()
                 asyncio.run_coroutine_threadsafe(
-                    self._state_q.put(state), self._loop
+                    self._broadcast(self._state_qs, state), self._loop
                 )
                 if self._recorder is not None:
                     import json as _json
@@ -602,7 +609,7 @@ class ReachyMujocoServer:
                         seg_b64=fr.seg_b64,
                     )
                     asyncio.run_coroutine_threadsafe(
-                        self._frame_q.put(cam_msg), self._loop
+                        self._broadcast(self._frame_qs, cam_msg), self._loop
                     )
 
             # Reset ack
@@ -637,6 +644,30 @@ class ReachyMujocoServer:
 
         renderer.close()
         log.info("Sim thread stopped")
+
+    async def _broadcast(self, queues: dict, msg) -> None:
+        """Put `msg` on EVERY connected client's queue, newest wins.
+
+        Runs on the event loop (scheduled from the sim thread), because
+        asyncio.Queue is not thread-safe.
+
+        On overflow the OLDEST entry is dropped rather than the newest, and
+        rather than awaiting space: these are live streams, so a late frame or
+        a stale joint sample is worth less than the current one, and a slow
+        client must not be able to stall the producer for everyone else.  The
+        previous shared queue used a blocking put(), so one wedged consumer
+        could back the whole thing up.
+        """
+        for q in list(queues.values()):
+            if q.full():
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                q.put_nowait(msg)
+            except asyncio.QueueFull:
+                pass
 
     def _build_state(self) -> State:
         self._seq += 1
@@ -690,6 +721,8 @@ class ReachyMujocoServer:
         conn_id = self._next_conn_id
         self._next_conn_id += 1
         self._place_ack_qs[conn_id] = asyncio.Queue(maxsize=32)
+        self._state_qs[conn_id] = asyncio.Queue(maxsize=10)
+        self._frame_qs[conn_id] = asyncio.Queue(maxsize=4)
         log.info("Handshake complete with %s", addr)
 
         last_hb_recv = time.monotonic()
@@ -698,13 +731,13 @@ class ReachyMujocoServer:
             while True:
                 # Drain state
                 try:
-                    state = self._state_q.get_nowait()
+                    state = self._state_qs[conn_id].get_nowait()
                     await ws.send(state.encode())
                 except asyncio.QueueEmpty:
                     pass
                 # Drain one camera frame
                 try:
-                    frame = self._frame_q.get_nowait()
+                    frame = self._frame_qs[conn_id].get_nowait()
                     await ws.send(frame.encode())
                 except asyncio.QueueEmpty:
                     pass
@@ -823,6 +856,8 @@ class ReachyMujocoServer:
         finally:
             self._connected_ws = None
             self._place_ack_qs.pop(conn_id, None)
+            self._state_qs.pop(conn_id, None)
+            self._frame_qs.pop(conn_id, None)
             log.info("Handler exited for %s", addr)
 
     def _build_recorder_manifest(self) -> dict:
@@ -884,8 +919,6 @@ class ReachyMujocoServer:
     # ── Entry point ──────────────────────────────────────────────────────────
 
     async def run(self) -> None:
-        self._state_q = asyncio.Queue(maxsize=10)
-        self._frame_q = asyncio.Queue(maxsize=4)
         self._reset_ack_q = asyncio.Queue(maxsize=4)
         self._loop = asyncio.get_running_loop()
 

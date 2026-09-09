@@ -94,6 +94,12 @@ COPY scene_loader.py /opt/scene_loader.py
 # copies of the merge rules that could drift would mean one scene file
 # compiling to two different worlds depending which side loaded it.
 COPY native_mujoco/scene_io.py /opt/scene_io.py
+# The camera page's scene-control panel serves /scene from this, so the panel
+# and the physics read the SAME cell geometry and the same measured reachability
+# tags.  Hardcoding a grid in the page would be a second source of truth that
+# drifts the first time the board moves.  Its mujoco import is optional; only
+# the pure geometry half is used here.
+COPY native_mujoco/placement.py /opt/placement.py
 COPY camera_fixture.py /opt/camera_fixture.py
 COPY web/ /opt/web/
 

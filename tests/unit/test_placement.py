@@ -523,3 +523,55 @@ class TestServerPath:
         ack = PlaceAck(sim_step=sim_state.step, **res)
         assert ack.accepted and ack.sim_step == sim_state.step
         assert ack.encode()
+
+
+class TestBroadcastFanOut:
+    """State and camera frames are broadcasts: every client is entitled to all
+    of them.  They were single shared queues drained by whichever send loop
+    polled first, which SPLIT the stream — measured on a live server, one client
+    got 13.2 camera_frame/s and two got 7.8 each.  So opening a browser panel or
+    a second notebook silently halved the Docker bridge's frame rate.
+    """
+
+    @staticmethod
+    def _run(coro):
+        import asyncio
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    def _server(self):
+        from server import ReachyMujocoServer
+        return ReachyMujocoServer.__new__(ReachyMujocoServer)
+
+    def test_every_client_gets_every_message(self):
+        import asyncio
+        srv = self._server()
+        qs = {1: asyncio.Queue(maxsize=4), 2: asyncio.Queue(maxsize=4)}
+        self._run(srv._broadcast(qs, "frame-a"))
+        self._run(srv._broadcast(qs, "frame-b"))
+        assert [qs[1].get_nowait(), qs[1].get_nowait()] == ["frame-a", "frame-b"]
+        assert [qs[2].get_nowait(), qs[2].get_nowait()] == ["frame-a", "frame-b"]
+
+    def test_a_full_queue_drops_the_oldest_not_the_newest(self):
+        """A late frame is worth less than the current one."""
+        import asyncio
+        srv = self._server()
+        qs = {1: asyncio.Queue(maxsize=2)}
+        for msg in ("one", "two", "three"):
+            self._run(srv._broadcast(qs, msg))
+        assert [qs[1].get_nowait(), qs[1].get_nowait()] == ["two", "three"]
+
+    def test_a_slow_client_cannot_stall_the_others(self):
+        """The old shared queue used a blocking put(), so one wedged consumer
+        backed the producer up for everyone."""
+        import asyncio
+        srv = self._server()
+        slow, fast = asyncio.Queue(maxsize=1), asyncio.Queue(maxsize=8)
+        qs = {1: slow, 2: fast}
+        for i in range(5):
+            self._run(srv._broadcast(qs, i))       # must not hang
+        assert fast.qsize() == 5
+        assert slow.qsize() == 1 and slow.get_nowait() == 4
+
+    def test_no_clients_is_not_an_error(self):
+        srv = self._server()
+        self._run(srv._broadcast({}, "frame"))

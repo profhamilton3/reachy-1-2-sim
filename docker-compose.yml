@@ -27,6 +27,13 @@ services:
       # cell_center) hit AttributeError against an image that predated them.
       - ./src:/opt/src
       - ./scripts:/opt/scripts
+      # And the camera page, for the same reason.  It was NOT mounted while the
+      # other four were, so `docker compose restart` silently kept serving the
+      # baked-in page: a fix to the scene-control panel's heartbeat handling
+      # never reached the browser, the sim dropped the panel's socket after 6 s,
+      # and every click after that went nowhere with the status bar still
+      # reading "connected".
+      - ./web:/opt/web
     environment:
       - DISPLAY=:1
       # Backend selector (overridable from the shell):
