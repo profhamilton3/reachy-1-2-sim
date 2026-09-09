@@ -103,3 +103,39 @@ class TestCollisionAwareness:
     def test_validate_clean_path(self, scene):
         path = [(0.42, -0.18, 0.86), (0.42, -0.10, 0.87), (0.42, -0.02, 0.77)]
         assert scene.validate_path(path) == []
+
+
+class TestSceneInheritance:
+    """SceneModel is the copy the notebooks and demos load scenes through, and
+    it used raw yaml.safe_load — so a child scene arrived as ONLY its own
+    overrides: no table, no grid cells, no rig rails, and every cell_center()
+    call with nothing to resolve.  Third instance of the same root cause; the
+    server and scene_loader were fixed in #39.
+    """
+
+    _SCENES = os.path.join(os.path.dirname(__file__), "../../scenes")
+
+    def _load(self, name):
+        from reachy_ai.scene.awareness import SceneModel
+        return SceneModel.from_yaml(os.path.join(self._SCENES, name))
+
+    def test_a_child_scene_sees_the_parents_board(self):
+        child = self._load("FWDCenterLabSiva.yaml")
+        assert child.table is not None and child.table.id == "table_top"
+        assert len(child.grid_cells()) == 9
+        assert len([o for o in child.static_obstacles()
+                    if "rig-frame" in o.tags]) == 5
+
+    def test_the_child_agrees_with_the_parent_on_geometry(self):
+        """Inheritance must not perturb the measured numbers — the child only
+        repaints objects."""
+        parent = self._load("FWDCenterLabMCC.yaml")
+        child = self._load("FWDCenterLabSiva.yaml")
+        assert child.table_surface_z == parent.table_surface_z
+        assert child.grid_cells() == parent.grid_cells()
+        for cid in parent.grid_cells():
+            assert child.cell_center(cid) == parent.cell_center(cid)
+
+    def test_a_scene_with_no_extends_is_unaffected(self):
+        parent = self._load("FWDCenterLabMCC.yaml")
+        assert len(parent.grid_cells()) == 9
