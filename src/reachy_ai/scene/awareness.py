@@ -22,6 +22,8 @@ import math
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import pathlib
+import sys
 import yaml
 
 # Right-arm FK/IK frame origin expressed in world/pedestal coordinates.
@@ -282,6 +284,36 @@ def segment_object_distance(
     return object_sdf(obj, at(t)) - radius, at(t)
 
 
+def _resolve_inheritance(path: str) -> dict:
+    """Follow a scene's `extends:` chain via the shared resolver.
+
+    Without this, a child scene loads as ONLY its own overrides: no table, no
+    grid cells, no rig rails, `scene.table is None`, and every cell_center()
+    call with nothing to resolve.  Measured on FWDCenterLabSivaPool before the
+    fix — 0 cells against the parent's 9.
+
+    Third copy of this lookup, and that is the point: scene_io.py is the ONE
+    implementation.  It sits under native_mujoco/ on the host and is copied to
+    /opt beside scene_loader.py in the container image, so both layouts are
+    probed rather than the merge rules being reimplemented here.  Two copies
+    that drifted would mean one scene file describing two different worlds
+    depending on which module loaded it.
+    """
+    root = pathlib.Path(__file__).resolve().parents[3]
+    for candidate in (root / "native_mujoco", root):
+        if (candidate / "scene_io.py").is_file() and str(candidate) not in sys.path:
+            sys.path.append(str(candidate))
+    try:
+        from scene_io import load_scene as _resolve
+    except ImportError as exc:                                  # pragma: no cover
+        raise RuntimeError(
+            f"{pathlib.Path(path).name} uses `extends:` but the resolver "
+            f"(scene_io.py) is not importable from {root}"
+        ) from exc
+    return _resolve(path)
+
+
+
 class SceneModel:
     """Loaded knowledge of one tabletop scene."""
 
@@ -306,6 +338,8 @@ class SceneModel:
     def from_yaml(cls, path: str) -> "SceneModel":
         with open(path) as f:
             doc = yaml.safe_load(f)
+        if "extends" in doc:
+            doc = _resolve_inheritance(path)
         return cls.from_doc(doc)
 
     @classmethod
