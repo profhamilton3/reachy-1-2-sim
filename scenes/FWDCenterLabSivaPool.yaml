@@ -2,21 +2,21 @@ schema_version: "1.0"
 extends: FWDCenterLabSiva.yaml
 name: FWDCenterLabSivaPool
 
-# ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║  PARKED — NOT REQUESTED WORK.  See issue #44 before building on this.      ║
-# ║                                                                           ║
-# ║  Runtime placement (place/stow/reshape) is the requested functionality     ║
-# ║  and lives in native_mujoco/placement.py.  It is scene-agnostic and works  ║
-# ║  against FWDCenterLabSiva.yaml, which is the scene in active use.          ║
-# ║                                                                           ║
-# ║  THIS FILE is an implementation choice made while building #39 — six spare ║
-# ║  slots plus an empty board.  Useful for a perception check that needs a    ║
-# ║  known-empty starting state, and the only place reshape() is exercised     ║
-# ║  against spare slots.  Neither is a live requirement.                      ║
-# ║                                                                           ║
-# ║  The R12-607 stamp in the placement code is NOT a real roadmap slot;       ║
-# ║  docs/ROADMAP.md stops at R12-604.  #44 covers reconciling that.           ║
-# ╚═══════════════════════════════════════════════════════════════════════════╝
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT THIS SCENE IS FOR
+#
+# A POOL of objects Reachy can be given to interact with, placed onto the board
+# from a notebook while the simulation runs.  notebooks/place_objects.ipynb
+# drives it.  Pick-and-place work uses FWDCenterLabSiva.yaml, which keeps its
+# four manipulables on the grid; this scene is the one where the board starts
+# empty and the caller decides what goes on it.
+#
+# Ten placeable objects: the four inherited manipulables plus six spare slots.
+# Spares exist because MuJoCo freezes nbody/njnt/ngeom at compile time — there
+# is no add_body(), so having MORE objects available than a scene declares means
+# declaring them up front and moving them.  reshape() then makes one slot stand
+# in for different objects across a run without a recompile.
+# ─────────────────────────────────────────────────────────────────────────────
 
 description: >-
   FWDCenterLabSiva plus a pool of spare manipulables parked on the floor, for
