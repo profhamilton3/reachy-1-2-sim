@@ -23,6 +23,7 @@ import copy
 import logging
 import os
 import pathlib
+import sys
 import threading
 import time
 from typing import Any, Dict, Mapping, Optional, Sequence
@@ -45,6 +46,7 @@ from protocol import (
     HeartbeatAck,
     JointCommand,
     Pause,
+    PlaceAck,
     Reset,
     ResetAck,
     SceneAck,
@@ -89,6 +91,9 @@ _CAM_MARGIN = (
 )
 
 
+_MAX_PENDING_PLACES = 256
+
+
 class SimState:
     """Mutable simulation state — owned by the sim thread."""
 
@@ -97,6 +102,7 @@ class SimState:
         model: mujoco.MjModel,
         tracked_ids: Optional[Sequence[str]] = None,
         interactive_specs: Optional[Sequence[Mapping[str, Any]]] = None,
+        scene_doc: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self.model = model
         self.data = mujoco.MjData(model)
@@ -108,6 +114,8 @@ class SimState:
         self._pending_cmd: Optional[Dict[str, Any]] = None
         self._pending_reset: Optional[Dict[str, Any]] = None
         self._pending_pause: Optional[bool] = None
+        self._pending_places: list[Dict[str, Any]] = []
+        self._place_results: list[Dict[str, Any]] = []
 
         # R12-501: actuator/compliance model owns ctrl, gains and force limits.
         self._reset_physics()
@@ -123,6 +131,13 @@ class SimState:
         self.interactive = InteractiveController(
             model, self.data, interactive_specs or []
         )
+        # R12-607: runtime placement onto grid cells.  Built LAST, so the home
+        # pose it records for each object is the settled scene pose rather than
+        # whatever qpos held before _reset_physics ran.
+        self.placer = None
+        if scene_doc:
+            from placement import ObjectPlacer
+            self.placer = ObjectPlacer(model, self.data, scene_doc)
 
     def _reset_physics(self) -> None:
         """Reset to the home keyframe, keeping free-joint objects at their
@@ -150,6 +165,28 @@ class SimState:
     def submit_pause(self, paused: bool) -> None:
         with self._lock:
             self._pending_pause = paused
+
+    def submit_place(self, msg: Dict[str, Any]) -> None:
+        # A list, not a slot: placements are discrete events a client may fire
+        # several of in a row (set up a board, then look at it), and dropping
+        # all but the last would silently build the wrong scene.  Joint commands
+        # can coalesce because only the newest target matters; these cannot.
+        #
+        # Capped because this is network-facing: a client that submits faster
+        # than the sim drains would otherwise grow the list without bound.  The
+        # cap is far above any real board (ten objects) so it only ever trips on
+        # a runaway, and it drops the newest rather than silently discarding the
+        # placements already queued ahead of it.
+        with self._lock:
+            if len(self._pending_places) >= _MAX_PENDING_PLACES:
+                self._place_results.append({
+                    "_conn_id": msg.get("_conn_id"),
+                    "request_id": str(msg.get("request_id", "")),
+                    "accepted": False,
+                    "error": f"placement queue full ({_MAX_PENDING_PLACES} "
+                             f"pending); the sim has not drained yet"})
+                return
+            self._pending_places.append(msg)
 
     # --- Called by sim thread each step ---
 
@@ -202,7 +239,59 @@ class SimState:
                     self.controller.set_torque_limit(idx, torque[idx])
             self._cmd_seq = cmd.get("seq", self._cmd_seq)
 
+        self._apply_places()
         return reset_id
+
+    _RESHAPE_KEYS = frozenset({"size", "radius", "length", "rgba", "mass"})
+
+    def _apply_places(self) -> None:
+        """Run queued placements.  Sim thread only — writes qpos and model."""
+        with self._lock:
+            pending, self._pending_places = self._pending_places, []
+        if not pending:
+            return
+        from placement import PlacementError
+        for msg in pending:
+            rid = str(msg.get("request_id", ""))
+            conn = {"_conn_id": msg.get("_conn_id")}
+            if self.placer is None:
+                self._place_results.append({
+                    **conn, "request_id": rid, "accepted": False,
+                    "error": "placement unavailable: server was started without "
+                             "a scene, so there are no grid cells and no objects"})
+                continue
+            try:
+                oid = str(msg.get("object_id", ""))
+                shape = msg.get("reshape")
+                if shape:
+                    unknown = sorted(set(shape) - self._RESHAPE_KEYS)
+                    if unknown:
+                        raise PlacementError(
+                            f"reshape does not accept {unknown}; "
+                            f"valid keys are {sorted(self._RESHAPE_KEYS)}")
+                    self.placer.reshape(oid, **shape)
+                cell = msg.get("cell")
+                if cell is None:
+                    placed = self.placer.stow(oid)
+                else:
+                    placed = self.placer.place(
+                        oid, str(cell),
+                        yaw_deg=float(msg.get("yaw_deg", 0.0)),
+                        allow_unreachable=bool(msg.get("allow_unreachable", False)),
+                        allow_occupied=bool(msg.get("allow_occupied", False)),
+                    )
+            except (PlacementError, ValueError, TypeError) as exc:
+                self._place_results.append({
+                    **conn, "request_id": rid, "accepted": False, "error": str(exc)})
+            else:
+                self._place_results.append({
+                    **conn, "request_id": rid, "accepted": True,
+                    "placement": placed.as_dict()})
+
+    def drain_place_results(self) -> list[Dict[str, Any]]:
+        with self._lock:
+            out, self._place_results = self._place_results, []
+        return out
 
     def control_step(self, dt: float) -> None:
         """Apply the actuator/compliance model for the upcoming mj_step."""
@@ -283,21 +372,37 @@ class ReachyMujocoServer:
 
         tracked_ids = None
         interactive_specs = None
+        scene_doc = None
         if scene_path:
             log.info("Loading scene: %s (into model %s)", scene_path, model_path)
-            import yaml
             from objects import build_scene_model_xml
             from scene_compiler import tracked_object_ids
             from scene_compiler import interactive_specs as _interactive_specs
-            # Validate for safety (raises on unsafe paths / bad schema); the
+            # Resolve `extends:` FIRST, then validate the RESULT.  A child
+            # scene is not a complete document on its own — it inherits `world`,
+            # the cameras and several hundred lines of measured geometry — so
+            # validating the raw file rejects every scene that uses inheritance,
+            # and validating only the child would leave the parent's objects
+            # unchecked.  This is not hypothetical: between #37 and #38 the
+            # format gained `extends:` while the schema and this call site did
+            # not, and the server could not load FWDCenterLabSiva at all.
+            from scene_io import load_scene as _resolve_scene
+            scene_doc = _resolve_scene(scene_path)
+            # Safety validation (raises on unsafe mesh paths / bad schema); the
             # compiler consumes the raw dict since it needs full physics fields.
+            # scene_loader lives at the repo root, and BOTH launch scripts cd
+            # into native_mujoco/ before starting this server — so this import
+            # has always failed there and the safety validation has always been
+            # skipped, announced only as a WARNING nobody was reading.  Put the
+            # root on the path rather than keep a check that never runs.
+            _repo_root = str(pathlib.Path(__file__).resolve().parents[1])
+            if _repo_root not in sys.path:
+                sys.path.append(_repo_root)
             try:
-                from scene_loader import load_scene
-                load_scene(scene_path)
+                from scene_loader import load_scene as _validate_scene
+                _validate_scene(scene_path, document=scene_doc)
             except ImportError:
                 log.warning("scene_loader unavailable; skipping validation")
-            with open(scene_path) as f:
-                scene_doc = yaml.safe_load(f)
             xml = build_scene_model_xml(scene_doc, model_path)
             self._model = mujoco.MjModel.from_xml_string(xml)
             tracked_ids = tracked_object_ids(scene_doc)
@@ -362,6 +467,7 @@ class ReachyMujocoServer:
             self._model,
             tracked_ids=tracked_ids,
             interactive_specs=interactive_specs,
+            scene_doc=scene_doc,
         )
         self._host = host
         self._port = port
@@ -377,6 +483,14 @@ class ReachyMujocoServer:
         self._state_q: asyncio.Queue = None   # type: ignore[assignment]
         self._frame_q: asyncio.Queue = None   # type: ignore[assignment]
         self._reset_ack_q: asyncio.Queue = None  # type: ignore[assignment]
+        # One queue PER CONNECTION, keyed by connection id.  A single shared
+        # queue is wrong here: the server accepts concurrent clients, each with
+        # its own send loop, so whichever loop called get_nowait() first took
+        # the ack — a notebook's placement ack would be delivered to the Docker
+        # bridge, which discards it, and the notebook would wait forever for a
+        # placement that had in fact already happened.  Observed exactly that.
+        self._place_ack_qs: dict = {}
+        self._next_conn_id = 0
 
         self._renderer: Optional[StereoRenderer] = None
 
@@ -502,6 +616,20 @@ class ReachyMujocoServer:
                     self._reset_ack_q.put(ack), self._loop
                 )
 
+            # Placement acks (R12-607).  Carry the sim step so a client can line
+            # the next camera frame up with a placement whose pose it knows.
+            if self._loop:
+                for res in self._sim.drain_place_results():
+                    conn_id = res.pop("_conn_id", None)
+                    queue = self._place_ack_qs.get(conn_id)
+                    if queue is None:
+                        # The client disconnected between asking and landing.
+                        # The placement still happened — it is a world change,
+                        # not a reply — so this only drops the receipt.
+                        continue
+                    pack = PlaceAck(sim_step=self._sim.step, **res)
+                    asyncio.run_coroutine_threadsafe(queue.put(pack), self._loop)
+
         if self._recorder is not None:
             wall = time.monotonic() - sim_start
             self._recorder.finalize(total_steps=self._sim.step, duration_s=wall)
@@ -559,6 +687,9 @@ class ReachyMujocoServer:
         )
         await ws.send(ack.encode())
         self._connected_ws = ws
+        conn_id = self._next_conn_id
+        self._next_conn_id += 1
+        self._place_ack_qs[conn_id] = asyncio.Queue(maxsize=32)
         log.info("Handshake complete with %s", addr)
 
         last_hb_recv = time.monotonic()
@@ -582,6 +713,12 @@ class ReachyMujocoServer:
                     rack = self._reset_ack_q.get_nowait()
                     await ws.send(rack.encode())
                 except asyncio.QueueEmpty:
+                    pass
+                # Drain THIS connection's placement acks
+                try:
+                    pack = self._place_ack_qs[conn_id].get_nowait()
+                    await ws.send(pack.encode())
+                except (asyncio.QueueEmpty, KeyError):
                     pass
                 await asyncio.sleep(0.002)
 
@@ -651,6 +788,13 @@ class ReachyMujocoServer:
                         error=error,
                     ).encode())
 
+                elif mtype == "place_object":
+                    # Queued for the sim thread; the ack comes back from there
+                    # once it has actually run, so an accepted ack means the
+                    # object is on the board, not that the request parsed.
+                    decoded["_conn_id"] = conn_id
+                    self._sim.submit_place(decoded)
+
                 elif mtype == "disconnect":
                     log.info("Client %s requested disconnect", addr)
                     return
@@ -678,6 +822,7 @@ class ReachyMujocoServer:
             log.exception("Error in handler for %s: %s", addr, exc)
         finally:
             self._connected_ws = None
+            self._place_ack_qs.pop(conn_id, None)
             log.info("Handler exited for %s", addr)
 
     def _build_recorder_manifest(self) -> dict:

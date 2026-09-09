@@ -14,6 +14,22 @@
     "schema_version": {
       "const": "1.0"
     },
+    "extends": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "Parent scene file, relative to this one.  Resolved by native_mujoco/scene_io.py before compiling: mappings merge, `objects` merges by id, any other list replaces.  Present so a variant that differs only in appearance does not have to fork several hundred lines of measured geometry."
+    },
+    "drop_objects": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Ids removed from the inherited scene.  Naming an id the parent does not contain is an error, not a no-op."
+    },
     "name": {
       "type": "string",
       "minLength": 1,
@@ -308,8 +324,15 @@
         "collision": {
           "description": "true = standard object channel; false = no collision; \"fixture\" = collides with robot links but not with sibling controls (contype=8 conaffinity=2).",
           "oneOf": [
-            {"type": "boolean"},
-            {"type": "string", "enum": ["fixture"]}
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "fixture"
+              ]
+            }
           ],
           "default": true
         },
@@ -334,7 +357,7 @@
       }
     },
     "articulation": {
-      "description": "Single-DOF joint that makes this body movable (lever/switch hinge, spring-button slide). When present the body is neither welded nor free — it swings/slides on this joint.",
+      "description": "Single-DOF joint that makes this body movable (lever/switch hinge, spring-button slide). When present the body is neither welded nor free \u2014 it swings/slides on this joint.",
       "type": "object",
       "additionalProperties": false,
       "required": [

@@ -1,0 +1,145 @@
+schema_version: "1.0"
+extends: FWDCenterLabSiva.yaml
+name: FWDCenterLabSivaPool
+
+description: >-
+  FWDCenterLabSiva plus a pool of spare manipulables parked on the floor, for
+  putting objects on the board while the simulation is running.  Geometry,
+  calibration, grid, reachability and the achromatic object palette are all
+  inherited; this file adds slots and nothing else.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY A CHILD SCENE AND NOT FWDCenterLabSiva ITSELF
+#
+# The detector handoff set in IITG-Reachy-Project/data/annotations/ was rendered
+# from FWDCenterLabSiva at seed 2026, and its README promises the set can be
+# regenerated.  Adding bodies to that scene changes what the renderer produces
+# for a given seed and quietly breaks that promise.  The pool lives one level
+# down, so the dataset scene stays byte-for-byte what it was.
+#
+# WHY THE SLOTS EXIST AT ALL
+#
+# MuJoCo freezes nbody/njnt/ngeom at compile time — there is no add_body(), and
+# server.py still (correctly) refuses a runtime scene_load because it cannot
+# swap the model atomically.  So "put an object on the table" has to mean "move
+# one that already exists".  These are the ones that exist.
+#
+# WHY THEY SIT ON THE FLOOR RATHER THAN HIDDEN BELOW IT
+#
+# The floor is an infinite plane, so a body parked at z = -0.5 is penetrating it
+# and gets ejected — measured, one returned to z = +0.005 carrying 2.4 m/s after
+# 2000 steps.  On the floor they rest quietly, they render (so the pool is
+# visible rather than magic), and at y = ±0.75 they are far outside the right
+# arm's 0.609 m reach, so nothing can disturb them by accident.
+#
+# SIZES ARE PROVISIONAL AND THAT IS FINE HERE
+#
+# 4 cm is used rather than the 6 cm the MCC objects inherit, because a real cube
+# measured against a known 12.7 cm grid cell spans about a third of a cell.  But
+# no tape measure has been on these yet, and unlike the inherited objects these
+# do not have to match anything: placement.py's reshape() sets size, colour and
+# mass on the LIVE model, so a slot becomes whatever the run needs without a
+# recompile.  Treat these numbers as a starting shape, not a measurement.
+#
+# reshape() — not a bare geom_size write — is the supported way to do that.
+# geom_rbound is computed by the compiler and is NOT recomputed when geom_size
+# changes (mj_setConst does not fix it either), so growing a geom without
+# updating rbound leaves the broadphase culling the pair and contacts silently
+# stop being generated.  reshape() writes both.
+# ─────────────────────────────────────────────────────────────────────────────
+
+objects:
+  - id: pool_box_1
+    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
+    pose: {position: [0.15, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: cube
+    tags: [pool, manipulable, pickable]
+
+  - id: pool_box_2
+    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
+    pose: {position: [0.35, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: cube
+    tags: [pool, manipulable, pickable]
+
+  - id: pool_box_3
+    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
+    pose: {position: [0.55, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: cube
+    tags: [pool, manipulable, pickable]
+
+  - id: pool_cyl_1
+    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
+    pose: {position: [0.15, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, manipulable, pickable]
+
+  - id: pool_cyl_2
+    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
+    pose: {position: [0.35, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, manipulable, pickable]
+
+  - id: pool_cyl_3
+    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
+    pose: {position: [0.55, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, manipulable, pickable]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # THE BOARD STARTS EMPTY.
+  #
+  # FWDCenterLabSiva places its four manipulables ON the grid, because it exists
+  # to render frames of objects on a board.  This scene exists to put them there
+  # on demand, so it parks them on the floor with the rest of the pool.  A run
+  # that wants a cube on r2c2 asks for one; nothing is on the board by accident,
+  # and "what is on the table" always has a caller who put it there.
+  #
+  # Their sizes are NOT corrected here.  They are inherited, known to be ~1.5x
+  # too large, and shared with the motion work — that is one change against a
+  # tape measure, not a quiet fix in a scene file.  reshape() sets a real size
+  # at runtime once someone measures one.
+  #
+  # Tags are restated in full, not appended: `objects` merges by id but any
+  # other list REPLACES the inherited one, so a partial tag list would silently
+  # drop `detector-target` and the rest.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - id: red_cube
+    pose: {position: [0.15, 0.95, 0.03], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    tags: [pool, manipulable, pickable, cube, detector-target]
+
+  - id: blue_cylinder
+    pose: {position: [0.35, 0.95, 0.05], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    tags: [pool, manipulable, pickable, cylinder, detector-target]
+
+  - id: soda_can
+    pose: {position: [0.55, 0.95, 0.0575], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    tags: [pool, manipulable, pickable, recyclable, detector-target, sort-item]
+
+  - id: foam_block
+    pose: {position: [0.15, -0.95, 0.025], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    tags: [pool, manipulable, pickable, non-recyclable, detector-target, sort-item]

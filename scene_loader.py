@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Sequence, Tuple, Union
 
+import sys
+
 import yaml
 
 try:
@@ -178,9 +180,36 @@ def _parse_object(obj_dict: dict, scene_root: Path) -> SceneObject:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _resolve_inheritance(yaml_path: Path) -> dict:
+    """Follow `extends:` via the shared resolver in scene_io.
+
+    ONE implementation, two locations.  scene_io.py lives under native_mujoco/
+    on the host and is copied beside this file into the container image, because
+    the container gets scene_loader.py but not the native_mujoco tree.  Merge
+    semantics that drifted between a host copy and a container copy would be a
+    genuinely horrible bug to chase: the same scene file would compile to two
+    different worlds depending on which side loaded it.
+    """
+    here = Path(__file__).resolve().parent
+    for candidate in (here / "native_mujoco", here):
+        if (candidate / "scene_io.py").is_file() and str(candidate) not in sys.path:
+            sys.path.append(str(candidate))
+    try:
+        from scene_io import SceneLoadError, load_scene as _resolve
+    except ImportError as exc:                                 # pragma: no cover
+        raise SceneValidationError(
+            f"'{yaml_path.name}' uses `extends:` but the resolver (scene_io.py) "
+            f"is not importable from {here}") from exc
+    try:
+        return _resolve(yaml_path)
+    except SceneLoadError as exc:
+        raise SceneValidationError(str(exc)) from exc
+
+
 def load_scene(
     path: Union[str, Path],
     scene_root: Optional[Path] = None,
+    document: Optional[dict] = None,
 ) -> SceneDocument:
     """Load and validate a scene YAML file.
 
@@ -188,6 +217,11 @@ def load_scene(
         path:       Absolute or relative path to the scene YAML.
         scene_root: Directory used as the approved root for mesh asset resolution.
                     Defaults to the directory containing the YAML file.
+        document:   Already-loaded scene mapping to validate instead of re-reading
+                    `path`.  `path` is still used to resolve mesh assets.  This is
+                    how a caller validates a scene AFTER `extends:` has been
+                    resolved (native_mujoco/scene_io.py), so the parent's objects
+                    are checked too rather than only the child's overrides.
 
     Returns:
         Validated SceneDocument.
@@ -203,14 +237,29 @@ def load_scene(
     effective_root = (scene_root or yaml_path.parent).resolve()
 
     # ── Load YAML safely ─────────────────────────────────────────────────────
-    try:
-        with open(yaml_path) as f:
-            doc = yaml.safe_load(f)
-    except yaml.YAMLError as exc:
-        raise SceneValidationError(f"YAML parse error in '{yaml_path}': {exc}") from exc
+    if document is not None:
+        doc = document
+    else:
+        try:
+            with open(yaml_path) as f:
+                doc = yaml.safe_load(f)
+        except yaml.YAMLError as exc:
+            raise SceneValidationError(f"YAML parse error in '{yaml_path}': {exc}") from exc
 
     if not isinstance(doc, dict):
         raise SceneValidationError(f"Scene file must be a YAML mapping, got {type(doc).__name__}")
+
+    # A child scene is not a complete document: it inherits `world`, the cameras
+    # and most of its objects, so validating it as-is fails on whichever required
+    # key the parent happened to supply.  Resolve the chain here rather than
+    # making every caller know to.
+    #
+    # This is not optional politeness.  ros/scene_marker_publisher.py loads
+    # scenes through this function to draw RViz markers, and it has no way to
+    # reach the resolver on its own — so without this, launching an inherited
+    # scene renders the child's objects floating with no board under them.
+    if document is None and "extends" in doc:
+        doc = _resolve_inheritance(yaml_path)
 
     # ── Pre-flight path safety (runs before jsonschema for clear messages) ───
     for obj in doc.get("objects", []) if isinstance(doc, dict) else []:
