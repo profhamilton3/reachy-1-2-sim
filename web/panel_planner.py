@@ -176,9 +176,16 @@ def _is_bin_phrase(phrase: str) -> bool:
     return any(re.search(rf"\b{w}\b", norm) for w in _BIN_WORDS)
 
 
-def _clarify(message: str, choices: Optional[List[str]] = None) -> PlannerOutcome:
+#: Slot names.  A clarification says which one it is asking about, and the
+#: answer fills that slot and no other.
+SLOT_CELL = "which_cell"
+SLOT_OBJECT = "which_object"
+
+
+def _clarify(message: str, choices: Optional[List[str]] = None,
+             slot: str = "") -> PlannerOutcome:
     return PlannerOutcome(kind="clarification", message=message,
-                          choices=list(choices or []))
+                          choices=list(choices or []), slot=slot)
 
 
 def _unsupported(message: str) -> PlannerOutcome:
@@ -202,7 +209,8 @@ class DeterministicPlanner:
             return _unsupported(f"I cannot read the scene right now: {scene.error}")
 
         command, answers = _split_history(request.history, request.text)
-        if _JOINT_RE.search(command) or any(_JOINT_RE.search(a) for a in answers):
+        if _JOINT_RE.search(command) or any(_JOINT_RE.search(a)
+                                            for _, a in answers):
             return _unsupported(
                 "I do not accept joint angles or joint names. Ask for a task — "
                 "which object, and where it should go — and the motion layer "
@@ -236,7 +244,7 @@ class DeterministicPlanner:
         cells = scene.available_cells()
 
         if not phrase:
-            return _clarify("Where should it go?", cells), None
+            return _clarify("Where should it go?", cells, SLOT_CELL), None
 
         did = _match_destination_id(phrase, scene)
         if did:
@@ -249,36 +257,37 @@ class DeterministicPlanner:
                     "nowhere I can call a bin. I can put it on a grid cell "
                     "instead — that is a spot on the board, not a container. "
                     "Which cell?",
-                    cells,
+                    cells, SLOT_CELL,
                 ), None
             names = sorted(scene.destinations)
             if len(names) == 1:
                 return None, _dest_ref(scene, names[0])
-            return _clarify("Which one?", names), None
+            return _clarify("Which one?", names, SLOT_CELL), None
 
         cell = _match_cell(phrase, scene)
         if cell:
             if cell not in scene.cells:
                 return _clarify(
                     f"There is no cell called {cell} in this scene. "
-                    "Pick one of these.", cells
+                    "Pick one of these.", cells, SLOT_CELL
                 ), None
             if not scene.cells[cell].reachable:
                 return _clarify(
                     f"{cell} was measured out of the right arm's reach, so I "
-                    "will not plan a move there. Pick another cell.", cells
+                    "will not plan a move there. Pick another cell.", cells,
+                    SLOT_CELL,
                 ), None
             occupant = scene.cells[cell].occupant
             if occupant:
                 return _clarify(
                     f"{cell} is already occupied by {occupant}. "
-                    "Pick another cell.", cells
+                    "Pick another cell.", cells, SLOT_CELL,
                 ), None
             return None, DestinationRef(kind="cell", ref_id=cell, label=cell)
 
         return _clarify(
             f"I do not know a destination called \"{phrase}\". "
-            "These are the destinations I can use.", cells
+            "These are the destinations I can use.", cells, SLOT_CELL
         ), None
 
     # -- target ------------------------------------------------------------
@@ -287,7 +296,7 @@ class DeterministicPlanner:
                         ) -> Tuple[Optional[PlannerOutcome], str]:
         if not phrase:
             return _clarify("Which object should I move?",
-                            sorted(scene.objects)), ""
+                            sorted(scene.objects), SLOT_OBJECT), ""
 
         oid = _match_object_id(phrase, scene)
         if oid:
@@ -299,7 +308,8 @@ class DeterministicPlanner:
 
         return _clarify(
             f"I do not know an object called \"{phrase}\". "
-            "These are the objects in this scene.", sorted(scene.objects)
+            "These are the objects in this scene.", sorted(scene.objects),
+            SLOT_OBJECT
         ), ""
 
     def _resolve_category(self, scene: SceneView, tag: str
@@ -329,7 +339,7 @@ class DeterministicPlanner:
             names = sorted(o.object_id for o in members)
             return _clarify(
                 "I cannot yet see which objects are actually on the board, so "
-                "I will not guess. Name the one you mean.", names
+                "I will not guess. Name the one you mean.", names, SLOT_OBJECT
             ), ""
 
         on_board = scene.tabletop_tagged(tag)
@@ -337,14 +347,14 @@ class DeterministicPlanner:
             return _clarify(
                 f"No {label} object is on the board right now. Place one on "
                 "a cell first, then ask me again.",
-                sorted(o.object_id for o in members),
+                sorted(o.object_id for o in members), SLOT_OBJECT,
             ), ""
         if len(on_board) > 1:
             return _clarify(
                 f"There is more than one {label} object on the board. "
                 "Which one?",
                 [f"{o.object_id} ({o.cell})" if o.cell else o.object_id
-                 for o in on_board],
+                 for o in on_board], SLOT_OBJECT,
             ), ""
         return None, on_board[0].object_id
 
@@ -499,48 +509,85 @@ def _distance(a, b) -> float:
 
 
 def _split_history(history: List[ConversationEvent], latest: str
-                   ) -> Tuple[str, List[str]]:
-    """Return the original command and every answer given since.
+                   ) -> Tuple[str, List[Tuple[str, str]]]:
+    """Return the original command and every answer since, each with its slot.
 
     `history` already contains `latest` as its last user turn, so the answers
     list is built from history alone and `latest` is only a fallback for the
     very first call.
+
+    The slot comes from the question the answer follows, not from the answer's
+    own wording.  Walking the transcript in order and remembering the last
+    reachy question is the whole mechanism: at the moment the planner asked, it
+    knew which slot it wanted, and that is the only reliable record of it.
+
+    An answer with no question before it — the opening command's own turn is
+    skipped, but a stray user turn is possible — carries an empty slot and is
+    placed by the fallback in `_apply_answers`.
     """
-    user_turns = [e.text for e in history if e.role == "user"]
-    if not user_turns:
+    command = ""
+    pending = ""
+    answers: List[Tuple[str, str]] = []
+    for ev in history:
+        if ev.role == "user":
+            if not command:
+                command = ev.text
+            else:
+                answers.append((pending, ev.text))
+            pending = ""
+        elif ev.question_id:
+            pending = ev.slot
+    if not command:
         return latest, []
-    return user_turns[0], user_turns[1:]
+    return command, answers
 
 
-def _apply_answers(intent: _Intent, answers: List[str], scene: SceneView
-                   ) -> Tuple[str, str]:
-    """Fold clarification answers into whichever slot is still unresolved.
+def _apply_answers(intent: _Intent, answers: List[Tuple[str, str]],
+                   scene: SceneView) -> Tuple[str, str]:
+    """Fold clarification answers into the slots they were given for.
 
-    An answer is tried as a destination only while the destination is open, and
-    as a target only while the target is open, so "r2c2" answering "which cell?"
-    cannot later be mistaken for an object.
+    Each answer arrives with the slot its question named, so an answer to
+    "which cell?" fills the destination and an answer to "which object?" fills
+    the target.  No inspection of the answer's wording decides that.
+
+    That inspection is what used to go wrong.  The slot was re-derived by
+    asking whether the CURRENT destination phrase looked resolvable:
+
+        dest_open = ... _match_cell(dest, scene) not in scene.cells ...
+
+    A cell that exists but was REJECTED — occupied, or out of the arm's reach —
+    read as resolved, so the slot the planner had just asked about counted as
+    filled.  "put soda_can on r2c2" with r2c2 occupied, answered "r1c1", stored
+    r1c1 as the TARGET and replied that it did not know an object by that name.
+    Both `cell_r3c1` and `cell_r3c2` are out of reach in FWDCenterLabMCC, so
+    this was reachable in ordinary use.
+
+    The docstring already stated the right rule — an answer fills a slot only
+    while that slot is open — and "open" means unresolved.  The code read it as
+    unrecognised.  Recording the slot at ask time is what makes the two agree.
     """
     target = intent.target_phrase
     dest = intent.dest_phrase
 
-    for answer in answers:
+    for slot, answer in answers:
         answer = answer.strip()
         if not answer:
             continue
-        dest_open = (not dest
-                     or _is_bin_phrase(dest) and not scene.has_destination
-                     or (_match_destination_id(dest, scene) is None
-                         and _match_cell(dest, scene) not in scene.cells
-                         and not _is_bin_phrase(dest)))
-        if dest_open and (_match_cell(answer, scene) is not None
-                          or _match_destination_id(answer, scene) is not None):
+        if slot == SLOT_CELL:
             dest = answer
             continue
-        if not target or _match_object_id(target, scene) is None:
-            if _match_object_id(answer, scene) is not None:
-                target = answer
-                continue
-        if dest_open:
+        if slot == SLOT_OBJECT:
+            target = answer
+            continue
+        # No slot recorded: a transcript from before slots existed, or a user
+        # turn that answered no question.  Fall back to placing it by shape,
+        # which is what every answer used to get.
+        if _match_cell(answer, scene) is not None or \
+                _match_destination_id(answer, scene) is not None:
+            dest = answer
+        elif _match_object_id(answer, scene) is not None:
+            target = answer
+        elif not dest:
             dest = answer
         else:
             target = answer

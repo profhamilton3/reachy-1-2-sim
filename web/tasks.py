@@ -112,12 +112,19 @@ class ConversationEvent:
     # answer typed against a stale question cannot be applied to a new one.
     question_id: str = ""
     choices: List[str] = field(default_factory=list)
+    #: Which slot this question is about — "which_cell", "which_object".  The
+    #: planner knows this at the moment it asks and used to throw it away, then
+    #: re-derive it from the answer's wording on the next turn.  Recording it
+    #: is what stops an answer landing in the slot nobody asked about (#59).
+    slot: str = ""
 
     def as_dict(self) -> dict:
         d = {"role": self.role, "text": self.text, "at": round(self.at, 3)}
         if self.question_id:
             d["question_id"] = self.question_id
             d["choices"] = list(self.choices)
+            if self.slot:
+                d["slot"] = self.slot
         return d
 
 
@@ -181,6 +188,10 @@ class PlannerOutcome:
     message: str = ""
     choices: List[str] = field(default_factory=list)
     proposal: Optional[Proposal] = None
+    #: On a clarification, the slot being asked about.  Carried onto the
+    #: transcript event so the next turn can fill that slot instead of
+    #: guessing which one the answer was for.
+    slot: str = ""
 
 
 @dataclass
@@ -631,6 +642,7 @@ class TaskCoordinator:
                 text=outcome.message,
                 question_id=task.question_id,
                 choices=list(outcome.choices),
+                slot=outcome.slot,
             ))
         elif outcome.kind == "proposal" and outcome.proposal is not None:
             proposal = outcome.proposal
