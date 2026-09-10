@@ -193,7 +193,8 @@ def test_a_rejected_route_says_it_was_flown_and_why_it_failed():
     _, why = R.check_route("STOW_ROUTE", "FWDCenterLabSivaPool")
     assert "rejected" in why
     assert "SWING_1" in why
-    assert "-0.2 cm" in why
+    assert "-0.2" in why
+    assert "one of six negative" in why
 
 
 def test_a_route_nobody_flew_here_is_a_different_answer_from_one_that_failed():

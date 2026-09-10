@@ -309,18 +309,21 @@ class ValidationAttempt:
 VALIDATION_ATTEMPTS: Tuple[ValidationAttempt, ...] = (
     ValidationAttempt(
         "PLACE_ROUTE", "FWDCenterLabSivaPool", "2026-09-10", "rejected",
-        "Flown twice, HOME->REST, both times complete and arrived, board "
-        "undisturbed (all 10 objects 0.0000 m). Rejected on clearance: worst "
-        "realised at SWING_1 vs rig_rail_outer_right was +0.2 cm and +0.1 cm "
-        "against a planned +0.6 cm.",
+        "Flown three times, HOME->REST. Twice complete and arrived; the third "
+        "stopped at REST_SHUT with r_wrist_roll 9 deg off its 6 deg tolerance "
+        "after five re-streamed passes. Board undisturbed every time (all 10 "
+        "objects 0.0000 m). Rejected on clearance: worst realised at SWING_1 "
+        "vs rig_rail_outer_right was +0.2, +0.1 and +0.2 cm against a planned "
+        "+0.6 cm.",
     ),
     ValidationAttempt(
         "STOW_ROUTE", "FWDCenterLabSivaPool", "2026-09-10", "rejected",
-        "Flown twice, REST->HOME, both times complete and arrived, board "
+        "Flown three times, REST->HOME, complete and arrived every time, board "
         "undisturbed. Rejected on clearance: SWING_1 vs rig_rail_outer_right "
-        "measured +0.7 cm and then -0.2 cm — the model puts the arm INSIDE the "
-        "rail on the second pass. Four SWING_1 samples across both routes: "
-        "+0.2, +0.7, +0.1, -0.2 cm. The corridor completes, and it has no "
+        "measured +0.7, -0.2 and +0.5 cm — the model puts the arm INSIDE the "
+        "rail on the second pass. Six SWING_1 samples across both routes: "
+        "+0.2, +0.7, +0.1, -0.2, +0.2, +0.5 cm, one of six negative, spread "
+        "0.9 cm on a 0.6 cm budget. The corridor completes, and it has no "
         "margin at its tightest waypoint.",
     ),
     ValidationAttempt(
