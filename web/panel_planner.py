@@ -35,13 +35,19 @@ ignored "set r_elbow_pitch to -75" would be one edit away from honouring it.
 
 from __future__ import annotations
 
+import math
 import re
 import uuid
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from panel_scene import SceneView
+from panel_scene import DestinationRef, SceneView
 from tasks import ConversationEvent, PlannerOutcome, PlannerRequest, Proposal
+
+#: How far a tracked object may drift before a proposal built on its position
+#: stops describing the world.  Objects at rest in MuJoCo jitter by far less
+#: than this; anything larger is a placement, a recall, a reset, or the arm.
+POSE_TOLERANCE_M = 0.02
 
 _VERBS = ("put", "move", "place", "drop", "sort")
 _PREPS = ("into", "onto", "in", "on", "to")
@@ -182,7 +188,7 @@ class DeterministicPlanner:
         # Answers to earlier clarifications fill whichever slot is still open.
         target_phrase, dest_phrase = _apply_answers(intent, answers, scene)
 
-        dest_outcome, destination, dest_kind = self._resolve_destination(dest_phrase, scene)
+        dest_outcome, destination = self._resolve_destination(dest_phrase, scene)
         if dest_outcome is not None:
             return dest_outcome
 
@@ -190,20 +196,23 @@ class DeterministicPlanner:
         if target_outcome is not None:
             return target_outcome
 
-        return self._propose(scene, target_id, destination, dest_kind)
+        return self._propose(scene, target_id, destination)
 
     # -- destination -------------------------------------------------------
 
     def _resolve_destination(self, phrase: str, scene: SceneView
-                             ) -> Tuple[Optional[PlannerOutcome], str, str]:
-        cells = scene.reachable_cells()
+                             ) -> Tuple[Optional[PlannerOutcome], Optional[DestinationRef]]:
+        # Offer only cells that are reachable AND free.  Offering an occupied
+        # cell and then refusing it on the next turn wastes the human's turn
+        # and makes the panel look like it is not reading the board.
+        cells = scene.available_cells()
 
         if not phrase:
-            return _clarify("Where should it go?", cells), "", ""
+            return _clarify("Where should it go?", cells), None
 
         did = _match_destination_id(phrase, scene)
         if did:
-            return None, did, "destination"
+            return None, _dest_ref(scene, did)
 
         if _is_bin_phrase(phrase):
             if not scene.has_destination:
@@ -213,36 +222,36 @@ class DeterministicPlanner:
                     "instead — that is a spot on the board, not a container. "
                     "Which cell?",
                     cells,
-                ), "", ""
+                ), None
             names = sorted(scene.destinations)
             if len(names) == 1:
-                return None, names[0], "destination"
-            return _clarify("Which one?", names), "", ""
+                return None, _dest_ref(scene, names[0])
+            return _clarify("Which one?", names), None
 
         cell = _match_cell(phrase, scene)
         if cell:
             if cell not in scene.cells:
                 return _clarify(
                     f"There is no cell called {cell} in this scene. "
-                    "Pick one of these.", sorted(scene.cells)
-                ), "", ""
+                    "Pick one of these.", cells
+                ), None
             if not scene.cells[cell].reachable:
                 return _clarify(
                     f"{cell} was measured out of the right arm's reach, so I "
                     "will not plan a move there. Pick another cell.", cells
-                ), "", ""
+                ), None
             occupant = scene.cells[cell].occupant
             if occupant:
                 return _clarify(
                     f"{cell} is already occupied by {occupant}. "
                     "Pick another cell.", cells
-                ), "", ""
-            return None, cell, "cell"
+                ), None
+            return None, DestinationRef(kind="cell", ref_id=cell, label=cell)
 
         return _clarify(
             f"I do not know a destination called \"{phrase}\". "
             "These are the destinations I can use.", cells
-        ), "", ""
+        ), None
 
     # -- target ------------------------------------------------------------
 
@@ -302,10 +311,8 @@ class DeterministicPlanner:
     # -- proposal ----------------------------------------------------------
 
     def _propose(self, scene: SceneView, target_id: str,
-                 destination: str, dest_kind: str) -> PlannerOutcome:
-        where = (f"grid cell {destination}" if dest_kind == "cell"
-                 else str(destination))
-        summary = f"move {target_id} to {where}"
+                 destination: DestinationRef) -> PlannerOutcome:
+        summary = f"move {target_id} to {destination.describe()}"
 
         obj = scene.objects.get(target_id)
         if obj is not None and obj.is_recyclable:
@@ -314,7 +321,9 @@ class DeterministicPlanner:
             reason = f"{target_id} is a {obj.semantic_class} in this scene."
         else:
             reason = f"{target_id} is a placeable object in this scene."
-        if not scene.live:
+        if scene.live and obj is not None and obj.cell:
+            reason += f" It is on {obj.cell} now."
+        elif not scene.live:
             reason += " Its current position has not been verified."
 
         return PlannerOutcome(
@@ -325,14 +334,128 @@ class DeterministicPlanner:
                 plan_version=0,          # the coordinator stamps the real one
                 task_type="pick_place",
                 target_id=target_id,
-                destination=f"{dest_kind}:{destination}",
+                destination=destination.as_str(),
+                destination_kind=destination.kind,
+                destination_label=destination.describe(),
+                legacy_destination=destination.legacy_destination(),
                 brief_reason=reason,
                 requires_confirmation=True,
                 semantic_source="scene_data",
                 scene_name=scene.name,
                 summary=summary,
+                state_evidence=_evidence(scene, target_id, destination),
             ),
         )
+
+
+def _dest_ref(scene: SceneView, destination_id: str) -> DestinationRef:
+    view = scene.destinations.get(destination_id)
+    return DestinationRef(
+        kind="destination", ref_id=destination_id,
+        label=view.label if view else destination_id,
+    )
+
+
+def _evidence(scene: SceneView, target_id: str,
+              destination: DestinationRef) -> dict:
+    """What this plan assumed about the world, so it can be rechecked.
+
+    Empty when the scene is not live: there is nothing to recheck against, and
+    a plan built from the scene file alone never claimed a position in the
+    first place.
+
+    `sim_step` is recorded but deliberately NOT compared at confirm time.  The
+    simulator advances it hundreds of times a second, so treating a changed
+    step as a changed world would invalidate every proposal before anyone
+    could read it.  What is compared is what actually matters: the scene
+    revision, where the target is, and whether the destination is still free.
+    """
+    if not scene.live:
+        return {}
+    obj = scene.objects.get(target_id)
+    occupant = None
+    if destination.kind == "cell":
+        cell = scene.cells.get(destination.ref_id)
+        occupant = cell.occupant if cell else None
+    return {
+        "scene_revision": scene.scene_revision,
+        "sim_step": scene.sim_step,
+        "target_id": target_id,
+        "target_pos": list(obj.position) if obj and obj.position else None,
+        "target_cell": obj.cell if obj else None,
+        "destination": destination.as_str(),
+        "destination_occupant": occupant,
+    }
+
+
+class LiveProposalValidator:
+    """Decides at confirm time whether a proposal still describes the world.
+
+    Returns `(ok, why_not)`.  Called by the coordinator under its lock, just
+    before a confirmation would be consumed, so a plan cannot be confirmed
+    against a board that has changed underneath it.
+    """
+
+    def __init__(self, scene_provider) -> None:
+        self._scene_provider = scene_provider
+
+    def __call__(self, proposal: Proposal) -> Tuple[bool, str]:
+        evidence = proposal.state_evidence or {}
+        if not evidence:
+            # A plan made without live state claimed nothing about positions,
+            # so there is nothing here to contradict.  It is still confirmed
+            # into planning-only mode, which moves nothing.
+            return True, ""
+
+        scene = self._scene_provider()
+        if scene.error:
+            return False, f"I cannot read the scene right now: {scene.error}"
+        if not scene.live:
+            return False, ("I have lost my link to the simulator, so I cannot "
+                           "check that this plan still matches the board.")
+
+        expected_rev = evidence.get("scene_revision")
+        if expected_rev and scene.scene_revision != expected_rev:
+            return False, ("The scene was reloaded since I made that plan. "
+                           "Ask me again and I will look at the new one.")
+
+        target_id = evidence.get("target_id") or proposal.target_id
+        obj = scene.objects.get(target_id)
+        if obj is None:
+            return False, f"{target_id} is no longer in this scene."
+
+        expected_pos = evidence.get("target_pos")
+        if expected_pos is not None:
+            if obj.position is None:
+                return False, (f"I can no longer see where {target_id} is, so "
+                               "I will not confirm a plan that assumed it.")
+            drift = _distance(obj.position, expected_pos)
+            if drift > POSE_TOLERANCE_M:
+                return False, (f"{target_id} has moved {drift * 100:.0f} cm "
+                               "since I made that plan. Ask me again.")
+
+        expected_cell = evidence.get("target_cell")
+        if expected_cell is not None and obj.cell != expected_cell:
+            return False, (f"{target_id} is no longer on {expected_cell}. "
+                           "Ask me again.")
+
+        if proposal.destination_kind == "cell":
+            cell = scene.cells.get(_ref_id(proposal.destination))
+            if cell is None:
+                return False, "That destination is no longer in this scene."
+            if cell.occupant != evidence.get("destination_occupant"):
+                held = cell.occupant or "nothing"
+                return False, (f"{cell.name} now holds {held}, which is not "
+                               "what it held when I made that plan.")
+        return True, ""
+
+
+def _ref_id(destination: str) -> str:
+    return destination.split(":", 1)[1] if ":" in destination else destination
+
+
+def _distance(a, b) -> float:
+    return math.sqrt(sum((float(x) - float(y)) ** 2 for x, y in zip(a, b)))
 
 
 def _split_history(history: List[ConversationEvent], latest: str

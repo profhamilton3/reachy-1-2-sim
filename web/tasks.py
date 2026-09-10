@@ -42,7 +42,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Limits.  All bounded on purpose — an unbounded queue or transcript in a
@@ -125,9 +125,16 @@ class ConversationEvent:
 class Proposal:
     """A validated, confirmable action.
 
-    Stage 2 (issue #50) adds the destination reference, semantic-source label,
-    scene identity and state evidence.  The fields that exist here are the ones
-    stage 1 can populate honestly; nothing is invented to fill the shape.
+    `destination` is the reference string (`cell:r2c2`, `destination:left_tray`)
+    and `legacy_destination` is the IITG `Destination` enum value when — and
+    only when — one genuinely exists.  None there is a real answer, not a gap
+    to fill: see DestinationRef.legacy_destination in panel_scene.py.
+
+    `state_evidence` is whatever the planner needs in order to decide later
+    whether this plan still describes the world.  The coordinator never reads
+    it; it only hands it back to the revalidator at confirm time.  Keeping the
+    shape out of here is what lets the scene layer change its mind about what
+    evidence is worth recording without touching the state machine.
     """
 
     plan_id: str
@@ -141,6 +148,10 @@ class Proposal:
     semantic_source: str = "scene_data"
     scene_name: str = ""
     summary: str = ""
+    destination_kind: str = ""
+    destination_label: str = ""
+    legacy_destination: Optional[str] = None
+    state_evidence: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -149,12 +160,16 @@ class Proposal:
             "task_type": self.task_type,
             "target_id": self.target_id,
             "destination": self.destination,
+            "destination_kind": self.destination_kind,
+            "destination_label": self.destination_label,
+            "legacy_destination": self.legacy_destination,
             "brief_reason": self.brief_reason,
             "requires_confirmation": self.requires_confirmation,
             "execution_mode": self.execution_mode,
             "semantic_source": self.semantic_source,
             "scene_name": self.scene_name,
             "summary": self.summary,
+            "state_evidence": dict(self.state_evidence),
         }
 
 
@@ -262,11 +277,16 @@ class TaskCoordinator:
         planner: Planner,
         *,
         capabilities: Optional[Capabilities] = None,
+        revalidate: Optional[Callable[[Proposal], Tuple[bool, str]]] = None,
         max_workers: int = 2,
         planning_timeout_s: float = PLANNING_TIMEOUT_S,
         task_ttl_s: float = TASK_TTL_S,
     ) -> None:
         self._planner = planner
+        # Called under the lock at confirm time, before the confirmation is
+        # consumed.  A plan is only worth confirming if it still describes the
+        # world, and the world moves on its own here.
+        self._revalidate = revalidate
         self._caps = capabilities or Capabilities()
         self._timeout = planning_timeout_s
         self._ttl = task_ttl_s
@@ -406,6 +426,21 @@ class TaskCoordinator:
                     "The plan changed since that button was drawn. Review the current plan and confirm again.",
                     409, "stale_plan_version",
                 )
+
+            # Last gate before the confirmation is spent.  Everything above
+            # checks that the human confirmed the plan we think they saw; this
+            # checks that the plan still matches the world.
+            if self._revalidate is not None:
+                ok, why = self._revalidate(task.proposal)
+                if not ok:
+                    task.state = TaskState.failed
+                    task.detail = why or "The plan no longer matches the scene."
+                    task.proposal = None
+                    task.generation += 1
+                    task.add_event(ConversationEvent(role="reachy", text=task.detail))
+                    task.touch()
+                    self._release_locked(task)
+                    raise TaskError(task.detail, 409, "plan_invalidated")
 
             task.confirmed_plan_id = plan_id
             task.generation += 1
