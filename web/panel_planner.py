@@ -41,7 +41,8 @@ import uuid
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from panel_scene import DestinationRef, SceneView
+from panel_scene import (NON_RECYCLABLE_TAG, RECYCLABLE_TAG, DestinationRef,
+                         SceneView)
 from tasks import ConversationEvent, PlannerOutcome, PlannerRequest, Proposal
 
 #: How far a tracked object may drift before a proposal built on its position
@@ -54,6 +55,13 @@ _PREPS = ("into", "onto", "in", "on", "to")
 
 _RECYCLE_WORDS = ("recycle", "recycling", "recyclable")
 _BIN_WORDS = ("bin", "trash", "garbage", "waste", "rubbish")
+
+# The recycling word itself, and the negation that may sit in front of it.
+# `non-recyclable` normalises with the hyphen intact, so the negation is
+# matched with an optional hyphen rather than as a separate word: "non" and
+# "non-" are the same claim.
+_RECYCLE_RE = re.compile(rf"\b({'|'.join(_RECYCLE_WORDS)})\b")
+_NEGATION_RE = re.compile(r"(\bnon-?|\bnot\b|\bno\b|n't\b)\s*$")
 
 _CELL_RE = re.compile(r"\br([1-9])c([1-9])\b", re.I)
 # No trailing \b on the alternation: joint names carry a suffix
@@ -139,8 +147,28 @@ def _match_cell(phrase: str, scene: SceneView) -> Optional[str]:
     return name          # a well-formed cell name the scene does not have
 
 
-def _is_recycle_phrase(phrase: str) -> bool:
-    return any(w in _normalise(phrase) for w in _RECYCLE_WORDS)
+def _category_of(phrase: str) -> Optional[str]:
+    """Which recycling category a phrase names, or None if it names neither.
+
+    Substring matching is what made this wrong.  `"recyclable" in
+    "non-recyclable item"` is True, so the phrase that explicitly EXCLUDES the
+    category selected it, and the panel proposed moving the one object the
+    operator had ruled out.  The scene layer has always matched tags exactly
+    for this reason; the test that undid it lived here, a layer earlier, where
+    correct tag handling downstream could not save it.
+
+    So: find the recycling word, then look at what sits immediately before it.
+    A negation there means the complementary category, which is a tag of its
+    own (`non-recyclable`) and is resolved exactly like the positive one.
+    """
+    norm = _normalise(phrase)
+    m = _RECYCLE_RE.search(norm)
+    if m is None:
+        return None
+    before = norm[: m.start()]
+    if _NEGATION_RE.search(before):
+        return NON_RECYCLABLE_TAG
+    return RECYCLABLE_TAG
 
 
 def _is_bin_phrase(phrase: str) -> bool:
@@ -265,20 +293,32 @@ class DeterministicPlanner:
         if oid:
             return None, oid
 
-        if _is_recycle_phrase(phrase):
-            return self._resolve_recyclable(scene)
+        category = _category_of(phrase)
+        if category is not None:
+            return self._resolve_category(scene, category)
 
         return _clarify(
             f"I do not know an object called \"{phrase}\". "
             "These are the objects in this scene.", sorted(scene.objects)
         ), ""
 
-    def _resolve_recyclable(self, scene: SceneView
-                            ) -> Tuple[Optional[PlannerOutcome], str]:
-        recyclable = scene.recyclables()
-        if not recyclable:
+    def _resolve_category(self, scene: SceneView, tag: str
+                          ) -> Tuple[Optional[PlannerOutcome], str]:
+        """Resolve "the recyclable one" / "the non-recyclable one" to an object.
+
+        One body for both categories.  The negated phrasing used to fall
+        through to this method with `tag` fixed at `recyclable`, so it answered
+        the opposite question with the same confidence; passing the tag in is
+        what makes the negation reach a decision instead of being dropped.
+        """
+        label = "recyclable" if tag == RECYCLABLE_TAG else "non-recyclable"
+        members = scene.tagged(tag)
+        if not members:
+            # Not a fallback to the other category.  A scene that classifies
+            # nothing as `non-recyclable` has not thereby said everything else
+            # is; saying so is how the substring bug produced wrong objects.
             return _unsupported(
-                "Nothing in this scene is tagged recyclable."
+                f"Nothing in this scene is tagged {label}."
             ), ""
 
         if not scene.live:
@@ -286,22 +326,22 @@ class DeterministicPlanner:
             # board from one parked in the pool, and guessing would be exactly
             # the false claim the design brief warns about.  Issue #50 removes
             # this branch by supplying live object poses.
-            names = sorted(o.object_id for o in recyclable)
+            names = sorted(o.object_id for o in members)
             return _clarify(
                 "I cannot yet see which objects are actually on the board, so "
                 "I will not guess. Name the one you mean.", names
             ), ""
 
-        on_board = scene.tabletop_recyclables()
+        on_board = scene.tabletop_tagged(tag)
         if not on_board:
             return _clarify(
-                "No recyclable object is on the board right now. Place one on "
+                f"No {label} object is on the board right now. Place one on "
                 "a cell first, then ask me again.",
-                sorted(o.object_id for o in recyclable),
+                sorted(o.object_id for o in members),
             ), ""
         if len(on_board) > 1:
             return _clarify(
-                "There is more than one recyclable object on the board. "
+                f"There is more than one {label} object on the board. "
                 "Which one?",
                 [f"{o.object_id} ({o.cell})" if o.cell else o.object_id
                  for o in on_board],
