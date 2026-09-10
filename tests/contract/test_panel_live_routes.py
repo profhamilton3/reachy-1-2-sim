@@ -262,6 +262,41 @@ def test_a_can_left_in_the_pool_is_not_a_candidate(live):
     c.post(f"/tasks/{task['task_id']}/cancel", {})
 
 
+def test_a_tasks_mode_agrees_with_capabilities(live):
+    """The two must never disagree in the same second.
+
+    `/capabilities` computed the live answer while `GET /tasks/{id}` reported
+    the value fixed at construction, so the badge could read "live execution"
+    while the task it described said "planning_only".
+    """
+    host, link = live
+    link.push({"soda_can": cell_pos(host, "r1c1")})
+    c = Client(host)
+
+    class YesExecutor:
+        def available(self, proposal=None):
+            return True, ""
+
+    saved = camera_server._PANEL.executor
+    camera_server._PANEL.executor = YesExecutor()
+    try:
+        _, caps = c.get("/capabilities")
+        _, task = c.post("/tasks", {"text": "put soda_can on r2c2"})
+        assert caps["capabilities"]["execution_mode"] == "live_simulation"
+        assert task["mode"] == caps["capabilities"]["execution_mode"]
+        assert task["capabilities"]["live_execution"] is True
+        c.post(f"/tasks/{task['task_id']}/cancel", {})
+    finally:
+        camera_server._PANEL.executor = saved
+
+    # And back again once the executor is gone.
+    _, caps = c.get("/capabilities")
+    _, task = c.post("/tasks", {"text": "put soda_can on r2c2"})
+    assert caps["capabilities"]["execution_mode"] == "planning_only"
+    assert task["mode"] == "planning_only"
+    c.post(f"/tasks/{task['task_id']}/cancel", {})
+
+
 def test_camera_and_scene_routes_are_unaffected_by_the_link(live):
     host, link = live
     link.clear()

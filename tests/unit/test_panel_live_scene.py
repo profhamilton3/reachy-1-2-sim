@@ -154,7 +154,10 @@ def test_status_without_a_snapshot_is_not_live():
     assert link.snapshot() is None
     status = link.status
     assert status["live"] is False
-    assert status["state"] == "stopped"
+    # "never_started", not "stopped": the request that lazily builds the panel
+    # also starts the link, so a link that is coming up must not report itself
+    # as one that has been shut down.
+    assert status["state"] == "never_started"
 
 
 def test_the_link_never_sends_anything_but_hello_and_heartbeat_ack():

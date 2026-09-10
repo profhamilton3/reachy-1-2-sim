@@ -230,6 +230,12 @@ class Task:
     # Set once a confirmation has been consumed, so a second one is refused
     # rather than quietly re-applied.
     confirmed_plan_id: str = ""
+    #: Set by cancel() while executing.  The executor reads it at a phase
+    #: boundary; the task is not cancelled until the executor says it stopped.
+    cancel_requested: bool = False
+    #: What the executor observed, when one ran.  Empty otherwise — it is
+    #: evidence, so it exists only when something actually looked.
+    execution_evidence: Dict[str, Any] = field(default_factory=dict)
     question_id: str = ""
     client_request_id: str = ""
     created_at: float = field(default_factory=time.time)
@@ -255,6 +261,8 @@ class Task:
             "question_id": self.question_id,
             "events": [e.as_dict() for e in self.events],
             "proposal": self.proposal.as_dict() if self.proposal else None,
+            "execution_evidence": dict(self.execution_evidence),
+            "cancel_requested": self.cancel_requested,
             "mode": caps.execution_mode,
             "capabilities": caps.as_dict(),
         }
@@ -278,6 +286,7 @@ class TaskCoordinator:
         *,
         capabilities: Optional[Capabilities] = None,
         revalidate: Optional[Callable[[Proposal], Tuple[bool, str]]] = None,
+        executor: Any = None,
         max_workers: int = 2,
         planning_timeout_s: float = PLANNING_TIMEOUT_S,
         task_ttl_s: float = TASK_TTL_S,
@@ -287,6 +296,9 @@ class TaskCoordinator:
         # consumed.  A plan is only worth confirming if it still describes the
         # world, and the world moves on its own here.
         self._revalidate = revalidate
+        # Whatever can actually move the robot, or None.  The coordinator never
+        # decides that a thing is executable — it asks.
+        self._executor = executor
         self._caps = capabilities or Capabilities()
         self._timeout = planning_timeout_s
         self._ttl = task_ttl_s
@@ -445,20 +457,45 @@ class TaskCoordinator:
             task.confirmed_plan_id = plan_id
             task.generation += 1
 
-            # Stage 1 has no executor, and saying anything else here would be a
-            # lie the operator cannot check.  Issue #51 replaces this branch.
-            if not self._caps.live_execution:
+            # Whether anything can move is the executor's answer, not a flag
+            # set here.  Asking it per proposal is what lets the panel say
+            # "nothing can pick from off the board" instead of the useless
+            # "execution unavailable".
+            can_execute, why_not = (
+                self._executor.available(task.proposal) if self._executor
+                else (False, "no execution adapter is installed")
+            )
+
+            if not can_execute:
                 task.state = TaskState.confirmed_no_motion
+                # This sentence is load-bearing and exact: it is the panel's
+                # promise that confirming moved nothing.  The reason goes in
+                # its own turn rather than blurring that line.
                 task.detail = "Plan confirmed; no movement performed."
                 task.add_event(ConversationEvent(
                     role="reachy", text="Plan confirmed; no movement performed."
                 ))
-            else:                                    # pragma: no cover - issue #51
-                task.state = TaskState.executing
-                task.detail = "Executing in simulation."
+                if why_not:
+                    task.add_event(ConversationEvent(
+                        role="reachy", text=f"I did not move because {why_not}."
+                    ))
+                task.touch()
+                self._release_locked(task)
+                return task
 
+            task.state = TaskState.executing
+            task.detail = "Executing in simulation."
+            task.add_event(ConversationEvent(
+                role="reachy", text="Executing in simulation."
+            ))
+            self._queued += 1
+            self._pool.submit(self._run_executor, task.task_id, task.generation,
+                              task.proposal)
+
+            # NOT released here: an executing task is still the session's
+            # active one, so a second command cannot be submitted while the
+            # arm is moving.  The worker releases it when the motion lands.
             task.touch()
-            self._release_locked(task)
             return task
 
     def cancel(self, session_id: str, task_id: str) -> Task:
@@ -467,12 +504,22 @@ class TaskCoordinator:
             task = self._owned_locked(session_id, task_id)
             if task.state in TERMINAL_STATES:
                 return task
-            if task.state is TaskState.executing:    # pragma: no cover - issue #51
-                raise TaskError(
-                    "Cancelling a running motion needs the executor to acknowledge it; "
-                    "that is not implemented yet.",
-                    501, "cancel_unsupported",
-                )
+            if task.state is TaskState.executing:
+                # The arm is moving.  Ask it to stop, and say so — but do NOT
+                # call this cancelled yet.  The executor stops at the next
+                # phase boundary and parks the arm; only when it acknowledges
+                # that does the task become cancelled.  Claiming a motion has
+                # stopped before the thing doing it agrees is the failure mode
+                # the brief names outright.
+                if not task.cancel_requested:
+                    task.cancel_requested = True
+                    task.detail = "Stopping; waiting for the arm to come to rest."
+                    task.add_event(ConversationEvent(
+                        role="reachy",
+                        text="Stopping; waiting for the arm to come to rest.",
+                    ))
+                    task.touch()
+                return task
             task.state = TaskState.cancelled
             task.detail = "Cancelled."
             task.generation += 1                     # abandon in-flight planning
@@ -525,6 +572,55 @@ class TaskCoordinator:
                 return
             self._apply_locked(task, outcome)
 
+    def _run_executor(self, task_id: str, gen: int, proposal: Proposal) -> None:
+        """Worker thread: run the motion, then record what actually happened.
+
+        Progress is written to `detail` rather than added as transcript turns:
+        a pick-and-place reports a dozen phases, and a conversation that filled
+        up with them would bury the exchange that started it.
+        """
+        def should_cancel() -> bool:
+            with self._lock:
+                task = self._tasks.get(task_id)
+                return bool(task and task.cancel_requested)
+
+        def on_phase(name: str) -> None:
+            with self._lock:
+                task = self._tasks.get(task_id)
+                if task is not None and task.generation == gen:
+                    task.detail = f"Executing: {name}."
+                    task.touch()
+
+        try:
+            result = self._executor.execute(
+                proposal, should_cancel=should_cancel, on_phase=on_phase
+            )
+        except Exception as exc:                     # never kill the pool
+            result = _failed_result(
+                f"the executor raised {exc.__class__.__name__}: {exc}"
+            )
+        finally:
+            with self._lock:
+                self._queued = max(0, self._queued - 1)
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.generation != gen:
+                return
+            status = getattr(result, "status", "failed")
+            detail = getattr(result, "detail", "") or ""
+            # Only these three, and only from the executor's own report.  A
+            # task never becomes completed because the trajectory finished.
+            task.state = {
+                "completed": TaskState.completed,
+                "cancelled": TaskState.cancelled,
+            }.get(status, TaskState.failed)
+            task.detail = detail or task.state.value
+            task.execution_evidence = dict(getattr(result, "evidence", None) or {})
+            task.add_event(ConversationEvent(role="reachy", text=task.detail))
+            task.touch()
+            self._release_locked(task)
+
     def _apply_locked(self, task: Task, outcome: PlannerOutcome) -> None:
         if outcome.kind == "clarification":
             task.state = TaskState.needs_clarification
@@ -539,7 +635,16 @@ class TaskCoordinator:
         elif outcome.kind == "proposal" and outcome.proposal is not None:
             proposal = outcome.proposal
             proposal.plan_version = task.version
-            proposal.execution_mode = self._caps.execution_mode
+            # Ask the executor about THIS plan, not the configured default.
+            # It is the same question confirm() will ask, so the card cannot
+            # promise motion that Confirm then declines to perform — or say
+            # "no motion" on a plan that is about to move the arm.
+            can_execute = (
+                self._executor.available(proposal)[0] if self._executor else False
+            )
+            proposal.execution_mode = (
+                "live_simulation" if can_execute else "planning_only"
+            )
             task.proposal = proposal
             task.state = TaskState.awaiting_confirmation
             task.question_id = ""
@@ -589,6 +694,20 @@ class TaskCoordinator:
             self._by_client_req = {
                 k: v for k, v in self._by_client_req.items() if v != tid
             }
+
+
+class _FailedResult:
+    """Stand-in when the executor itself raised, so the caller still gets a shape."""
+
+    status = "failed"
+    evidence: Dict[str, Any] = {}
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+
+
+def _failed_result(detail: str) -> _FailedResult:
+    return _FailedResult(detail)
 
 
 def _clean_text(text: Any) -> str:

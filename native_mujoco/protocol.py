@@ -21,15 +21,20 @@ Message catalogue
 Client → Server:
   hello           version negotiation
   joint_command   set target joint positions (radians)
+  place_object    put a free-joint object on a named grid cell (scene setup)
   scene_load      load a scene document
   reset           reset simulation state
   pause           pause or resume stepping
+  acquire_control take the execution lease
+  release_control give the execution lease back
   heartbeat       liveness check
   heartbeat_ack   reply to server's heartbeat
   disconnect      clean shutdown request
 
 Server → Client:
   hello_ack       confirm connection and capabilities
+  control_ack     result of acquire_control / release_control
+  place_ack       result of place_object
   state           snapshot: joints + object poses + metadata
   camera_frame    one JPEG-encoded camera image
   scene_ack       result of scene_load
@@ -157,6 +162,64 @@ class PlaceAck:
     accepted: bool = False
     placement: Optional[Dict[str, Any]] = None
     sim_step: int = 0
+    error: str = ""
+
+    def encode(self) -> str:
+        return encode(asdict(self))
+
+
+@dataclass
+class AcquireControl:
+    """Client -> server: take the execution lease (R12-810, issue #51).
+
+    WHY THE SERVER HAS TO ARBITRATE
+    -------------------------------
+    While a task is driving the arm, a `place_object` from anywhere teleports
+    an object mid-grasp and a `reset` restarts the world underneath it.  The
+    browser panel talks to this server on its own socket, so disabling a button
+    in one page cannot prevent either — the refusal has to live where every
+    client's message actually arrives.
+
+    `motion_client_id` names the ONE client allowed to send joint_command while
+    the lease is held.  It is usually not the acquirer: the panel's coordinator
+    holds the lease but motion reaches the simulator through the Docker core's
+    SDK bridge, which is a different connection.  Naming the mover rather than
+    assuming it is the acquirer is what makes that arrangement expressible.
+
+    `ttl_s` bounds the damage from a holder that wedges or vanishes without a
+    clean disconnect: an expired lease is released and the simulator is usable
+    again without restarting it.
+    """
+    type: str = field(default="acquire_control", init=False)
+    client_id: str = ""
+    motion_client_id: str = ""
+    reason: str = ""
+    ttl_s: float = 120.0
+    request_id: str = ""
+
+    def encode(self) -> str:
+        return encode(asdict(self))
+
+
+@dataclass
+class ReleaseControl:
+    type: str = field(default="release_control", init=False)
+    request_id: str = ""
+
+    def encode(self) -> str:
+        return encode(asdict(self))
+
+
+@dataclass
+class ControlAck:
+    """Server -> client: whether the lease is yours, and who holds it if not."""
+    type: str = field(default="control_ack", init=False)
+    request_id: str = ""
+    granted: bool = False
+    held: bool = False              # is a lease held at all, by anyone
+    holder: str = ""                # client_id of the holder
+    motion_client_id: str = ""
+    expires_in_s: float = 0.0
     error: str = ""
 
     def encode(self) -> str:
@@ -358,13 +421,14 @@ class Shutdown:
 # ---------------------------------------------------------------------------
 
 _CLIENT_TYPES = {
-    "hello", "joint_command", "scene_load",
+    "hello", "joint_command", "scene_load", "place_object",
     "reset", "pause", "heartbeat", "heartbeat_ack", "disconnect",
-    "zoom_command",
+    "zoom_command", "acquire_control", "release_control",
 }
 _SERVER_TYPES = {
-    "hello_ack", "state", "camera_frame", "scene_ack",
+    "hello_ack", "state", "camera_frame", "scene_ack", "place_ack",
     "reset_ack", "heartbeat", "heartbeat_ack", "error", "shutdown",
+    "control_ack",
 }
 
 
