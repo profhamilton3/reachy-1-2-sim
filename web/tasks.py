@@ -1,0 +1,569 @@
+"""Task coordinator for the browser panel's "Talk to Reachy" card (issue #49).
+
+Owns the conversation and task lifecycle that sits behind the same-origin HTTP
+routes in camera_server.py.  Deliberately stdlib-only: this module runs inside
+the Docker compatibility container next to the camera page, which the
+container's supervisord starts with a bare `python3` and no extra wheels.
+
+WHAT THIS IS NOT
+----------------
+It does not move the robot and it does not talk to the simulator.  Stage 1 is
+planning-only by construction: `confirm` lands a task in `confirmed_no_motion`
+and nothing else happens.  A live executor arrives in issue #51 and announces
+itself through `Capabilities`, so the browser only ever shows execution
+controls that something can actually service.
+
+WHY A GENERATION COUNTER
+------------------------
+Planning runs on a worker thread and a planner can be slow or wedged.  A reply,
+a cancel, or a planning timeout therefore has to be able to abandon an
+in-flight job whose thread cannot be killed.  Each of those bumps
+`Task.generation`, and a worker result is applied only when the generation it
+captured at submit time still matches.  A late answer to a superseded question
+is dropped rather than reviving a cancelled task or overwriting a newer one.
+
+WHY VERSIONS ARE SEPARATE FROM GENERATIONS
+------------------------------------------
+`generation` guards worker results; `version` guards the browser.  Every state
+transition bumps `version`, and a proposal records the version it was built at
+as `plan_version`.  Confirming quotes both the plan id and that version, so a
+Confirm click that was rendered before some other change cannot be applied
+afterwards.  Two ids because they answer different questions: one is "is this
+worker's answer still wanted", the other is "is the button the human clicked
+still describing the world".
+"""
+
+from __future__ import annotations
+
+import secrets
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
+
+# ---------------------------------------------------------------------------
+# Limits.  All bounded on purpose — an unbounded queue or transcript in a
+# long-lived container is a slow leak nobody watches.
+# ---------------------------------------------------------------------------
+
+MAX_TEXT_CHARS = 2000          # one message; the HTTP layer caps the body too
+MAX_EVENTS = 40                # transcript entries retained per task
+MAX_TASKS = 200                # total tasks retained before oldest are dropped
+PLANNING_TIMEOUT_S = 20.0      # a planner slower than this is declared failed
+TASK_TTL_S = 30 * 60           # idle task lifetime before it expires
+MAX_QUEUED_JOBS = 8            # backpressure: refuse rather than pile up
+
+
+class TaskState(str, Enum):
+    planning = "planning"
+    needs_clarification = "needs_clarification"
+    awaiting_confirmation = "awaiting_confirmation"
+    confirmed_no_motion = "confirmed_no_motion"
+    executing = "executing"
+    completed = "completed"
+    cancelled = "cancelled"
+    failed = "failed"
+    expired = "expired"
+
+
+#: States from which no further transition is possible.
+TERMINAL_STATES = frozenset({
+    TaskState.confirmed_no_motion,
+    TaskState.completed,
+    TaskState.cancelled,
+    TaskState.failed,
+    TaskState.expired,
+})
+
+#: States that still count against a session's one-active-task budget.
+ACTIVE_STATES = frozenset({
+    TaskState.planning,
+    TaskState.needs_clarification,
+    TaskState.awaiting_confirmation,
+    TaskState.executing,
+})
+
+
+class TaskError(Exception):
+    """A request the coordinator refuses, carrying the HTTP status to use."""
+
+    def __init__(self, message: str, status: int = 400, code: str = "bad_request"):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.code = code
+
+
+# ---------------------------------------------------------------------------
+# Conversation and proposals
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ConversationEvent:
+    """One turn in the transcript.  `text` is always plain text, never markup."""
+
+    role: str                  # "user" | "reachy"
+    text: str
+    at: float = field(default_factory=time.time)
+    # Set on a reachy turn that asks something.  A reply must quote it, so an
+    # answer typed against a stale question cannot be applied to a new one.
+    question_id: str = ""
+    choices: List[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        d = {"role": self.role, "text": self.text, "at": round(self.at, 3)}
+        if self.question_id:
+            d["question_id"] = self.question_id
+            d["choices"] = list(self.choices)
+        return d
+
+
+@dataclass
+class Proposal:
+    """A validated, confirmable action.
+
+    Stage 2 (issue #50) adds the destination reference, semantic-source label,
+    scene identity and state evidence.  The fields that exist here are the ones
+    stage 1 can populate honestly; nothing is invented to fill the shape.
+    """
+
+    plan_id: str
+    plan_version: int
+    task_type: str
+    target_id: str
+    destination: str
+    brief_reason: str
+    requires_confirmation: bool = True
+    execution_mode: str = "planning_only"
+    semantic_source: str = "scene_data"
+    scene_name: str = ""
+    summary: str = ""
+
+    def as_dict(self) -> dict:
+        return {
+            "plan_id": self.plan_id,
+            "plan_version": self.plan_version,
+            "task_type": self.task_type,
+            "target_id": self.target_id,
+            "destination": self.destination,
+            "brief_reason": self.brief_reason,
+            "requires_confirmation": self.requires_confirmation,
+            "execution_mode": self.execution_mode,
+            "semantic_source": self.semantic_source,
+            "scene_name": self.scene_name,
+            "summary": self.summary,
+        }
+
+
+@dataclass
+class PlannerOutcome:
+    """What a planner may return.  Anything else is a programming error."""
+
+    kind: str                       # "clarification" | "proposal" | "unsupported"
+    message: str = ""
+    choices: List[str] = field(default_factory=list)
+    proposal: Optional[Proposal] = None
+
+
+@dataclass
+class PlannerRequest:
+    text: str
+    history: List[ConversationEvent]
+
+
+Planner = Callable[[PlannerRequest], PlannerOutcome]
+
+
+@dataclass
+class Capabilities:
+    """What the server can actually do, so the UI never offers more.
+
+    `live_execution` stays False until issue #51 lands a validated executor.
+    The panel keys its Confirm-button wording off this rather than assuming.
+    """
+
+    live_execution: bool = False
+    execution_mode: str = "planning_only"
+    semantic_source: str = "scene_data"
+    max_text_chars: int = MAX_TEXT_CHARS
+
+    def as_dict(self) -> dict:
+        return {
+            "live_execution": self.live_execution,
+            "execution_mode": self.execution_mode,
+            "semantic_source": self.semantic_source,
+            "max_text_chars": self.max_text_chars,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Task
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Task:
+    task_id: str
+    session_id: str
+    state: TaskState = TaskState.planning
+    version: int = 1
+    generation: int = 1
+    events: List[ConversationEvent] = field(default_factory=list)
+    proposal: Optional[Proposal] = None
+    # Set once a confirmation has been consumed, so a second one is refused
+    # rather than quietly re-applied.
+    confirmed_plan_id: str = ""
+    question_id: str = ""
+    client_request_id: str = ""
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    deadline: float = 0.0
+    detail: str = ""
+
+    def touch(self) -> None:
+        self.version += 1
+        self.updated_at = time.time()
+
+    def add_event(self, ev: ConversationEvent) -> None:
+        self.events.append(ev)
+        while len(self.events) > MAX_EVENTS:
+            self.events.pop(0)
+
+    def as_dict(self, caps: Capabilities) -> dict:
+        return {
+            "task_id": self.task_id,
+            "state": self.state.value,
+            "version": self.version,
+            "detail": self.detail,
+            "question_id": self.question_id,
+            "events": [e.as_dict() for e in self.events],
+            "proposal": self.proposal.as_dict() if self.proposal else None,
+            "mode": caps.execution_mode,
+            "capabilities": caps.as_dict(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Coordinator
+# ---------------------------------------------------------------------------
+
+class TaskCoordinator:
+    """Owns tasks, sessions, and the worker pool that runs planning.
+
+    Every public method takes the caller's `session_id` and refuses to touch a
+    task owned by anyone else — with 404 rather than 403, so one session cannot
+    probe another's task ids.
+    """
+
+    def __init__(
+        self,
+        planner: Planner,
+        *,
+        capabilities: Optional[Capabilities] = None,
+        max_workers: int = 2,
+        planning_timeout_s: float = PLANNING_TIMEOUT_S,
+        task_ttl_s: float = TASK_TTL_S,
+    ) -> None:
+        self._planner = planner
+        self._caps = capabilities or Capabilities()
+        self._timeout = planning_timeout_s
+        self._ttl = task_ttl_s
+        self._lock = threading.RLock()
+        self._tasks: Dict[str, Task] = {}
+        self._by_session: Dict[str, str] = {}          # session -> active task id
+        self._by_client_req: Dict[str, str] = {}       # session+crid -> task id
+        self._queued = 0
+        self._pool = ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="panel-planner"
+        )
+
+    # -- lifecycle ---------------------------------------------------------
+
+    @property
+    def capabilities(self) -> Capabilities:
+        return self._caps
+
+    def shutdown(self) -> None:
+        self._pool.shutdown(wait=False)
+
+    @staticmethod
+    def new_session_id() -> str:
+        return secrets.token_urlsafe(24)
+
+    # -- public API --------------------------------------------------------
+
+    def submit(self, session_id: str, text: str, client_request_id: str = "") -> Task:
+        """Validate, create a task, and queue planning.  Never blocks on the planner."""
+        text = _clean_text(text)
+        if not text:
+            raise TaskError("Type a command first.", 400, "empty_text")
+        if len(text) > MAX_TEXT_CHARS:
+            raise TaskError(
+                f"That message is {len(text)} characters; the limit is {MAX_TEXT_CHARS}.",
+                413, "text_too_long",
+            )
+
+        with self._lock:
+            self._sweep_locked()
+
+            # A retried POST (double click, flaky network) must not open a
+            # second task.  Same session + same client id returns the original.
+            crid_key = f"{session_id}:{client_request_id}"
+            if client_request_id and crid_key in self._by_client_req:
+                existing = self._tasks.get(self._by_client_req[crid_key])
+                if existing is not None:
+                    return existing
+
+            active_id = self._by_session.get(session_id)
+            if active_id:
+                active = self._tasks.get(active_id)
+                if active is not None and active.state in ACTIVE_STATES:
+                    raise TaskError(
+                        "One task at a time. Finish or cancel the current one first.",
+                        409, "task_in_progress",
+                    )
+
+            if self._queued >= MAX_QUEUED_JOBS:
+                raise TaskError(
+                    "The planner is busy. Try again in a moment.", 503, "planner_busy"
+                )
+
+            task = Task(task_id=uuid.uuid4().hex, session_id=session_id)
+            task.client_request_id = client_request_id
+            task.add_event(ConversationEvent(role="user", text=text))
+            task.deadline = time.time() + self._timeout
+            self._tasks[task.task_id] = task
+            self._by_session[session_id] = task.task_id
+            if client_request_id:
+                self._by_client_req[crid_key] = task.task_id
+            self._trim_locked()
+            self._queue_locked(task, text)
+            return task
+
+    def get(self, session_id: str, task_id: str) -> Task:
+        with self._lock:
+            self._sweep_locked()
+            return self._owned_locked(session_id, task_id)
+
+    def reply(self, session_id: str, task_id: str, question_id: str, text: str) -> Task:
+        """Answer the *current* question.  A stale question_id is refused."""
+        text = _clean_text(text)
+        if not text:
+            raise TaskError("Type an answer first.", 400, "empty_text")
+        if len(text) > MAX_TEXT_CHARS:
+            raise TaskError(
+                f"That message is {len(text)} characters; the limit is {MAX_TEXT_CHARS}.",
+                413, "text_too_long",
+            )
+
+        with self._lock:
+            self._sweep_locked()
+            task = self._owned_locked(session_id, task_id)
+            if task.state is not TaskState.needs_clarification:
+                raise TaskError(
+                    f"This task is not waiting for an answer (state: {task.state.value}).",
+                    409, "not_awaiting_reply",
+                )
+            if question_id != task.question_id:
+                raise TaskError(
+                    "That answer was for an earlier question. Read the latest one and answer again.",
+                    409, "stale_question",
+                )
+
+            task.add_event(ConversationEvent(role="user", text=text))
+            task.state = TaskState.planning
+            task.question_id = ""
+            task.detail = ""
+            task.generation += 1          # abandon anything still in flight
+            task.deadline = time.time() + self._timeout
+            task.touch()
+            self._queue_locked(task, text)
+            return task
+
+    def confirm(self, session_id: str, task_id: str, plan_id: str, plan_version: int) -> Task:
+        """Consume a confirmation exactly once, for exactly this plan."""
+        with self._lock:
+            self._sweep_locked()
+            task = self._owned_locked(session_id, task_id)
+
+            if task.confirmed_plan_id:
+                raise TaskError(
+                    "This plan was already confirmed.", 409, "already_confirmed"
+                )
+            if task.state is not TaskState.awaiting_confirmation or task.proposal is None:
+                raise TaskError(
+                    f"There is no plan awaiting confirmation (state: {task.state.value}).",
+                    409, "not_awaiting_confirmation",
+                )
+            if plan_id != task.proposal.plan_id:
+                raise TaskError(
+                    "That confirmation is for a different plan.", 409, "plan_mismatch"
+                )
+            if plan_version != task.proposal.plan_version:
+                raise TaskError(
+                    "The plan changed since that button was drawn. Review the current plan and confirm again.",
+                    409, "stale_plan_version",
+                )
+
+            task.confirmed_plan_id = plan_id
+            task.generation += 1
+
+            # Stage 1 has no executor, and saying anything else here would be a
+            # lie the operator cannot check.  Issue #51 replaces this branch.
+            if not self._caps.live_execution:
+                task.state = TaskState.confirmed_no_motion
+                task.detail = "Plan confirmed; no movement performed."
+                task.add_event(ConversationEvent(
+                    role="reachy", text="Plan confirmed; no movement performed."
+                ))
+            else:                                    # pragma: no cover - issue #51
+                task.state = TaskState.executing
+                task.detail = "Executing in simulation."
+
+            task.touch()
+            self._release_locked(task)
+            return task
+
+    def cancel(self, session_id: str, task_id: str) -> Task:
+        with self._lock:
+            self._sweep_locked()
+            task = self._owned_locked(session_id, task_id)
+            if task.state in TERMINAL_STATES:
+                return task
+            if task.state is TaskState.executing:    # pragma: no cover - issue #51
+                raise TaskError(
+                    "Cancelling a running motion needs the executor to acknowledge it; "
+                    "that is not implemented yet.",
+                    501, "cancel_unsupported",
+                )
+            task.state = TaskState.cancelled
+            task.detail = "Cancelled."
+            task.generation += 1                     # abandon in-flight planning
+            task.proposal = None
+            task.question_id = ""
+            task.add_event(ConversationEvent(role="reachy", text="Cancelled."))
+            task.touch()
+            self._release_locked(task)
+            return task
+
+    # -- internals ---------------------------------------------------------
+
+    def _owned_locked(self, session_id: str, task_id: str) -> Task:
+        task = self._tasks.get(task_id)
+        # 404 for both "gone" and "someone else's": a different status would
+        # let one session confirm the existence of another's task.
+        if task is None or task.session_id != session_id:
+            raise TaskError("No such task.", 404, "not_found")
+        return task
+
+    def _release_locked(self, task: Task) -> None:
+        if self._by_session.get(task.session_id) == task.task_id:
+            del self._by_session[task.session_id]
+
+    def _queue_locked(self, task: Task, text: str) -> None:
+        gen = task.generation
+        history = list(task.events)
+        self._queued += 1
+        self._pool.submit(self._run_planner, task.task_id, gen, text, history)
+
+    def _run_planner(self, task_id: str, gen: int, text: str, history: List[ConversationEvent]) -> None:
+        """Worker thread.  Runs the planner off the request path, then applies
+        the result only if it is still wanted."""
+        try:
+            outcome = self._planner(PlannerRequest(text=text, history=history))
+        except Exception as exc:                     # a planner must not kill the pool
+            outcome = PlannerOutcome(
+                kind="unsupported",
+                message=f"The planner failed: {exc.__class__.__name__}.",
+            )
+        finally:
+            with self._lock:
+                self._queued = max(0, self._queued - 1)
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.generation != gen:
+                return                               # superseded, cancelled, or timed out
+            if task.state is not TaskState.planning:
+                return
+            self._apply_locked(task, outcome)
+
+    def _apply_locked(self, task: Task, outcome: PlannerOutcome) -> None:
+        if outcome.kind == "clarification":
+            task.state = TaskState.needs_clarification
+            task.question_id = f"{task.task_id}:{task.version}"
+            task.detail = ""
+            task.add_event(ConversationEvent(
+                role="reachy",
+                text=outcome.message,
+                question_id=task.question_id,
+                choices=list(outcome.choices),
+            ))
+        elif outcome.kind == "proposal" and outcome.proposal is not None:
+            proposal = outcome.proposal
+            proposal.plan_version = task.version
+            proposal.execution_mode = self._caps.execution_mode
+            task.proposal = proposal
+            task.state = TaskState.awaiting_confirmation
+            task.question_id = ""
+            task.detail = ""
+            if outcome.message:
+                task.add_event(ConversationEvent(role="reachy", text=outcome.message))
+        else:
+            task.state = TaskState.failed
+            task.detail = outcome.message or "That request is not supported."
+            task.add_event(ConversationEvent(role="reachy", text=task.detail))
+            self._release_locked(task)
+        task.touch()
+
+    def _sweep_locked(self) -> None:
+        """Fail timed-out planning and expire idle tasks.
+
+        Called on every request rather than from a timer thread: the container
+        has few clients, and a sweep that only runs when someone is looking is
+        one less thread to shut down cleanly.
+        """
+        now = time.time()
+        for task in self._tasks.values():
+            if task.state is TaskState.planning and task.deadline and now > task.deadline:
+                task.state = TaskState.failed
+                task.detail = "The planner did not answer in time."
+                task.generation += 1                 # discard the late result
+                task.add_event(ConversationEvent(role="reachy", text=task.detail))
+                task.touch()
+                self._release_locked(task)
+            elif task.state not in TERMINAL_STATES and now - task.updated_at > self._ttl:
+                task.state = TaskState.expired
+                task.detail = "This task expired after being idle."
+                task.generation += 1
+                task.touch()
+                self._release_locked(task)
+
+    def _trim_locked(self) -> None:
+        if len(self._tasks) <= MAX_TASKS:
+            return
+        for tid, _ in sorted(self._tasks.items(), key=lambda kv: kv[1].updated_at):
+            if len(self._tasks) <= MAX_TASKS:
+                break
+            task = self._tasks[tid]
+            if task.state in ACTIVE_STATES:
+                continue
+            del self._tasks[tid]
+            self._by_client_req = {
+                k: v for k, v in self._by_client_req.items() if v != tid
+            }
+
+
+def _clean_text(text: Any) -> str:
+    """Trim, and drop control characters that would corrupt a transcript line.
+
+    Tabs and newlines survive because the input is multiline on purpose.
+    Nothing here is HTML escaping — the browser renders every turn with
+    textContent, so escaping at this layer would only double-encode.
+    """
+    if not isinstance(text, str):
+        return ""
+    kept = [c for c in text if c in "\t\n" or ord(c) >= 32]
+    return "".join(kept).strip()
