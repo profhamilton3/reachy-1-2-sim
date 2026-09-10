@@ -27,6 +27,7 @@ import json
 from dataclasses import replace
 from typing import Any, Callable, Dict, Optional, Tuple
 
+import panel_abilities
 from panel_planner import DeterministicPlanner, LiveProposalValidator
 from tasks import Capabilities, TaskCoordinator, TaskError
 
@@ -50,14 +51,19 @@ class PanelRoutes:
         self.capabilities = capabilities or Capabilities()
         self.link = link
         self.executor = executor
+        planner = DeterministicPlanner(scene_provider)
         self.coordinator = TaskCoordinator(
-            DeterministicPlanner(scene_provider),
+            planner,
             capabilities=self.capabilities,
             # The validator reads the scene fresh, so it sees the board as it
             # is at the moment Confirm is pressed rather than as it was when
             # the plan was drawn.
             revalidate=LiveProposalValidator(scene_provider),
             executor=executor,
+            # A greeting is answered without becoming the session's one active
+            # task, so typing "Hello" while a plan waits for confirmation
+            # neither replaces the plan nor is refused as a second task.
+            aside=planner.aside,
         )
 
     def _effective_capabilities(self) -> Tuple[Capabilities, bool, str]:
@@ -96,6 +102,12 @@ class PanelRoutes:
         )
         payload["capabilities"]["live_scene"] = bool(payload["sim_link"]["live"])
         payload["execution"] = {"available": can_execute, "detail": why_not}
+        # Served rather than duplicated in the page's JavaScript (#61).  A
+        # browser holding its own copy of the alias list eventually offers an
+        # ability this server has never heard of, which is worse than offering
+        # nothing: the operator types it, waits, and is told it was not
+        # understood by the one component that was supposed to know.
+        payload["abilities"] = panel_abilities.describe_all()
         return payload
 
     # -- helpers -----------------------------------------------------------

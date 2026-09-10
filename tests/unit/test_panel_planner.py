@@ -60,15 +60,24 @@ def make_scene(*, destinations=False, live=False, unreachable=("r3c1", "r3c2"),
 
 
 def plan(scene, text, answers=()):
-    """Run the planner over an opening command plus any clarification answers."""
+    """Replay a conversation the way the coordinator does.
+
+    Each answer is preceded by the question the planner ACTUALLY asked — its
+    slot included — rather than a stand-in event.  Inventing the question would
+    leave every answer slotless, which exercises the fallback in
+    `_apply_answers` and never touches the slot routing that #59 added.
+    """
+    planner = DeterministicPlanner(lambda: scene)
     history = [ConversationEvent(role="user", text=text)]
+    out = planner(PlannerRequest(text=text, history=history))
     for a in answers:
-        history.append(ConversationEvent(role="reachy", text="?", question_id="q"))
+        history.append(ConversationEvent(
+            role="reachy", text=out.message, question_id="q",
+            choices=list(out.choices), slot=out.slot,
+        ))
         history.append(ConversationEvent(role="user", text=a))
-    latest = answers[-1] if answers else text
-    return DeterministicPlanner(lambda: scene)(
-        PlannerRequest(text=latest, history=history)
-    )
+        out = planner(PlannerRequest(text=a, history=history))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +369,90 @@ def test_an_answer_naming_a_cell_is_not_mistaken_for_an_object():
     out = plan(make_scene(), "put soda_can", answers=["r2c2"])
     assert out.kind == "proposal"
     assert out.proposal.target_id == "soda_can"
+    assert out.proposal.destination == "cell:r2c2"
+
+
+# ---------------------------------------------------------------------------
+# The answer goes to the slot that was asked about (issue #59)
+#
+# A cell that EXISTS but was rejected — occupied, or out of reach — used to
+# read as a resolved destination, so the slot the planner had just asked about
+# counted as filled and the answer fell through to the target.  The reply was
+# then about not knowing an object called "r1c1".
+# ---------------------------------------------------------------------------
+
+def test_a_new_cell_answering_an_occupied_cell_becomes_the_destination():
+    scene = make_scene(occupant=("r2c2", "foam_block"))
+    first = plan(scene, "put soda_can on r2c2")
+    assert first.kind == "clarification"
+    assert "already occupied" in first.message
+    assert first.slot == "which_cell"
+
+    out = plan(scene, "put soda_can on r2c2", answers=["r1c1"])
+    assert out.kind == "proposal", out.message
+    assert out.proposal.target_id == "soda_can"
+    assert out.proposal.destination == "cell:r1c1"
+
+
+def test_a_new_cell_answering_an_unreachable_cell_becomes_the_destination():
+    scene = make_scene()
+    first = plan(scene, "put soda_can on r3c1")
+    assert first.kind == "clarification"
+    assert "out of the right arm's reach" in first.message
+    assert first.slot == "which_cell"
+
+    out = plan(scene, "put soda_can on r3c1", answers=["r1c1"])
+    assert out.kind == "proposal", out.message
+    assert out.proposal.destination == "cell:r1c1"
+
+
+def test_an_answer_to_which_object_still_fills_the_target():
+    scene = make_scene()
+    first = plan(scene, "put the widget on r2c2")
+    assert first.kind == "clarification"
+    assert first.slot == "which_object"
+
+    out = plan(scene, "put the widget on r2c2", answers=["soda_can"])
+    assert out.kind == "proposal", out.message
+    assert out.proposal.target_id == "soda_can"
+    assert out.proposal.destination == "cell:r2c2"
+
+
+def test_every_clarification_names_a_slot():
+    """A question with no slot sends its answer back to the guessing path."""
+    scene = make_scene(live=True)
+    asked = [
+        plan(scene, "put soda_can"),                       # no destination
+        plan(scene, "put soda_can on r9c9"),               # no such cell
+        plan(scene, "put soda_can on r3c1"),               # unreachable
+        plan(make_scene(occupant=("r2c2", "foam_block")),
+             "put soda_can on r2c2"),                      # occupied
+        plan(scene, "put soda_can on the shelf"),          # unknown destination
+        plan(scene, "put soda_can in the bin"),            # no bin in scene
+        plan(scene, "put the widget on r2c2"),             # unknown object
+        plan(make_scene(), "put the recycle item on r2c2"),  # not live yet
+    ]
+    for out in asked:
+        assert out.kind == "clarification", out.message
+        assert out.slot in ("which_cell", "which_object"), out.message
+
+
+def test_a_slotless_answer_is_still_placed_by_shape():
+    """Transcripts written before slots existed must keep working.
+
+    The coordinator replays whatever the task already holds, so an in-flight
+    conversation across a restart can carry questions with no slot on them.
+    """
+    from panel_planner import DeterministicPlanner as _P
+    scene = make_scene()
+    history = [
+        ConversationEvent(role="user", text="put soda_can"),
+        ConversationEvent(role="reachy", text="Where should it go?",
+                          question_id="q", choices=["r2c2"]),   # no slot
+        ConversationEvent(role="user", text="r2c2"),
+    ]
+    out = _P(lambda: scene)(PlannerRequest(text="r2c2", history=history))
+    assert out.kind == "proposal"
     assert out.proposal.destination == "cell:r2c2"
 
 

@@ -39,8 +39,10 @@ import math
 import re
 import uuid
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+import panel_abilities as abilities
+from panel_abilities import AbilityRefusal
 from panel_scene import (NON_RECYCLABLE_TAG, RECYCLABLE_TAG, DestinationRef,
                          SceneView)
 from tasks import ConversationEvent, PlannerOutcome, PlannerRequest, Proposal
@@ -176,13 +178,40 @@ def _is_bin_phrase(phrase: str) -> bool:
     return any(re.search(rf"\b{w}\b", norm) for w in _BIN_WORDS)
 
 
-def _clarify(message: str, choices: Optional[List[str]] = None) -> PlannerOutcome:
+#: Slot names, from the registry so a clarification here and an ability there
+#: cannot drift into naming the same slot differently.
+SLOT_CELL = abilities.SLOT_CELL
+SLOT_OBJECT = abilities.SLOT_OBJECT
+SLOT_ARM = abilities.SLOT_ARM
+SLOT_POSTURE = abilities.SLOT_POSTURE
+
+
+def _clarify(message: str, choices: Optional[List[str]] = None,
+             slot: str = "") -> PlannerOutcome:
     return PlannerOutcome(kind="clarification", message=message,
-                          choices=list(choices or []))
+                          choices=list(choices or []), slot=slot)
 
 
 def _unsupported(message: str) -> PlannerOutcome:
     return PlannerOutcome(kind="unsupported", message=message)
+
+
+def _reply(message: str) -> PlannerOutcome:
+    """A successful answer with nothing to do.
+
+    Distinct from `_unsupported` with friendly wording: the panel shows a
+    failed task in red, and a greeting is not a failure.
+    """
+    return PlannerOutcome(kind="reply", message=message)
+
+
+#: What "Hello" gets back.  It says what this panel can actually do rather
+#: than making conversation about what it might: an opening line that implies
+#: abilities the server does not have is the same false claim as a proposal
+#: that cannot be executed, just earlier.
+GREETING = ("Hello. I can move objects between the grid cells on the board — "
+            "tell me which object and which cell, and I will plan it and show "
+            "you the plan before anything moves.")
 
 
 class DeterministicPlanner:
@@ -197,17 +226,35 @@ class DeterministicPlanner:
         self._scene_provider = scene_provider
 
     def __call__(self, request: PlannerRequest) -> PlannerOutcome:
-        scene = self._scene_provider()
-        if scene.error:
-            return _unsupported(f"I cannot read the scene right now: {scene.error}")
-
         command, answers = _split_history(request.history, request.text)
-        if _JOINT_RE.search(command) or any(_JOINT_RE.search(a) for a in answers):
+        if _JOINT_RE.search(command) or any(_JOINT_RE.search(a)
+                                            for _, a in answers):
             return _unsupported(
                 "I do not accept joint angles or joint names. Ask for a task — "
                 "which object, and where it should go — and the motion layer "
                 "works out the angles."
             )
+
+        # A NEW COMMAND is not an answer.  "Which cell?" followed by "stow your
+        # arm" is a change of mind, and folding it into the open slot would
+        # store "stow your arm" as a cell name and then complain it is not one.
+        # Whichever the operator typed last wins, and the earlier answers go
+        # with the request they were answering.
+        if answers and _is_a_command(answers[-1][1]):
+            command, answers = answers[-1][1], []
+
+        # Abilities are matched BEFORE the pick-and-place grammar, because two
+        # of them open with a pick-and-place verb: "put your arm away" and
+        # "place your forearm on the table".  Left to the old order they parse
+        # as a move with "your arm" for a target, and the panel answers that it
+        # does not know an object by that name.
+        ability = self._ability_outcome(command, answers)
+        if ability is not None:
+            return ability
+
+        scene = self._scene_provider()
+        if scene.error:
+            return _unsupported(f"I cannot read the scene right now: {scene.error}")
 
         intent = parse_intent(command)
         if intent is None:
@@ -226,6 +273,180 @@ class DeterministicPlanner:
 
         return self._propose(scene, target_id, destination)
 
+    def aside(self, text: str) -> Optional[PlannerOutcome]:
+        """Answer a message that needs no task, or None.
+
+        Called by the coordinator before it creates anything, so it must be
+        cheap and must not touch the board — which is exactly the property
+        that lets a greeting be answered while the simulator is down.  Only
+        abilities the registry marks as needing neither scene nor motion
+        qualify; everything else is a task.
+        """
+        try:
+            match = abilities.match(text)
+        except AbilityRefusal:
+            return None          # a refusal is a task's answer, not an aside
+        if match is None or not match.ability:
+            return None
+        if match.ability.needs_scene or match.ability.needs_motion:
+            return None
+        if match.name == "greet":
+            return _reply(GREETING)
+        return None
+
+    # -- abilities ---------------------------------------------------------
+
+    def _ability_outcome(self, command: str,
+                         answers: List[Tuple[str, str]]) -> Optional[PlannerOutcome]:
+        """Answer a non-pick-and-place request, or None to fall through.
+
+        Everything an ability can answer WITHOUT the board happens here:
+        greetings, refusals, the arm question and the rest/stow ambiguity.
+        What needs the board — is that cell real, is that object on it —
+        belongs to `_ability_proposal`, which reads the scene once and only
+        for abilities whose registry entry says they need it.
+        """
+        try:
+            match = abilities.match(command)
+        except AbilityRefusal as exc:
+            return _unsupported(exc.message)
+        if match is None:
+            return None
+
+        if match.name == "greet":
+            # Answered here as well as through `aside`, so a greeting still
+            # works if the coordinator was built without that hook — and so
+            # there is one definition of what a greeting says.
+            return _reply(GREETING)
+
+        given = {slot: text for slot, text in answers if slot}
+
+        if match.ambiguous_between:
+            resolved = _posture_answer(given.get(SLOT_POSTURE, ""))
+            if resolved is None:
+                return _clarify(
+                    "\"Rest\" can mean two different places, and they are "
+                    "eleven waypoints apart: my forearm supported on the "
+                    "tabletop, or my arm stored back in the rail pocket. "
+                    "Which did you mean?",
+                    ["on the table", "in the rail pocket"],
+                    SLOT_POSTURE,
+                )
+            match.name = resolved
+            match.ability = abilities.REGISTRY[resolved]
+            match.ambiguous_between = ()
+
+        ability = match.ability
+        if ability.arm_specific and match.arm != abilities.DEFAULT_ARM:
+            # The corridor in tlh_motion-routine.ipynb was measured for the
+            # right arm through a rig that is not symmetric.  Mirroring it is
+            # an assumption about geometry, not a translation.
+            return _unsupported(
+                f"I can only {ability.summary} with my right arm. The route "
+                "was measured for that arm through a rig that is not "
+                "symmetric, so I will not mirror it without validating it."
+            )
+
+        if SLOT_CELL in ability.slots and SLOT_CELL not in match.slots:
+            cell = given.get(SLOT_CELL, "")
+            if not cell:
+                scene = self._scene_provider()
+                choices = [] if scene.error else scene.reachable_cells()
+                return _clarify("Which cell should I point to?", choices,
+                                SLOT_CELL)
+            match.slots[SLOT_CELL] = cell
+
+        if SLOT_OBJECT in ability.slots and SLOT_OBJECT not in match.slots:
+            obj = given.get(SLOT_OBJECT, "")
+            if not obj:
+                scene = self._scene_provider()
+                choices = [] if scene.error else sorted(scene.objects)
+                return _clarify("Which object should I point to?", choices,
+                                SLOT_OBJECT)
+            match.slots[SLOT_OBJECT] = obj
+
+        return self._ability_proposal(match)
+
+    def _ability_proposal(self, match) -> PlannerOutcome:
+        """A confirmable plan for an ability, with only the arguments it has.
+
+        No placeholders.  A wave carries no target and no destination, and the
+        card, the revalidator and the executor all read that absence as the
+        answer it is.
+        """
+        ability = match.ability
+        cell = match.slots.get(SLOT_CELL) or None
+        obj = match.slots.get(SLOT_OBJECT) or None
+        # An ability with a cell or an object to check needs the board to check
+        # it against, whatever its registry entry says.  Deriving that here
+        # rather than trusting `needs_scene` alone means a future ability that
+        # sets one and forgets the other gets a scene rather than an
+        # AttributeError on `scene.cells`.
+        if ability.needs_scene or cell is not None or obj is not None:
+            scene = self._scene_provider()
+            if scene.error:
+                return _unsupported(
+                    f"I cannot read the scene right now: {scene.error}")
+        else:
+            scene = None
+
+        summary = ability.summary
+        if cell is not None:
+            # Pointing is a hover, so an occupied cell is fine — the object is
+            # what gets hovered over.  Reusing pick-and-place's empty-cell rule
+            # here would refuse the most natural request in a populated scene.
+            if cell not in scene.cells:
+                return _clarify(
+                    f"There is no cell called {cell} in this scene. "
+                    "Pick one of these.", scene.reachable_cells(), SLOT_CELL)
+            if not scene.cells[cell].reachable:
+                return _clarify(
+                    f"{cell} was measured out of the right arm's reach, so I "
+                    "cannot point at it. Pick another cell.",
+                    scene.reachable_cells(), SLOT_CELL)
+            summary = f"{summary} {cell}"
+
+        if obj is not None:
+            oid = _match_object_id(obj, scene)
+            if oid is None:
+                return _clarify(
+                    f"I do not know an object called \"{obj}\". "
+                    "These are the objects in this scene.",
+                    sorted(scene.objects), SLOT_OBJECT)
+            if scene.objects[oid].on_board is False:
+                # In the pool, not on the board.  Reaching for it would be a
+                # tabletop motion aimed off the tabletop.
+                return _unsupported(
+                    f"{oid} is not on the board right now, so there is nothing "
+                    "on the table for me to point at. Place it on a cell first."
+                )
+            # Write the resolution back so everything downstream — the
+            # evidence, the card, the executor — sees the object ID and not
+            # the words the operator typed.  "soda can" and `soda_can` are the
+            # same object to a reader and different strings to a lookup.
+            match.slots[SLOT_OBJECT] = oid
+            obj = oid
+            summary = f"{summary} {oid}"
+
+        proposal = Proposal(
+            plan_id=uuid.uuid4().hex,
+            plan_version=0,
+            task_type=match.name,
+            arm=match.arm,
+            cell=cell,
+            object_id=obj,
+            route=ability.route,
+            route_version=ability.route_version,
+            expected_start_posture=(ability.start_postures[0]
+                                    if ability.start_postures else ""),
+            brief_reason=_ability_reason(match),
+            requires_confirmation=ability.requires_confirmation,
+            scene_name=(scene.name if scene is not None else ""),
+            summary=summary,
+            state_evidence=_ability_evidence(match, scene),
+        )
+        return PlannerOutcome(kind="proposal", proposal=proposal)
+
     # -- destination -------------------------------------------------------
 
     def _resolve_destination(self, phrase: str, scene: SceneView
@@ -236,7 +457,7 @@ class DeterministicPlanner:
         cells = scene.available_cells()
 
         if not phrase:
-            return _clarify("Where should it go?", cells), None
+            return _clarify("Where should it go?", cells, SLOT_CELL), None
 
         did = _match_destination_id(phrase, scene)
         if did:
@@ -249,36 +470,37 @@ class DeterministicPlanner:
                     "nowhere I can call a bin. I can put it on a grid cell "
                     "instead — that is a spot on the board, not a container. "
                     "Which cell?",
-                    cells,
+                    cells, SLOT_CELL,
                 ), None
             names = sorted(scene.destinations)
             if len(names) == 1:
                 return None, _dest_ref(scene, names[0])
-            return _clarify("Which one?", names), None
+            return _clarify("Which one?", names, SLOT_CELL), None
 
         cell = _match_cell(phrase, scene)
         if cell:
             if cell not in scene.cells:
                 return _clarify(
                     f"There is no cell called {cell} in this scene. "
-                    "Pick one of these.", cells
+                    "Pick one of these.", cells, SLOT_CELL
                 ), None
             if not scene.cells[cell].reachable:
                 return _clarify(
                     f"{cell} was measured out of the right arm's reach, so I "
-                    "will not plan a move there. Pick another cell.", cells
+                    "will not plan a move there. Pick another cell.", cells,
+                    SLOT_CELL,
                 ), None
             occupant = scene.cells[cell].occupant
             if occupant:
                 return _clarify(
                     f"{cell} is already occupied by {occupant}. "
-                    "Pick another cell.", cells
+                    "Pick another cell.", cells, SLOT_CELL,
                 ), None
             return None, DestinationRef(kind="cell", ref_id=cell, label=cell)
 
         return _clarify(
             f"I do not know a destination called \"{phrase}\". "
-            "These are the destinations I can use.", cells
+            "These are the destinations I can use.", cells, SLOT_CELL
         ), None
 
     # -- target ------------------------------------------------------------
@@ -287,7 +509,7 @@ class DeterministicPlanner:
                         ) -> Tuple[Optional[PlannerOutcome], str]:
         if not phrase:
             return _clarify("Which object should I move?",
-                            sorted(scene.objects)), ""
+                            sorted(scene.objects), SLOT_OBJECT), ""
 
         oid = _match_object_id(phrase, scene)
         if oid:
@@ -299,7 +521,8 @@ class DeterministicPlanner:
 
         return _clarify(
             f"I do not know an object called \"{phrase}\". "
-            "These are the objects in this scene.", sorted(scene.objects)
+            "These are the objects in this scene.", sorted(scene.objects),
+            SLOT_OBJECT
         ), ""
 
     def _resolve_category(self, scene: SceneView, tag: str
@@ -329,7 +552,7 @@ class DeterministicPlanner:
             names = sorted(o.object_id for o in members)
             return _clarify(
                 "I cannot yet see which objects are actually on the board, so "
-                "I will not guess. Name the one you mean.", names
+                "I will not guess. Name the one you mean.", names, SLOT_OBJECT
             ), ""
 
         on_board = scene.tabletop_tagged(tag)
@@ -337,14 +560,14 @@ class DeterministicPlanner:
             return _clarify(
                 f"No {label} object is on the board right now. Place one on "
                 "a cell first, then ask me again.",
-                sorted(o.object_id for o in members),
+                sorted(o.object_id for o in members), SLOT_OBJECT,
             ), ""
         if len(on_board) > 1:
             return _clarify(
                 f"There is more than one {label} object on the board. "
                 "Which one?",
                 [f"{o.object_id} ({o.cell})" if o.cell else o.object_id
-                 for o in on_board],
+                 for o in on_board], SLOT_OBJECT,
             ), ""
         return None, on_board[0].object_id
 
@@ -386,6 +609,81 @@ class DeterministicPlanner:
                 state_evidence=_evidence(scene, target_id, destination),
             ),
         )
+
+
+def _ability_reason(match) -> str:
+    """Why this plan, said in terms the operator can check.
+
+    Names the route, because the route IS the claim: "store your arm" means
+    the eleven-waypoint rail-pocket corridor and not `P.go_home()`, which
+    routes through `stow_from_side()` and is a different motion that is also
+    fairly called going home.
+    """
+    ability = match.ability
+    if not ability.route:
+        return "no arm movement"
+    where = f" to {match.slots[abilities.SLOT_CELL]}" if match.slots.get(
+        abilities.SLOT_CELL) else ""
+    return (f"{ability.route} with my {match.arm} arm{where}, ending "
+            f"{ability.end_posture or 'where it started'}")
+
+
+def _ability_evidence(match, scene) -> Dict[str, Any]:
+    """What the revalidator will need at confirm time.
+
+    Per ability, because what invalidates a plan differs: a wave does not care
+    where the objects are, pointing at an object cares very much, and pointing
+    at a cell cares only that the cell is still there and reachable.
+    """
+    ev: Dict[str, Any] = {"action": match.name, "arm": match.arm,
+                          "route": match.ability.route,
+                          "route_version": match.ability.route_version}
+    if scene is None:
+        return ev
+    ev["scene_revision"] = scene.scene_revision
+    ev["live"] = scene.live
+    cell = match.slots.get(abilities.SLOT_CELL)
+    if cell:
+        ev["cell"] = cell
+    oid = match.slots.get(abilities.SLOT_OBJECT)
+    if oid and oid in scene.objects and scene.objects[oid].position is not None:
+        ev["object_id"] = oid
+        ev["object_position"] = list(scene.objects[oid].position)
+    return ev
+
+
+def _is_a_command(text: str) -> bool:
+    """Whether a turn stands on its own as a request rather than an answer.
+
+    An answer is a bare noun — "r2c2", "soda_can", "on the table".  None of
+    those parse as a command, and every command carries a verb the grammars
+    know, so the two do not overlap.
+    """
+    try:
+        if abilities.match(text) is not None:
+            return True
+    except AbilityRefusal:
+        # Understood, and refused.  Still a command: the operator should get
+        # the refusal, not have "don't wave" filed as a cell name.
+        return True
+    return parse_intent(text) is not None
+
+
+def _posture_answer(text: str) -> Optional[str]:
+    """Which posture an answer to the rest/stow question names.
+
+    None means it named neither, and the question gets asked again rather than
+    resolved by preference.  The two postures are eleven waypoints apart
+    through the rig; a coin-flip here is a long arm movement nobody asked for.
+    """
+    norm = _normalise(text)
+    if not norm:
+        return None
+    if re.search(r"\b(table|tabletop|desk|board|forearm|down|surface)\b", norm):
+        return "rest_forearm"
+    if re.search(r"\b(pocket|rail|home|away|stow|store|default|back)\b", norm):
+        return "stow_arm"
+    return None
 
 
 def _dest_ref(scene: SceneView, destination_id: str) -> DestinationRef:
@@ -459,6 +757,10 @@ class LiveProposalValidator:
             return False, ("The scene was reloaded since I made that plan. "
                            "Ask me again and I will look at the new one.")
 
+        action = evidence.get("action")
+        if action is not None and action != "pick_place":
+            return self._check_ability(proposal, scene, evidence, action)
+
         target_id = evidence.get("target_id") or proposal.target_id
         obj = scene.objects.get(target_id)
         if obj is None:
@@ -489,6 +791,59 @@ class LiveProposalValidator:
                                "what it held when I made that plan.")
         return True, ""
 
+    def _check_ability(self, proposal: Proposal, scene: SceneView,
+                       evidence: dict, action: str) -> Tuple[bool, str]:
+        """What invalidates a plan differs by ability, so ask per ability.
+
+        The pick-and-place rule — the target must not have moved, the
+        destination must still be empty — is not a general one.  Applied to a
+        wave it asserts things about objects the plan never mentioned; applied
+        to pointing at a cell it refuses an occupied cell that pointing is
+        perfectly happy to hover over.  One rule covering all of them would
+        pass silently for every ability it was not written for.
+        """
+        cell_name = evidence.get("cell") or proposal.cell
+        if cell_name is not None:
+            cell = scene.cells.get(cell_name)
+            if cell is None:
+                return False, f"{cell_name} is no longer in this scene."
+            if not cell.reachable:
+                return False, f"{cell_name} is no longer within reach."
+            # Deliberately NOT checking occupancy.  Pointing is a hover, and
+            # a cell with something on it is a cell worth pointing at.
+
+        object_id = evidence.get("object_id") or proposal.object_id
+        expected_pos = evidence.get("object_position")
+        if object_id is not None:
+            obj = scene.objects.get(object_id)
+            if obj is None:
+                return False, f"{object_id} is no longer in this scene."
+            if obj.on_board is False:
+                return False, (f"{object_id} has been taken off the board "
+                               "since I made that plan.")
+            if expected_pos is not None:
+                if obj.position is None:
+                    return False, (f"I can no longer see where {object_id} "
+                                   "is, so I will not point at where it was.")
+                drift = _distance(obj.position, expected_pos)
+                if drift > POSE_TOLERANCE_M:
+                    # For pointing, the object moving is exactly what makes the
+                    # plan wrong: the hover was computed over where it WAS.
+                    return False, (f"{object_id} has moved "
+                                   f"{drift * 100:.0f} cm since I made that "
+                                   "plan. Ask me again.")
+
+        if action == "rest_forearm":
+            # The forearm footprint check belongs to the geometry #64 brings
+            # in; there is nothing here that can measure it yet.  Saying so
+            # rather than passing quietly matters because a rest lowers the
+            # forearm onto the table, and an object under it is the one thing
+            # that must stop it.  Nothing can execute this ability until #65
+            # anyway, so the gate holds without this check pretending to be one.
+            return True, ""
+
+        return True, ""
+
 
 def _ref_id(destination: str) -> str:
     return destination.split(":", 1)[1] if ":" in destination else destination
@@ -499,48 +854,85 @@ def _distance(a, b) -> float:
 
 
 def _split_history(history: List[ConversationEvent], latest: str
-                   ) -> Tuple[str, List[str]]:
-    """Return the original command and every answer given since.
+                   ) -> Tuple[str, List[Tuple[str, str]]]:
+    """Return the original command and every answer since, each with its slot.
 
     `history` already contains `latest` as its last user turn, so the answers
     list is built from history alone and `latest` is only a fallback for the
     very first call.
+
+    The slot comes from the question the answer follows, not from the answer's
+    own wording.  Walking the transcript in order and remembering the last
+    reachy question is the whole mechanism: at the moment the planner asked, it
+    knew which slot it wanted, and that is the only reliable record of it.
+
+    An answer with no question before it — the opening command's own turn is
+    skipped, but a stray user turn is possible — carries an empty slot and is
+    placed by the fallback in `_apply_answers`.
     """
-    user_turns = [e.text for e in history if e.role == "user"]
-    if not user_turns:
+    command = ""
+    pending = ""
+    answers: List[Tuple[str, str]] = []
+    for ev in history:
+        if ev.role == "user":
+            if not command:
+                command = ev.text
+            else:
+                answers.append((pending, ev.text))
+            pending = ""
+        elif ev.question_id:
+            pending = ev.slot
+    if not command:
         return latest, []
-    return user_turns[0], user_turns[1:]
+    return command, answers
 
 
-def _apply_answers(intent: _Intent, answers: List[str], scene: SceneView
-                   ) -> Tuple[str, str]:
-    """Fold clarification answers into whichever slot is still unresolved.
+def _apply_answers(intent: _Intent, answers: List[Tuple[str, str]],
+                   scene: SceneView) -> Tuple[str, str]:
+    """Fold clarification answers into the slots they were given for.
 
-    An answer is tried as a destination only while the destination is open, and
-    as a target only while the target is open, so "r2c2" answering "which cell?"
-    cannot later be mistaken for an object.
+    Each answer arrives with the slot its question named, so an answer to
+    "which cell?" fills the destination and an answer to "which object?" fills
+    the target.  No inspection of the answer's wording decides that.
+
+    That inspection is what used to go wrong.  The slot was re-derived by
+    asking whether the CURRENT destination phrase looked resolvable:
+
+        dest_open = ... _match_cell(dest, scene) not in scene.cells ...
+
+    A cell that exists but was REJECTED — occupied, or out of the arm's reach —
+    read as resolved, so the slot the planner had just asked about counted as
+    filled.  "put soda_can on r2c2" with r2c2 occupied, answered "r1c1", stored
+    r1c1 as the TARGET and replied that it did not know an object by that name.
+    Both `cell_r3c1` and `cell_r3c2` are out of reach in FWDCenterLabMCC, so
+    this was reachable in ordinary use.
+
+    The docstring already stated the right rule — an answer fills a slot only
+    while that slot is open — and "open" means unresolved.  The code read it as
+    unrecognised.  Recording the slot at ask time is what makes the two agree.
     """
     target = intent.target_phrase
     dest = intent.dest_phrase
 
-    for answer in answers:
+    for slot, answer in answers:
         answer = answer.strip()
         if not answer:
             continue
-        dest_open = (not dest
-                     or _is_bin_phrase(dest) and not scene.has_destination
-                     or (_match_destination_id(dest, scene) is None
-                         and _match_cell(dest, scene) not in scene.cells
-                         and not _is_bin_phrase(dest)))
-        if dest_open and (_match_cell(answer, scene) is not None
-                          or _match_destination_id(answer, scene) is not None):
+        if slot == SLOT_CELL:
             dest = answer
             continue
-        if not target or _match_object_id(target, scene) is None:
-            if _match_object_id(answer, scene) is not None:
-                target = answer
-                continue
-        if dest_open:
+        if slot == SLOT_OBJECT:
+            target = answer
+            continue
+        # No slot recorded: a transcript from before slots existed, or a user
+        # turn that answered no question.  Fall back to placing it by shape,
+        # which is what every answer used to get.
+        if _match_cell(answer, scene) is not None or \
+                _match_destination_id(answer, scene) is not None:
+            dest = answer
+        elif _match_object_id(answer, scene) is not None:
+            target = answer
+        elif not dest:
             dest = answer
         else:
             target = answer

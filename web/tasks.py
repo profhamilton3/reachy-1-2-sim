@@ -112,12 +112,19 @@ class ConversationEvent:
     # answer typed against a stale question cannot be applied to a new one.
     question_id: str = ""
     choices: List[str] = field(default_factory=list)
+    #: Which slot this question is about — "which_cell", "which_object".  The
+    #: planner knows this at the moment it asks and used to throw it away, then
+    #: re-derive it from the answer's wording on the next turn.  Recording it
+    #: is what stops an answer landing in the slot nobody asked about (#59).
+    slot: str = ""
 
     def as_dict(self) -> dict:
         d = {"role": self.role, "text": self.text, "at": round(self.at, 3)}
         if self.question_id:
             d["question_id"] = self.question_id
             d["choices"] = list(self.choices)
+            if self.slot:
+                d["slot"] = self.slot
         return d
 
 
@@ -140,9 +147,29 @@ class Proposal:
     plan_id: str
     plan_version: int
     task_type: str
-    target_id: str
-    destination: str
-    brief_reason: str
+    #: Absent on the abilities that genuinely have neither.  None here is a
+    #: real answer, the same way `legacy_destination` None is — a wave has no
+    #: target and no destination, and writing "" or "__none__" into these
+    #: would put a value meaning ABSENT into fields whose readers (the live
+    #: revalidator, the executor's cell lookup, the browser card) all assume
+    #: PRESENT.  `__post_init__` holds pick_place to both.
+    target_id: Optional[str] = None
+    destination: Optional[str] = None
+    brief_reason: str = ""
+    #: Which arm.  Always known, never guessed: the validated corridor is
+    #: right-arm geometry through a rig that is not symmetric.
+    arm: str = "right"
+    #: The cell an ability points AT — not a destination to place into, so it
+    #: does not inherit pick-and-place's "must be empty" rule.
+    cell: Optional[str] = None
+    #: The object an ability points AT, distinct from a pick target.
+    object_id: Optional[str] = None
+    #: Which measured motion this plan flies, and which version of it.
+    route: str = ""
+    route_version: int = 0
+    #: The posture the route may be entered from, so the executor can refuse an
+    #: unsupported start rather than discover it in flight.
+    expected_start_posture: str = ""
     requires_confirmation: bool = True
     execution_mode: str = "planning_only"
     semantic_source: str = "scene_data"
@@ -153,6 +180,16 @@ class Proposal:
     legacy_destination: Optional[str] = None
     state_evidence: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # A pick-and-place plan without both of these is not a plan, and the
+        # cheapest place to notice is here rather than in the executor with the
+        # lease held.
+        if self.task_type == "pick_place" and not (self.target_id
+                                                   and self.destination):
+            raise ValueError(
+                "a pick_place proposal needs a target_id and a destination"
+            )
+
     def as_dict(self) -> dict:
         return {
             "plan_id": self.plan_id,
@@ -160,6 +197,12 @@ class Proposal:
             "task_type": self.task_type,
             "target_id": self.target_id,
             "destination": self.destination,
+            "arm": self.arm,
+            "cell": self.cell,
+            "object_id": self.object_id,
+            "route": self.route,
+            "route_version": self.route_version,
+            "expected_start_posture": self.expected_start_posture,
             "destination_kind": self.destination_kind,
             "destination_label": self.destination_label,
             "legacy_destination": self.legacy_destination,
@@ -177,10 +220,14 @@ class Proposal:
 class PlannerOutcome:
     """What a planner may return.  Anything else is a programming error."""
 
-    kind: str                       # "clarification" | "proposal" | "unsupported"
+    kind: str      # "clarification" | "proposal" | "reply" | "unsupported"
     message: str = ""
     choices: List[str] = field(default_factory=list)
     proposal: Optional[Proposal] = None
+    #: On a clarification, the slot being asked about.  Carried onto the
+    #: transcript event so the next turn can fill that slot instead of
+    #: guessing which one the answer was for.
+    slot: str = ""
 
 
 @dataclass
@@ -287,6 +334,7 @@ class TaskCoordinator:
         capabilities: Optional[Capabilities] = None,
         revalidate: Optional[Callable[[Proposal], Tuple[bool, str]]] = None,
         executor: Any = None,
+        aside: Optional[Callable[[str], Optional["PlannerOutcome"]]] = None,
         max_workers: int = 2,
         planning_timeout_s: float = PLANNING_TIMEOUT_S,
         task_ttl_s: float = TASK_TTL_S,
@@ -299,6 +347,11 @@ class TaskCoordinator:
         # Whatever can actually move the robot, or None.  The coordinator never
         # decides that a thing is executable — it asks.
         self._executor = executor
+        # Answers a message that needs no task at all, or None if it is not one
+        # of those.  Called OUTSIDE the lock and required to be fast and
+        # side-effect free: it decides whether "Hello" should disturb the
+        # session's one active task, so it must not itself be able to.
+        self._aside = aside
         self._caps = capabilities or Capabilities()
         self._timeout = planning_timeout_s
         self._ttl = task_ttl_s
@@ -336,6 +389,17 @@ class TaskCoordinator:
                 f"That message is {len(text)} characters; the limit is {MAX_TEXT_CHARS}.",
                 413, "text_too_long",
             )
+
+        # Before anything is created or any lock is taken: is this a message
+        # that needs no task?  A greeting has nothing to confirm, nothing to
+        # clarify and nothing to move, so making it the session's one active
+        # task would put it in the way of real work — and typing "Hello" while
+        # a plan is awaiting confirmation would either be refused with "one
+        # task at a time" or, worse, replace the plan.
+        aside = self._aside(text) if self._aside is not None else None
+        if aside is not None and aside.kind == "reply":
+            return self._aside_task_locked(session_id, text, aside,
+                                           client_request_id)
 
         with self._lock:
             self._sweep_locked()
@@ -532,6 +596,44 @@ class TaskCoordinator:
 
     # -- internals ---------------------------------------------------------
 
+    def _aside_task_locked(self, session_id: str, text: str,
+                           outcome: "PlannerOutcome",
+                           client_request_id: str = "") -> Task:
+        """A finished task that was never the session's active one.
+
+        It exists so the page has something to render the exchange into, and
+        it is deliberately absent from `_by_session`: the session's active task
+        — a pending clarification, a plan awaiting confirmation, an arm in
+        motion — is not touched, not re-versioned, and not replaced.
+
+        It IS in `_by_client_req`, though.  Skipping that was a real gap: a
+        double-clicked "Hello", or a POST retried over a flaky link, put two
+        greetings in the transcript, which is exactly the invariant the
+        client-request id was added to hold.  Not being the active task and
+        not being idempotent are unrelated properties, and this needs both.
+        """
+        with self._lock:
+            self._sweep_locked()
+            crid_key = f"{session_id}:{client_request_id}"
+            if client_request_id and crid_key in self._by_client_req:
+                existing = self._tasks.get(self._by_client_req[crid_key])
+                if existing is not None:
+                    return existing
+
+            task = Task(task_id=uuid.uuid4().hex, session_id=session_id)
+            task.client_request_id = client_request_id
+            task.deadline = time.time() + self._ttl
+            task.add_event(ConversationEvent(role="user", text=text))
+            task.add_event(ConversationEvent(role="reachy", text=outcome.message))
+            task.state = TaskState.completed
+            task.detail = outcome.message
+            task.touch()
+            self._tasks[task.task_id] = task
+            if client_request_id:
+                self._by_client_req[crid_key] = task.task_id
+            self._trim_locked()
+            return task
+
     def _owned_locked(self, session_id: str, task_id: str) -> Task:
         task = self._tasks.get(task_id)
         # 404 for both "gone" and "someone else's": a different status would
@@ -631,7 +733,17 @@ class TaskCoordinator:
                 text=outcome.message,
                 question_id=task.question_id,
                 choices=list(outcome.choices),
+                slot=outcome.slot,
             ))
+        elif outcome.kind == "reply":
+            # A successful answer with nothing to do.  Terminal on arrival: no
+            # confirmation to seek, no executor to ask, no lease to take.  It
+            # is a distinct kind rather than a friendly `unsupported` because
+            # the panel shows failures in red, and "Hello" is not a failure.
+            task.state = TaskState.completed
+            task.detail = outcome.message
+            task.add_event(ConversationEvent(role="reachy", text=outcome.message))
+            self._release_locked(task)
         elif outcome.kind == "proposal" and outcome.proposal is not None:
             proposal = outcome.proposal
             proposal.plan_version = task.version
