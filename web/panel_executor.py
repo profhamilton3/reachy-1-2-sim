@@ -28,6 +28,22 @@ accepts `joint_command` only from the SDK bridge.  Disabling browser buttons
 would not do: the page has its own socket to the simulator.  The lease names
 the bridge as the mover because the panel holds the lease but does not move.
 
+THE LEASE COMES FIRST, THEN THE SNAPSHOT
+----------------------------------------
+Everything the motion is planned against is read AFTER the grant and from a
+snapshot captured after it, then revalidated.  Reading first and locking second
+leaves one window — the only one in the whole execution — where the plan is
+being fixed while other clients can still move the board.  A `place_object`
+landing there sends the arm to where the object was; `_verify` catches it, so
+the panel does not lie about the outcome, but the failure reads as a slipped
+grasp rather than as a race, and that is the expensive kind of wrong.
+
+What the lease does NOT give is exclusivity against other SDK callers.  It
+names `docker-core` as the mover, and `docker-core` is one bridge that can
+aggregate several callers: a notebook on gRPC 50051 arrives as that same
+client_id and passes the server's check.  So the honest claim is that the scene
+is locked against edits, not that the arm is locked against a second caller.
+
 COMPLETION IS PROVEN, NOT ASSUMED
 ---------------------------------
 When the arc finishes, the object's live pose is read back and tested against
@@ -59,6 +75,12 @@ SDK_PORT = int(os.environ.get("REACHY_SIM_SDK_PORT", "50051"))
 #: How long the lease is taken for.  A pick-and-place arc is tens of seconds;
 #: this leaves room for a slow one without letting a wedge freeze the scene.
 LEASE_TTL_S = 240.0
+
+#: How long to wait, after the lease is granted, for a snapshot captured after
+#: it.  State arrives at the simulator's push rate, so this is many frames; a
+#: link that cannot produce one in that time cannot be planned against, and
+#: waiting indefinitely would hold the lease open over a dead socket.
+FRESH_SNAPSHOT_TIMEOUT_S = 2.0
 
 #: How close to the destination cell the object must end up to count as placed.
 #: The cell's own half-extent decides that, so this only bounds the wait for a
@@ -187,10 +209,7 @@ class SimulatorExecutor:
         from reachy_ai.scene.awareness import SceneModel
         from reachy_ai.tasks.pick_place_live import pick_and_place, side_hub
 
-        scene = self._scene_provider()
-        cell = scene.cells[_ref_id(proposal.destination)]
         target_id = proposal.target_id
-        started_step = scene.sim_step
 
         granted, why = self._link.acquire_control(
             MOTION_CLIENT_ID,
@@ -209,6 +228,33 @@ class SimulatorExecutor:
                 on_phase(name)
 
         try:
+            # Nothing about the board is read until here.  Taking the lease is
+            # what makes the next few lines mean anything: they describe a
+            # scene no other client can now change.
+            phase("checking the board")
+            scene = self._fresh_scene()
+            if scene is None:
+                return ExecutionResult(
+                    status="failed",
+                    detail=("I took control of the scene but no fresh view of "
+                            "it arrived, so I will not move against a stale "
+                            "picture of the board."),
+                )
+
+            ok, why = self.available(proposal)
+            if not ok:
+                # Distinct from a motion failure on purpose.  "The board
+                # changed while I was taking control" is an answer the operator
+                # can act on; "the motion finished but soda_can is not on r2c2"
+                # sends them looking for a grasp problem that is not there.
+                return ExecutionResult(
+                    status="failed",
+                    detail=f"the board changed while I was taking control: {why}",
+                    evidence={"scene_changed": True, "sim_step": scene.sim_step},
+                )
+
+            cell = scene.cells[_ref_id(proposal.destination)]
+            started_step = scene.sim_step
             phase("connecting to the arm")
             robot = ReachySDK(host=self._sdk_host, sdk_port=self._sdk_port)
             time.sleep(0.8)
@@ -271,6 +317,36 @@ class SimulatorExecutor:
             )
         finally:
             self._link.release_control()
+
+    # -- reading the board under the lease ---------------------------------
+
+    def _fresh_scene(self):
+        """A scene view built from a snapshot captured after the lease.
+
+        Moving the read below `acquire_control` is not on its own enough.  The
+        link hands back whatever the simulator last pushed, and that push may
+        predate the grant by most of a frame interval — so the "post-lease"
+        read can still describe the board as it was while other clients could
+        edit it.  Waiting for a snapshot whose `received_at` is later than the
+        grant is what closes that.
+
+        Returns None rather than a stale view if none arrives.  A link that
+        cannot produce a current picture of the board is a link this must not
+        plan a half-metre arm movement against.
+        """
+        granted_at = time.monotonic()
+        deadline = granted_at + FRESH_SNAPSHOT_TIMEOUT_S
+        while time.monotonic() < deadline:
+            snap = self._link.snapshot()
+            if snap is not None and snap.received_at >= granted_at:
+                scene = self._scene_provider()
+                # The provider builds from the link's current snapshot, which
+                # is this one or a newer one.  Newer is fine; older is not, and
+                # `live` false means it fell back to the scene file.
+                if scene.live and not scene.error:
+                    return scene
+            time.sleep(0.05)
+        return None
 
     # -- result verification ----------------------------------------------
 
