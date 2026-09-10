@@ -6,6 +6,7 @@ its refusals — which is the part worth pinning down, because every one of them
 is a case where the panel must decline rather than guess.
 """
 
+import json
 import os
 import sys
 import time
@@ -709,78 +710,125 @@ def test_an_ability_is_refused_in_a_scene_where_its_route_failed(fake_sdk):
     assert "TestScene" in why
 
 
-def test_an_arm_at_no_named_posture_reports_recovery_rather_than_guessing(
-        monkeypatch, fake_sdk):
-    """The nearest waypoint is the useful fact; flying to it is the one
-    segment nobody measured."""
-    from reachy_ai.motion import rig_routes as R
-    from reachy_ai.tasks import rig_motion as M
-    _validated(monkeypatch)
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.SWING_2))
-    monkeypatch.setattr("panel_executor.ReachySDK" if False else
-                        "reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+class StubWorker:
+    """A motion process that answers without one.
 
-    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    out = ex.execute(_ability())
-    assert out.status == "failed"
-    assert out.evidence.get("recovery_needed") is True
-    assert "SWING_2" in out.detail
-    assert "will not guess" in out.detail
+    The arm logic it stands in for is tested in `test_motion_worker.py`,
+    against the real thing.  What these tests are about is the half that stays
+    here: what goes into a job, and what the panel does with an answer.
+    """
 
+    def __init__(self, *results):
+        self.results = list(results) or [{"status": "moved", "flown": [],
+                                          "final_posture": "home"}]
+        self.jobs = []
+        self.phases_to_emit = []
+        self.cancelled = False
 
-def test_the_wrong_posture_names_the_route_that_bridges_it(monkeypatch, fake_sdk):
-    from reachy_ai.motion import rig_routes as R
-    from reachy_ai.tasks import rig_motion as M
-    _validated(monkeypatch)
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
-    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+    def run(self, job, *, on_phase=None, should_cancel=None):
+        self.jobs.append(job)
+        for name in self.phases_to_emit:
+            if on_phase is not None:
+                on_phase(name)
+        if should_cancel is not None and should_cancel():
+            self.cancelled = True
+        return self.results.pop(0) if len(self.results) > 1 else self.results[0]
 
-    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    out = ex.execute(_ability())          # stow starts at rest; arm is home
-    assert out.status == "failed"
-    assert out.evidence["bridge"] == "PLACE_ROUTE"
-    assert "no measured way" not in out.detail
-
-
-def test_an_unbridgeable_posture_says_so_rather_than_inventing_a_path(
-        monkeypatch, fake_sdk):
-    from reachy_ai.motion import rig_routes as R
-    from reachy_ai.tasks import rig_motion as M
-    _validated(monkeypatch)
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
-    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
-
-    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    out = ex.execute(_ability())          # present -> rest is not measured
-    assert out.status == "failed"
-    assert "no measured way" in out.detail
-    assert "invent" in out.detail
-
-
-class _FakeArm:
-    pass
-
-
-class _FakeRobot:
-    def __init__(self, host=None, sdk_port=None):
-        self.r_arm = _FakeArm()
-
-    def turn_on(self, _part):
+    def close(self):
         pass
+
+
+def _with(worker, provider=live_scene):
+    return SimulatorExecutor(StubLink(), provider, "scene.yaml", worker=worker)
+
+
+def test_the_job_names_the_ability_the_scene_and_where_it_must_start(
+        monkeypatch, fake_sdk):
+    """Everything the motion process needs and nothing it does not: it has no
+    link to the simulator, so the scene it validates routes against has to
+    come across with the job."""
+    _validated(monkeypatch)
+    worker = StubWorker()
+    _with(worker).execute(_ability(expected_start_posture="home"))
+
+    job, = worker.jobs
+    assert job["kind"] == "ability"
+    assert job["task_type"] == "stow_arm"
+    assert job["route"] == "STOW_ROUTE"
+    assert job["expected_start_posture"] == "home"
+    assert job["scene"] == "TestScene"
+    assert job["sdk"]["port"] == 50051
+
+
+def test_a_refusal_from_the_motion_process_is_passed_through_as_it_stands(
+        monkeypatch, fake_sdk):
+    """It knows things the panel does not — which posture the arm is in, which
+    waypoint is nearest — so its wording and its evidence survive intact."""
+    _validated(monkeypatch)
+    worker = StubWorker({
+        "status": "failed",
+        "detail": ("my arm is not at a posture I have a measured route out "
+                   "of — the nearest waypoint is SWING_2, 22 degrees away."),
+        "evidence": {"recovery_needed": True, "nearest": "SWING_2"}})
+
+    out = _with(worker).execute(_ability(expected_start_posture="home"))
+    assert out.status == "failed"
+    assert "SWING_2" in out.detail
+    assert out.evidence["recovery_needed"] is True
+
+
+def test_progress_from_the_motion_process_reaches_the_page(monkeypatch, fake_sdk):
+    _validated(monkeypatch)
+    worker = StubWorker()
+    worker.phases_to_emit = ["connecting to the arm", "leaving home"]
+    seen = []
+    _with(worker).execute(_ability(expected_start_posture="home"),
+                          on_phase=seen.append)
+    assert seen == ["connecting to the arm", "leaving home"]
+
+
+def test_a_stop_reaches_the_motion_process(monkeypatch, fake_sdk):
+    """A Stop has to be visible between waypoints, which is the only place a
+    corridor can be left."""
+    _validated(monkeypatch)
+    worker = StubWorker()
+    _with(worker).execute(_ability(expected_start_posture="home"),
+                          should_cancel=lambda: True)
+    assert worker.cancelled is True
+
+
+def test_the_board_is_read_before_the_approach_flies(monkeypatch, fake_sdk):
+    """An arm that swept something off the table on its way to the route's
+    start has disturbed the board.  Reading after the approach — which is what
+    this used to do — was the one way for that to go unnoticed."""
+    _validated(monkeypatch)
+    where = {"soda_can": None}
+
+    def provider():
+        scene = live_scene()
+        if where["soda_can"] is not None:
+            scene.objects["soda_can"].position = where["soda_can"]
+        return scene
+
+    class Sweeps(StubWorker):
+        """Knocks the can over on its way to the route's start."""
+
+        def run(self, job, **kw):
+            scene = provider()
+            x, y, z = on_cell(scene, "r1c1")
+            where["soda_can"] = (x, y + 0.25, z)
+            return {"status": "moved", "flown": [], "final_posture": "home"}
+
+    out = _with(Sweeps(), provider).execute(_ability(expected_start_posture="home"))
+    assert out.status == "failed"
+    assert "moved something on the way" in out.detail
 
 
 def test_arriving_with_the_board_disturbed_is_a_failure(monkeypatch, fake_sdk):
     """The two fail independently: the arm can reach HOME having swept
     something off the table on the way, and it can leave the board untouched
     while stopping three waypoints short."""
-    from reachy_ai.motion import rig_routes as R
-    from reachy_ai.tasks import rig_motion as M
     _validated(monkeypatch)
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
-    monkeypatch.setattr(M, "stow_to_home",
-                        lambda arm, **kw: [w.name for w in R.STOW_ROUTE])
-    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
-
     moved = {"n": 0}
 
     def provider():
@@ -791,9 +839,10 @@ def test_arriving_with_the_board_disturbed_is_a_failure(monkeypatch, fake_sdk):
             scene.objects["soda_can"].position = (x, y + 0.25, z)
         return scene
 
-    ex = SimulatorExecutor(StubLink(), provider, "scene.yaml")
-    out = ex.execute(_ability(expected_start_posture="home",
-                              route="STOW_ROUTE"))
+    worker = StubWorker({"status": "moved", "flown": ["HOME"],
+                         "final_posture": "home"})
+    out = _with(worker, provider).execute(
+        _ability(expected_start_posture="home", route="STOW_ROUTE"))
     assert out.status == "failed"
     assert "moved something on the way" in out.detail
     assert out.evidence["object_drift"]["soda_can"] > 0.02
@@ -802,62 +851,188 @@ def test_arriving_with_the_board_disturbed_is_a_failure(monkeypatch, fake_sdk):
 def test_arriving_cleanly_reports_the_posture_and_the_waypoints(
         monkeypatch, fake_sdk):
     from reachy_ai.motion import rig_routes as R
-    from reachy_ai.tasks import rig_motion as M
     _validated(monkeypatch)
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
-    monkeypatch.setattr(M, "stow_to_home",
-                        lambda arm, **kw: [w.name for w in R.STOW_ROUTE])
-    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+    flown = [w.name for w in R.STOW_ROUTE]
+    worker = StubWorker({"status": "moved", "flown": flown,
+                         "final_posture": "home"})
 
-    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    out = ex.execute(_ability(expected_start_posture="home"))
+    out = _with(worker).execute(_ability(expected_start_posture="home"))
     assert out.status == "completed"
     assert out.evidence["final_posture"] == "home"
-    assert out.evidence["waypoints_flown"] == [w.name for w in R.STOW_ROUTE]
+    assert out.evidence["waypoints_flown"] == flown
     assert out.evidence["object_drift"] == {}
     assert "board is as it was" in out.detail
 
 
 def test_a_route_stopped_part_way_is_not_reported_as_arrival(
         monkeypatch, fake_sdk):
-    from reachy_ai.motion import rig_routes as R
-    from reachy_ai.tasks import rig_motion as M
     _validated(monkeypatch)
-    poses = {"at": dict(R.HOME)}
-    monkeypatch.setattr(M, "present_pose", lambda _arm: poses["at"])
+    worker = StubWorker({"status": "moved", "flown": ["TUCK"],
+                         "final_posture": None})
 
-    def half(arm, **kw):
-        poses["at"] = dict(R.SWING_2)          # stopped in the corridor
-        return [w.name for w in R.STOW_ROUTE][:4]
-
-    monkeypatch.setattr(M, "stow_to_home", half)
-    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
-
-    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    out = ex.execute(_ability(expected_start_posture="home"))
+    out = _with(worker).execute(_ability(expected_start_posture="home"))
     assert out.status == "failed"
     assert "stopped before home" in out.detail
     assert out.evidence["final_posture"] is None
 
 
-def test_the_cancel_check_reaches_the_route_runner(monkeypatch, fake_sdk):
-    """A Stop has to be visible between waypoints, which is the only place a
-    corridor can be left."""
-    from reachy_ai.motion import rig_routes as R
-    from reachy_ai.tasks import rig_motion as M
-    _validated(monkeypatch)
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
-    seen = {}
+def test_the_pick_place_job_carries_the_live_poses_and_the_cell(fake_sdk):
+    """The motion process has no link to the simulator, so everything the arc
+    used to read here has to travel with the job.
 
-    def capture(arm, **kw):
-        seen["abort"] = kw.get("should_abort")
-        return []
+    This is the whole regression surface of moving pick-and-place out of
+    process: the scene document supplies geometry, the live snapshot supplies
+    where things actually are, and planning against the YAML's initial poses
+    would aim the gripper at where an object started.
+    """
+    worker = StubWorker({"status": "moved"})
+    scene = live_scene()
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=worker)
+    ex.execute(a_proposal())
 
-    monkeypatch.setattr(M, "stow_to_home", capture)
-    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+    job, = worker.jobs
+    assert job["kind"] == "pick_place"
+    assert job["target_id"] == "soda_can"
+    assert job["scene_file"] == "scene.yaml"
+    assert job["cell_xy"] == [scene.cells["r2c2"].x, scene.cells["r2c2"].y]
+    assert job["live"]["soda_can"] == list(scene.objects["soda_can"].position)
 
-    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    ex.execute(_ability(expected_start_posture="home"),
-               should_cancel=lambda: True)
-    assert seen["abort"] is not None
-    assert seen["abort"]() is True
+
+def test_a_cancelled_arc_is_reported_as_cancelled_not_as_a_failure(fake_sdk):
+    """Only with the arm actually stopped and parked is it true to say the
+    motion has stopped, and the motion process is what knows that."""
+    worker = StubWorker({"status": "cancelled",
+                         "detail": "Stopped, and the arm is back at rest.",
+                         "evidence": {"cancelled_at_phase": True}})
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml", worker=worker)
+    out = ex.execute(a_proposal())
+    assert out.status == "cancelled"
+    assert "back at rest" in out.detail
+
+
+# ---------------------------------------------------------------------------
+# Issue #79: the leash on the motion process.
+#
+# Against a real child, because the whole point is what happens when a child
+# misbehaves, and a stub that misbehaves on request proves nothing about a
+# pipe, a kill or a wait.
+# ---------------------------------------------------------------------------
+
+CHILD_ANSWERS = """
+import json, sys
+for line in sys.stdin:
+    if "job" not in json.loads(line):
+        continue
+    print(json.dumps({"phase": "working"}), flush=True)
+    print(json.dumps({"result": {"status": "moved", "flown": ["A"],
+                                 "final_posture": "home"}}), flush=True)
+"""
+
+CHILD_WEDGES = """
+import json, sys, time
+sys.stdin.readline()
+print(json.dumps({"phase": "wedging"}), flush=True)
+time.sleep(600)
+"""
+
+CHILD_DIES = """
+import sys
+sys.stdin.readline()
+sys.exit(3)
+"""
+
+CHILD_ECHOES_CANCEL = """
+import json, sys
+sys.stdin.readline()
+line = sys.stdin.readline()
+print(json.dumps({"result": {"status": "cancelled", "detail": line.strip()}}),
+      flush=True)
+"""
+
+
+@pytest.fixture
+def child(tmp_path, monkeypatch):
+    """Build a stand-in motion process out of one of the scripts above."""
+    import panel_executor
+    monkeypatch.setattr(panel_executor, "WORKER_EXIT_GRACE_S", 0.2)
+
+    made = []
+
+    def build(source, **kw):
+        path = tmp_path / f"child{len(made)}.py"
+        path.write_text(source)
+        from panel_executor import MotionWorker
+        worker = MotionWorker(argv=[sys.executable, "-u", str(path)], **kw)
+        made.append(worker)
+        return worker
+
+    yield build
+    for worker in made:
+        worker.close()
+
+
+def test_a_job_gets_its_phases_and_its_result(child):
+    worker = child(CHILD_ANSWERS)
+    seen = []
+    out = worker.run({"kind": "ability"}, on_phase=seen.append)
+    assert seen == ["working"]
+    assert out == {"status": "moved", "flown": ["A"], "final_posture": "home"}
+
+
+def test_the_process_outlives_one_job(child):
+    """Connecting costs the better part of a second and starts sync threads;
+    paying that per request is what the reuse is for."""
+    worker = child(CHILD_ANSWERS)
+    worker.run({"kind": "ability"})
+    first = worker._proc.pid
+    worker.run({"kind": "ability"})
+    assert worker._proc.pid == first
+
+
+def test_a_move_that_never_returns_fails_the_task_instead_of_the_panel(child):
+    """The failure this exists for: grpc.aio's poller dies, the blocking
+    `goto` never returns, and the motion lock is held for the life of the
+    process.  A deadline turns that into one failed command."""
+    worker = child(CHILD_WEDGES, deadline_s=0.6)
+    started = time.monotonic()
+    out = worker.run({"kind": "ability"})
+    assert time.monotonic() - started < 5.0
+    assert out["status"] == "failed"
+    assert out["evidence"]["timed_out"] is True
+    assert "wherever it stopped" in out["detail"]
+
+
+def test_a_wedged_process_is_killed_and_the_next_job_gets_a_new_one(child):
+    """Leaving it alive would leave the SDK connection it wedged in place, and
+    the next job would find the same dead poller."""
+    worker = child(CHILD_WEDGES, deadline_s=0.4)
+    worker.run({"kind": "ability"})
+    assert worker._proc is None
+
+
+def test_a_process_that_dies_mid_move_is_reported_rather_than_waited_out(child):
+    """Its stdout closing is the answer arriving — waiting out the deadline
+    for a process that has already gone would be three minutes of nothing."""
+    worker = child(CHILD_DIES, deadline_s=30.0)
+    started = time.monotonic()
+    out = worker.run({"kind": "ability"})
+    assert time.monotonic() - started < 5.0
+    assert out["status"] == "failed"
+    assert out["evidence"]["worker_died"] is True
+    assert out["evidence"]["recovery_needed"] is True
+
+
+def test_a_stop_is_sent_to_the_process_rather_than_killing_it(child):
+    """Killing it mid-corridor would abandon the arm between rails at whatever
+    waypoint it had reached, which is the one place it must not be left."""
+    worker = child(CHILD_ECHOES_CANCEL, deadline_s=5.0)
+    out = worker.run({"kind": "ability"}, should_cancel=lambda: True)
+    assert json.loads(out["detail"]) == {"cancel": True}
+
+
+def test_a_process_that_cannot_be_started_is_a_failed_task(child):
+    worker = child("import sys; sys.exit(1)", deadline_s=5.0)
+    out = worker.run({"kind": "ability"})
+    assert out["status"] == "failed"
+    assert out["evidence"].get("worker_died") is True

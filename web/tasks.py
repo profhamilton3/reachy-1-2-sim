@@ -170,6 +170,10 @@ class Proposal:
     #: The posture the route may be entered from, so the executor can refuse an
     #: unsupported start rather than discover it in flight.
     expected_start_posture: str = ""
+    #: Where the ability leaves the arm.  This, not `route`, is what the
+    #: ability is FOR: "store your arm" means end in the pocket, and which
+    #: measured routes get there depends on where the arm is standing.
+    end_posture: str = ""
     requires_confirmation: bool = True
     execution_mode: str = "planning_only"
     semantic_source: str = "scene_data"
@@ -203,6 +207,7 @@ class Proposal:
             "route": self.route,
             "route_version": self.route_version,
             "expected_start_posture": self.expected_start_posture,
+            "end_posture": self.end_posture,
             "destination_kind": self.destination_kind,
             "destination_label": self.destination_label,
             "legacy_destination": self.legacy_destination,

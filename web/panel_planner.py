@@ -439,6 +439,7 @@ class DeterministicPlanner:
             route_version=ability.route_version,
             expected_start_posture=(ability.start_postures[0]
                                     if ability.start_postures else ""),
+            end_posture=ability.end_posture,
             brief_reason=_ability_reason(match),
             requires_confirmation=ability.requires_confirmation,
             scene_name=(scene.name if scene is not None else ""),
