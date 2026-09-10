@@ -540,8 +540,12 @@ class TaskCoordinator:
                     role="reachy", text="Plan confirmed; no movement performed."
                 ))
                 if why_not:
+                    # The reasons come from several layers and some already end
+                    # in a full stop; appending another gives "..".
                     task.add_event(ConversationEvent(
-                        role="reachy", text=f"I did not move because {why_not}."
+                        role="reachy",
+                        text="I did not move because "
+                             + why_not.rstrip(". ") + ".",
                     ))
                 task.touch()
                 self._release_locked(task)
