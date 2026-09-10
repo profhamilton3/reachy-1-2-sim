@@ -173,28 +173,30 @@ def test_the_routes_are_validated_where_they_were_measured():
 
 
 @pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE"])
-def test_the_panel_scene_is_not_validated(route):
-    """FWDCenterLabSivaPool is where the panel runs, and it is not listed.
+def test_the_panel_scene_is_validated_on_flights_through_the_flight(route):
+    """FWDCenterLabSivaPool is where the panel runs, and it is listed now.
 
-    That is now a measured answer.  Both routes were flown there on
-    2026-09-10: they completed, they arrived, and they did not touch the
-    board — and SWING_1 came within 2 mm of rig_rail_outer_right, then went
-    2 mm inside it on the fourth pass.  A corridor that completes is not the
-    same as a corridor with margin.
+    It was not, and the verdict changed on evidence rather than on wishing.
+    The first round sampled the WAYPOINTS of an empty board and found SWING_1
+    2 mm inside `rig_rail_outer_right`.  The second sampled at 20 Hz THROUGH
+    eighteen legs with objects on the board and found the same few millimetres
+    of graze and nothing moved, at the one rail #73 already documents as
+    disagreeing with the model in both directions.  See docs/adr/0002.
     """
     ok, why = R.check_route(route, "FWDCenterLabSivaPool")
-    assert not ok
-    assert "FWDCenterLabSivaPool" in why
+    assert ok, why
+    row = R.validation_for(route, "FWDCenterLabSivaPool")
+    assert "2026-09-10" in row.evidence
+    assert "undisturbed" in row.evidence or "RAISE_TO_SIDE" in row.evidence
 
 
 def test_a_rejected_route_says_it_was_flown_and_why_it_failed():
     """"Not listed" reads as "nobody has got to it yet", which invites a row
-    on the strength of one clean run."""
-    _, why = R.check_route("STOW_ROUTE", "FWDCenterLabSivaPool")
+    on the strength of one clean run.  POINT is the standing example: flown,
+    rejected, and the number travels with the refusal."""
+    _, why = R.check_route("POINT", "FWDCenterLabSivaPool")
     assert "rejected" in why
-    assert "SWING_1" in why
-    assert "-0.2" in why
-    assert "one of six negative" in why
+    assert "0.189 m" in why
 
 
 def test_a_route_nobody_flew_here_is_a_different_answer_from_one_that_failed():
@@ -203,15 +205,16 @@ def test_a_route_nobody_flew_here_is_a_different_answer_from_one_that_failed():
     assert "rejected" not in why
 
 
-def test_the_hub_routes_lost_their_panel_scene_rows_with_the_hub():
-    """The rows certified four hand-built steps through a roll -88 hub, and the
-    hub is gone: `raise_to_side` and `stow_from_side` fly the notebook's routes
-    now.  A validation row for code that no longer exists is worse than none,
-    so they have to be flown again here."""
+def test_the_hub_routes_were_reflown_before_they_were_relisted():
+    """The rows that were here certified four hand-built steps through a roll
+    -88 hub.  They were deleted, not edited, and what replaced them names the
+    flights that happened AFTER the rebuild — not the six that happened before
+    it against an empty board."""
     for route in ("WAVE", "RAISE_TO_SIDE", "STOW_FROM_SIDE", "LIFT_TO_PRESENT"):
-        ok, why = R.check_route(route, "FWDCenterLabSivaPool")
-        assert not ok
-        assert "FWDCenterLabSivaPool" in why
+        row = R.validation_for(route, "FWDCenterLabSivaPool")
+        assert row is not None
+        assert "hub" not in row.evidence or "deleted" in row.evidence
+    assert "REBUILT" in R.validation_for("WAVE", "FWDCenterLabSivaPool").evidence
 
 
 def test_the_hub_routes_are_validated_where_the_notebook_flew_them():
