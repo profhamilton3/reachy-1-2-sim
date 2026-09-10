@@ -51,14 +51,19 @@ class PanelRoutes:
         self.capabilities = capabilities or Capabilities()
         self.link = link
         self.executor = executor
+        planner = DeterministicPlanner(scene_provider)
         self.coordinator = TaskCoordinator(
-            DeterministicPlanner(scene_provider),
+            planner,
             capabilities=self.capabilities,
             # The validator reads the scene fresh, so it sees the board as it
             # is at the moment Confirm is pressed rather than as it was when
             # the plan was drawn.
             revalidate=LiveProposalValidator(scene_provider),
             executor=executor,
+            # A greeting is answered without becoming the session's one active
+            # task, so typing "Hello" while a plan waits for confirmation
+            # neither replaces the plan nor is refused as a second task.
+            aside=planner.aside,
         )
 
     def _effective_capabilities(self) -> Tuple[Capabilities, bool, str]:

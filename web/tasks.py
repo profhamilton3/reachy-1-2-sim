@@ -184,7 +184,7 @@ class Proposal:
 class PlannerOutcome:
     """What a planner may return.  Anything else is a programming error."""
 
-    kind: str                       # "clarification" | "proposal" | "unsupported"
+    kind: str      # "clarification" | "proposal" | "reply" | "unsupported"
     message: str = ""
     choices: List[str] = field(default_factory=list)
     proposal: Optional[Proposal] = None
@@ -298,6 +298,7 @@ class TaskCoordinator:
         capabilities: Optional[Capabilities] = None,
         revalidate: Optional[Callable[[Proposal], Tuple[bool, str]]] = None,
         executor: Any = None,
+        aside: Optional[Callable[[str], Optional["PlannerOutcome"]]] = None,
         max_workers: int = 2,
         planning_timeout_s: float = PLANNING_TIMEOUT_S,
         task_ttl_s: float = TASK_TTL_S,
@@ -310,6 +311,11 @@ class TaskCoordinator:
         # Whatever can actually move the robot, or None.  The coordinator never
         # decides that a thing is executable — it asks.
         self._executor = executor
+        # Answers a message that needs no task at all, or None if it is not one
+        # of those.  Called OUTSIDE the lock and required to be fast and
+        # side-effect free: it decides whether "Hello" should disturb the
+        # session's one active task, so it must not itself be able to.
+        self._aside = aside
         self._caps = capabilities or Capabilities()
         self._timeout = planning_timeout_s
         self._ttl = task_ttl_s
@@ -347,6 +353,16 @@ class TaskCoordinator:
                 f"That message is {len(text)} characters; the limit is {MAX_TEXT_CHARS}.",
                 413, "text_too_long",
             )
+
+        # Before anything is created or any lock is taken: is this a message
+        # that needs no task?  A greeting has nothing to confirm, nothing to
+        # clarify and nothing to move, so making it the session's one active
+        # task would put it in the way of real work — and typing "Hello" while
+        # a plan is awaiting confirmation would either be refused with "one
+        # task at a time" or, worse, replace the plan.
+        aside = self._aside(text) if self._aside is not None else None
+        if aside is not None and aside.kind == "reply":
+            return self._aside_task_locked(session_id, text, aside)
 
         with self._lock:
             self._sweep_locked()
@@ -543,6 +559,28 @@ class TaskCoordinator:
 
     # -- internals ---------------------------------------------------------
 
+    def _aside_task_locked(self, session_id: str, text: str,
+                           outcome: "PlannerOutcome") -> Task:
+        """A finished task that was never the session's active one.
+
+        It exists so the page has something to render the exchange into, and
+        it is deliberately absent from `_by_session`: the session's active task
+        — a pending clarification, a plan awaiting confirmation, an arm in
+        motion — is not touched, not re-versioned, and not replaced.
+        """
+        with self._lock:
+            self._sweep_locked()
+            task = Task(task_id=uuid.uuid4().hex, session_id=session_id)
+            task.deadline = time.time() + self._ttl
+            task.add_event(ConversationEvent(role="user", text=text))
+            task.add_event(ConversationEvent(role="reachy", text=outcome.message))
+            task.state = TaskState.completed
+            task.detail = outcome.message
+            task.touch()
+            self._tasks[task.task_id] = task
+            self._trim_locked()
+            return task
+
     def _owned_locked(self, session_id: str, task_id: str) -> Task:
         task = self._tasks.get(task_id)
         # 404 for both "gone" and "someone else's": a different status would
@@ -644,6 +682,15 @@ class TaskCoordinator:
                 choices=list(outcome.choices),
                 slot=outcome.slot,
             ))
+        elif outcome.kind == "reply":
+            # A successful answer with nothing to do.  Terminal on arrival: no
+            # confirmation to seek, no executor to ask, no lease to take.  It
+            # is a distinct kind rather than a friendly `unsupported` because
+            # the panel shows failures in red, and "Hello" is not a failure.
+            task.state = TaskState.completed
+            task.detail = outcome.message
+            task.add_event(ConversationEvent(role="reachy", text=outcome.message))
+            self._release_locked(task)
         elif outcome.kind == "proposal" and outcome.proposal is not None:
             proposal = outcome.proposal
             proposal.plan_version = task.version

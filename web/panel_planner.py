@@ -196,6 +196,24 @@ def _unsupported(message: str) -> PlannerOutcome:
     return PlannerOutcome(kind="unsupported", message=message)
 
 
+def _reply(message: str) -> PlannerOutcome:
+    """A successful answer with nothing to do.
+
+    Distinct from `_unsupported` with friendly wording: the panel shows a
+    failed task in red, and a greeting is not a failure.
+    """
+    return PlannerOutcome(kind="reply", message=message)
+
+
+#: What "Hello" gets back.  It says what this panel can actually do rather
+#: than making conversation about what it might: an opening line that implies
+#: abilities the server does not have is the same false claim as a proposal
+#: that cannot be executed, just earlier.
+GREETING = ("Hello. I can move objects between the grid cells on the board — "
+            "tell me which object and which cell, and I will plan it and show "
+            "you the plan before anything moves.")
+
+
 class DeterministicPlanner:
     """Callable planner over a scene supplied fresh for each request.
 
@@ -247,6 +265,27 @@ class DeterministicPlanner:
 
         return self._propose(scene, target_id, destination)
 
+    def aside(self, text: str) -> Optional[PlannerOutcome]:
+        """Answer a message that needs no task, or None.
+
+        Called by the coordinator before it creates anything, so it must be
+        cheap and must not touch the board — which is exactly the property
+        that lets a greeting be answered while the simulator is down.  Only
+        abilities the registry marks as needing neither scene nor motion
+        qualify; everything else is a task.
+        """
+        try:
+            match = abilities.match(text)
+        except AbilityRefusal:
+            return None          # a refusal is a task's answer, not an aside
+        if match is None or not match.ability:
+            return None
+        if match.ability.needs_scene or match.ability.needs_motion:
+            return None
+        if match.name == "greet":
+            return _reply(GREETING)
+        return None
+
     # -- abilities ---------------------------------------------------------
 
     def _ability_outcome(self, command: str,
@@ -265,6 +304,12 @@ class DeterministicPlanner:
             return _unsupported(exc.message)
         if match is None:
             return None
+
+        if match.name == "greet":
+            # Answered here as well as through `aside`, so a greeting still
+            # works if the coordinator was built without that hook — and so
+            # there is one definition of what a greeting says.
+            return _reply(GREETING)
 
         given = {slot: text for slot, text in answers if slot}
 

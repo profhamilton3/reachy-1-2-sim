@@ -363,3 +363,224 @@ def test_capabilities_serves_the_ability_list():
     greet = next(a for a in payload["abilities"] if a["name"] == "greet")
     assert greet["needs_scene"] is False
     assert greet["needs_motion"] is False
+
+
+# ---------------------------------------------------------------------------
+# Conversation-only outcomes (issue #62)
+#
+# "Hello" could not work before, for two independent reasons: there was no
+# successful non-action outcome — `_apply_locked` sent everything that was not
+# a clarification or a proposal to the failure branch — and the planner read
+# the scene before it parsed anything, so a greeting answered with a scene
+# error when the simulator was down.
+# ---------------------------------------------------------------------------
+
+def test_a_greeting_is_a_reply_not_a_failure():
+    out = plan(make_scene(), "hello")
+    assert out.kind == "reply"
+    assert out.proposal is None
+
+
+def test_a_greeting_works_while_the_scene_is_unreadable():
+    """The panel is at its least useful exactly when someone is checking
+    whether anything is alive."""
+    from panel_scene import SceneView
+
+    out = DeterministicPlanner(lambda: SceneView(error="connection refused"))(
+        PlannerRequest(text="hi", history=[ConversationEvent(role="user", text="hi")])
+    )
+    assert out.kind == "reply"
+    assert "connection refused" not in out.message
+
+
+def test_a_greeting_completes_the_task_with_no_confirmation():
+    from tasks import TaskCoordinator, TaskState
+
+    planner = DeterministicPlanner(make_scene)
+    coord = TaskCoordinator(planner, aside=planner.aside)
+    try:
+        task = coord.submit("s1", "good morning")
+        assert task.state is TaskState.completed
+        assert task.proposal is None
+        assert task.question_id == ""
+        assert task.events[-1].role == "reachy"
+    finally:
+        coord.shutdown()
+
+
+def test_a_greeting_never_reaches_the_executor():
+    from tasks import TaskCoordinator
+
+    class Recorder:
+        def __init__(self):
+            self.asked = 0
+
+        def available(self, proposal=None):
+            self.asked += 1
+            return True, ""
+
+        def execute(self, proposal, **kw):        # pragma: no cover
+            raise AssertionError("a greeting must not execute anything")
+
+    rec = Recorder()
+    planner = DeterministicPlanner(make_scene)
+    coord = TaskCoordinator(planner, executor=rec, aside=planner.aside)
+    try:
+        coord.submit("s1", "hello")
+        assert rec.asked == 0
+    finally:
+        coord.shutdown()
+
+
+def _await_state(coord, session, task_id, state, timeout=3.0):
+    import time
+    from tasks import TaskState
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        task = coord.get(session, task_id)
+        if task.state is TaskState(state):
+            return task
+        time.sleep(0.01)
+    raise AssertionError(f"task stayed in {coord.get(session, task_id).state}")
+
+
+def test_a_greeting_during_a_pending_clarification_leaves_it_alone():
+    """The active task keeps its state, its version and its open question.
+
+    The obvious implementation runs the greeting through `submit()`, which
+    queues onto the session's one active task — replacing the plan, or being
+    refused as a second task.  Neither is an answer to "Hello".
+    """
+    from tasks import TaskCoordinator
+
+    planner = DeterministicPlanner(make_scene)
+    coord = TaskCoordinator(planner, aside=planner.aside)
+    try:
+        active = coord.submit("s1", "put soda_can")
+        active = _await_state(coord, "s1", active.task_id, "needs_clarification")
+        before = (active.state, active.version, active.question_id,
+                  len(active.events))
+
+        greeting = coord.submit("s1", "hello")
+        assert greeting.task_id != active.task_id
+        assert greeting.state.value == "completed"
+
+        after = coord.get("s1", active.task_id)
+        assert (after.state, after.version, after.question_id,
+                len(after.events)) == before
+
+        # And the pending question is still answerable afterwards.
+        resumed = coord.reply("s1", after.task_id, after.question_id, "r2c2")
+        assert resumed.task_id == active.task_id
+    finally:
+        coord.shutdown()
+
+
+def test_a_greeting_is_not_refused_as_a_second_task():
+    """`submit()` normally answers 409 while a task is active.  A greeting is
+    not a second task, so it must not collide with that rule."""
+    from tasks import TaskCoordinator
+
+    planner = DeterministicPlanner(make_scene)
+    coord = TaskCoordinator(planner, aside=planner.aside)
+    try:
+        active = coord.submit("s1", "put soda_can")
+        _await_state(coord, "s1", active.task_id, "needs_clarification")
+        greeting = coord.submit("s1", "hey reachy")
+        assert greeting.state.value == "completed"
+    finally:
+        coord.shutdown()
+
+
+def test_a_greeting_task_never_becomes_the_session_active_one():
+    from tasks import TaskCoordinator
+
+    planner = DeterministicPlanner(make_scene)
+    coord = TaskCoordinator(planner, aside=planner.aside)
+    try:
+        greeting = coord.submit("s1", "hello")
+        # The session slot is still free, so real work starts immediately
+        # rather than being told to finish or cancel the greeting.
+        real = coord.submit("s1", "put soda_can on r2c2")
+        assert real.task_id != greeting.task_id
+    finally:
+        coord.shutdown()
+
+
+def test_the_greeting_does_not_promise_abilities_the_panel_lacks():
+    """An opening line implying it can wave is the same false claim as a
+    proposal that cannot be executed, just earlier."""
+    from panel_planner import GREETING
+
+    lowered = GREETING.lower()
+    for absent in ("wave", "point", "rest", "stow"):
+        assert absent not in lowered
+
+
+def test_an_ability_that_needs_motion_is_never_an_aside():
+    planner = DeterministicPlanner(make_scene)
+    assert planner.aside("hello") is not None
+    for text in ("wave", "reset", "point to r2c2",
+                 "place your forearm on the table"):
+        assert planner.aside(text) is None
+
+
+def test_a_greeting_during_execution_does_not_disturb_the_arm():
+    """No cancel, no lease, and not a phase in the running task."""
+    import time
+
+    from tasks import (Capabilities, PlannerOutcome, Proposal, TaskCoordinator,
+                       TaskState)
+
+    proposal = Proposal(plan_id="p1", plan_version=0, task_type="pick_place",
+                        target_id="soda_can", destination="cell:r2c2",
+                        destination_kind="cell", brief_reason="because",
+                        summary="move soda_can to r2c2")
+
+    class SlowExecutor:
+        def __init__(self):
+            self.cancel_seen = False
+            self.phases = []
+
+        def available(self, proposal=None):
+            return True, ""
+
+        def execute(self, proposal, *, should_cancel=None, on_phase=None):
+            deadline = time.time() + 0.5
+            while time.time() < deadline:
+                if should_cancel and should_cancel():
+                    self.cancel_seen = True
+                    break
+                time.sleep(0.01)
+            from panel_executor import ExecutionResult
+            return ExecutionResult(status="completed", detail="done")
+
+    executor = SlowExecutor()
+    real_planner = DeterministicPlanner(make_scene)
+    coord = TaskCoordinator(
+        lambda _req: PlannerOutcome(kind="proposal", proposal=proposal),
+        capabilities=Capabilities(),
+        executor=executor,
+        aside=real_planner.aside,
+    )
+    try:
+        task = coord.submit("s1", "put soda_can on r2c2")
+        task = _await_state(coord, "s1", task.task_id, "awaiting_confirmation")
+        task = coord.confirm("s1", task.task_id, task.proposal.plan_id,
+                             task.proposal.plan_version)
+        assert task.state is TaskState.executing
+        version_while_executing = task.version
+
+        greeting = coord.submit("s1", "hello")
+        assert greeting.state is TaskState.completed
+
+        moving = coord.get("s1", task.task_id)
+        assert moving.state is TaskState.executing
+        assert moving.cancel_requested is False
+        assert moving.version == version_while_executing
+
+        _await_state(coord, "s1", task.task_id, "completed")
+        assert executor.cancel_seen is False
+    finally:
+        coord.shutdown()
