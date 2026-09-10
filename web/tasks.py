@@ -147,9 +147,29 @@ class Proposal:
     plan_id: str
     plan_version: int
     task_type: str
-    target_id: str
-    destination: str
-    brief_reason: str
+    #: Absent on the abilities that genuinely have neither.  None here is a
+    #: real answer, the same way `legacy_destination` None is — a wave has no
+    #: target and no destination, and writing "" or "__none__" into these
+    #: would put a value meaning ABSENT into fields whose readers (the live
+    #: revalidator, the executor's cell lookup, the browser card) all assume
+    #: PRESENT.  `__post_init__` holds pick_place to both.
+    target_id: Optional[str] = None
+    destination: Optional[str] = None
+    brief_reason: str = ""
+    #: Which arm.  Always known, never guessed: the validated corridor is
+    #: right-arm geometry through a rig that is not symmetric.
+    arm: str = "right"
+    #: The cell an ability points AT — not a destination to place into, so it
+    #: does not inherit pick-and-place's "must be empty" rule.
+    cell: Optional[str] = None
+    #: The object an ability points AT, distinct from a pick target.
+    object_id: Optional[str] = None
+    #: Which measured motion this plan flies, and which version of it.
+    route: str = ""
+    route_version: int = 0
+    #: The posture the route may be entered from, so the executor can refuse an
+    #: unsupported start rather than discover it in flight.
+    expected_start_posture: str = ""
     requires_confirmation: bool = True
     execution_mode: str = "planning_only"
     semantic_source: str = "scene_data"
@@ -160,6 +180,16 @@ class Proposal:
     legacy_destination: Optional[str] = None
     state_evidence: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # A pick-and-place plan without both of these is not a plan, and the
+        # cheapest place to notice is here rather than in the executor with the
+        # lease held.
+        if self.task_type == "pick_place" and not (self.target_id
+                                                   and self.destination):
+            raise ValueError(
+                "a pick_place proposal needs a target_id and a destination"
+            )
+
     def as_dict(self) -> dict:
         return {
             "plan_id": self.plan_id,
@@ -167,6 +197,12 @@ class Proposal:
             "task_type": self.task_type,
             "target_id": self.target_id,
             "destination": self.destination,
+            "arm": self.arm,
+            "cell": self.cell,
+            "object_id": self.object_id,
+            "route": self.route,
+            "route_version": self.route_version,
+            "expected_start_posture": self.expected_start_posture,
             "destination_kind": self.destination_kind,
             "destination_label": self.destination_label,
             "legacy_destination": self.legacy_destination,

@@ -268,16 +268,24 @@ def test_put_your_arm_away_is_an_ability_not_a_move():
     answers that it does not know an object by that name.
     """
     out = plan(make_scene(), "put your arm away")
-    assert out.kind == "unsupported"
-    assert "stow" in out.message or "rail pocket" in out.message
-    assert "object called" not in out.message
+    assert out.kind == "proposal"
+    assert out.proposal.task_type == "stow_arm"
+    assert out.proposal.route == "STOW_ROUTE"
+    assert "object called" not in (out.message or "")
 
 
-def test_a_recognised_ability_is_refused_by_name():
+def test_an_ability_proposal_carries_no_target_and_no_destination():
+    """A wave has neither, and no placeholder stands in for one."""
     out = plan(make_scene(), "wave")
-    assert out.kind == "unsupported"
-    assert "I understand: wave" in out.message
-    assert "I did not understand" not in out.message
+    assert out.kind == "proposal"
+    p = out.proposal
+    assert p.task_type == "wave"
+    assert p.target_id is None
+    assert p.destination is None
+    assert p.cell is None and p.object_id is None
+    assert p.arm == "right"
+    assert p.route == "WAVE"
+    assert p.expected_start_posture == "present"
 
 
 def test_pointing_at_a_cell_asks_which_one_and_offers_reachable_cells():
@@ -290,8 +298,10 @@ def test_pointing_at_a_cell_asks_which_one_and_offers_reachable_cells():
 
 def test_the_cell_answer_fills_the_cell_slot():
     out = plan(make_scene(), "point to a cell", answers=["r2c2"])
-    assert out.kind == "unsupported"
-    assert "r2c2" in out.message
+    assert out.kind == "proposal"
+    assert out.proposal.task_type == "point_cell"
+    assert out.proposal.cell == "r2c2"
+    assert out.proposal.destination is None      # pointing places nothing
 
 
 def test_bare_rest_asks_which_posture_then_resolves():
@@ -301,10 +311,12 @@ def test_bare_rest_asks_which_posture_then_resolves():
     assert "eleven waypoints apart" in first.message
 
     table = plan(make_scene(), "rest your arm", answers=["on the table"])
-    assert "rest the forearm on the table" in table.message
+    assert table.proposal.task_type == "rest_forearm"
+    assert table.proposal.route == "PLACE_ROUTE"
 
     pocket = plan(make_scene(), "rest your arm", answers=["in the rail pocket"])
-    assert "rail pocket" in pocket.message
+    assert pocket.proposal.task_type == "stow_arm"
+    assert pocket.proposal.route == "STOW_ROUTE"
 
 
 def test_an_answer_naming_neither_posture_asks_again():
@@ -334,19 +346,26 @@ def test_reset_the_simulation_is_explained_through_the_planner():
     assert "reset your arm" in out.message
 
 
-def test_an_ability_is_recognised_while_the_scene_is_unreadable():
-    """Ability matching does not depend on the board.
+def test_the_scene_read_follows_the_registry_not_a_blanket_rule():
+    """Each ability declares whether planning it needs the board.
 
-    Not the greeting reply itself — that is #62 — but the matcher must not sit
-    behind the scene read, or every ability inherits the simulator's health.
+    A wave sweeps the space above the board — `PRESENT` was chosen for
+    whole-arm clearance against the objects on it — so an unreadable scene is
+    a real obstacle and saying so is right.  A greeting is not, and must not
+    inherit the simulator's health.
     """
     from panel_scene import SceneView
-    out = DeterministicPlanner(lambda: SceneView(error="bad YAML"))(
-        PlannerRequest(text="wave", history=[
-            ConversationEvent(role="user", text="wave")])
-    )
-    assert "I understand: wave" in out.message
-    assert "bad YAML" not in out.message
+
+    planner = DeterministicPlanner(lambda: SceneView(error="bad YAML"))
+    waved = planner(PlannerRequest(text="wave", history=[
+        ConversationEvent(role="user", text="wave")]))
+    assert waved.kind == "unsupported"
+    assert "bad YAML" in waved.message
+
+    greeted = planner(PlannerRequest(text="hello", history=[
+        ConversationEvent(role="user", text="hello")]))
+    assert greeted.kind == "reply"
+    assert "bad YAML" not in greeted.message
 
 
 def test_capabilities_serves_the_ability_list():
@@ -584,3 +603,183 @@ def test_a_greeting_during_execution_does_not_disturb_the_arm():
         assert executor.cancel_seen is False
     finally:
         coord.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Per-ability proposal arguments (issue #63)
+# ---------------------------------------------------------------------------
+
+def test_a_pick_place_proposal_cannot_be_built_without_its_two_fields():
+    """The invariant is enforced where it is cheap, not in the executor with
+    the lease held."""
+    import pytest as _pytest
+    from tasks import Proposal
+
+    with _pytest.raises(ValueError):
+        Proposal(plan_id="p", plan_version=0, task_type="pick_place")
+    with _pytest.raises(ValueError):
+        Proposal(plan_id="p", plan_version=0, task_type="pick_place",
+                 target_id="soda_can")
+
+
+def test_an_ability_proposal_needs_neither():
+    from tasks import Proposal
+
+    p = Proposal(plan_id="p", plan_version=0, task_type="wave")
+    assert p.target_id is None and p.destination is None
+
+
+@pytest.mark.parametrize("text,action,route", [
+    ("wave", "wave", "WAVE"),
+    ("store your arm", "stow_arm", "STOW_ROUTE"),
+    ("place your forearm on the table", "rest_forearm", "PLACE_ROUTE"),
+    ("point to r2c2", "point_cell", "POINT"),
+    ("point to the soda can", "point_object", "POINT"),
+])
+def test_each_ability_carries_its_route_identity(text, action, route):
+    out = plan(make_scene(), text)
+    assert out.kind == "proposal", out.message
+    assert out.proposal.task_type == action
+    assert out.proposal.route == route
+    assert out.proposal.route_version == 1
+
+
+def test_the_reason_names_the_route_because_the_route_is_the_claim():
+    """"Store your arm" means the rail-pocket corridor, not `P.go_home()` —
+    which routes through `stow_from_side()` and is a different motion also
+    fairly called going home."""
+    out = plan(make_scene(), "store your arm")
+    assert "STOW_ROUTE" in out.proposal.brief_reason
+    assert "right arm" in out.proposal.brief_reason
+
+
+def test_pointing_at_an_occupied_cell_is_a_proposal():
+    """Pointing is a hover.  Pick-and-place's empty-destination rule would
+    refuse the most natural request in a populated scene."""
+    scene = make_scene()
+    scene.cells["r2c2"].occupant = "foam_block"
+    out = plan(scene, "point to r2c2")
+    assert out.kind == "proposal"
+    assert out.proposal.cell == "r2c2"
+
+
+def test_placing_into_an_occupied_cell_is_still_refused():
+    scene = make_scene()
+    scene.cells["r2c2"].occupant = "foam_block"
+    out = plan(scene, "put soda_can on r2c2")
+    assert out.kind == "clarification"
+    assert "already occupied" in out.message
+
+
+def test_pointing_at_an_unreachable_cell_is_refused():
+    out = plan(make_scene(), "point to r3c1")
+    assert out.kind == "clarification"
+    assert "out of the right arm's reach" in out.message
+
+
+def test_pointing_at_an_object_in_the_pool_explains_rather_than_reaches():
+    scene = make_scene()
+    scene.objects["soda_can"].on_board = False
+    out = plan(scene, "point to the soda can")
+    assert out.kind == "unsupported"
+    assert "not on the board" in out.message
+
+
+# ---------------------------------------------------------------------------
+# Revalidation branches by ability
+# ---------------------------------------------------------------------------
+
+def _revalidate(scene, proposal):
+    from panel_planner import LiveProposalValidator
+    return LiveProposalValidator(lambda: scene)(proposal)
+
+
+def _live(scene):
+    from panel_scene import apply_snapshot
+    from panel_sim_link import SimSnapshot
+    import time as _t
+    apply_snapshot(scene, SimSnapshot(scene_revision="rev-1", objects={},
+                                      received_at=_t.monotonic()))
+    return scene
+
+
+def test_a_wave_is_not_invalidated_by_the_objects_moving():
+    scene = _live(make_scene())
+    out = plan(scene, "wave")
+    scene.cells["r2c2"].occupant = "soda_can"
+    ok, why = _revalidate(scene, out.proposal)
+    assert ok, why
+
+
+def test_pointing_at_a_cell_is_not_invalidated_by_it_becoming_occupied():
+    scene = _live(make_scene())
+    out = plan(scene, "point to r2c2")
+    scene.cells["r2c2"].occupant = "foam_block"
+    ok, why = _revalidate(scene, out.proposal)
+    assert ok, why
+
+
+def test_pointing_at_a_cell_is_invalidated_when_the_cell_goes_away():
+    scene = _live(make_scene())
+    out = plan(scene, "point to r2c2")
+    del scene.cells["r2c2"]
+    ok, why = _revalidate(scene, out.proposal)
+    assert not ok
+    assert "no longer in this scene" in why
+
+
+def test_pointing_at_an_object_is_invalidated_when_it_moves():
+    """The hover was computed over where it WAS."""
+    scene = _live(make_scene())
+    scene.objects["soda_can"].position = (0.30, 0.00, 0.78)
+    scene.objects["soda_can"].on_board = True
+    out = plan(scene, "point to the soda can")
+    assert out.kind == "proposal", out.message
+    scene.objects["soda_can"].position = (0.30, 0.20, 0.78)
+    ok, why = _revalidate(scene, out.proposal)
+    assert not ok
+    assert "has moved" in why
+
+
+def test_pointing_at_an_object_survives_it_sitting_still():
+    scene = _live(make_scene())
+    scene.objects["soda_can"].position = (0.30, 0.00, 0.78)
+    scene.objects["soda_can"].on_board = True
+    out = plan(scene, "point to the soda can")
+    ok, why = _revalidate(scene, out.proposal)
+    assert ok, why
+
+
+# ---------------------------------------------------------------------------
+# A new command during a clarification is a new command
+# ---------------------------------------------------------------------------
+
+def test_a_new_command_during_a_clarification_replaces_the_task():
+    out = plan(make_scene(), "point to a cell", answers=["store your arm"])
+    assert out.kind == "proposal"
+    assert out.proposal.task_type == "stow_arm"
+    assert out.proposal.cell is None
+
+
+def test_a_pick_and_place_command_during_a_clarification_replaces_it_too():
+    out = plan(make_scene(), "point to a cell",
+               answers=["put soda_can on r1c1"])
+    assert out.kind == "proposal"
+    assert out.proposal.task_type == "pick_place"
+    assert out.proposal.destination == "cell:r1c1"
+
+
+def test_a_refused_command_during_a_clarification_is_still_a_command():
+    """"Don't wave" must reach the operator as a refusal, not be filed as a
+    cell name."""
+    out = plan(make_scene(), "point to a cell", answers=["don't wave"])
+    assert out.kind == "unsupported"
+    assert "telling me not to" in out.message
+
+
+def test_a_bare_answer_is_still_an_answer():
+    """The two do not overlap: answers are bare nouns, commands carry verbs."""
+    out = plan(make_scene(), "point to a cell", answers=["r2c2"])
+    assert out.proposal.cell == "r2c2"
+    out = plan(make_scene(), "put soda_can", answers=["r2c2"])
+    assert out.proposal.destination == "cell:r2c2"

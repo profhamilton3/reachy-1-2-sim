@@ -39,7 +39,7 @@ import math
 import re
 import uuid
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import panel_abilities as abilities
 from panel_abilities import AbilityRefusal
@@ -235,6 +235,14 @@ class DeterministicPlanner:
                 "works out the angles."
             )
 
+        # A NEW COMMAND is not an answer.  "Which cell?" followed by "stow your
+        # arm" is a change of mind, and folding it into the open slot would
+        # store "stow your arm" as a cell name and then complain it is not one.
+        # Whichever the operator typed last wins, and the earlier answers go
+        # with the request they were answering.
+        if answers and _is_a_command(answers[-1][1]):
+            command, answers = answers[-1][1], []
+
         # Abilities are matched BEFORE the pick-and-place grammar, because two
         # of them open with a pick-and-place verb: "put your arm away" and
         # "place your forearm on the table".  Left to the old order they parse
@@ -357,7 +365,79 @@ class DeterministicPlanner:
                                 SLOT_OBJECT)
             match.slots[SLOT_OBJECT] = obj
 
-        return _unsupported(_not_yet(match))
+        return self._ability_proposal(match)
+
+    def _ability_proposal(self, match) -> PlannerOutcome:
+        """A confirmable plan for an ability, with only the arguments it has.
+
+        No placeholders.  A wave carries no target and no destination, and the
+        card, the revalidator and the executor all read that absence as the
+        answer it is.
+        """
+        ability = match.ability
+        scene = self._scene_provider() if ability.needs_scene else None
+        cell = match.slots.get(SLOT_CELL) or None
+        obj = match.slots.get(SLOT_OBJECT) or None
+
+        if scene is not None and scene.error:
+            return _unsupported(f"I cannot read the scene right now: {scene.error}")
+
+        summary = ability.summary
+        if cell is not None:
+            # Pointing is a hover, so an occupied cell is fine — the object is
+            # what gets hovered over.  Reusing pick-and-place's empty-cell rule
+            # here would refuse the most natural request in a populated scene.
+            if cell not in scene.cells:
+                return _clarify(
+                    f"There is no cell called {cell} in this scene. "
+                    "Pick one of these.", scene.reachable_cells(), SLOT_CELL)
+            if not scene.cells[cell].reachable:
+                return _clarify(
+                    f"{cell} was measured out of the right arm's reach, so I "
+                    "cannot point at it. Pick another cell.",
+                    scene.reachable_cells(), SLOT_CELL)
+            summary = f"{summary} {cell}"
+
+        if obj is not None:
+            oid = _match_object_id(obj, scene)
+            if oid is None:
+                return _clarify(
+                    f"I do not know an object called \"{obj}\". "
+                    "These are the objects in this scene.",
+                    sorted(scene.objects), SLOT_OBJECT)
+            if scene.objects[oid].on_board is False:
+                # In the pool, not on the board.  Reaching for it would be a
+                # tabletop motion aimed off the tabletop.
+                return _unsupported(
+                    f"{oid} is not on the board right now, so there is nothing "
+                    "on the table for me to point at. Place it on a cell first."
+                )
+            # Write the resolution back so everything downstream — the
+            # evidence, the card, the executor — sees the object ID and not
+            # the words the operator typed.  "soda can" and `soda_can` are the
+            # same object to a reader and different strings to a lookup.
+            match.slots[SLOT_OBJECT] = oid
+            obj = oid
+            summary = f"{summary} {oid}"
+
+        proposal = Proposal(
+            plan_id=uuid.uuid4().hex,
+            plan_version=0,
+            task_type=match.name,
+            arm=match.arm,
+            cell=cell,
+            object_id=obj,
+            route=ability.route,
+            route_version=ability.route_version,
+            expected_start_posture=(ability.start_postures[0]
+                                    if ability.start_postures else ""),
+            brief_reason=_ability_reason(match),
+            requires_confirmation=ability.requires_confirmation,
+            scene_name=(scene.name if scene is not None else ""),
+            summary=summary,
+            state_evidence=_ability_evidence(match, scene),
+        )
+        return PlannerOutcome(kind="proposal", proposal=proposal)
 
     # -- destination -------------------------------------------------------
 
@@ -523,6 +603,64 @@ class DeterministicPlanner:
         )
 
 
+def _ability_reason(match) -> str:
+    """Why this plan, said in terms the operator can check.
+
+    Names the route, because the route IS the claim: "store your arm" means
+    the eleven-waypoint rail-pocket corridor and not `P.go_home()`, which
+    routes through `stow_from_side()` and is a different motion that is also
+    fairly called going home.
+    """
+    ability = match.ability
+    if not ability.route:
+        return "no arm movement"
+    where = f" to {match.slots[abilities.SLOT_CELL]}" if match.slots.get(
+        abilities.SLOT_CELL) else ""
+    return (f"{ability.route} with my {match.arm} arm{where}, ending "
+            f"{ability.end_posture or 'where it started'}")
+
+
+def _ability_evidence(match, scene) -> Dict[str, Any]:
+    """What the revalidator will need at confirm time.
+
+    Per ability, because what invalidates a plan differs: a wave does not care
+    where the objects are, pointing at an object cares very much, and pointing
+    at a cell cares only that the cell is still there and reachable.
+    """
+    ev: Dict[str, Any] = {"action": match.name, "arm": match.arm,
+                          "route": match.ability.route,
+                          "route_version": match.ability.route_version}
+    if scene is None:
+        return ev
+    ev["scene_revision"] = scene.scene_revision
+    ev["live"] = scene.live
+    cell = match.slots.get(abilities.SLOT_CELL)
+    if cell:
+        ev["cell"] = cell
+    oid = match.slots.get(abilities.SLOT_OBJECT)
+    if oid and oid in scene.objects and scene.objects[oid].position is not None:
+        ev["object_id"] = oid
+        ev["object_position"] = list(scene.objects[oid].position)
+    return ev
+
+
+def _is_a_command(text: str) -> bool:
+    """Whether a turn stands on its own as a request rather than an answer.
+
+    An answer is a bare noun — "r2c2", "soda_can", "on the table".  None of
+    those parse as a command, and every command carries a verb the grammars
+    know, so the two do not overlap.
+    """
+    try:
+        if abilities.match(text) is not None:
+            return True
+    except AbilityRefusal:
+        # Understood, and refused.  Still a command: the operator should get
+        # the refusal, not have "don't wave" filed as a cell name.
+        return True
+    return parse_intent(text) is not None
+
+
 def _posture_answer(text: str) -> Optional[str]:
     """Which posture an answer to the rest/stow question names.
 
@@ -538,20 +676,6 @@ def _posture_answer(text: str) -> Optional[str]:
     if re.search(r"\b(pocket|rail|home|away|stow|store|default|back)\b", norm):
         return "stow_arm"
     return None
-
-
-def _not_yet(match) -> str:
-    """Refuse one ability by name, saying what would make it possible."""
-    what = match.ability.summary
-    if match.slots.get(abilities.SLOT_CELL):
-        what = f"{what} — {match.slots[abilities.SLOT_CELL]}"
-    elif match.slots.get(abilities.SLOT_OBJECT):
-        what = f"{what} — {match.slots[abilities.SLOT_OBJECT]}"
-    return (
-        f"I understand: {what}. I cannot do it yet — the validated route for "
-        "it is not wired into this server. I can move objects between grid "
-        "cells today; ask me for that and I will plan it."
-    )
 
 
 def _dest_ref(scene: SceneView, destination_id: str) -> DestinationRef:
@@ -625,6 +749,10 @@ class LiveProposalValidator:
             return False, ("The scene was reloaded since I made that plan. "
                            "Ask me again and I will look at the new one.")
 
+        action = evidence.get("action")
+        if action is not None and action != "pick_place":
+            return self._check_ability(proposal, scene, evidence, action)
+
         target_id = evidence.get("target_id") or proposal.target_id
         obj = scene.objects.get(target_id)
         if obj is None:
@@ -653,6 +781,59 @@ class LiveProposalValidator:
                 held = cell.occupant or "nothing"
                 return False, (f"{cell.name} now holds {held}, which is not "
                                "what it held when I made that plan.")
+        return True, ""
+
+    def _check_ability(self, proposal: Proposal, scene: SceneView,
+                       evidence: dict, action: str) -> Tuple[bool, str]:
+        """What invalidates a plan differs by ability, so ask per ability.
+
+        The pick-and-place rule — the target must not have moved, the
+        destination must still be empty — is not a general one.  Applied to a
+        wave it asserts things about objects the plan never mentioned; applied
+        to pointing at a cell it refuses an occupied cell that pointing is
+        perfectly happy to hover over.  One rule covering all of them would
+        pass silently for every ability it was not written for.
+        """
+        cell_name = evidence.get("cell") or proposal.cell
+        if cell_name is not None:
+            cell = scene.cells.get(cell_name)
+            if cell is None:
+                return False, f"{cell_name} is no longer in this scene."
+            if not cell.reachable:
+                return False, f"{cell_name} is no longer within reach."
+            # Deliberately NOT checking occupancy.  Pointing is a hover, and
+            # a cell with something on it is a cell worth pointing at.
+
+        object_id = evidence.get("object_id") or proposal.object_id
+        expected_pos = evidence.get("object_position")
+        if object_id is not None:
+            obj = scene.objects.get(object_id)
+            if obj is None:
+                return False, f"{object_id} is no longer in this scene."
+            if obj.on_board is False:
+                return False, (f"{object_id} has been taken off the board "
+                               "since I made that plan.")
+            if expected_pos is not None:
+                if obj.position is None:
+                    return False, (f"I can no longer see where {object_id} "
+                                   "is, so I will not point at where it was.")
+                drift = _distance(obj.position, expected_pos)
+                if drift > POSE_TOLERANCE_M:
+                    # For pointing, the object moving is exactly what makes the
+                    # plan wrong: the hover was computed over where it WAS.
+                    return False, (f"{object_id} has moved "
+                                   f"{drift * 100:.0f} cm since I made that "
+                                   "plan. Ask me again.")
+
+        if action == "rest_forearm":
+            # The forearm footprint check belongs to the geometry #64 brings
+            # in; there is nothing here that can measure it yet.  Saying so
+            # rather than passing quietly matters because a rest lowers the
+            # forearm onto the table, and an object under it is the one thing
+            # that must stop it.  Nothing can execute this ability until #65
+            # anyway, so the gate holds without this check pretending to be one.
+            return True, ""
+
         return True, ""
 
 
