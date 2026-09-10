@@ -350,3 +350,28 @@ def test_a_stop_before_the_approach_returns_without_flying(monkeypatch):
                      read=read, should_abort=lambda: True)
     assert not out.reached
     assert "stopped" in out.detail
+
+
+def test_the_start_check_ignores_wrist_and_gripper_drift():
+    """An arm sitting correctly at REST, with the wrist drift GROSS_JOINTS
+    exists to ignore, was refused — with a message that contradicted itself:
+    "the arm is not at REST_SHUT; the nearest waypoint is REST_SHUT"."""
+    arm = StubArm(dict(R.REST, r_wrist_roll=R.REST["r_wrist_roll"] + 8.0))
+    ok, why = M.check_start(arm, R.STOW_ROUTE)
+    assert ok, why
+
+
+def test_the_start_check_still_refuses_a_genuinely_wrong_posture():
+    arm = StubArm(R.SWING_1)
+    ok, why = M.check_start(arm, R.STOW_ROUTE)
+    assert not ok
+    assert "SWING_1" in why
+
+
+def test_a_rested_arm_can_be_stowed_straight_afterwards():
+    """The two routes have to compose: deploy ends at REST, and stow starts
+    from there."""
+    arm = StubArm(R.HOME)
+    M.deploy_to_rest(arm)
+    assert M.stow_to_home(arm) == [w.name for w in R.STOW_ROUTE]
+    assert arm.at(R.HOME)

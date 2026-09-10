@@ -783,3 +783,21 @@ def test_a_bare_answer_is_still_an_answer():
     assert out.proposal.cell == "r2c2"
     out = plan(make_scene(), "put soda_can", answers=["r2c2"])
     assert out.proposal.destination == "cell:r2c2"
+
+
+def test_a_retried_greeting_does_not_appear_twice():
+    """Not being the session's active task and being idempotent are unrelated
+    properties, and the aside path needs both — a double click must not put
+    two greetings in the transcript."""
+    from tasks import TaskCoordinator
+
+    planner = DeterministicPlanner(make_scene)
+    coord = TaskCoordinator(planner, aside=planner.aside)
+    try:
+        first = coord.submit("s1", "hello", "req-1")
+        again = coord.submit("s1", "hello", "req-1")
+        assert again.task_id == first.task_id
+        different = coord.submit("s1", "hello", "req-2")
+        assert different.task_id != first.task_id
+    finally:
+        coord.shutdown()

@@ -398,7 +398,8 @@ class TaskCoordinator:
         # task at a time" or, worse, replace the plan.
         aside = self._aside(text) if self._aside is not None else None
         if aside is not None and aside.kind == "reply":
-            return self._aside_task_locked(session_id, text, aside)
+            return self._aside_task_locked(session_id, text, aside,
+                                           client_request_id)
 
         with self._lock:
             self._sweep_locked()
@@ -596,17 +597,31 @@ class TaskCoordinator:
     # -- internals ---------------------------------------------------------
 
     def _aside_task_locked(self, session_id: str, text: str,
-                           outcome: "PlannerOutcome") -> Task:
+                           outcome: "PlannerOutcome",
+                           client_request_id: str = "") -> Task:
         """A finished task that was never the session's active one.
 
         It exists so the page has something to render the exchange into, and
         it is deliberately absent from `_by_session`: the session's active task
         — a pending clarification, a plan awaiting confirmation, an arm in
         motion — is not touched, not re-versioned, and not replaced.
+
+        It IS in `_by_client_req`, though.  Skipping that was a real gap: a
+        double-clicked "Hello", or a POST retried over a flaky link, put two
+        greetings in the transcript, which is exactly the invariant the
+        client-request id was added to hold.  Not being the active task and
+        not being idempotent are unrelated properties, and this needs both.
         """
         with self._lock:
             self._sweep_locked()
+            crid_key = f"{session_id}:{client_request_id}"
+            if client_request_id and crid_key in self._by_client_req:
+                existing = self._tasks.get(self._by_client_req[crid_key])
+                if existing is not None:
+                    return existing
+
             task = Task(task_id=uuid.uuid4().hex, session_id=session_id)
+            task.client_request_id = client_request_id
             task.deadline = time.time() + self._ttl
             task.add_event(ConversationEvent(role="user", text=text))
             task.add_event(ConversationEvent(role="reachy", text=outcome.message))
@@ -614,6 +629,8 @@ class TaskCoordinator:
             task.detail = outcome.message
             task.touch()
             self._tasks[task.task_id] = task
+            if client_request_id:
+                self._by_client_req[crid_key] = task.task_id
             self._trim_locked()
             return task
 

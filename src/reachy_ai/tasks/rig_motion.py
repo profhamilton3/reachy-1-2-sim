@@ -98,10 +98,19 @@ def check_start(arm, route, *, tol: float = 8.0) -> Tuple[bool, str]:
     A route is only as safe as its first waypoint's assumption about where the
     arm was.  Answering "no, and here is the nearest waypoint" is more use than
     a tracking failure three waypoints in.
+
+    Judged on the GROSS joints, at a posture tolerance.  The first version used
+    all seven at the waypoint's own tracking tolerance, and that is the wrong
+    question twice over: the wrist angles and the gripper do not move the elbow
+    or forearm through the rails, and a tracking tolerance measures whether a
+    move converged, not whether the arm is standing somewhere.  An arm sitting
+    correctly at REST with 8 deg of wrist_roll drift — the drift GROSS_JOINTS
+    exists to ignore — was refused, with a message that contradicted itself:
+    "the arm is not at REST_SHUT; the nearest waypoint is REST_SHUT".
     """
     present = present_pose(arm)
     first = route[0]
-    if R.at_pose(present, first.pose, tol=first.tol):
+    if R.at_pose(present, first.pose, tol=tol, joints=list(R.GROSS_JOINTS)):
         return True, ""
     name, distance = R.nearest_waypoint(present, route)
     return False, (f"the arm is not at {first.name}; the nearest waypoint on "
@@ -184,7 +193,13 @@ def wave(arm, *, cycles: int = R.WAVE_CYCLES, should_abort: Abort = None,
         done += 1
     if on_phase is not None:
         on_phase("returning to the presentation pose")
+    # Unguarded on purpose, and the notebook says so: WAVE_A and WAVE_B are
+    # defined relative to PRESENT, so this retreat stays inside the envelope
+    # the wave was measured in.  It is not a jump to rest or to the pocket —
+    # those are separate validated transitions.
     P.smooth_move(arm, R.PRESENT, R.WAVE_SECONDS)
+    P.wait_until(arm, {n: v for n, v in R.PRESENT.items() if n != "r_gripper"},
+                 tol=R.LESSON_TOL, timeout=R.WAVE_SECONDS + 1.0)
     return done
 
 

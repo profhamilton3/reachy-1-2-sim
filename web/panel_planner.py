@@ -300,11 +300,11 @@ class DeterministicPlanner:
                          answers: List[Tuple[str, str]]) -> Optional[PlannerOutcome]:
         """Answer a non-pick-and-place request, or None to fall through.
 
-        Stage #61 lands recognition, not motion.  A recognised ability is
-        refused BY NAME — "I understand: wave" — because "I did not understand
-        that" for a phrase the registry knows is a worse answer than an honest
-        no, and because it is the difference between the operator rephrasing
-        forever and the operator reading the issue.
+        Everything an ability can answer WITHOUT the board happens here:
+        greetings, refusals, the arm question and the rest/stow ambiguity.
+        What needs the board — is that cell real, is that object on it —
+        belongs to `_ability_proposal`, which reads the scene once and only
+        for abilities whose registry entry says they need it.
         """
         try:
             match = abilities.match(command)
@@ -375,12 +375,20 @@ class DeterministicPlanner:
         answer it is.
         """
         ability = match.ability
-        scene = self._scene_provider() if ability.needs_scene else None
         cell = match.slots.get(SLOT_CELL) or None
         obj = match.slots.get(SLOT_OBJECT) or None
-
-        if scene is not None and scene.error:
-            return _unsupported(f"I cannot read the scene right now: {scene.error}")
+        # An ability with a cell or an object to check needs the board to check
+        # it against, whatever its registry entry says.  Deriving that here
+        # rather than trusting `needs_scene` alone means a future ability that
+        # sets one and forgets the other gets a scene rather than an
+        # AttributeError on `scene.cells`.
+        if ability.needs_scene or cell is not None or obj is not None:
+            scene = self._scene_provider()
+            if scene.error:
+                return _unsupported(
+                    f"I cannot read the scene right now: {scene.error}")
+        else:
+            scene = None
 
         summary = ability.summary
         if cell is not None:
