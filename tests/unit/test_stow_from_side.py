@@ -110,7 +110,13 @@ def _run_stow(start=None):
 #: narrow for everything that goes through it — SWING_1 on the measured route
 #: plans at +0.6 cm and flew at +0.2 and -0.2 (#74) — so this is not a test for
 #: a comfortable margin.  It is a test that the tuck is worth doing.
-_TUCKED_CM = -0.4
+#: What the tucked paths measure at their tightest point, with an arm that
+#: tracks exactly.  They differ because they carry different shoulder pitches:
+#: from the hub the arm is already folded and keeps its own (-25, which models
+#: best), while from HOME it has to back out of the pocket to +30 first.
+_TUCKED_FROM_HUB_CM = 1.5
+_TUCKED_FROM_HOME_CM = -0.4
+_TUCKED_PARTWAY_CM = -2.2
 _STRAIGHT_CM = -3.2
 
 
@@ -129,8 +135,8 @@ def test_the_tuck_is_an_order_of_magnitude_better_than_the_straight_sweep(
     """
     arm, _ = _run_stow()
     tucked = _worst_rig(pool_scene, arm.trace)
-    assert tucked > _STRAIGHT_CM / 100.0 + 0.02
-    assert tucked == pytest.approx(_TUCKED_CM / 100.0, abs=0.01)
+    assert tucked > 0, "{:+.1f} cm".format(tucked * 100)
+    assert tucked == pytest.approx(_TUCKED_FROM_HUB_CM / 100.0, abs=0.01)
 
 
 def test_the_same_path_behaves_the_same_in_the_other_scene(pool_scene):
@@ -226,13 +232,21 @@ def test_it_ends_at_home_with_the_motors_off():
 
 
 def test_it_works_from_a_part_way_return(pool_scene):
-    """The return trajectory can leave the arm flexed and forward; the first
-    step re-establishes the geometry every later clearance is measured from."""
+    """The return trajectory can leave the arm flexed and forward.
+
+    This is the worst of the three starts — an arm caught half folded at
+    roll -55 is already inside the band, so the tuck happens there rather
+    than before it, and the first part of the sweep carries whatever it
+    started with.  Better than the straight sweep, and not by much: a start
+    inside the band is a start the tuck cannot fully rescue.
+    """
     arm, _ = _run_stow(start={"r_shoulder_pitch": -40.0, "r_shoulder_roll": -55.0,
                               "r_arm_yaw": 10.0, "r_elbow_pitch": -70.0,
                               "r_forearm_yaw": 0.0, "r_wrist_pitch": 0.0,
                               "r_wrist_roll": 0.0, "r_gripper": R.OPEN})
-    assert _worst_rig(pool_scene, arm.trace) > _STRAIGHT_CM / 100.0 + 0.02
+    worst = _worst_rig(pool_scene, arm.trace)
+    assert worst > _STRAIGHT_CM / 100.0
+    assert worst == pytest.approx(_TUCKED_PARTWAY_CM / 100.0, abs=0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +298,9 @@ def test_raising_to_the_side_never_enters_the_rig(pool_scene):
     moved it.  The old docstring claimed it held at its range limit.
     """
     arm = _run_raise()
-    assert _worst_rig(pool_scene, arm.trace) > _STRAIGHT_CM / 100.0 + 0.02
+    worst = _worst_rig(pool_scene, arm.trace)
+    assert worst == pytest.approx(_TUCKED_FROM_HOME_CM / 100.0, abs=0.01)
+    assert worst > _STRAIGHT_CM / 100.0 + 0.02
 
 
 def test_the_old_ascent_is_the_one_that_jammed(pool_scene):
@@ -325,6 +341,7 @@ def test_out_and_back_is_clear_in_both_scenes(pool_scene):
         worst = _worst_rig(model, up.trace + down.trace)
         assert worst > _STRAIGHT_CM / 100.0 + 0.02, "{:+.1f} cm".format(
             worst * 100)
+        assert worst == pytest.approx(_TUCKED_FROM_HOME_CM / 100.0, abs=0.01)
 
 
 def test_a_half_fold_stops_rather_than_sweeping():
@@ -352,7 +369,8 @@ def test_a_half_fold_stops_rather_than_sweeping():
         P._stream = half
         with pytest.raises(RuntimeError) as exc:
             P.stow_from_side(_Robot(), arm, duration=3.0)
-        assert "did not fold" in str(exc.value)
+        assert "did not take" in str(exc.value)
+        assert "elbow is at -55" in str(exc.value)
         assert "rig_rail_outer_right" in str(exc.value)
         # And it stopped BEFORE moving the roll.
         assert all(abs(p["r_shoulder_roll"]) < 1.0 for p in arm.trace)
@@ -377,7 +395,8 @@ def test_raising_also_stops_on_a_half_fold():
         P._stream = half
         with pytest.raises(RuntimeError) as exc:
             P.raise_to_side(arm, duration=3.0)
-        assert "did not fold" in str(exc.value)
+        assert "did not take" in str(exc.value)
+        assert "elbow is at -55" in str(exc.value)
         assert all(abs(p["r_shoulder_roll"]) < 1.0 for p in arm.trace)
     finally:
         P._stream = original
