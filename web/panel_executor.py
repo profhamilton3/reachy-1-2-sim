@@ -320,10 +320,22 @@ class SimulatorExecutor:
 
             start = R.posture_of(M.present_pose(arm))
             wanted = proposal.expected_start_posture
+            recovered: List[str] = []
+            if start is None and M.stranded_at(arm) is not None:
+                # Left part way through the pocket entry by something that
+                # stopped early.  Finishing it is two measured moves, and
+                # refusing every later request until a human intervenes is
+                # correct and useless.
+                phase("finishing the move that was interrupted")
+                robot.turn_on("r_arm")
+                _wait_for_motors(arm)
+                recovered = M.resume_to_home(arm, on_phase=phase)
+                start = R.posture_of(M.present_pose(arm))
             if start is None:
-                # Not at any named posture.  The nearest waypoint is reported
-                # because it is the useful fact, and NOT flown to, because the
-                # segment onto it is the one nobody measured.
+                # Not at any named posture, and not on the pocket sequence
+                # either.  The nearest waypoint is reported because it is the
+                # useful fact, and NOT flown to, because the segment onto it is
+                # the one nobody measured.
                 name, distance = R.nearest_waypoint(M.present_pose(arm))
                 return ExecutionResult(
                     status="failed",
@@ -353,7 +365,7 @@ class SimulatorExecutor:
             # the rig rather than something the operator should have to know
             # and type.  So the approach is flown, by measured edges only —
             # `travel` refuses rather than inventing one.
-            approach: List[str] = []
+            approach: List[str] = list(recovered)
             if wanted and start != wanted:
                 steps = R.path(start, wanted)
                 if steps is None:
@@ -374,9 +386,9 @@ class SimulatorExecutor:
                             evidence={"posture": start, "wanted": wanted,
                                       "blocked_on": route})
                 phase(f"leaving {start}")
-                approach = M.travel(arm, wanted, robot=robot,
-                                    should_abort=(should_cancel or (lambda: False)),
-                                    on_phase=phase)
+                approach += M.travel(arm, wanted, robot=robot,
+                                     should_abort=(should_cancel or (lambda: False)),
+                                     on_phase=phase)
                 robot.turn_on("r_arm")
                 time.sleep(0.2)
 

@@ -498,3 +498,56 @@ def test_the_module_defaults_to_the_sdk_trajectory_generator():
     import inspect
     for f in (M.fly_route, M.deploy_to_rest, M.stow_to_home, M.wave):
         assert "move" in inspect.signature(f).parameters
+
+
+# ---------------------------------------------------------------------------
+# Resuming from a stranded pose (bounded)
+# ---------------------------------------------------------------------------
+
+def test_an_arm_left_at_back_is_recognised_as_on_the_pocket_sequence():
+    """The case this exists for: something stopped part way, left the arm at
+    BACK — out of the pocket, roll home, nothing in front of it — and every
+    later request refused for want of a posture. Correct, and useless."""
+    arm = StubArm(R.BACK)
+    where = M.stranded_at(arm)
+    assert where is not None
+    assert where[0] == "BACK"
+    assert where[1] == pytest.approx(0.0, abs=0.5)
+
+
+def test_resuming_finishes_the_pocket_entry():
+    arm = StubArm(R.BACK)
+    flown = M.resume_to_home(arm, move=exact_move)
+    assert flown == ["BACK", "GRIP_SHUT", "HOME"]
+    assert R.posture_of(M.present_pose(arm)) == R.POSTURE_HOME
+
+
+def test_an_arm_out_over_the_board_is_not_on_the_pocket_sequence():
+    """Same shoulder pitch, roll swung out: a different situation with a
+    different answer, and guessing between them is what this must not do."""
+    arm = StubArm(dict(R.BACK, r_shoulder_roll=-45.0))
+    assert M.stranded_at(arm) is None
+
+
+def test_a_pose_far_from_every_waypoint_is_not_resumable():
+    """The notebook warns that the connecting move is the one unverified
+    segment.  The answer is to keep it small, not to allow any gap."""
+    arm = StubArm(dict(R.HOME, r_elbow_pitch=-60.0))
+    assert M.stranded_at(arm) is None
+    with pytest.raises(M.RecoveryNeeded):
+        M.resume_to_home(arm, move=exact_move)
+
+
+def test_travel_resumes_rather_than_refusing_from_the_pocket_sequence():
+    arm = StubArm(R.BACK)
+    assert R.posture_of(M.present_pose(arm)) is None          # not a named posture
+    flown = M.travel(arm, R.POSTURE_HOME, robot=None)
+    assert R.posture_of(M.present_pose(arm)) == R.POSTURE_HOME
+    assert "HOME" in flown
+
+
+def test_travel_still_refuses_from_somewhere_it_does_not_recognise():
+    arm = StubArm(dict(R.SWING_2))
+    with pytest.raises(M.RecoveryNeeded) as exc:
+        M.travel(arm, R.POSTURE_HOME, robot=None)
+    assert "not guess" in str(exc.value)

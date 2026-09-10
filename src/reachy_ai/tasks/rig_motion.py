@@ -35,6 +35,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from reachy_ai.motion import primitives as P
 from reachy_ai.motion import rig_routes as R
+from reachy_ai.motion.rig_routes import Waypoint
 
 log = logging.getLogger("reachy_ai.tasks.rig_motion")
 
@@ -525,7 +526,14 @@ def travel(arm, to: str, *, robot=None, should_abort: Abort = None,
     is a fact about the rig, not something an operator should have to know and
     type.  What it will NOT do is invent an edge: no path is a refusal.
     """
+    recovered: List[str] = []
     here = R.posture_of(present_pose(arm))
+    if here is None and stranded_at(arm) is not None:
+        # Left part way through the pocket entry.  Finishing it is two
+        # measured moves, not a guess — and it is reported, because an arm
+        # that had to be recovered before it could start is worth saying.
+        recovered = resume_to_home(arm, on_phase=on_phase)
+        here = R.posture_of(present_pose(arm))
     if here is None:
         name, distance = R.nearest_waypoint(present_pose(arm))
         raise RecoveryNeeded(
@@ -539,7 +547,7 @@ def travel(arm, to: str, *, robot=None, should_abort: Abort = None,
             f"there is no measured way from {here} to {to}, so I will not "
             "invent one."
         )
-    flown: List[str] = []
+    flown: List[str] = list(recovered)
     for route in steps:
         if should_abort is not None and should_abort():
             break
@@ -552,3 +560,73 @@ def travel(arm, to: str, *, robot=None, should_abort: Abort = None,
         if route == "STOW_FROM_SIDE" and robot is not None:
             robot.turn_on("r_arm")
     return flown
+
+
+# ---------------------------------------------------------------------------
+# Resuming from a stranded pose
+# ---------------------------------------------------------------------------
+
+#: How close the arm must be to a known waypoint before it may be eased onto
+#: it and the rest of the sequence flown.
+#:
+#: The notebook's `ensure_home` does this and says plainly that the connecting
+#: move is the ONE segment on an unverified path.  That is a real warning and
+#: the answer is not to refuse every recovery — it is to keep the unverified
+#: part small.  At a few degrees the connecting move is nothing; at forty it is
+#: the whole problem.  So this is deliberately tight, and past it the arm is
+#: reported rather than driven.
+RESUME_TOL_DEG = 12.0
+
+#: The pocket entry, as poses, in the order they are flown.  This is the tail
+#: of the measured route and the same sequence `primitives.stow_from_side`
+#: uses; an arm stranded part way out of the pocket is on it.
+_POCKET_SEQUENCE = ("CURL", "BACK", "GRIP_SHUT", "HOME")
+
+
+def stranded_at(arm) -> Optional[Tuple[str, float]]:
+    """Which pocket waypoint the arm is sitting on, and how far off, or None.
+
+    Only the pocket waypoints, and only with the roll already home.  An arm out
+    over the board at the same shoulder pitch is a different situation with a
+    different answer, and guessing between them is exactly what this must not
+    do.
+    """
+    now = present_pose(arm)
+    if abs(now["r_shoulder_roll"]) > RESUME_TOL_DEG:
+        return None
+    best, best_off = None, 1e9
+    for name in _POCKET_SEQUENCE:
+        target = getattr(R, name)
+        off = max(abs(now[j] - target[j]) for j in R.GROSS_JOINTS)
+        if off < best_off:
+            best, best_off = name, off
+    if best_off > RESUME_TOL_DEG:
+        return None
+    return best, best_off
+
+
+def resume_to_home(arm, *, on_phase: Phase = None, move=None) -> List[str]:
+    """Finish the pocket entry from wherever on it the arm was left.
+
+    The case this exists for: something stopped part way and left the arm at
+    BACK — out of the pocket, roll home, nothing in front of it — and every
+    later request then refused for want of a posture to start from.  That is
+    correct and useless.  BACK is a measured waypoint with two measured moves
+    left in it.
+    """
+    where = stranded_at(arm)
+    if where is None:
+        raise RecoveryNeeded(
+            "the arm is not on the pocket sequence, so there is no measured "
+            "way to finish from here."
+        )
+    name, off = where
+    if on_phase is not None:
+        on_phase(f"resuming from {name} ({off:.0f} deg off)")
+    rest = _POCKET_SEQUENCE[_POCKET_SEQUENCE.index(name):]
+    route = tuple(Waypoint(n, getattr(R, n), 2.5, 12.0,
+                           guard=("r_shoulder_pitch", "r_shoulder_roll",
+                                  "r_arm_yaw", "r_elbow_pitch",
+                                  "r_wrist_pitch"))
+                  for n in rest)
+    return fly_route(arm, route, on_phase=on_phase, move=move)
