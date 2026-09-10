@@ -24,6 +24,7 @@ own — and the brief asks that no credential be exposed to page script.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from panel_planner import DeterministicPlanner, LiveProposalValidator
@@ -59,8 +60,32 @@ class PanelRoutes:
             executor=executor,
         )
 
+    def _effective_capabilities(self) -> Tuple[Capabilities, bool, str]:
+        """Capabilities as they are RIGHT NOW, not as configured at startup.
+
+        The stored `Capabilities` is a static default.  Whether anything can
+        move depends on the SDK, the safety gate and the simulator, all of
+        which can change under a running page — so it is asked per request.
+
+        Every response that carries a mode goes through here.  `/capabilities`
+        computing the live answer while `GET /tasks/{id}` reported the stored
+        one had the two disagreeing: the badge read "live execution" while the
+        task said "planning_only" in the same second.
+        """
+        can_execute, why_not = (
+            self.executor.available() if self.executor is not None
+            else (False, "no execution adapter is installed")
+        )
+        caps = replace(
+            self.capabilities,
+            live_execution=bool(can_execute),
+            execution_mode="live_simulation" if can_execute else "planning_only",
+        )
+        return caps, bool(can_execute), why_not
+
     def _capabilities_payload(self) -> dict:
-        payload = {"capabilities": self.capabilities.as_dict()}
+        caps, can_execute, why_not = self._effective_capabilities()
+        payload = {"capabilities": caps.as_dict()}
         # The link's state is read per request, not frozen at construction:
         # the simulator can be started, stopped, or restarted under a running
         # page, and a badge that lied about that would be worse than none.
@@ -70,19 +95,7 @@ class PanelRoutes:
                   "detail": "no simulator link configured"}
         )
         payload["capabilities"]["live_scene"] = bool(payload["sim_link"]["live"])
-
-        # Asked, not assumed, and for the same reason: the SDK, the safety
-        # gate and the simulator can all change under a running page.
-        can_execute, why_not = (
-            self.executor.available() if self.executor is not None
-            else (False, "no execution adapter is installed")
-        )
-        payload["capabilities"]["live_execution"] = bool(can_execute)
-        payload["capabilities"]["execution_mode"] = (
-            "live_simulation" if can_execute else "planning_only"
-        )
-        payload["execution"] = {"available": bool(can_execute),
-                                "detail": why_not}
+        payload["execution"] = {"available": can_execute, "detail": why_not}
         return payload
 
     # -- helpers -----------------------------------------------------------
@@ -113,7 +126,7 @@ class PanelRoutes:
             task = self.coordinator.get(session_id, task_id)
         except TaskError as exc:
             return _error(exc)
-        return 200, task.as_dict(self.capabilities)
+        return 200, task.as_dict(self._effective_capabilities()[0])
 
     # -- POST --------------------------------------------------------------
 
@@ -129,7 +142,7 @@ class PanelRoutes:
                     payload.get("text", ""),
                     str(payload.get("client_request_id", ""))[:64],
                 )
-                return 202, task.as_dict(self.capabilities)
+                return 202, task.as_dict(self._effective_capabilities()[0])
 
             task_id = self._task_id(path, "reply")
             if task_id:
@@ -138,7 +151,7 @@ class PanelRoutes:
                     str(payload.get("question_id", "")),
                     payload.get("text", ""),
                 )
-                return 202, task.as_dict(self.capabilities)
+                return 202, task.as_dict(self._effective_capabilities()[0])
 
             task_id = self._task_id(path, "confirm")
             if task_id:
@@ -149,12 +162,12 @@ class PanelRoutes:
                 task = self.coordinator.confirm(
                     session_id, task_id, str(payload.get("plan_id", "")), version
                 )
-                return 200, task.as_dict(self.capabilities)
+                return 200, task.as_dict(self._effective_capabilities()[0])
 
             task_id = self._task_id(path, "cancel")
             if task_id:
                 task = self.coordinator.cancel(session_id, task_id)
-                return 200, task.as_dict(self.capabilities)
+                return 200, task.as_dict(self._effective_capabilities()[0])
         except TaskError as exc:
             return _error(exc)
 

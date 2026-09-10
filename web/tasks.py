@@ -635,7 +635,16 @@ class TaskCoordinator:
         elif outcome.kind == "proposal" and outcome.proposal is not None:
             proposal = outcome.proposal
             proposal.plan_version = task.version
-            proposal.execution_mode = self._caps.execution_mode
+            # Ask the executor about THIS plan, not the configured default.
+            # It is the same question confirm() will ask, so the card cannot
+            # promise motion that Confirm then declines to perform — or say
+            # "no motion" on a plan that is about to move the arm.
+            can_execute = (
+                self._executor.available(proposal)[0] if self._executor else False
+            )
+            proposal.execution_mode = (
+                "live_simulation" if can_execute else "planning_only"
+            )
             task.proposal = proposal
             task.state = TaskState.awaiting_confirmation
             task.question_id = ""

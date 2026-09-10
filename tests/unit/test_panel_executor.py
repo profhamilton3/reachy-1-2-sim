@@ -355,6 +355,30 @@ def test_an_unavailable_executor_still_confirms_without_motion():
         coord.shutdown()
 
 
+def test_a_proposal_reports_the_mode_it_will_actually_be_confirmed_in():
+    """The card must not promise motion Confirm then declines to perform.
+
+    The proposal's execution_mode was taken from the configured default, so a
+    server with a working executor still stamped every plan `planning_only`.
+    """
+    ex = StubExecutor()
+    coord = _coord(ex)
+    try:
+        task = settle(coord, "s1", coord.submit("s1", "x").task_id,
+                      {TaskState.awaiting_confirmation})
+        assert task.proposal.execution_mode == "live_simulation"
+    finally:
+        coord.shutdown()
+
+    coord = _coord(NullExecutor("nothing here"))
+    try:
+        task = settle(coord, "s1", coord.submit("s1", "x").task_id,
+                      {TaskState.awaiting_confirmation})
+        assert task.proposal.execution_mode == "planning_only"
+    finally:
+        coord.shutdown()
+
+
 def test_a_confirmed_plan_executes_and_completes_from_the_result():
     ex = StubExecutor(ExecutionResult(status="completed",
                                       detail="soda_can is on r2c2.",

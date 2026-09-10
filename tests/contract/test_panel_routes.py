@@ -43,6 +43,23 @@ def server():
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     host = f"127.0.0.1:{httpd.server_address[1]}"
+
+    # Build the panel, then cut its link to the simulator.
+    #
+    # These are the planning-only tests, and their expectations are written
+    # against the scene FILE.  Left connected, the link finds whatever
+    # simulator happens to be listening on 8765 on the developer's machine and
+    # folds its live board in — so "put soda_can on r2c2" started answering
+    # "r2c2 is already occupied by foam_block" and the suite failed for a
+    # reason that had nothing to do with the code.  It passed before only
+    # because no simulator was running.  Live behaviour has its own module.
+    urllib.request.urlopen(f"http://{host}/capabilities", timeout=5).read()
+    if camera_server._SIM_LINK is not None:
+        camera_server._SIM_LINK.stop()
+    camera_server._SIM_LINK = None
+    if camera_server._PANEL is not None:
+        camera_server._PANEL.link = None
+        camera_server._PANEL.executor = None
     try:
         yield host
     finally:
@@ -50,6 +67,8 @@ def server():
         httpd.server_close()
         if camera_server._PANEL is not None:
             camera_server._PANEL.shutdown()
+        camera_server._PANEL = None
+        camera_server._SIM_LINK = None
 
 
 class Client:

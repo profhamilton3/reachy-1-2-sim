@@ -49,6 +49,13 @@ services:
       # Scene the noVNC/RViz view renders — set by scripts/start_sim.sh so it
       # matches the launched physics scene.  Defaults to the pick-and-place table.
       - REACHY_SIM_SCENE_FILE=${REACHY_SIM_SCENE_FILE:-/opt/scenes/tabletop_demo.yaml}
+      # Command panel: does pressing Confirm move the arm, or only produce a
+      # plan?  Off unless asked for, because turning it on changes what a
+      # button on a page does to the world, and that should be a deliberate
+      # act by whoever runs the container rather than something that arrives
+      # with a page upgrade.  Even with it on, the executor still refuses
+      # unless the simulator advertises the execution lease.
+      - REACHY_PANEL_EXECUTOR=${REACHY_PANEL_EXECUTOR:-0}
     stdin_open: true
     tty: true
     restart: unless-stopped
