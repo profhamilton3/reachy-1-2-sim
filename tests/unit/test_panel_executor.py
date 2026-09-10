@@ -310,6 +310,113 @@ def test_the_lease_names_the_bridge_as_the_mover(fake_sdk):
     assert link.acquired[0][0] == MOTION_CLIENT_ID
 
 
+# ---------------------------------------------------------------------------
+# The lease comes first, then the snapshot (issue #60)
+#
+# `_execute_locked` used to read the board, pin a destination cell and a
+# `started_step`, and only then ask for the lease.  Everything the motion was
+# planned against was therefore sampled in the one window where other clients
+# could still edit the scene.  A `place_object` landing there sent the arm to
+# where the object had been; `_verify` caught it, so the panel did not claim
+# success, but the failure read as a slipped grasp rather than as a race.
+# ---------------------------------------------------------------------------
+
+def test_the_lease_is_taken_before_the_board_is_read(fake_sdk):
+    """The scene the MOTION is planned from is read under the lease.
+
+    `execute()` reads the board before taking anything, to decide whether to
+    try at all; that read pins nothing and costs no lease.  This is about
+    `_execute_locked`, where a cell and a sim_step get fixed.
+    """
+    order = []
+    link = StubLink()
+    inner = link.acquire_control
+
+    def acquire(*a, **kw):
+        order.append("acquire")
+        return inner(*a, **kw)
+
+    link.acquire_control = acquire
+
+    def provider():
+        order.append("read")
+        return live_scene()
+
+    SimulatorExecutor(link, provider, "scene.yaml")._execute_locked(
+        a_proposal(), None, None)
+    assert order, "the executor never touched the link or the board"
+    assert order[0] == "acquire"
+    assert "read" in order
+
+
+def test_a_board_change_under_the_lease_is_reported_as_one(fake_sdk):
+    """Not as a motion failure.  The operator can act on the difference."""
+    link = StubLink()
+    reads = {"n": 0}
+
+    def provider():
+        reads["n"] += 1
+        scene = live_scene()
+        if reads["n"] > 1:           # recalled to the pool after the lease
+            scene.objects["soda_can"].on_board = False
+        return scene
+
+    out = SimulatorExecutor(link, provider, "scene.yaml").execute(a_proposal())
+    assert out.status == "failed"
+    assert "the board changed while I was taking control" in out.detail
+    assert "not on the board" in out.detail
+    assert out.evidence["scene_changed"] is True
+    assert link.released == 1
+
+
+def test_a_snapshot_older_than_the_lease_is_not_planned_against(monkeypatch,
+                                                                fake_sdk):
+    """Moving the read below `acquire_control` is not on its own enough.
+
+    The link hands back whatever the simulator last pushed, which may predate
+    the grant — so a "post-lease" read can still describe the board as it was
+    while it could be edited.
+    """
+    import panel_executor
+    monkeypatch.setattr(panel_executor, "FRESH_SNAPSHOT_TIMEOUT_S", 0.2)
+
+    class StaleLink(StubLink):
+        def snapshot(self):
+            return SimSnapshot(received_at=time.monotonic() - 10.0)
+
+    link = StaleLink()
+    out = SimulatorExecutor(link, live_scene, "scene.yaml").execute(a_proposal())
+    assert out.status == "failed"
+    assert "no fresh view" in out.detail
+    assert link.released == 1
+
+
+def test_a_scene_that_falls_back_to_the_file_is_not_fresh(monkeypatch, fake_sdk):
+    """`live` false means the poses came from the YAML, not the simulator."""
+    import panel_executor
+    monkeypatch.setattr(panel_executor, "FRESH_SNAPSHOT_TIMEOUT_S", 0.2)
+
+    ex = SimulatorExecutor(StubLink(), make_scene, "scene.yaml")
+    assert ex._fresh_scene() is None
+
+
+def test_the_lease_is_released_even_when_the_board_changed(fake_sdk):
+    """The refusal paths added by #60 sit inside the try, not before it."""
+    link = StubLink()
+    reads = {"n": 0}
+
+    def provider():
+        reads["n"] += 1
+        scene = live_scene()
+        if reads["n"] > 1:
+            scene.objects["soda_can"].on_board = False
+        return scene
+
+    SimulatorExecutor(link, provider, "scene.yaml").execute(a_proposal())
+    assert len(link.acquired) == 1
+    assert link.released == 1
+
+
 def test_the_executor_never_sends_place_object():
     """place_object teleports scene state; using it here would fake success.
 
