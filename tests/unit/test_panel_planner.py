@@ -249,6 +249,95 @@ def test_scene_with_no_recyclable_says_so():
 
 
 # ---------------------------------------------------------------------------
+# Negated categories (issue #58)
+#
+# `"recyclable" in "non-recyclable item"` is True, so a substring test here
+# answered the negated question with the positive category and proposed moving
+# the one object the operator had ruled out.  The proposal card looked entirely
+# reasonable; nothing in it showed the negation had been dropped.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("phrase", [
+    "non-recyclable item",
+    "non recyclable item",
+    "not recyclable item",
+    "the item that isn't recyclable",
+])
+def test_a_negated_phrase_never_resolves_to_the_recyclable_object(phrase):
+    scene = make_scene(live=True)
+    scene.objects["soda_can"].on_board = True
+    scene.objects["foam_block"].on_board = True
+    out = plan(scene, f"put the {phrase} on r2c2")
+    assert out.kind == "proposal", out.message
+    assert out.proposal.target_id == "foam_block"
+
+
+@pytest.mark.parametrize("phrase", ["recycle item", "recycling item",
+                                    "recyclable item"])
+def test_the_positive_phrases_are_unchanged(phrase):
+    scene = make_scene(live=True)
+    scene.objects["soda_can"].on_board = True
+    scene.objects["foam_block"].on_board = True
+    out = plan(scene, f"put the {phrase} on r2c2")
+    assert out.kind == "proposal", out.message
+    assert out.proposal.target_id == "soda_can"
+
+
+def test_a_scene_with_no_non_recyclable_tag_does_not_fall_back_to_recyclable():
+    """The complementary category is a tag, not the absence of one.
+
+    Answering "everything not tagged recyclable" would make red_cube — which
+    carries neither tag — a non-recyclable item, and in a scene with trays it
+    would make a tray one too.
+    """
+    scene = make_scene(live=True)
+    scene.objects["foam_block"].tags.remove("non-recyclable")
+    scene.objects["soda_can"].on_board = True
+    scene.objects["foam_block"].on_board = True
+    out = plan(scene, "put the non-recyclable item on r2c2")
+    assert out.kind == "unsupported"
+    assert "tagged non-recyclable" in out.message
+
+
+def test_an_untagged_object_belongs_to_neither_category():
+    scene = make_scene(live=True)
+    for oid in ("soda_can", "foam_block", "red_cube"):
+        scene.objects[oid].on_board = True
+    assert "red_cube" not in [o.object_id for o in scene.tagged("recyclable")]
+    assert "red_cube" not in [o.object_id
+                              for o in scene.tagged("non-recyclable")]
+
+
+def test_a_negated_request_asks_which_when_several_are_on_the_board():
+    scene = make_scene(live=True)
+    scene.objects["foam_block"].on_board = True
+    scene.objects["foam_block"].cell = "r1c1"
+    scene.objects["red_cube"].tags.append("non-recyclable")
+    scene.objects["red_cube"].on_board = True
+    scene.objects["red_cube"].cell = "r2c1"
+    out = plan(scene, "put the non-recyclable item on r2c2")
+    assert out.kind == "clarification"
+    assert "more than one non-recyclable" in out.message
+    assert "foam_block (r1c1)" in out.choices
+
+
+def test_a_negated_request_with_none_on_the_board_says_so():
+    scene = make_scene(live=True)
+    scene.objects["foam_block"].on_board = False
+    out = plan(scene, "put the non-recyclable item on r2c2")
+    assert out.kind == "clarification"
+    assert "No non-recyclable object is on the board" in out.message
+
+
+def test_a_word_merely_containing_non_is_not_a_negation():
+    """`\bnon-?` must not fire on the tail of another word."""
+    from panel_planner import _category_of
+    assert _category_of("canon recyclable") == "recyclable"
+    assert _category_of("non-recyclable") == "non-recyclable"
+    assert _category_of("a wooden block") is None
+
+
+# ---------------------------------------------------------------------------
 # Clarification answers
 # ---------------------------------------------------------------------------
 

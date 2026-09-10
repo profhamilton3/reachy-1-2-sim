@@ -170,16 +170,32 @@ class SceneView:
         return sorted(n for n, c in self.cells.items()
                       if c.reachable and not c.occupant)
 
-    def recyclables(self) -> List[ObjectView]:
-        return [o for o in self.objects.values() if o.is_recyclable]
+    def tagged(self, tag: str) -> List[ObjectView]:
+        """Objects carrying `tag` exactly.
 
-    def tabletop_recyclables(self) -> List[ObjectView]:
-        """Recyclable objects known to be on the board.
+        The category the planner resolves is chosen by the phrasing, so this
+        takes the tag as an argument rather than hard-coding the recyclable
+        one.  `non-recyclable` is a tag in its own right, not the absence of
+        `recyclable`: an object with neither belongs to neither category, and
+        answering "everything not tagged recyclable" would sweep the trays,
+        the rig and anything a future scene declines to classify into the
+        non-recyclable set.
+        """
+        return [o for o in self.objects.values() if tag in o.tags]
+
+    def tabletop_tagged(self, tag: str) -> List[ObjectView]:
+        """Objects carrying `tag` and known to be on the board.
 
         `on_board is True` and not merely truthy: stage 1 leaves it None, and a
         None must not be read as either answer.
         """
-        return [o for o in self.recyclables() if o.on_board is True]
+        return [o for o in self.tagged(tag) if o.on_board is True]
+
+    def recyclables(self) -> List[ObjectView]:
+        return self.tagged(RECYCLABLE_TAG)
+
+    def tabletop_recyclables(self) -> List[ObjectView]:
+        return self.tabletop_tagged(RECYCLABLE_TAG)
 
     @property
     def has_destination(self) -> bool:
