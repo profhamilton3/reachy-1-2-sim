@@ -45,9 +45,10 @@ class PanelRoutes:
 
     def __init__(self, scene_provider: Callable[[], Any],
                  capabilities: Optional[Capabilities] = None,
-                 link: Any = None) -> None:
+                 link: Any = None, executor: Any = None) -> None:
         self.capabilities = capabilities or Capabilities()
         self.link = link
+        self.executor = executor
         self.coordinator = TaskCoordinator(
             DeterministicPlanner(scene_provider),
             capabilities=self.capabilities,
@@ -55,6 +56,7 @@ class PanelRoutes:
             # is at the moment Confirm is pressed rather than as it was when
             # the plan was drawn.
             revalidate=LiveProposalValidator(scene_provider),
+            executor=executor,
         )
 
     def _capabilities_payload(self) -> dict:
@@ -68,6 +70,19 @@ class PanelRoutes:
                   "detail": "no simulator link configured"}
         )
         payload["capabilities"]["live_scene"] = bool(payload["sim_link"]["live"])
+
+        # Asked, not assumed, and for the same reason: the SDK, the safety
+        # gate and the simulator can all change under a running page.
+        can_execute, why_not = (
+            self.executor.available() if self.executor is not None
+            else (False, "no execution adapter is installed")
+        )
+        payload["capabilities"]["live_execution"] = bool(can_execute)
+        payload["capabilities"]["execution_mode"] = (
+            "live_simulation" if can_execute else "planning_only"
+        )
+        payload["execution"] = {"available": bool(can_execute),
+                                "detail": why_not}
         return payload
 
     # -- helpers -----------------------------------------------------------

@@ -57,6 +57,7 @@ from protocol import (
     encode,
     message_type,
     validate_joint_command,
+    ControlAck,
 )
 from calibration import (
     StereoCalibrationProfile,
@@ -81,6 +82,9 @@ _CAMERA_HZ    = 15         # camera render target
 _STATE_HZ     = 50         # state message rate to client
 _HB_INTERVAL  = 2.0        # heartbeat period (s)
 _HB_DEADLINE  = 6.0        # max time without heartbeat before disconnect (s)
+#: Longest an execution lease may be held before it expires on its own.  A
+#: pick-and-place arc is tens of seconds; anything near this is a wedge.
+_MAX_CONTROL_TTL_S = 300.0
 _CAM_WIDTH    = int(os.environ.get("REACHY_SIM_CAMERA_WIDTH", "640"))
 _CAM_HEIGHT   = int(os.environ.get("REACHY_SIM_CAMERA_HEIGHT", "480"))
 # Distortion source-render margin.  Unset = auto (smallest factor with no dark
@@ -498,6 +502,11 @@ class ReachyMujocoServer:
         # placement that had in fact already happened.  Observed exactly that.
         self._place_ack_qs: dict = {}
         self._next_conn_id = 0
+        # Execution lease (issue #51).  None, or a dict with conn_id /
+        # client_id / motion_client_id / expires_at.  Only ever touched from
+        # the asyncio loop, so it needs no lock; keeping it off the sim thread
+        # is also what lets a refusal be answered on the socket that caused it.
+        self._control: Optional[dict] = None
 
         self._renderer: Optional[StereoRenderer] = None
 
@@ -687,6 +696,75 @@ class ReachyMujocoServer:
 
     # ── WebSocket handler ────────────────────────────────────────────────────
 
+    # ── Execution lease ──────────────────────────────────────────────────
+    #
+    # One holder at a time.  While held, the scene is frozen against edits from
+    # every client, and joint_command is accepted only from the named mover.
+    #
+    # This has to live here rather than in a client.  The browser panel reaches
+    # this server on its own socket, so disabling a button in one page stops
+    # nothing: a place_object arriving mid-grasp teleports the object out of a
+    # closing gripper, and a reset restarts the world underneath a trajectory
+    # already in flight.  The refusal belongs where every client's message
+    # actually arrives.
+
+    def _active_control(self) -> Optional[dict]:
+        """The lease, or None — clearing it first if its TTL has run out.
+
+        A holder that wedges or dies without a clean close must not freeze the
+        scene until someone restarts the simulator, so the lease is time-bounded
+        and every read is where expiry gets noticed.
+        """
+        control = self._control
+        if control is not None and time.monotonic() >= control["expires_at"]:
+            log.info("Execution lease held by %r expired", control["client_id"])
+            self._control = None
+            return None
+        return control
+
+    def _release_control(self, conn_id: int) -> bool:
+        held = self._active_control()
+        if held is not None and held["conn_id"] == conn_id:
+            log.info("Execution lease released by %r", held["client_id"])
+            self._control = None
+            return True
+        return False
+
+    def _control_ack(self, request_id: str, granted: bool,
+                     error: str = "") -> ControlAck:
+        held = self._active_control()
+        return ControlAck(
+            request_id=request_id,
+            granted=granted,
+            held=held is not None,
+            holder=held["client_id"] if held else "",
+            motion_client_id=held["motion_client_id"] if held else "",
+            expires_in_s=(round(held["expires_at"] - time.monotonic(), 2)
+                          if held else 0.0),
+            error=error,
+        )
+
+    def _blocked_by_control(self, mtype: str, client_id: str) -> Optional[str]:
+        """Why this message is refused right now, or None to let it through."""
+        held = self._active_control()
+        if held is None:
+            return None
+        if mtype in ("place_object", "scene_load", "reset"):
+            return (f"{mtype} is refused while {held['client_id']!r} holds the "
+                    f"execution lease")
+        if mtype == "joint_command":
+            mover = held["motion_client_id"]
+            # An empty mover means the lease named nobody, so nobody may move.
+            # Comparing directly would instead match every client that sent no
+            # client_id in its hello, handing the arm to any anonymous client.
+            if not mover:
+                return ("joint_command is refused: the lease held by "
+                        f"{held['client_id']!r} names no motion client")
+            if client_id != mover:
+                return (f"joint_command is refused: {mover!r} is the motion "
+                        f"client for the lease held by {held['client_id']!r}")
+        return None
+
     async def _handle_connection(self, ws) -> None:
         addr = ws.remote_address
         log.info("Client connected from %s", addr)
@@ -699,6 +777,7 @@ class ReachyMujocoServer:
                 await ws.send(Error(code="handshake_error",
                                     message="Expected hello").encode())
                 return
+            client_id = str(msg.get("client_id") or "")
             client_ver = msg.get("protocol_version", 0)
             if client_ver != PROTOCOL_VERSION:
                 await ws.send(Error(
@@ -715,6 +794,9 @@ class ReachyMujocoServer:
             sim_fps=_SIM_STEP_HZ,
             camera_fps=_CAMERA_HZ,
             num_joints=NUM_JOINTS,
+            # Advertised so a client can tell an arbitrating server from an
+            # older one rather than assuming its lease request was honoured.
+            capabilities={"execution_lease": True},
         )
         await ws.send(ack.encode())
         self._connected_ws = ws
@@ -765,6 +847,43 @@ class ReachyMujocoServer:
                     return
                 mtype = message_type(raw)
                 decoded = decode(raw)
+
+                refusal = self._blocked_by_control(mtype, client_id)
+                if refusal is not None:
+                    await ws.send(Error(code="control_held",
+                                        message=refusal).encode())
+                    continue
+
+                if mtype == "acquire_control":
+                    held = self._active_control()
+                    if held is not None and held["conn_id"] != conn_id:
+                        await ws.send(self._control_ack(
+                            decoded.get("request_id", ""), False,
+                            f"lease already held by {held['client_id']!r}",
+                        ).encode())
+                        continue
+                    ttl = float(decoded.get("ttl_s") or 120.0)
+                    ttl = max(1.0, min(ttl, _MAX_CONTROL_TTL_S))
+                    self._control = {
+                        "conn_id": conn_id,
+                        "client_id": str(decoded.get("client_id") or client_id),
+                        "motion_client_id": str(
+                            decoded.get("motion_client_id") or ""),
+                        "expires_at": time.monotonic() + ttl,
+                        "reason": str(decoded.get("reason") or ""),
+                    }
+                    log.info("Execution lease granted to %r (mover %r, %.0fs)",
+                             self._control["client_id"],
+                             self._control["motion_client_id"], ttl)
+                    await ws.send(self._control_ack(
+                        decoded.get("request_id", ""), True).encode())
+                    continue
+
+                if mtype == "release_control":
+                    self._release_control(conn_id)
+                    await ws.send(self._control_ack(
+                        decoded.get("request_id", ""), False).encode())
+                    continue
 
                 if mtype == "joint_command":
                     try:
@@ -855,6 +974,8 @@ class ReachyMujocoServer:
             log.exception("Error in handler for %s: %s", addr, exc)
         finally:
             self._connected_ws = None
+            # A holder that drops its socket must not leave the scene frozen.
+            self._release_control(conn_id)
             self._place_ack_qs.pop(conn_id, None)
             self._state_qs.pop(conn_id, None)
             self._frame_qs.pop(conn_id, None)

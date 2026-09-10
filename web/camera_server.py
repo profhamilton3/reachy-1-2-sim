@@ -779,14 +779,18 @@ def _panel():
     """
     global _PANEL, _SIM_LINK
     if _PANEL is None:
+        from panel_executor import build_executor
         from panel_routes import PanelRoutes
         from panel_sim_link import SimLink
-        # Read-only, and its own connection: server.py gives every client its
-        # own state/frame/place_ack queues, so this takes nothing away from
-        # the browser panel's socket.
+        # Its own connection: server.py gives every client its own
+        # state/frame/place_ack queues, so this takes nothing away from the
+        # browser panel's socket.
         _SIM_LINK = SimLink()
         _SIM_LINK.start()
-        _PANEL = PanelRoutes(_scene_view, link=_SIM_LINK)
+        # Off unless REACHY_PANEL_EXECUTOR says so, so upgrading the page can
+        # never quietly change what pressing Confirm does to the world.
+        executor = build_executor(_SIM_LINK, _scene_view, _SCENE_FILE)
+        _PANEL = PanelRoutes(_scene_view, link=_SIM_LINK, executor=executor)
     return _PANEL
 
 
