@@ -445,6 +445,29 @@ _INDEX_HTML = b"""\
 
     function renderProposal(t) {
       var p = t.proposal;
+
+      // While the arm is moving the proposal card becomes the stop control.
+      // Without this there is no way to stop a running motion from the page
+      // at all -- the card that carried Cancel is hidden the moment the task
+      // leaves awaiting_confirmation, which is exactly when stopping starts
+      // to matter.
+      if (t.state === 'executing') {
+        propEl.hidden = false;
+        propEl.textContent = '';
+        var running = document.createElement('div');
+        running.textContent = 'Executing in simulation.';
+        propEl.appendChild(running);
+        var acts0 = document.createElement('div');
+        acts0.className = 'acts';
+        var stop = document.createElement('button');
+        stop.textContent = t.cancel_requested ? 'Stopping\\u2026' : 'Stop';
+        stop.disabled = !!t.cancel_requested;
+        stop.onclick = function () { post('/tasks/' + t.task_id + '/cancel', {}); };
+        acts0.appendChild(stop);
+        propEl.appendChild(acts0);
+        return;
+      }
+
       if (!p || t.state !== 'awaiting_confirmation') {
         propEl.hidden = true;
         propEl.textContent = '';
