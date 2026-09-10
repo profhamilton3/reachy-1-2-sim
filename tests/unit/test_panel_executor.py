@@ -766,8 +766,20 @@ def test_an_unbridgeable_posture_says_so_rather_than_inventing_a_path(
     assert "invent" in out.detail
 
 
+class _FakeJoint:
+    present_position = 0.0
+    goal_position = 0.0
+    compliant = False
+
+
 class _FakeArm:
-    pass
+    """Enough of an arm that the liveness probe reads something real."""
+
+    def __init__(self):
+        for name in ("r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
+                     "r_elbow_pitch", "r_forearm_yaw", "r_wrist_pitch",
+                     "r_wrist_roll", "r_gripper"):
+            setattr(self, name, _FakeJoint())
 
 
 class _FakeRobot:
@@ -870,3 +882,53 @@ def test_the_cancel_check_reaches_the_route_runner(monkeypatch, fake_sdk):
                should_cancel=lambda: True)
     assert seen["abort"] is not None
     assert seen["abort"]() is True
+
+
+def test_the_sdk_connection_is_made_once_and_reused(monkeypatch, fake_sdk):
+    """`ReachySDK.__init__` opens a gRPC channel and starts sync threads, and
+    nothing stopped them.  After a handful of tasks the bridge stopped
+    answering new connections at all — the panel kept serving HTTP while no
+    SDK client could connect and the task mid-motion never returned."""
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    _validated(monkeypatch)
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "travel", lambda arm, to, **kw: [])
+    made = {"n": 0}
+
+    class Counting(_FakeRobot):
+        def __init__(self, host=None, sdk_port=None):
+            made["n"] += 1
+            super().__init__(host, sdk_port)
+
+    monkeypatch.setattr("reachy_sdk.ReachySDK", Counting, raising=False)
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    for _ in range(4):
+        ex.execute(_ability(expected_start_posture="home"))
+    assert made["n"] == 1
+
+
+def test_a_stale_connection_is_replaced_rather_than_used(monkeypatch, fake_sdk):
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    _validated(monkeypatch)
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "travel", lambda arm, to, **kw: [])
+    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    ex.execute(_ability(expected_start_posture="home"))
+    first = ex._robot
+
+    class Dead:
+        @property
+        def r_arm(self):
+            raise RuntimeError("channel closed")
+
+        def _stop(self):
+            pass
+
+    ex._robot = Dead()
+    ex.execute(_ability(expected_start_posture="home"))
+    assert ex._robot is not first
+    assert not isinstance(ex._robot, Dead)

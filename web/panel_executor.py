@@ -125,6 +125,15 @@ class SimulatorExecutor:
         self._sdk_port = sdk_port
         # One task at a time reaches the arm, whatever the coordinator thinks.
         self._motion_lock = threading.Lock()
+        # ONE SDK connection, reused.  `ReachySDK.__init__` opens a gRPC
+        # channel and starts background sync threads, and nothing here ever
+        # stopped them — so every task leaked a channel and its threads.  After
+        # a handful the bridge stopped answering new connections at all: the
+        # panel kept serving HTTP while no SDK client, including a fresh one
+        # from a shell, could connect, and the task that was mid-motion never
+        # returned.  Connecting also costs the better part of a second, which
+        # is a poor thing to pay per request.
+        self._robot = None
 
     # -- availability ------------------------------------------------------
 
@@ -310,9 +319,8 @@ class SimulatorExecutor:
                     evidence={"scene_changed": True})
 
             phase("connecting to the arm")
-            robot = ReachySDK(host=self._sdk_host, sdk_port=self._sdk_port)
-            time.sleep(0.8)
-            if robot.r_arm is None:
+            robot = self._connect(ReachySDK)
+            if robot is None or robot.r_arm is None:
                 return ExecutionResult(
                     status="failed",
                     detail="the right arm is not available on the simulator")
@@ -432,6 +440,40 @@ class SimulatorExecutor:
         finally:
             self._link.release_control()
 
+    def _connect(self, sdk_class):
+        """The one SDK connection, made once and kept.
+
+        A connection that has gone stale raises on first use rather than
+        returning nonsense, so the retry is a reconnect and not a guess.
+        """
+        if self._robot is not None:
+            try:
+                arm = self._robot.r_arm
+                if arm is not None:
+                    # Read something across the wire, so a channel that has
+                    # died is found here rather than half way through a move.
+                    # A joint that is simply absent is not evidence of a dead
+                    # channel, so the probe is skipped rather than failed.
+                    joint = getattr(arm, "r_shoulder_pitch", None)
+                    if joint is not None:
+                        _ = joint.present_position
+                    return self._robot
+            except Exception:                     # noqa: BLE001 - stale channel
+                log.info("SDK connection went stale; reconnecting")
+                self._close()
+        self._robot = sdk_class(host=self._sdk_host, sdk_port=self._sdk_port)
+        time.sleep(0.8)
+        return self._robot
+
+    def _close(self) -> None:
+        robot, self._robot = self._robot, None
+        if robot is None:
+            return
+        try:
+            robot._stop()
+        except Exception:                         # noqa: BLE001 - best effort
+            log.debug("could not stop the SDK connection cleanly")
+
     def _verify_posture(self, arm, proposal, flown, before) -> ExecutionResult:
         """Read the posture back, and check the board is where it was.
 
@@ -537,9 +579,8 @@ class SimulatorExecutor:
             cell = scene.cells[_ref_id(proposal.destination)]
             started_step = scene.sim_step
             phase("connecting to the arm")
-            robot = ReachySDK(host=self._sdk_host, sdk_port=self._sdk_port)
-            time.sleep(0.8)
-            if robot.r_arm is None:
+            robot = self._connect(ReachySDK)
+            if robot is None or robot.r_arm is None:
                 return ExecutionResult(
                     status="failed",
                     detail="the right arm is not available on the simulator",
