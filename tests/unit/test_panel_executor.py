@@ -258,10 +258,45 @@ def test_a_non_cell_destination_refuses(fake_sdk):
 
 
 def test_an_unsupported_task_type_refuses(fake_sdk):
+    """An ability with no route is refused BY NAME, and says which of the
+    three reasons it is: no motion at all, no validated route in this scene,
+    or the wrong arm."""
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
     ok, why = ex.available(a_proposal(task_type="handover"))
     assert ok is False
-    assert "no motion for a handover task" in why
+    assert "handover" in why
+    assert "not yet built" in why
+
+
+def test_a_route_unvalidated_in_this_scene_names_the_scene(fake_sdk):
+    """Not "the arm is unavailable" — that sends someone to the robot when the
+    answer is in the compatibility record."""
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    ok, why = ex.available(
+        a_proposal(task_type="stow_arm", target_id=None, destination=None,
+                   destination_kind="", route="STOW_ROUTE"))
+    assert ok is False
+    assert "TestScene" in why
+    assert "arm is unavailable" not in why
+
+
+def test_a_left_arm_ability_refuses_with_the_geometry_reason(fake_sdk):
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    ok, why = ex.available(
+        a_proposal(task_type="wave", target_id=None, destination=None,
+                   destination_kind="", route="WAVE", arm="left"))
+    assert ok is False
+    assert "right arm" in why
+    assert "not symmetric" in why
+
+
+def test_pointing_is_refused_because_its_runs_moved_objects(fake_sdk):
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    ok, why = ex.available(
+        a_proposal(task_type="point_cell", target_id=None, destination=None,
+                   destination_kind="", route="POINT", cell="r2c2"))
+    assert ok is False
+    assert "0.189 m" in why
 
 
 def test_an_object_off_the_board_refuses(fake_sdk):
@@ -642,3 +677,187 @@ def test_a_confirmation_is_still_consumed_once_when_executing():
                {TaskState.completed, TaskState.failed}, timeout=5)
     finally:
         coord.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Ability execution: posture, cancellation, evidence (issue #65)
+# ---------------------------------------------------------------------------
+
+def _ability(**kw):
+    base = dict(plan_id="plan-a", plan_version=0, task_type="stow_arm",
+                target_id=None, destination=None, destination_kind="",
+                brief_reason="STOW_ROUTE with my right arm", arm="right",
+                route="STOW_ROUTE", route_version=1,
+                expected_start_posture="rest", summary="stow the arm")
+    base.update(kw)
+    return Proposal(**base)
+
+
+def _validated(monkeypatch):
+    """Pretend the route passed validation in this scene, so the tests below
+    reach the execution logic instead of the (correct) refusal."""
+    from reachy_ai.motion import rig_routes as R
+    monkeypatch.setattr(R, "check_route", lambda route, scene: (True, ""))
+
+
+def test_an_ability_is_refused_in_a_scene_where_its_route_failed(fake_sdk):
+    """The default, and the right answer today: FWDCenterLabSivaPool was flown
+    and rejected, so nothing in this scene may fly."""
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    ok, why = ex.available(_ability())
+    assert ok is False
+    assert "TestScene" in why
+
+
+def test_an_arm_at_no_named_posture_reports_recovery_rather_than_guessing(
+        monkeypatch, fake_sdk):
+    """The nearest waypoint is the useful fact; flying to it is the one
+    segment nobody measured."""
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    _validated(monkeypatch)
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.SWING_2))
+    monkeypatch.setattr("panel_executor.ReachySDK" if False else
+                        "reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    out = ex.execute(_ability())
+    assert out.status == "failed"
+    assert out.evidence.get("recovery_needed") is True
+    assert "SWING_2" in out.detail
+    assert "will not guess" in out.detail
+
+
+def test_the_wrong_posture_names_the_route_that_bridges_it(monkeypatch, fake_sdk):
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    _validated(monkeypatch)
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    out = ex.execute(_ability())          # stow starts at rest; arm is home
+    assert out.status == "failed"
+    assert out.evidence["bridge"] == "PLACE_ROUTE"
+    assert "no measured way" not in out.detail
+
+
+def test_an_unbridgeable_posture_says_so_rather_than_inventing_a_path(
+        monkeypatch, fake_sdk):
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    _validated(monkeypatch)
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
+    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    out = ex.execute(_ability())          # present -> rest is not measured
+    assert out.status == "failed"
+    assert "no measured way" in out.detail
+    assert "invent" in out.detail
+
+
+class _FakeArm:
+    pass
+
+
+class _FakeRobot:
+    def __init__(self, host=None, sdk_port=None):
+        self.r_arm = _FakeArm()
+
+    def turn_on(self, _part):
+        pass
+
+
+def test_arriving_with_the_board_disturbed_is_a_failure(monkeypatch, fake_sdk):
+    """The two fail independently: the arm can reach HOME having swept
+    something off the table on the way, and it can leave the board untouched
+    while stopping three waypoints short."""
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    _validated(monkeypatch)
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "stow_to_home",
+                        lambda arm, **kw: [w.name for w in R.STOW_ROUTE])
+    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+
+    moved = {"n": 0}
+
+    def provider():
+        scene = live_scene()
+        moved["n"] += 1
+        if moved["n"] > 2:                       # after the motion
+            x, y, z = on_cell(scene, "r1c1")
+            scene.objects["soda_can"].position = (x, y + 0.25, z)
+        return scene
+
+    ex = SimulatorExecutor(StubLink(), provider, "scene.yaml")
+    out = ex.execute(_ability(expected_start_posture="home",
+                              route="STOW_ROUTE"))
+    assert out.status == "failed"
+    assert "moved something on the way" in out.detail
+    assert out.evidence["object_drift"]["soda_can"] > 0.02
+
+
+def test_arriving_cleanly_reports_the_posture_and_the_waypoints(
+        monkeypatch, fake_sdk):
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    _validated(monkeypatch)
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "stow_to_home",
+                        lambda arm, **kw: [w.name for w in R.STOW_ROUTE])
+    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    out = ex.execute(_ability(expected_start_posture="home"))
+    assert out.status == "completed"
+    assert out.evidence["final_posture"] == "home"
+    assert out.evidence["waypoints_flown"] == [w.name for w in R.STOW_ROUTE]
+    assert out.evidence["object_drift"] == {}
+    assert "board is as it was" in out.detail
+
+
+def test_a_route_stopped_part_way_is_not_reported_as_arrival(
+        monkeypatch, fake_sdk):
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    _validated(monkeypatch)
+    poses = {"at": dict(R.HOME)}
+    monkeypatch.setattr(M, "present_pose", lambda _arm: poses["at"])
+
+    def half(arm, **kw):
+        poses["at"] = dict(R.SWING_2)          # stopped in the corridor
+        return [w.name for w in R.STOW_ROUTE][:4]
+
+    monkeypatch.setattr(M, "stow_to_home", half)
+    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    out = ex.execute(_ability(expected_start_posture="home"))
+    assert out.status == "failed"
+    assert "stopped before home" in out.detail
+    assert out.evidence["final_posture"] is None
+
+
+def test_the_cancel_check_reaches_the_route_runner(monkeypatch, fake_sdk):
+    """A Stop has to be visible between waypoints, which is the only place a
+    corridor can be left."""
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    _validated(monkeypatch)
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    seen = {}
+
+    def capture(arm, **kw):
+        seen["abort"] = kw.get("should_abort")
+        return []
+
+    monkeypatch.setattr(M, "stow_to_home", capture)
+    monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
+
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    ex.execute(_ability(expected_start_posture="home"),
+               should_cancel=lambda: True)
+    assert seen["abort"] is not None
+    assert seen["abort"]() is True

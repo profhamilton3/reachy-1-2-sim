@@ -129,7 +129,13 @@ class SimulatorExecutor:
     # -- availability ------------------------------------------------------
 
     def available(self, proposal=None) -> Tuple[bool, str]:
-        """Whether this proposal could be executed right now, and why not."""
+        """Whether this proposal could be executed right now, and why not.
+
+        Answered PER ABILITY.  One reason for the whole executor was fine while
+        there was one ability; with six it turns "I cannot rest my forearm in
+        this scene" into "the arm is unavailable", which sends whoever reads it
+        to the robot instead of to the compatibility record.
+        """
         # Same path setup as execute(): without it the motion layer is
         # unimportable here and every proposal is refused for the wrong reason,
         # which would read as "the arm is broken" rather than "look at sys.path".
@@ -161,7 +167,7 @@ class SimulatorExecutor:
             return True, ""
 
         if proposal.task_type != "pick_place":
-            return False, f"I have no motion for a {proposal.task_type} task"
+            return self._ability_available(proposal)
         if proposal.destination_kind != "cell":
             return False, ("I can only place onto a grid cell; this plan names "
                            f"{proposal.destination_label!r}")
@@ -180,6 +186,39 @@ class SimulatorExecutor:
             return False, "that destination is not in this scene"
         if not cell.reachable:
             return False, f"{cell.name} is out of the arm's reach"
+        return True, ""
+
+    def _ability_available(self, proposal) -> Tuple[bool, str]:
+        """Can this ability be flown, in this scene, on this arm?
+
+        Three questions, and each is a different answer to give:  the ability
+        may have no motion at all; the route may not be validated in the scene
+        the panel is showing; or the arm may be somewhere the route cannot be
+        entered from.  Collapsing them loses the one piece of information the
+        operator can act on.
+        """
+        _ensure_paths()
+        from reachy_ai.motion import rig_routes as R
+
+        if not proposal.route:
+            return False, (f"I have no motion for {proposal.task_type} — it is "
+                           "recognised, planned and not yet built")
+        if proposal.arm != "right":
+            return False, ("I can only do that with my right arm; the route "
+                           "was measured for that arm through a rig that is "
+                           "not symmetric")
+
+        scene = self._scene_provider()
+        if scene.error:
+            return False, f"I cannot read the scene: {scene.error}"
+
+        ok, why = R.check_route(proposal.route, scene.name)
+        if not ok:
+            # Named in the scene's own terms.  This is the refusal the
+            # FWDCenterLabSivaPool validation run produced, and it is the
+            # correct answer there, not a placeholder for one.
+            return False, why
+
         return True, ""
 
     # -- execution ---------------------------------------------------------
@@ -201,6 +240,178 @@ class SimulatorExecutor:
             self._motion_lock.release()
 
     def _execute_locked(self, proposal, should_cancel, on_phase) -> ExecutionResult:
+        if proposal.task_type != "pick_place":
+            return self._execute_ability_locked(proposal, should_cancel, on_phase)
+        return self._execute_pick_place_locked(proposal, should_cancel, on_phase)
+
+    # -- abilities ---------------------------------------------------------
+
+    def _execute_ability_locked(self, proposal, should_cancel, on_phase):
+        """Fly one ability's route, under the lease, and prove where it ended.
+
+        CANCELLATION IS PER STAGE, and the stages are not interchangeable.
+        Entry and exit are corridors: mid-corridor the arm is between rails and
+        cannot stop where it is, so a Stop finishes the waypoint it is flying
+        and holds.  The action itself — a wave — can stop between cycles.  None
+        of these is an emergency stop, and the panel must not word them as one.
+
+        NO UNVERIFIED AUTO-RETREAT.  A route stopped half way leaves the arm at
+        a waypoint, and the transition from that waypoint to anywhere else is
+        the thing that was never measured.  It is reported, not corrected.
+        """
+        _ensure_paths()
+        from reachy_sdk import ReachySDK
+
+        from reachy_ai.motion import rig_routes as R
+        from reachy_ai.tasks import rig_motion as M
+
+        granted, why = self._link.acquire_control(
+            MOTION_CLIENT_ID, reason=f"plan {proposal.plan_id}",
+            ttl_s=LEASE_TTL_S)
+        if not granted:
+            return ExecutionResult(
+                status="failed",
+                detail=f"I could not take control of the scene: {why}")
+
+        def phase(name: str) -> None:
+            log.info("ability phase: %s", name)
+            if on_phase is not None:
+                on_phase(name)
+
+        try:
+            scene = self._fresh_scene()
+            if scene is None:
+                return ExecutionResult(
+                    status="failed",
+                    detail=("I took control of the scene but no fresh view of "
+                            "it arrived, so I will not move."))
+            ok, why = self.available(proposal)
+            if not ok:
+                return ExecutionResult(
+                    status="failed",
+                    detail=f"the board changed while I was taking control: {why}",
+                    evidence={"scene_changed": True})
+
+            phase("connecting to the arm")
+            robot = ReachySDK(host=self._sdk_host, sdk_port=self._sdk_port)
+            time.sleep(0.8)
+            if robot.r_arm is None:
+                return ExecutionResult(
+                    status="failed",
+                    detail="the right arm is not available on the simulator")
+            arm = robot.r_arm
+
+            start = R.posture_of(M.present_pose(arm))
+            wanted = proposal.expected_start_posture
+            if start is None:
+                # Not at any named posture.  The nearest waypoint is reported
+                # because it is the useful fact, and NOT flown to, because the
+                # segment onto it is the one nobody measured.
+                name, distance = R.nearest_waypoint(M.present_pose(arm))
+                return ExecutionResult(
+                    status="failed",
+                    detail=("my arm is not at a posture I have a measured "
+                            f"route out of — the nearest waypoint is {name}, "
+                            f"{distance:.0f} degrees away. I will not guess a "
+                            "path from here."),
+                    evidence={"recovery_needed": True, "nearest": name})
+            if wanted and start != wanted:
+                bridge = R.transition(start, wanted)
+                if bridge is None:
+                    return ExecutionResult(
+                        status="failed",
+                        detail=(f"my arm is at {start} and that route starts "
+                                f"at {wanted}. There is no measured way from "
+                                f"{start} to {wanted}, so I will not invent "
+                                "one."),
+                        evidence={"posture": start, "wanted": wanted})
+                return ExecutionResult(
+                    status="failed",
+                    detail=(f"my arm is at {start}; getting to {wanted} means "
+                            f"flying {bridge} first. Ask me for that and then "
+                            "ask me for this."),
+                    evidence={"posture": start, "wanted": wanted,
+                              "bridge": bridge})
+
+            robot.turn_on("r_arm")
+            time.sleep(0.3)
+            before = {oid: o.position for oid, o in scene.objects.items()
+                      if o.position is not None}
+
+            runner = {"rest_forearm": M.deploy_to_rest,
+                      "stow_arm": M.stow_to_home}.get(proposal.task_type)
+            if runner is None:
+                return ExecutionResult(
+                    status="failed",
+                    detail=f"I have no runner wired up for {proposal.task_type}")
+
+            try:
+                flown = runner(arm, should_abort=(should_cancel or (lambda: False)),
+                               on_phase=phase)
+            except M.RecoveryNeeded as exc:
+                return ExecutionResult(
+                    status="failed", detail=str(exc),
+                    evidence={"recovery_needed": True})
+            except M.RouteError as exc:
+                return ExecutionResult(
+                    status="failed", detail=str(exc),
+                    evidence={"stopped_mid_route": True})
+
+            return self._verify_posture(arm, proposal, flown, before)
+
+        except Exception as exc:
+            log.exception("ability execution failed")
+            return ExecutionResult(
+                status="failed",
+                detail=f"the motion failed: {exc.__class__.__name__}: {exc}")
+        finally:
+            self._link.release_control()
+
+    def _verify_posture(self, arm, proposal, flown, before) -> ExecutionResult:
+        """Read the posture back, and check the board is where it was.
+
+        Both, because they fail independently: the arm can arrive at HOME
+        having swept an object off the table on the way, and it can leave the
+        board untouched while stopping three waypoints short.
+        """
+        _ensure_paths()
+        from reachy_ai.motion import rig_routes as R
+        from reachy_ai.tasks import rig_motion as M
+
+        wanted = proposal.route
+        end = {"PLACE_ROUTE": R.POSTURE_REST,
+               "STOW_ROUTE": R.POSTURE_HOME}.get(wanted, "")
+        posture = R.posture_of(M.present_pose(arm))
+        drift = {}
+        scene = self._scene_provider()
+        for oid, was in before.items():
+            now = scene.objects.get(oid)
+            if now is not None and now.position is not None:
+                moved = _euclid(now.position, was)
+                if moved > 0.02:
+                    drift[oid] = round(moved, 4)
+
+        evidence = {"route": wanted, "waypoints_flown": list(flown),
+                    "final_posture": posture, "object_drift": drift}
+        if posture != end:
+            return ExecutionResult(
+                status="failed",
+                detail=(f"the route stopped before {end}: my arm is at "
+                        f"{posture or 'no posture I recognise'}."),
+                evidence=evidence)
+        if drift:
+            names = ", ".join(f"{k} by {v * 100:.0f} cm" for k, v in drift.items())
+            return ExecutionResult(
+                status="failed",
+                detail=(f"I reached {end}, but I moved something on the way: "
+                        f"{names}."),
+                evidence=evidence)
+        return ExecutionResult(
+            status="completed",
+            detail=f"My arm is at {end}, and the board is as it was.",
+            evidence=evidence)
+
+    def _execute_pick_place_locked(self, proposal, should_cancel, on_phase):
         _ensure_paths()
         from reachy_sdk import ReachySDK
 
@@ -393,6 +604,10 @@ class SimulatorExecutor:
                 "verified": "live_pose",
             },
         )
+
+
+def _euclid(a, b) -> float:
+    return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
 
 
 def _ref_id(destination: str) -> str:

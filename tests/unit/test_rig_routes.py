@@ -211,11 +211,13 @@ def test_every_attempt_records_an_outcome_and_the_numbers():
 
 def test_pointing_is_not_a_validated_route_anywhere():
     """Section 4.7 records runs that moved objects — a can shifted 0.189 m by
-    an arm reporting positive clearance."""
+    an arm reporting positive clearance.  The reason travels with the refusal
+    into scenes pointing was never tried in: a route rejected where it was
+    designed is not going to be better somewhere it was not."""
     for scene in ("FWDCenterLabMCC", "FWDCenterLabSivaPool"):
         ok, why = R.check_route("POINT", scene)
         assert not ok
-        assert "not been validated in any scene" in why
+        assert "0.189 m" in why
 
 
 def test_a_refusal_names_the_scene_not_the_arm():
@@ -254,3 +256,46 @@ def test_at_pose_checks_only_the_gross_joints_when_asked():
     drifted = dict(R.HOME, r_wrist_roll=40.0, r_gripper=R.OPEN)
     assert R.at_pose(drifted, R.HOME, joints=list(R.GROSS_JOINTS))
     assert not R.at_pose(drifted, R.HOME)
+
+
+# ---------------------------------------------------------------------------
+# The posture graph (issue #65)
+# ---------------------------------------------------------------------------
+
+def test_the_named_postures_are_recognised_from_a_pose():
+    assert R.posture_of(dict(R.HOME)) == R.POSTURE_HOME
+    assert R.posture_of(dict(R.REST)) == R.POSTURE_REST
+    assert R.posture_of(dict(R.PRESENT)) == R.POSTURE_PRESENT
+
+
+def test_a_pose_between_postures_is_not_any_of_them():
+    """"Somewhere in the corridor" is an answer, and it is not "close enough
+    to HOME"."""
+    assert R.posture_of(dict(R.SWING_2)) is None
+
+
+def test_posture_is_judged_on_the_gross_joints():
+    drifted = dict(R.HOME, r_wrist_roll=40.0, r_gripper=R.OPEN)
+    assert R.posture_of(drifted) == R.POSTURE_HOME
+
+
+def test_only_measured_transitions_exist():
+    """There is no "just move there" edge, and the absence is the point."""
+    assert R.transition(R.POSTURE_HOME, R.POSTURE_REST) == "PLACE_ROUTE"
+    assert R.transition(R.POSTURE_REST, R.POSTURE_HOME) == "STOW_ROUTE"
+    # Not measured: rest to present, present to home, home to present.
+    assert R.transition(R.POSTURE_REST, R.POSTURE_PRESENT) is None
+    assert R.transition(R.POSTURE_PRESENT, R.POSTURE_HOME) is None
+    assert R.transition(R.POSTURE_HOME, R.POSTURE_PRESENT) is None
+
+
+def test_the_wave_is_a_transition_from_present_to_itself():
+    """It ends where it started.  Getting to rest or the pocket afterwards is
+    a separate transition, and there is not one."""
+    assert R.transition(R.POSTURE_PRESENT, R.POSTURE_PRESENT) == "WAVE"
+    assert R.reachable_from(R.POSTURE_PRESENT) == (R.POSTURE_PRESENT,)
+
+
+def test_home_and_rest_each_reach_exactly_one_other_posture():
+    assert R.reachable_from(R.POSTURE_HOME) == (R.POSTURE_REST,)
+    assert R.reachable_from(R.POSTURE_REST) == (R.POSTURE_HOME,)

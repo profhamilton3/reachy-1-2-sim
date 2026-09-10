@@ -31,6 +31,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+#: Named postures.  `REST` is the forearm supported on the tabletop; `HOME` is
+#: stored in the rail pocket.  They are eleven waypoints apart, and the
+#: operator's word for both of them is "rest".
+POSTURE_HOME = "home"
+POSTURE_REST = "rest"
+POSTURE_PRESENT = "present"
+
 #: Gripper angles.  The sign is inverted from the obvious reading: negative
 #: OPENS.  Verified on the physical robot, not inferred from the joint name.
 OPEN = -45.0    # ~6.5 cm pad gap
@@ -317,6 +324,13 @@ VALIDATION_ATTEMPTS: Tuple[ValidationAttempt, ...] = (
         "margin at its tightest waypoint.",
     ),
     ValidationAttempt(
+        "POINT", "FWDCenterLabMCC", "2026-08", "rejected",
+        "Measured in notebook section 4.7 and not accepted: pad miss up to "
+        "21.2 cm across the grid, and cell_r2c1 reported +5.5 cm of clearance "
+        "while moving the can 0.189 m. The arm bows off the line the guard "
+        "cleared, between the points where anything was measured.",
+    ),
+    ValidationAttempt(
         "WAVE", "FWDCenterLabSivaPool", "2026-09-10", "not attempted",
         "The wave starts from PRESENT, and the transition into PRESENT from "
         "either endpoint of the routes above is itself unvalidated here. "
@@ -363,6 +377,15 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
                        f"{attempt.detail}")
     flown_in = sorted({r.scene for r in ROUTE_COMPATIBILITY if r.route == route})
     if not flown_in:
+        # No pass anywhere.  If it was tried somewhere else and failed, that
+        # reason travels: a route rejected in the scene it was designed for is
+        # not going to be better in one it was not.
+        elsewhere = [a for a in VALIDATION_ATTEMPTS
+                     if a.route == route and a.outcome == "rejected"]
+        if elsewhere:
+            return False, (f"the {route} route is not validated in any scene. "
+                           f"It was flown in {elsewhere[0].scene} and "
+                           f"rejected: {elsewhere[0].detail}")
         return False, (f"the {route} route has not been validated in any "
                        "scene yet, so I will not fly it")
     return False, (f"the {route} route was measured in "
@@ -404,3 +427,53 @@ def at_pose(present: Dict[str, float], target: Dict[str, float],
     names = list(joints) if joints is not None else [n for n in target
                                                      if n != "r_gripper"]
     return all(abs(present.get(n, 0.0) - target[n]) <= tol for n in names)
+
+
+# ---------------------------------------------------------------------------
+# The posture graph
+# ---------------------------------------------------------------------------
+
+#: The named postures a route may start or end at.
+POSTURES: Dict[str, Dict[str, float]] = {
+    POSTURE_HOME: HOME,
+    POSTURE_REST: REST,
+    POSTURE_PRESENT: PRESENT,
+}
+
+#: Which route takes the arm from one posture to another.
+#:
+#: A pair that is not here is not a transition.  There is no "just move there"
+#: edge, and the absence is the point: a direct move from anywhere over the
+#: board to HOME drives the upper arm through the board's near edge, and the
+#: side-hub exit that IS named "go home" drives it through the outer rail in at
+#: least one scene (#73).  Two motions can both be reasonably called going
+#: home; only one of them is measured for the trip you are making.
+POSTURE_TRANSITIONS: Dict[Tuple[str, str], str] = {
+    (POSTURE_HOME, POSTURE_REST): "PLACE_ROUTE",
+    (POSTURE_REST, POSTURE_HOME): "STOW_ROUTE",
+    (POSTURE_PRESENT, POSTURE_PRESENT): "WAVE",
+}
+
+
+def posture_of(present: Dict[str, float], tol: float = 8.0) -> Optional[str]:
+    """Which named posture the arm is standing at, or None.
+
+    Judged on the gross joints: the wrist angles and the gripper do not decide
+    where the arm sits in the rig, and on a freshly reset simulator they read
+    wherever gravity left them.
+    """
+    for name, target in POSTURES.items():
+        if at_pose(present, target, tol=tol, joints=list(GROSS_JOINTS)):
+            return name
+    return None
+
+
+def transition(frm: str, to: str) -> Optional[str]:
+    """The route from one posture to another, or None if there is not one."""
+    if frm == to:
+        return POSTURE_TRANSITIONS.get((frm, to))
+    return POSTURE_TRANSITIONS.get((frm, to))
+
+
+def reachable_from(frm: str) -> Tuple[str, ...]:
+    return tuple(sorted(to for (f, to) in POSTURE_TRANSITIONS if f == frm))
