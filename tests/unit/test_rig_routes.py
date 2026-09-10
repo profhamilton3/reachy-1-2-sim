@@ -203,18 +203,22 @@ def test_a_route_nobody_flew_here_is_a_different_answer_from_one_that_failed():
     assert "rejected" not in why
 
 
-def test_the_wave_and_its_approach_are_validated_in_the_panel_scene():
-    """Flown from the rail pocket: the arm leaves it, waves, and stays raised.
-
-    The wave was refused here for want of an approach, not for want of room —
-    it has 13 cm of it.
-    """
-    for route in ("WAVE", "PRESENT_ROUTE", "PRESENT_RETURN"):
+def test_the_hub_routes_lost_their_panel_scene_rows_with_the_hub():
+    """The rows certified four hand-built steps through a roll -88 hub, and the
+    hub is gone: `raise_to_side` and `stow_from_side` fly the notebook's routes
+    now.  A validation row for code that no longer exists is worse than none,
+    so they have to be flown again here."""
+    for route in ("WAVE", "RAISE_TO_SIDE", "STOW_FROM_SIDE", "LIFT_TO_PRESENT"):
         ok, why = R.check_route(route, "FWDCenterLabSivaPool")
+        assert not ok
+        assert "FWDCenterLabSivaPool" in why
+
+
+def test_the_hub_routes_are_validated_where_the_notebook_flew_them():
+    for route in ("RAISE_TO_SIDE", "STOW_FROM_SIDE", "LIFT_TO_PRESENT",
+                  "LOWER_TO_REST"):
+        ok, why = R.check_route(route, "FWDCenterLabMCC")
         assert ok, "{}: {}".format(route, why)
-    row = R.validation_for("WAVE", "FWDCenterLabSivaPool")
-    assert "+13.1" in row.evidence
-    assert "rail pocket" in row.evidence
 
 
 def test_every_attempt_records_an_outcome_and_the_numbers():
@@ -300,10 +304,14 @@ def test_only_measured_transitions_exist():
     """There is no "just move there" edge, and the absence is the point."""
     assert R.transition(R.POSTURE_HOME, R.POSTURE_REST) == "PLACE_ROUTE"
     assert R.transition(R.POSTURE_REST, R.POSTURE_HOME) == "STOW_ROUTE"
-    # Not measured: rest to present, present to home, home to present.
-    assert R.transition(R.POSTURE_REST, R.POSTURE_PRESENT) is None
-    assert R.transition(R.POSTURE_PRESENT, R.POSTURE_HOME) is None
-    assert R.transition(R.POSTURE_HOME, R.POSTURE_PRESENT) is None
+    # Measured, all four, and every one of them is in the notebook.
+    assert R.transition(R.POSTURE_REST, R.POSTURE_PRESENT) == "LIFT_TO_PRESENT"
+    assert R.transition(R.POSTURE_PRESENT, R.POSTURE_REST) == "LOWER_TO_REST"
+    assert R.transition(R.POSTURE_HOME, R.POSTURE_PRESENT) == "RAISE_TO_SIDE"
+    assert R.transition(R.POSTURE_PRESENT, R.POSTURE_HOME) == "STOW_FROM_SIDE"
+    # Still not a posture, and not an edge: the invented side hub.
+    assert not hasattr(R, "POSTURE_SIDE_HUB")
+    assert "side_hub" not in R.POSTURES
 
 
 def test_the_wave_is_a_transition_from_present_to_itself():
@@ -313,32 +321,28 @@ def test_the_wave_is_a_transition_from_present_to_itself():
     assert R.POSTURE_PRESENT in R.reachable_from(R.POSTURE_PRESENT)
 
 
-def test_everything_out_of_the_pocket_goes_through_the_side_hub():
-    """The hub is the junction: it is the one pose with the pocket behind the
-    arm and the rail beside it rather than in front."""
-    assert set(R.reachable_from(R.POSTURE_HOME)) == {R.POSTURE_REST,
-                                                     R.POSTURE_SIDE_HUB}
-    assert set(R.reachable_from(R.POSTURE_SIDE_HUB)) == {R.POSTURE_HOME,
-                                                         R.POSTURE_PRESENT}
-    assert set(R.reachable_from(R.POSTURE_REST)) == {R.POSTURE_HOME}
+def test_the_way_out_of_the_pocket_is_the_measured_route():
+    """It used to abduct to roll -88, which the notebook names as its FAILURE
+    exercise.  The route crosses the rail band in two joints at once and never
+    rolls past -37.5."""
+    assert [w.name for w in R.RAISE_TO_SIDE] == \
+        [w.name for w in R.PLACE_ROUTE] + ["PRESENT"]
+    assert [w.name for w in R.STOW_FROM_SIDE] == [w.name for w in R.STOW_ROUTE]
+    deepest = min(w.pose["r_shoulder_roll"] for w in R.RAISE_TO_SIDE)
+    assert deepest == -37.5
 
 
 def test_an_arm_in_the_pocket_is_routed_out_of_it():
-    """"Wave" asked of a stored arm is not a refusal: it is two moves.
-
-    The arm has to leave the pocket before it can do anything, and that is a
-    fact about the rig rather than something the operator should have to know
-    and type.
-    """
-    assert R.path(R.POSTURE_HOME, R.POSTURE_PRESENT) == ["RAISE_TO_SIDE",
-                                                         "PRESENT_ROUTE"]
-    assert R.path(R.POSTURE_PRESENT, R.POSTURE_HOME) == ["PRESENT_RETURN",
-                                                         "STOW_FROM_SIDE"]
+    """"Wave" asked of a stored arm answers with the route, not a refusal."""
+    assert R.path(R.POSTURE_HOME, R.POSTURE_PRESENT) == ["RAISE_TO_SIDE"]
+    assert R.path(R.POSTURE_HOME, R.POSTURE_HOME) == []
 
 
-def test_a_path_from_rest_goes_all_the_way_round():
-    assert R.path(R.POSTURE_REST, R.POSTURE_PRESENT) == [
-        "STOW_ROUTE", "RAISE_TO_SIDE", "PRESENT_ROUTE"]
+def test_a_path_from_rest_is_the_notebooks_single_move():
+    """It used to be STOW_ROUTE, RAISE_TO_SIDE, PRESENT_ROUTE — all the way
+    home and back out through the hub.  The notebook lifts straight off the
+    board (cell 18)."""
+    assert R.path(R.POSTURE_REST, R.POSTURE_PRESENT) == ["LIFT_TO_PRESENT"]
 
 
 def test_already_there_is_no_moves_and_the_wave_is_the_exception():

@@ -406,7 +406,8 @@ class SimulatorExecutor:
         # An ability is FOR a posture, not for one route.  "Store your arm"
         # means end in the pocket, and which measured routes get there depends
         # on where the arm is standing — from the presentation pose it is
-        # PRESENT_RETURN then STOW_FROM_SIDE, neither of which is STOW_ROUTE.
+        # STOW_FROM_SIDE, which is not the same route as PLACE_ROUTE's reverse
+        # entered from rest.
         # So availability asks whether ANY validated route leads where the
         # ability is going; the executor checks the ACTUAL path once it can
         # see the arm, and refuses there if a leg of it is not validated.

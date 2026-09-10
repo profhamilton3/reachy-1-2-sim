@@ -99,26 +99,29 @@ READY: Dict[str, float] = {
 # while the right shoulder sits at world (0,−0.19,1.0) — the whole forward
 # workspace is above the table with only ~0.26 m of headroom.  Raising the arm by
 # pitching it FORWARD (the intuitive move) sweeps the gripper straight into the
-# tabletop.  Instead we raise it like a JUMPING JACK: shoulder *pitch stays ~0*
-# and shoulder *roll* drives the arm laterally OUT, away from the torso, past the
-# table's right edge (−Y), where there is no table to hit.  Only once the arm is
-# out and up does it reach forward over the table (as a collision-checked
-# Cartesian move).  Both poses were FK-verified so the gripper pad clears the
-# table slab throughout every joint-space interpolation HOME → ABDUCT_LOW →
-# SIDE_HIGH.
+# tabletop.  The arm used to be raised like a JUMPING JACK instead — pitch held
+# near 0 while the roll drove it laterally out past the table's right edge —
+# and ABDUCT_LOW/SIDE_HIGH below are what is left of that.
+#
+# THAT WAS WRONG ONCE THE RIG EXISTED, and `raise_to_side` no longer does it.
+# The rails put a pocket around the hanging arm and a rail beside it, so a
+# lateral sweep at fixed pitch runs the hand through the board's near edge and
+# the forearm through `rig_rail_outer_right`.  The notebook says so in as many
+# words, as its FAILURE exercise: "Try the sideways version and watch it fail
+# ... the arm jams against the outer rail."
+#
+# SIDE_HIGH is now the notebook's PRESENT — pitch -70, roll -25, elbow -80 —
+# which is what "raised, out to the robot's right" actually means in this rig
+# and is the only such pose anyone has measured (+8.9 cm worst whole-arm
+# clearance across the whole of section 4, against -1.9 cm for the pose it
+# replaced).  It is spelled out here rather than imported from rig_routes
+# because this module is imported BY that one; `test_primitives` asserts the
+# two agree.
 #
 #   ABDUCT_LOW : arm swung straight OUT to the right, roughly horizontal, elbow
-#                extended — pitch 0, so it moves away from the side of the torso
-#                without going forward (pad ≈ (0.00,−0.82,0.83), well outside the
-#                table's −0.33 right edge).
-#   SIDE_HIGH  : from ABDUCT_LOW, lift the upper arm and FLEX THE ELBOW TIGHT —
-#                a "bicep-curl" that folds the forearm UP so the whole forearm
-#                (not just the gripper tip) rides high and clear of the table.
-#                This is the raised transit hub (pad ≈ (0.33,−0.41,1.15), wrist ≈
-#                (0.23,−0.43,1.10) — both ~0.4 m above the surface).  Verified so
-#                BOTH the pad and the wrist clear the slab through every
-#                interpolation; the arm only reaches forward over the table,
-#                unflexing as needed, once fully raised.
+#                extended.  Kept only for `recipe_executor`, which uses it as a
+#                mid-point in its own path; nothing in the rig routes goes near
+#                it, and nothing new should.
 ABDUCT_LOW: Dict[str, float] = {
     "r_shoulder_pitch":  0.0,
     "r_shoulder_roll":  -75.0,
@@ -131,10 +134,10 @@ ABDUCT_LOW: Dict[str, float] = {
 }
 
 SIDE_HIGH: Dict[str, float] = {
-    "r_shoulder_pitch": -25.0,
-    "r_shoulder_roll":  -88.0,
+    "r_shoulder_pitch": -70.0,
+    "r_shoulder_roll":  -25.0,
     "r_arm_yaw":         0.0,
-    "r_elbow_pitch":   -100.0,   # tight bicep flex → forearm folds up, rides high
+    "r_elbow_pitch":    -80.0,
     "r_forearm_yaw":     0.0,
     "r_wrist_pitch":     0.0,
     "r_wrist_roll":      0.0,
@@ -373,134 +376,109 @@ def wait_until(
     return False
 
 
-# Joint whose isolated abduction lifts the arm out to the side.
-_ABDUCT_JOINT = "r_shoulder_roll"
+def fly(arm, route, *, label: str = "route", move=None) -> List[str]:
+    """Walk a measured route waypoint by waypoint, and stop where it stops.
 
+    This is the notebook's `move_to` loop, and every part of it is load-bearing:
 
-def _folded(pose: Dict[str, float]) -> Dict[str, float]:
-    """The same arm position, with the elbow tucked and reaching forward.
+    * ONE WAYPOINT AT A TIME.  The clearance of each waypoint was measured FROM
+      the one before it, so a route is not a set of poses to reach eventually,
+      it is an order.
+    * THE WHOLE POSE, EVERY TIME.  Each waypoint is a complete eight-joint
+      pose.  Building a target out of whatever the arm happens to be reading —
+      which is what `raise_to_side` and `stow_from_side` used to do — flies a
+      configuration nobody verified, and inherits, say, the wrist angles the
+      wave left behind.
+    * RE-STREAM UNTIL IT ARRIVES.  Under mujoco-remote the arm only moves while
+      setpoints stream; `converge` does that.
+    * STOP RATHER THAN CONTINUE.  A waypoint reached ten degrees short is no
+      longer the pose that was verified, and the next segment's clearance no
+      longer applies to it.
 
-    This is the shape that gets past `rig_rail_outer_right`.  A folded forearm
-    rides high and inside the rail's arc; a straight one sweeps through it.
+    Raises RuntimeError naming the waypoint.  Callers that need abort and phase
+    callbacks want `tasks.rig_motion.fly_route`, which is the same walk with
+    those hooks and a typed error.
     """
-    out = dict(pose)
-    out["r_elbow_pitch"] = _FOLDED_ELBOW
-    out["r_shoulder_pitch"] = _FOLDED_PITCH
-    out["r_arm_yaw"] = 0.0
-    out["r_forearm_yaw"] = 0.0
-    out["r_wrist_pitch"] = 0.0
-    out["r_wrist_roll"] = 0.0
-    return out
+    from reachy_ai.motion import rig_routes as R
+
+    flown: List[str] = []
+    for wp in route:
+        guard = list(wp.guard) if wp.guard else list(R.CRITICAL_JOINTS)
+        loose = [n for n in wp.pose if n not in guard and n != "r_gripper"]
+        if not converge(arm, dict(wp.pose), wp.seconds, tol=wp.tol,
+                        joints=guard, passes=6):
+            joint, off = worst_joint(arm, dict(wp.pose), guard)
+            raise RuntimeError(
+                f"{label} stopped at {wp.name}: {joint} is {off:.0f} deg off, "
+                f"tolerance {wp.tol:.0f}. The next waypoint's clearance was "
+                "measured from this one, so it does not apply from here.")
+        # The joints that only spin the hand still have to be moving.  They
+        # are not held to the waypoint's tolerance — see CRITICAL_JOINTS — but
+        # one of them tens of degrees out is not a weak joint lagging, it is
+        # nothing tracking at all, and that is worth stopping for.
+        if loose:
+            joint, off = worst_joint(arm, dict(wp.pose), loose)
+            if off > R.LESSON_TOL:
+                raise RuntimeError(
+                    f"{label} stopped at {wp.name}: {joint} is {off:.0f} deg "
+                    f"off its goal, past even the loose tolerance "
+                    f"{R.LESSON_TOL:.0f}. Nothing is tracking.")
+        flown.append(wp.name)
+    return flown
+
+
+def _at(arm, pose: Dict[str, float], tol: float = 8.0) -> bool:
+    """Is the arm standing at `pose`, judged on the joints that place it?"""
+    return _reached(arm, {n: pose[n] for n in PLACING_JOINTS}, tol)
 
 
 def raise_to_side(arm, duration: float = 3.0) -> None:
-    """Lift the right arm out to the robot's right side to the SIDE_HIGH hub.
+    """Out of the rail pocket and up to the raised pose, by the measured route.
 
-    OUT OF THE POCKET FIRST, THEN UP.  This function predates the rig: with no
-    rails around it, abducting the shoulder straight out of HOME was fine, and
-    that is what it did — roll first, in isolation, with the arm straight.
-    With the rails in place that is two different collisions at once.
+    THIS FLIES THE NOTEBOOK, AND IT DID NOT USED TO.  It was four hand-built
+    steps: shut the hand, back out of the pocket (both of those taken from the
+    route), then fold the arm from wherever it was reading and sweep the roll
+    from 0 to -88 in a single command at fixed pitch.  Only the first two are
+    in `tlh_motion-routine.ipynb`.  The rest was invented, and modelled against
+    the scene it is 4.3 to 6.5 cm inside `table_top` for every degree of that
+    sweep, clearing only in the last ten — the HAND against the board's near
+    edge, with the fold holding it at the height of the slab.  An operator
+    watched exactly that: the gripper going through the board.
 
-    At HOME the arm is INSIDE the rail pocket, and the only way out of a pocket
-    is the way you came in: extension, with the roll left alone.  The measured
-    route says so in its first two waypoints — GRIP_SHUT then BACK, "back out
-    of the pocket, extension only, roll stays at 0" — and the robot agrees:
-    probed from HOME, a forward shoulder pitch does not move at all
-    (commanded -60, -40 and -25, it held at -0.9, +4.5 and -0.5), because the
-    pocket is in the way.
+    WHY THE INVENTED VERSION LOOKED FINE FOR SO LONG.  MuJoCo's contact pushes
+    back in proportion to penetration; a position servo pushes in proportion to
+    joint error.  The shoulder has kp=300 and 60 Nm to spend, so a pose a
+    couple of degrees past a rail loses to the rail — which is where "commanded
+    to -88, the roll reached -14.1 and held there" came from — while a pose six
+    centimetres inside the board wins from the first timestep and goes straight
+    through.  The physics was never off.  It was being asked for the second
+    kind of pose.
 
-    Only once the arm is clear of the pocket rails is there anything to raise.
-    And then the SECOND collision applies: a straight arm sweeping the roll out
-    runs into `rig_rail_outer_right` between about -13 and -35 degrees, up to
-    3.2 cm deep.  Measured live, commanded to -88, the roll reached -14.1 and
-    held there — the old docstring claimed it "holds at its ~-85 degree range
-    limit", and it was holding against a rail.  So the elbow is tucked before
-    the roll moves; folded, the forearm rides inside the rail's arc.
+    WHAT THE MEASURED ROUTE DOES INSTEAD.  `PLACE_ROUTE` crosses the rail band
+    in TWO joints at once — SWING_1/2/3 step the pitch +37.5 -> +20 -> -17.5
+    while the roll goes -32.5 -> -35 -> -37.5 — so it goes around the rail
+    rather than through it.  There is no "-13 to -35 degree rail band" on that
+    path; the band is an artefact of sweeping one joint at fixed pitch, which
+    is the thing this no longer does.  Its deepest roll anywhere is -37.5.
 
-    Four steps, and each one is a different obstacle: the pocket, then the
-    rail, then the abduction, then the hub.  See #73.
+    Then one move to PRESENT, which is the notebook's own next step (cell 18)
+    and the raised pose this function is named for.
+
+    `duration` is accepted and IGNORED.  The route carries its own measured
+    per-waypoint timings and they are part of what was verified — at half the
+    time the weak joints finish tens of degrees short, which is how a bounded
+    route stops being one.  The parameter stays so callers keep working.
     """
-    # 1. Shut the hand.  It travels shut through the rig for the same reason
-    #    the route does it: the moving finger swings out as the gripper opens,
-    #    so an open hand is a 7.5 cm tube about the wrist axis and a shut one
-    #    is 5.2 cm.
-    converge(arm, dict(R_ROUTES.GRIP_SHUT), duration * 0.20, tol=12.0,
-             joints=_POCKET_JOINTS)
+    from reachy_ai.motion import rig_routes as R
 
-    # 2. Back out of the pocket: extension only, roll untouched.
-    #
-    #    This one gets a real budget.  It is 40 degrees of shoulder against
-    #    gravity, from an arm that has usually just been parked with the motors
-    #    off, and it is the first move of the trip — there is no momentum in it
-    #    and nothing after it can help.  Given a quarter of the default
-    #    duration it failed about one attempt in three, with the shoulder
-    #    exactly where it started.
-    if not converge(arm, dict(R_ROUTES.BACK), duration * 0.60, tol=10.0,
-                    joints=_POCKET_JOINTS, passes=8):
-        joint, off = worst_joint(arm, dict(R_ROUTES.BACK), _POCKET_JOINTS)
+    if not _at(arm, R.HOME):
+        joint, off = worst_joint(arm, dict(R.HOME), PLACING_JOINTS)
         raise RuntimeError(
-            "the arm did not back out of the rail pocket: "
-            f"{joint} is {off:.0f} deg off. Raising from inside the pocket "
-            "would drive it into the rails.")
-
-    # 3. Clear of the pocket, tuck the elbow — now the rail is the obstacle,
-    #    not the pocket, and a folded arm is what gets past it.
-    here = {n: getattr(arm, n).present_position for n in HOME}
-    if not _tuck(arm, here, duration * 0.25):
-        joint, off = worst_joint(arm, _folded(here), _SHOULDER_JOINTS)
-        raise RuntimeError(
-            "the tuck did not take, so the arm is still straight enough to "
-            f"catch rig_rail_outer_right on the way out: elbow is at "
-            f"{arm.r_elbow_pitch.present_position:.0f} (needs to be past "
-            f"{_TUCK_FLOOR:.0f}), {joint} is {off:.0f} deg off")
-
-    # 4. Carry the folded arm out past the rail, then open to the hub, where
-    #    there is 24 cm of room.
-    out = {n: getattr(arm, n).present_position for n in HOME}
-    out[_ABDUCT_JOINT] = SIDE_HIGH[_ABDUCT_JOINT]
-    converge(arm, out, duration * 0.30, tol=10.0, joints=PLACING_JOINTS)
-    converge(arm, dict(SIDE_HIGH), duration * 0.25, tol=14.0,
-             joints=PLACING_JOINTS)
-
-
-#: The tuck the arm carries through the rail band, and the two facts that
-#: pin it.
-#:
-#: PITCH MUST BE POSITIVE.  At HOME the arm is in the rail pocket, and the only
-#: way out is backwards — which is why the measured route's first waypoint is
-#: BACK at +40.  Probed live from HOME: commanded -60, -40 and -25, the
-#: shoulder held at -0.9, +4.5 and -0.5.  It does not move forward at all.  A
-#: forward tuck reads well in the model and is unreachable on the robot.
-#:
-#: ELBOW MUST BE DEEP.  Rig clearance over the whole roll sweep, pitch +30:
-#:
-#:     elbow   -90     -100     -110     -120     -125
-#:            -7.0    -9.1     -5.1     -0.4     +1.8  cm
-#:
-#: -125 is what the model wants; the joint will not go there from HOME at this
-#: pitch — asked for it, the elbow saturates around -109 — so this asks -120
-#: and gets about -110.
-#:
-#: AND AT -110 THE MODEL SAYS THE ARM IS INSIDE THE RAIL, by about 5 cm, while
-#: the arm sweeps the full range without catching.  The old straight-armed
-#: sweep models BETTER (-3.2 cm) and physically stops dead at roll -14.  So for
-#: this rail the capsule model and the physics disagree about which paths are
-#: passable, and they disagree in both directions.  Flown behaviour is the
-#: evidence here; the model is what picked the direction to try.  That
-#: disagreement is worth knowing about beyond this function — the route
-#: compatibility record in rig_routes rests on the same model (#74).
-_FOLDED_PITCH = 30.0
-_FOLDED_ELBOW = -120.0
-
-#: Shoulder pitch the elbow is straightened at, on the way back into the
-#: pocket.  Not the same as `_FOLDED_PITCH`, and it has to be further back.
-#: Probed live at roll 0: asked to straighten from -120, the elbow stalls
-#: around -79 at pitch +30 and will not move further however many passes it is
-#: given — the forearm is pointing into the pocket's front rail.  At +40 it
-#: straightens out to within a few degrees.  This is the same fact the measured
-#: route encodes as BACK: leaving and entering the pocket is EXTENSION ONLY,
-#: with the arm swung behind.
-_UNFOLD_PITCH = 40.0
+            "the route out of the rail pocket starts at HOME and the arm is "
+            f"not there: {joint} is {off:.0f} deg off. Getting onto the route "
+            "is a separate move, and guessing one is what this exists to stop.")
+    fly(arm, R.PLACE_ROUTE, label="the route out of the pocket")
+    fly(arm, R.LIFT_TO_PRESENT, label="the lift to the raised pose")
 
 
 def _stream(arm, pose: Dict[str, float], duration: float) -> None:
@@ -535,72 +513,6 @@ def _stream(arm, pose: Dict[str, float], duration: float) -> None:
 #: on a sim that has been reset they read wherever gravity left them.
 PLACING_JOINTS = ("r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
                   "r_elbow_pitch")
-
-#: The shoulder joints alone.  The tuck holds these to a tight tolerance
-#: because a shoulder still swinging while the roll crosses the rail is the
-#: excursion the tuck exists to prevent — measured at -5.8 cm when the pitch
-#: was allowed 15 degrees of slack.
-_SHOULDER_JOINTS = ("r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw")
-
-#: What must arrive on the way into the pocket.  The placing joints, plus the
-#: WRIST PITCH — that one folds the hand and is part of the shape that fits
-#: through, which is why CURL carries +45.  The forearm yaw and the wrist roll
-#: only spin the hand about its own axis, and guarding on them refuses a stow
-#: after a wave, which deliberately leaves both wherever the last swing put
-#: them.
-_POCKET_JOINTS = PLACING_JOINTS + ("r_wrist_pitch",)
-
-#: How deep the elbow must actually BE before the roll is allowed to move.
-#:
-#: A floor rather than a tolerance, because the joint sags 10-30 degrees short
-#: of whatever it is asked for and the sag varies run to run: observed tucks
-#: were -91, -100, -108, -110 and -114 for the same command.  A symmetric
-#: tolerance rejects half of those, and they all fly.
-#:
-#: The value separates FOLDED from STRAIGHT, and is not read off a clearance
-#: curve.  It cannot be: over this range the model is not even monotonic
-#: (pitch +30 gives -7.0 cm at elbow -90, -9.1 at -100, -5.1 at -110, -0.4 at
-#: -120) and it is the same model that rates the straight sweep — which
-#: physically stops dead — as three times safer than the tucked one, which
-#: physically passes.  So this is set from what was flown: every tuck past -80
-#: swept the full range, the half-fold at -55 caught, and the straight arm
-#: caught every time.
-_TUCK_FLOOR = -80.0
-
-
-def tucked_enough(arm) -> bool:
-    return arm.r_elbow_pitch.present_position <= _TUCK_FLOOR
-
-
-def _tuck(arm, here: Dict[str, float], duration: float) -> bool:
-    """Get the arm folded, without moving the shoulder more than it has to.
-
-    AN ARM THAT IS ALREADY FOLDED KEEPS ITS PITCH.  The side hub is a tuck —
-    elbow -100 at pitch -25 — and forcing it to `_FOLDED_PITCH` means a 55
-    degree shoulder swing with the elbow folded, which does not happen: the
-    shoulder stalls 44 degrees short, twice in three runs.  It is also
-    pointless, because -25 models BETTER through the rail band than +30
-    (+1.5 cm against -0.4).  The forward pitch exists for one case only: an
-    arm that is straight and therefore still in the pocket, which has to back
-    out before it can bend at all.
-
-    Shoulder first, elbow second.  Commanding both at once, the same tuck
-    landed anywhere between -72 and -114 degrees across runs; separately, it
-    lands where it is asked.
-    """
-    target = _folded(here)
-    if tucked_enough(arm):
-        # Already folded: leave the shoulder where it is.
-        target["r_shoulder_pitch"] = arm.r_shoulder_pitch.present_position
-    hold = dict(target)
-    hold["r_elbow_pitch"] = arm.r_elbow_pitch.present_position
-    converge(arm, hold, duration * 0.45, tol=6.0, joints=_SHOULDER_JOINTS,
-             passes=6)
-    converge(arm, target, duration * 0.55, tol=8.0,
-             joints=("r_elbow_pitch",), passes=8)
-    shoulders = _reached(arm, {n: target[n] for n in _SHOULDER_JOINTS}, 8.0)
-    return shoulders and tucked_enough(arm)
-
 
 def worst_joint(arm, pose: Dict[str, float], joints=None):
     """The joint furthest from its goal, and by how much.
@@ -645,81 +557,50 @@ def converge(arm, pose: Dict[str, float], duration: float = 2.0,
 
 
 def stow_from_side(robot, arm, duration: float = 3.0) -> None:
-    """Bring the arm down from the side hub and stow it at HOME, motors off.
+    """Back into the rail pocket from the raised pose, by the measured route.
 
-    LOWER FOLDED, STRAIGHTEN AT THE BOTTOM.  This used to do the opposite —
-    re-establish a straight "jumping jack" out to the side, then adduct the
-    roll — and a straight arm sweeping the roll home passes THROUGH
-    `rig_rail_outer_right`:
+    THE NOTEBOOK'S STOW *IS* THE RETURN FROM PRESENT.  `STOW_ROUTE` begins at
+    REST_SHUT, and cell 34 flies it straight after section 4 leaves the arm at
+    PRESENT — so the first move it makes is PRESENT -> REST_SHUT, and the whole
+    descent and pocket entry follow from there.  Nothing else is needed, and
+    this is the exact reverse of `raise_to_side`, which is what the notebook
+    requires of a stow: "Retrace the placement route backwards.  Do not
+    shortcut it: going straight from PRESENT to HOME drives the upper arm
+    through the rig's front rail."
 
-        roll  -40   +3.7 cm      roll  -20   -3.2 cm
-        roll  -30   -1.9 cm      roll  -10   +2.6 cm
+    WHAT THIS REPLACES.  Seven of the eleven moves it used to make were not in
+    the notebook.  It tucked the arm from whatever it was reading, swept the
+    roll from -88 home in one command at fixed pitch, and only then picked up
+    the route's last four waypoints — entering CURL from a pose that is not the
+    one the route reaches CURL from.  Modelled, that join passes the hand
+    6.4 cm inside `table_top`; the notebook's own join (CURL_HIGH -> CURL, both
+    behind the pocket at pitch +70 and +40) never goes below -1.4 cm, and that
+    only at the endpoint.  The descent before it modelled clear — down to
+    +0.7 cm, which is not much — so this one failed at the join rather than on
+    the sweep, and the sweep is gone with it either way.
 
-    A band from about -35 to -13 degrees, up to 3.2 cm deep.  Neither arm_yaw
-    nor the gripper changes it: it is the upper arm and forearm against the
-    rail, not the hand.  Observed live in FWDCenterLabSivaPool, the arm stalled
-    at roll -33.4 with the model reporting -0.03 cm and refused every further
-    command — it was not disobeying, it was held by contact.
+    It also inherited the wave's wrist and forearm angles into the pocket,
+    because a target built from live readings carries whatever is in them.  A
+    route waypoint is a whole pose, so the hand is placed rather than merely
+    left alone — which is what an operator noticed was missing.
 
-    Folded, the forearm rides high and inside the rail's arc instead of
-    sweeping through it, and the descent clears by +5.2 cm at `_FOLDED_PITCH`.
+    `duration` is accepted and IGNORED, for the reason given on
+    `raise_to_side`: the route's timings are part of what was measured.
 
-    WHAT THIS STILL CANNOT SEE.  `primitives` has no scene, so the clearances
-    above are the RIG only, and the rig is the part that is always there.  The
-    straightening at the end sweeps the forearm forward across the near-right
-    grid cell: measured against FWDCenterLabMCC's initial placements, that is
-    2.2 cm INSIDE `red_cube`.  An object parked there will be hit, and nothing
-    in this function can know it is.  A caller that cares must guard the move —
-    `reachy_ai.motion.escort` is what does that — or clear the cell first.
+    The motors go off at the end.  That is right for a stow — it is the one
+    route that parks — and wrong in the middle of a longer trip, so callers
+    that continue afterwards turn them back on.
     """
-    here = {n: getattr(arm, n).present_position for n in HOME}
+    from reachy_ai.motion import rig_routes as R
 
-    # 1. Tuck where the arm stands.  It may be at the hub, or partway back from
-    #    it, or anywhere a run left it; folding first makes the next move safe
-    #    from all of them, and it is the same first step as `raise_to_side`.
-    #    A half-fold is the dangerous case, not a slow one: it leaves the arm
-    #    straight enough to catch the rail, so this stops rather than sweeps.
-    if not _tuck(arm, here, duration * 0.30):
-        joint, off = worst_joint(arm, _folded(here), _SHOULDER_JOINTS)
+    if not _at(arm, R.PRESENT, tol=12.0):
+        joint, off = worst_joint(arm, dict(R.PRESENT), PLACING_JOINTS)
         raise RuntimeError(
-            "the tuck did not take, so bringing the roll home would run the "
-            f"arm into rig_rail_outer_right: elbow is at "
-            f"{arm.r_elbow_pitch.present_position:.0f} (needs to be past "
-            f"{_TUCK_FLOOR:.0f}), {joint} is {off:.0f} deg off")
-
-    # 2. Bring the roll home, still folded.  This is the move that used to go
-    #    through the rail.
-    lowered = {n: getattr(arm, n).present_position for n in HOME}
-    lowered[_ABDUCT_JOINT] = 0.0
-    converge(arm, lowered, duration * 0.40, tol=8.0,
-             joints=PLACING_JOINTS)
-
-    # 3. Enter the pocket by the MEASURED sequence, not by an invented one.
-    #    This is `raise_to_side`'s step 2 run backwards: a pocket is entered
-    #    the way it is left, by extension with the roll already home.
-    #    Straightening the elbow at roll 0 is the step that decides whether the
-    #    arm ends in the pocket or standing in front of it, and it is fussier
-    #    than it looks: probed live, an open hand with the wrist flat would not
-    #    straighten past about -79 degrees at pitch +30, or at all at +40.  The
-    #    route's own CURL -> BACK does it in one move — shut hand, wrist folded
-    #    +45, shoulder swung back — and took the elbow from -123 to -0.9.
-    #
-    #    The hand travels SHUT for the same reason it does on the route: the
-    #    moving finger swings out as it opens, so an open hand is a 7.5 cm tube
-    #    about the wrist axis and a shut one is 5.2 cm.
-    from reachy_ai.motion import rig_routes as _R
-
-    for name, target, secs, tol in (("CURL", _R.CURL, 0.30, 10.0),
-                                    ("BACK", _R.BACK, 0.30, 10.0),
-                                    ("GRIP_SHUT", _R.GRIP_SHUT, 0.20, 12.0),
-                                    ("HOME", HOME, 0.20, 8.0)):
-        if not converge(arm, dict(target), duration * secs, tol=tol, passes=8,
-                        joints=_POCKET_JOINTS):
-            joint, off = worst_joint(arm, dict(target), _POCKET_JOINTS)
-            raise RuntimeError(
-                f"the arm did not reach {name} on the way into the pocket: "
-                f"{joint} is {off:.0f} deg off, tolerance {tol:.0f}. It is "
-                "being left where it is rather than driven further in.")
+            "the stow starts at the raised pose and the arm is not there: "
+            f"{joint} is {off:.0f} deg off. A direct move to HOME from an "
+            "arbitrary pose drives the upper arm through the board's near "
+            "edge, so this will not guess one.")
+    fly(arm, R.STOW_ROUTE, label="the route into the pocket")
 
     robot.turn_off("r_arm")
     log.info("Right arm stowed at HOME, motors off.")
