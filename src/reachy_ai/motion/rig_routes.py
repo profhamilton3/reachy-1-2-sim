@@ -37,6 +37,11 @@ from typing import Dict, List, Optional, Tuple
 POSTURE_HOME = "home"
 POSTURE_REST = "rest"
 POSTURE_PRESENT = "present"
+#: Raised and fully abducted, out to the robot's right.  Not a resting place —
+#: it is the junction.  Everything that leaves the rail pocket goes through it,
+#: because it is the one pose with the pocket behind the arm and the rail
+#: beside it rather than in front.
+POSTURE_SIDE_HUB = "side_hub"
 
 #: Gripper angles.  The sign is inverted from the obvious reading: negative
 #: OPENS.  Verified on the physical robot, not inferred from the joint name.
@@ -143,6 +148,12 @@ class Waypoint:
     pose: Dict[str, float]
     seconds: float
     tol: float
+    #: Which joints must actually arrive.  None means every one but the
+    #: gripper, which is right for the pocket corridor — there the wrist angles
+    #: are part of the shape that fits.  The presentation route names the gross
+    #: joints instead: the wave ends with the forearm yaw at +-60 by design,
+    #: and holding the return to that refuses a move that is perfectly safe.
+    guard: Optional[Tuple[str, ...]] = None
 
 
 #: Out of the pocket and onto the board.
@@ -177,6 +188,43 @@ STOW_ROUTE: Tuple[Waypoint, ...] = (
     Waypoint("HOME", HOME, 2.5, 25.0),
 )
 
+# ── Getting to the presentation pose ────────────────────────────────────────
+# The wave starts and ends at PRESENT, and nothing measured how to GET there in
+# this rig — which is why "wave" was refused in FWDCenterLabSivaPool while the
+# wave itself had 18 cm of room.
+#
+# TWO LEGS, AND THE ORDER IS THE WHOLE POINT.  Interpolated as one move from
+# the side hub, the joints do not arrive in step: the roll adducts before the
+# pitch lifts, so the arm swings IN across the rail before it swings UP over
+# it.  Flown that way the shoulder never made the forward swing at all and the
+# arm ended at roll -33 with the model reading -9.4 cm.  Lifting first and
+# adducting second is monotonic and roomy: +24.5 cm then +18.1 cm.
+#
+#: Roll the arm is lifted at.  Matches `primitives.SIDE_HIGH`'s abduction —
+#: defined here rather than imported because primitives imports THIS module.
+_HUB_ROLL = -88.0
+
+#: Half way through the forward swing, still fully abducted.
+#:
+#: Not decoration.  Commanded straight from the hub's -25 to -70 in one move,
+#: the shoulder went to +84 — 154 degrees the WRONG WAY, taking the long way
+#: round at full abduction.  Stepped, it tracks: probed -25 -> 0 -> -25 -> -45
+#: -> -70 held -2, -22, -40, -64.  Both poses have 20 cm of room; this exists
+#: purely so the joint goes the short way.
+PRESENT_MID = pose(r_shoulder_pitch=-45.0, r_shoulder_roll=_HUB_ROLL,
+                   r_elbow_pitch=-90.0)
+
+#: Lifted, still fully abducted: the pose the forward swing happens at, where
+#: there is no rail in front of the arm to swing into.
+PRESENT_LIFT = pose(r_shoulder_pitch=-70.0, r_shoulder_roll=_HUB_ROLL,
+                    r_elbow_pitch=-80.0)
+
+#: Side hub -> PRESENT.  Entered from the hub, which `raise_to_side` reaches.
+PRESENT_ROUTE: Tuple["Waypoint", ...] = ()
+
+#: PRESENT -> side hub.  The same two legs backwards.
+PRESENT_RETURN: Tuple["Waypoint", ...] = ()
+
 # ── The wave (notebook 4.6) ──────────────────────────────────────────────────
 # Defined relative to PRESENT, so the wave inherits PRESENT's clearance
 # argument rather than making its own.
@@ -197,6 +245,26 @@ WAVE_SECONDS = 1.8
 #: tidy.
 WAVE_START = "present"
 WAVE_END = "present"
+
+#: The side hub, as a pose.  Mirrors `primitives.SIDE_HIGH`; defined here
+#: because primitives imports this module and not the other way round.
+SIDE_HUB = pose(r_shoulder_pitch=-25.0, r_shoulder_roll=_HUB_ROLL,
+                r_elbow_pitch=-100.0)
+
+_PRESENT_GUARD = ("r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
+                  "r_elbow_pitch")
+
+PRESENT_ROUTE = (
+    Waypoint("PRESENT_MID", PRESENT_MID, 2.5, 10.0, _PRESENT_GUARD),
+    Waypoint("PRESENT_LIFT", PRESENT_LIFT, 2.5, 10.0, _PRESENT_GUARD),
+    Waypoint("PRESENT", PRESENT, 3.0, 10.0, _PRESENT_GUARD),
+)
+
+PRESENT_RETURN = (
+    Waypoint("PRESENT_LIFT", PRESENT_LIFT, 3.0, 10.0, _PRESENT_GUARD),
+    Waypoint("PRESENT_MID", PRESENT_MID, 2.5, 10.0, _PRESENT_GUARD),
+    Waypoint("SIDE_HUB", SIDE_HUB, 3.0, 14.0, _PRESENT_GUARD),
+)
 
 # ── Pointing (notebook 4.7) ──────────────────────────────────────────────────
 #: Air wanted under the pad.  This number is about POINTING; it is not what
@@ -280,6 +348,46 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
         "notebooks/tlh_motion-routine.ipynb section 4.6: three cycles at 1.8 s, "
         "scene drift checked afterwards",
     ),
+    RouteValidation(
+        "RAISE_TO_SIDE", "FWDCenterLabSivaPool",
+        "2026-09-10: HOME -> side hub, flown six times (three in the #73 "
+        "round trips, three in the wave runs), reaching roll -82 to -87 "
+        "against a hub of -88 every time, board undisturbed. THE MODEL AND "
+        "THE PHYSICS DISAGREE ON THIS LEG and the row says so: the tucked "
+        "sweep reads about -5 cm inside rig_rail_outer_right while the arm "
+        "passes, and the straight sweep it replaced reads -3.2 cm and stops "
+        "dead at roll -14. Flown behaviour is what this row rests on. See #73.",
+    ),
+    RouteValidation(
+        "STOW_FROM_SIDE", "FWDCenterLabSivaPool",
+        "2026-09-10: side hub -> HOME, flown six times, arriving at HOME "
+        "every time with the board undisturbed. Carries the same model "
+        "disagreement as RAISE_TO_SIDE, and the same caveat. See #73.",
+    ),
+    RouteValidation(
+        "WAVE", "FWDCenterLabSivaPool",
+        "2026-09-10: flown from the rail pocket three times — RAISE_TO_SIDE, "
+        "PRESENT_ROUTE, three wave cycles, ending at PRESENT — plus the stow "
+        "back each time. Worst realised whole-arm clearance during the wave "
+        "+13.1, +13.3, +13.2 cm vs rig_rail_outer_right. Board undisturbed "
+        "every run. The pocket exit leg carries the model disagreement "
+        "recorded in #73 and is not what this row certifies; the wave and its "
+        "approach are.",
+    ),
+    RouteValidation(
+        "PRESENT_ROUTE", "FWDCenterLabSivaPool",
+        "2026-09-10: side hub -> PRESENT, three runs, reaching the "
+        "presentation pose every time. Modelled +24.5 cm on the lift and "
+        "+18.1 cm on the adduction. PRESENT_MID exists because the shoulder "
+        "took the long way round (-25 to -70 commanded in one move went to "
+        "+84) — it is there so the joint goes the short way, not for room.",
+    ),
+    RouteValidation(
+        "PRESENT_RETURN", "FWDCenterLabSivaPool",
+        "2026-09-10: PRESENT -> side hub, flown as part of the runs above and "
+        "separately as a recovery. Guarded on the gross joints: the wave ends "
+        "with the forearm yaw at +-60 by design.",
+    ),
     # POINT is not listed for any scene.  Section 4.7 documents runs that moved
     # objects — a can shifted 0.189 m by an arm reporting positive clearance —
     # so it is not a validated route anywhere, and saying so here is more use
@@ -332,12 +440,6 @@ VALIDATION_ATTEMPTS: Tuple[ValidationAttempt, ...] = (
         "21.2 cm across the grid, and cell_r2c1 reported +5.5 cm of clearance "
         "while moving the can 0.189 m. The arm bows off the line the guard "
         "cleared, between the points where anything was measured.",
-    ),
-    ValidationAttempt(
-        "WAVE", "FWDCenterLabSivaPool", "2026-09-10", "not attempted",
-        "The wave starts from PRESENT, and the transition into PRESENT from "
-        "either endpoint of the routes above is itself unvalidated here. "
-        "Flying it would have measured the wave and asserted the approach.",
     ),
 )
 
@@ -441,6 +543,7 @@ POSTURES: Dict[str, Dict[str, float]] = {
     POSTURE_HOME: HOME,
     POSTURE_REST: REST,
     POSTURE_PRESENT: PRESENT,
+    POSTURE_SIDE_HUB: SIDE_HUB,
 }
 
 #: Which route takes the arm from one posture to another.
@@ -454,6 +557,10 @@ POSTURES: Dict[str, Dict[str, float]] = {
 POSTURE_TRANSITIONS: Dict[Tuple[str, str], str] = {
     (POSTURE_HOME, POSTURE_REST): "PLACE_ROUTE",
     (POSTURE_REST, POSTURE_HOME): "STOW_ROUTE",
+    (POSTURE_HOME, POSTURE_SIDE_HUB): "RAISE_TO_SIDE",
+    (POSTURE_SIDE_HUB, POSTURE_HOME): "STOW_FROM_SIDE",
+    (POSTURE_SIDE_HUB, POSTURE_PRESENT): "PRESENT_ROUTE",
+    (POSTURE_PRESENT, POSTURE_SIDE_HUB): "PRESENT_RETURN",
     (POSTURE_PRESENT, POSTURE_PRESENT): "WAVE",
 }
 
@@ -476,6 +583,36 @@ def transition(frm: str, to: str) -> Optional[str]:
     if frm == to:
         return POSTURE_TRANSITIONS.get((frm, to))
     return POSTURE_TRANSITIONS.get((frm, to))
+
+
+def path(frm: str, to: str) -> Optional[List[str]]:
+    """The routes that get from one posture to another, in order.
+
+    Breadth-first over the measured edges, so "wave" asked of an arm in the
+    rail pocket answers RAISE_TO_SIDE then PRESENT_ROUTE rather than refusing.
+    The arm has to leave the pocket before it can do anything, and that is a
+    fact about the rig rather than something the operator should have to know
+    and type.
+
+    None means no measured sequence exists.  That is still a real answer: it
+    is what stops a plan inventing a way through.
+    """
+    if frm == to:
+        direct = POSTURE_TRANSITIONS.get((frm, to))
+        return [direct] if direct else []
+    seen = {frm}
+    queue: List[Tuple[str, List[str]]] = [(frm, [])]
+    while queue:
+        here, so_far = queue.pop(0)
+        for (a, b), route in POSTURE_TRANSITIONS.items():
+            if a != here or b in seen or a == b:
+                continue
+            steps = so_far + [route]
+            if b == to:
+                return steps
+            seen.add(b)
+            queue.append((b, steps))
+    return None
 
 
 def reachable_from(frm: str) -> Tuple[str, ...]:

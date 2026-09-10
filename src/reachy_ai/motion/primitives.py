@@ -24,6 +24,10 @@ from typing import Dict
 
 log = logging.getLogger(__name__)
 
+# The measured pose set.  rig_routes imports nothing from here, so this is not
+# a cycle — and the pocket waypoints belong to the route, not to this module.
+from reachy_ai.motion import rig_routes as R_ROUTES  # noqa: E402
+
 _INTERP_HZ = 25          # interpolation update rate
 # Gripper sign convention (measured from reachy_1_2.xml): the RIGHT gripper
 # opens NEGATIVE, closes POSITIVE.  Pad gap: -45° ≈ 8.0 cm (open), -5° ≈ 4.6 cm
@@ -392,36 +396,69 @@ def _folded(pose: Dict[str, float]) -> Dict[str, float]:
 def raise_to_side(arm, duration: float = 3.0) -> None:
     """Lift the right arm out to the robot's right side to the SIDE_HIGH hub.
 
-    FOLD BEFORE ABDUCTING.  This used to abduct the shoulder-roll first and in
-    isolation, with the arm straight, and its comment claimed the arm "actually
-    swings out to the side (it holds at its ~-85 degree range limit)".  It does
-    not.  A straight arm sweeping the roll out of HOME runs into
-    `rig_rail_outer_right` between about -13 and -35 degrees, up to 3.2 cm
-    deep, and stops there.  Measured live in FWDCenterLabSivaPool: commanded to
-    -88, the roll reached -14.1 and held, and the SIDE_HIGH goals that follow
-    never moved it because the arm was against the rail.
+    OUT OF THE POCKET FIRST, THEN UP.  This function predates the rig: with no
+    rails around it, abducting the shoulder straight out of HOME was fine, and
+    that is what it did — roll first, in isolation, with the arm straight.
+    With the rails in place that is two different collisions at once.
 
-    Folded, the same sweep clears by +5.2 cm.  So: tuck first, carry the folded
-    arm out past the rail, and open to the hub once there.
+    At HOME the arm is INSIDE the rail pocket, and the only way out of a pocket
+    is the way you came in: extension, with the roll left alone.  The measured
+    route says so in its first two waypoints — GRIP_SHUT then BACK, "back out
+    of the pocket, extension only, roll stays at 0" — and the robot agrees:
+    probed from HOME, a forward shoulder pitch does not move at all
+    (commanded -60, -40 and -25, it held at -0.9, +4.5 and -0.5), because the
+    pocket is in the way.
 
-    See #73.  The reverse trip has the same constraint and `stow_from_side`
-    mirrors this.
+    Only once the arm is clear of the pocket rails is there anything to raise.
+    And then the SECOND collision applies: a straight arm sweeping the roll out
+    runs into `rig_rail_outer_right` between about -13 and -35 degrees, up to
+    3.2 cm deep.  Measured live, commanded to -88, the roll reached -14.1 and
+    held there — the old docstring claimed it "holds at its ~-85 degree range
+    limit", and it was holding against a rail.  So the elbow is tucked before
+    the roll moves; folded, the forearm rides inside the rail's arc.
+
+    Four steps, and each one is a different obstacle: the pocket, then the
+    rail, then the abduction, then the hub.  See #73.
     """
+    # 1. Shut the hand.  It travels shut through the rig for the same reason
+    #    the route does it: the moving finger swings out as the gripper opens,
+    #    so an open hand is a 7.5 cm tube about the wrist axis and a shut one
+    #    is 5.2 cm.
+    converge(arm, dict(R_ROUTES.GRIP_SHUT), duration * 0.20, tol=12.0,
+             joints=_POCKET_JOINTS)
+
+    # 2. Back out of the pocket: extension only, roll untouched.
+    #
+    #    This one gets a real budget.  It is 40 degrees of shoulder against
+    #    gravity, from an arm that has usually just been parked with the motors
+    #    off, and it is the first move of the trip — there is no momentum in it
+    #    and nothing after it can help.  Given a quarter of the default
+    #    duration it failed about one attempt in three, with the shoulder
+    #    exactly where it started.
+    if not converge(arm, dict(R_ROUTES.BACK), duration * 0.60, tol=10.0,
+                    joints=_POCKET_JOINTS, passes=8):
+        joint, off = worst_joint(arm, dict(R_ROUTES.BACK), _POCKET_JOINTS)
+        raise RuntimeError(
+            "the arm did not back out of the rail pocket: "
+            f"{joint} is {off:.0f} deg off. Raising from inside the pocket "
+            "would drive it into the rails.")
+
+    # 3. Clear of the pocket, tuck the elbow — now the rail is the obstacle,
+    #    not the pocket, and a folded arm is what gets past it.
     here = {n: getattr(arm, n).present_position for n in HOME}
-    # 1. Tuck where the arm stands.  Nothing moves through the rail yet.
-    if not _tuck(arm, here, duration * 0.30):
+    if not _tuck(arm, here, duration * 0.25):
         joint, off = worst_joint(arm, _folded(here), _SHOULDER_JOINTS)
         raise RuntimeError(
             "the tuck did not take, so the arm is still straight enough to "
             f"catch rig_rail_outer_right on the way out: elbow is at "
             f"{arm.r_elbow_pitch.present_position:.0f} (needs to be past "
             f"{_TUCK_FLOOR:.0f}), {joint} is {off:.0f} deg off")
-    # 2. Carry the folded arm out.  Roll is the only thing that changes, so the
-    #    coupling that stalls it under mujoco-remote has nothing to fight.
+
+    # 4. Carry the folded arm out past the rail, then open to the hub, where
+    #    there is 24 cm of room.
     out = {n: getattr(arm, n).present_position for n in HOME}
     out[_ABDUCT_JOINT] = SIDE_HIGH[_ABDUCT_JOINT]
-    converge(arm, out, duration * 0.45, tol=10.0, joints=PLACING_JOINTS)
-    # 3. Open to the hub, out where there is 24 cm of room.
+    converge(arm, out, duration * 0.30, tol=10.0, joints=PLACING_JOINTS)
     converge(arm, dict(SIDE_HIGH), duration * 0.25, tol=14.0,
              joints=PLACING_JOINTS)
 
@@ -504,6 +541,14 @@ PLACING_JOINTS = ("r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
 #: excursion the tuck exists to prevent — measured at -5.8 cm when the pitch
 #: was allowed 15 degrees of slack.
 _SHOULDER_JOINTS = ("r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw")
+
+#: What must arrive on the way into the pocket.  The placing joints, plus the
+#: WRIST PITCH — that one folds the hand and is part of the shape that fits
+#: through, which is why CURL carries +45.  The forearm yaw and the wrist roll
+#: only spin the hand about its own axis, and guarding on them refuses a stow
+#: after a wave, which deliberately leaves both wherever the last swing put
+#: them.
+_POCKET_JOINTS = PLACING_JOINTS + ("r_wrist_pitch",)
 
 #: How deep the elbow must actually BE before the roll is allowed to move.
 #:
@@ -650,6 +695,8 @@ def stow_from_side(robot, arm, duration: float = 3.0) -> None:
              joints=PLACING_JOINTS)
 
     # 3. Enter the pocket by the MEASURED sequence, not by an invented one.
+    #    This is `raise_to_side`'s step 2 run backwards: a pocket is entered
+    #    the way it is left, by extension with the roll already home.
     #    Straightening the elbow at roll 0 is the step that decides whether the
     #    arm ends in the pocket or standing in front of it, and it is fussier
     #    than it looks: probed live, an open hand with the wrist flat would not
@@ -666,8 +713,9 @@ def stow_from_side(robot, arm, duration: float = 3.0) -> None:
                                     ("BACK", _R.BACK, 0.30, 10.0),
                                     ("GRIP_SHUT", _R.GRIP_SHUT, 0.20, 12.0),
                                     ("HOME", HOME, 0.20, 8.0)):
-        if not converge(arm, dict(target), duration * secs, tol=tol, passes=8):
-            joint, off = worst_joint(arm, dict(target))
+        if not converge(arm, dict(target), duration * secs, tol=tol, passes=8,
+                        joints=_POCKET_JOINTS):
+            joint, off = worst_joint(arm, dict(target), _POCKET_JOINTS)
             raise RuntimeError(
                 f"the arm did not reach {name} on the way into the pocket: "
                 f"{joint} is {off:.0f} deg off, tolerance {tol:.0f}. It is "

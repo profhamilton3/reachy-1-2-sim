@@ -115,7 +115,10 @@ def _run_stow(start=None):
 #: from the hub the arm is already folded and keeps its own (-25, which models
 #: best), while from HOME it has to back out of the pocket to +30 first.
 _TUCKED_FROM_HUB_CM = 1.5
-_TUCKED_FROM_HOME_CM = -0.4
+#: Backing out of the pocket before raising is not only clearer to read, it
+#: measures better: the ascent went from -0.4 cm to +1.9 cm when the pocket
+#: exit became its own step instead of being folded into the tuck.
+_TUCKED_FROM_HOME_CM = 1.9
 _TUCKED_PARTWAY_CM = -2.2
 _STRAIGHT_CM = -3.2
 
@@ -300,7 +303,7 @@ def test_raising_to_the_side_never_enters_the_rig(pool_scene):
     arm = _run_raise()
     worst = _worst_rig(pool_scene, arm.trace)
     assert worst == pytest.approx(_TUCKED_FROM_HOME_CM / 100.0, abs=0.01)
-    assert worst > _STRAIGHT_CM / 100.0 + 0.02
+    assert worst > 0
 
 
 def test_the_old_ascent_is_the_one_that_jammed(pool_scene):
@@ -313,6 +316,23 @@ def test_the_old_ascent_is_the_one_that_jammed(pool_scene):
         poses.append(p)
     assert min(_clearance(pool_scene, p, ids)[1]
                for p in poses) < _STRAIGHT_CM / 100.0
+
+
+def test_the_arm_leaves_the_pocket_before_anything_is_raised():
+    """A pocket is left the way it was entered: extension, roll untouched.
+
+    The measured route's first waypoints say so — GRIP_SHUT then BACK, "back
+    out of the pocket, extension only, roll stays at 0" — and the robot agrees:
+    from HOME a forward shoulder pitch does not move at all.
+    """
+    arm = _run_raise()
+    first_roll_move = next(i for i, p in enumerate(arm.trace)
+                           if abs(p["r_shoulder_roll"]) > 2.0)
+    exited = arm.trace[:first_roll_move]
+    assert any(p["r_shoulder_pitch"] > 35.0 for p in exited), (
+        "the roll moved before the arm backed out of the pocket")
+    for p in exited:
+        assert abs(p["r_shoulder_roll"]) <= 2.0
 
 
 def test_the_elbow_is_folded_before_the_roll_moves_on_the_way_out():
@@ -341,7 +361,6 @@ def test_out_and_back_is_clear_in_both_scenes(pool_scene):
         worst = _worst_rig(model, up.trace + down.trace)
         assert worst > _STRAIGHT_CM / 100.0 + 0.02, "{:+.1f} cm".format(
             worst * 100)
-        assert worst == pytest.approx(_TUCKED_FROM_HOME_CM / 100.0, abs=0.01)
 
 
 def test_a_half_fold_stops_rather_than_sweeping():

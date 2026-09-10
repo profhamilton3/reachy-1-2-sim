@@ -728,18 +728,27 @@ def test_an_arm_at_no_named_posture_reports_recovery_rather_than_guessing(
     assert "will not guess" in out.detail
 
 
-def test_the_wrong_posture_names_the_route_that_bridges_it(monkeypatch, fake_sdk):
+def test_the_arm_is_taken_to_the_start_rather_than_refused(monkeypatch, fake_sdk):
+    """Getting there is part of doing it.
+
+    An arm stored in the rail pocket cannot wave from where it is, and that is
+    a fact about the rig rather than something the operator should have to
+    know and type.
+    """
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
     _validated(monkeypatch)
+    travelled = {}
     monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "travel",
+                        lambda arm, to, **kw: travelled.setdefault("to", to)
+                        and None or ["RAISE_TO_SIDE"])
+    monkeypatch.setattr(M, "stow_to_home", lambda arm, **kw: [])
     monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
 
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    out = ex.execute(_ability())          # stow starts at rest; arm is home
-    assert out.status == "failed"
-    assert out.evidence["bridge"] == "PLACE_ROUTE"
-    assert "no measured way" not in out.detail
+    ex.execute(_ability())                # stow starts at rest; arm is home
+    assert travelled["to"] == "rest"
 
 
 def test_an_unbridgeable_posture_says_so_rather_than_inventing_a_path(
@@ -751,7 +760,7 @@ def test_an_unbridgeable_posture_says_so_rather_than_inventing_a_path(
     monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
 
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    out = ex.execute(_ability())          # present -> rest is not measured
+    out = ex.execute(_ability(expected_start_posture="nowhere"))
     assert out.status == "failed"
     assert "no measured way" in out.detail
     assert "invent" in out.detail
@@ -777,8 +786,8 @@ def test_arriving_with_the_board_disturbed_is_a_failure(monkeypatch, fake_sdk):
     from reachy_ai.tasks import rig_motion as M
     _validated(monkeypatch)
     monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
-    monkeypatch.setattr(M, "stow_to_home",
-                        lambda arm, **kw: [w.name for w in R.STOW_ROUTE])
+    monkeypatch.setattr(M, "travel",
+                        lambda arm, to, **kw: [w.name for w in R.STOW_ROUTE])
     monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
 
     moved = {"n": 0}
@@ -805,8 +814,8 @@ def test_arriving_cleanly_reports_the_posture_and_the_waypoints(
     from reachy_ai.tasks import rig_motion as M
     _validated(monkeypatch)
     monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
-    monkeypatch.setattr(M, "stow_to_home",
-                        lambda arm, **kw: [w.name for w in R.STOW_ROUTE])
+    monkeypatch.setattr(M, "travel",
+                        lambda arm, to, **kw: [w.name for w in R.STOW_ROUTE])
     monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
 
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
@@ -826,11 +835,11 @@ def test_a_route_stopped_part_way_is_not_reported_as_arrival(
     poses = {"at": dict(R.HOME)}
     monkeypatch.setattr(M, "present_pose", lambda _arm: poses["at"])
 
-    def half(arm, **kw):
+    def half(arm, to, **kw):
         poses["at"] = dict(R.SWING_2)          # stopped in the corridor
         return [w.name for w in R.STOW_ROUTE][:4]
 
-    monkeypatch.setattr(M, "stow_to_home", half)
+    monkeypatch.setattr(M, "travel", half)
     monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
 
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
@@ -849,11 +858,11 @@ def test_the_cancel_check_reaches_the_route_runner(monkeypatch, fake_sdk):
     monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
     seen = {}
 
-    def capture(arm, **kw):
+    def capture(arm, to, **kw):
         seen["abort"] = kw.get("should_abort")
         return []
 
-    monkeypatch.setattr(M, "stow_to_home", capture)
+    monkeypatch.setattr(M, "travel", capture)
     monkeypatch.setattr("reachy_sdk.ReachySDK", _FakeRobot, raising=False)
 
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")

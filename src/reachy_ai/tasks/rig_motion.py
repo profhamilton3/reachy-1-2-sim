@@ -123,7 +123,8 @@ def fly_route(arm, route, *, should_abort: Abort = None, on_phase: Phase = None,
             return flown
         if on_phase is not None:
             on_phase(wp.name)
-        guarded = {n: v for n, v in wp.pose.items() if n != "r_gripper"}
+        names = wp.guard or [n for n in wp.pose if n != "r_gripper"]
+        guarded = {n: wp.pose[n] for n in names if n in wp.pose}
 
         move(arm, wp.pose, wp.seconds)
         for k in range(retries + 1):
@@ -256,10 +257,23 @@ def wave(arm, *, cycles: int = R.WAVE_CYCLES, should_abort: Abort = None,
     # defined relative to PRESENT, so this retreat stays inside the envelope
     # the wave was measured in.  It is not a jump to rest or to the pocket —
     # those are separate validated transitions.
+    #
+    # It does have to ARRIVE, though, on the joints that say where the arm is
+    # standing.  One run finished the cycles and left the shoulder far enough
+    # out that `posture_of` no longer recognised PRESENT, and the next move
+    # refused for want of a posture to start from.  The wrists and forearm yaw
+    # are deliberately left wherever the last swing put them.
     move(arm, R.PRESENT, R.WAVE_SECONDS)
-    P.wait_until(arm, {n: v for n, v in R.PRESENT.items() if n != "r_gripper"},
-                 tol=R.LESSON_TOL, timeout=R.WAVE_SECONDS + 1.0)
+    for k in range(4):
+        if _reached_gross(arm, R.PRESENT):
+            break
+        move(arm, R.PRESENT, R.WAVE_SECONDS * (0.5 + 0.25 * k))
     return done
+
+
+def _reached_gross(arm, target, tol: float = 8.0) -> bool:
+    return R.at_pose(present_pose(arm), target, tol=tol,
+                     joints=list(R.GROSS_JOINTS))
 
 
 # ---------------------------------------------------------------------------
@@ -421,3 +435,120 @@ def _distance_of(clearance) -> float:
 
 def _euclid(a, b) -> float:
     return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+
+
+# ---------------------------------------------------------------------------
+# The presentation pose
+# ---------------------------------------------------------------------------
+
+def to_present(arm, *, should_abort: Abort = None, on_phase: Phase = None,
+               move=None) -> List[str]:
+    """Side hub -> PRESENT, the pose the wave starts and ends at.
+
+    Entered from the side hub, because that is the one place the forward swing
+    is free: below roll -72 the rail is in front of the arm, and at roll 0 the
+    pocket is.  `primitives.raise_to_side` is what gets there.
+
+    Two legs, and the order is the whole point — see PRESENT_ROUTE.
+    """
+    if R.at_pose(present_pose(arm), R.PRESENT, tol=8.0,
+                 joints=list(R.GROSS_JOINTS)):
+        if on_phase is not None:
+            on_phase("already at the presentation pose")
+        return []
+    now = present_pose(arm)
+    if abs(now["r_shoulder_roll"] - R.PRESENT_LIFT["r_shoulder_roll"]) > 20.0:
+        raise RecoveryNeeded(
+            "the approach to the presentation pose starts from the side hub, "
+            f"and my shoulder roll is at {now['r_shoulder_roll']:.0f} rather "
+            f"than {R.PRESENT_LIFT['r_shoulder_roll']:.0f}. Raising to the hub "
+            "first is a separate move."
+        )
+    return fly_route(arm, R.PRESENT_ROUTE, should_abort=should_abort,
+                     on_phase=on_phase, move=move)
+
+
+def from_present(arm, *, should_abort: Abort = None, on_phase: Phase = None,
+                 move=None) -> List[str]:
+    """PRESENT -> side hub.  The same two legs backwards.
+
+    Not a jump to rest or to the pocket: those are further transitions, and
+    each one is measured separately or not made.
+    """
+    if not R.at_pose(present_pose(arm), R.PRESENT, tol=12.0,
+                     joints=list(R.GROSS_JOINTS)):
+        raise RecoveryNeeded(
+            "the return starts at the presentation pose, and the arm is not "
+            "at it"
+        )
+    return fly_route(arm, R.PRESENT_RETURN, should_abort=should_abort,
+                     on_phase=on_phase, move=move)
+
+
+# ---------------------------------------------------------------------------
+# Travelling the posture graph
+# ---------------------------------------------------------------------------
+
+def _raise_to_side(arm, **kw):
+    from reachy_ai.motion import primitives as P
+    P.raise_to_side(arm, duration=kw.pop("duration", 3.5))
+    return ["SIDE_HUB"]
+
+
+def _stow_from_side(arm, **kw):
+    from reachy_ai.motion import primitives as P
+    # stow_from_side turns the motors off when it arrives, which is right at
+    # the end of a trip and wrong in the middle of one.  The caller turns them
+    # back on; this is the only route that parks.
+    P.stow_from_side(kw.pop("robot"), arm, duration=kw.pop("duration", 4.0))
+    return ["HOME"]
+
+
+#: What actually flies each edge of the posture graph.
+ROUTE_RUNNERS = {
+    "PLACE_ROUTE": lambda arm, **kw: deploy_to_rest(arm, **kw),
+    "STOW_ROUTE": lambda arm, **kw: stow_to_home(arm, **kw),
+    "PRESENT_ROUTE": lambda arm, **kw: to_present(arm, **kw),
+    "PRESENT_RETURN": lambda arm, **kw: from_present(arm, **kw),
+    "RAISE_TO_SIDE": _raise_to_side,
+    "STOW_FROM_SIDE": _stow_from_side,
+    "WAVE": lambda arm, **kw: ["wave x%d" % wave(arm, **kw)],
+}
+
+
+def travel(arm, to: str, *, robot=None, should_abort: Abort = None,
+           on_phase: Phase = None) -> List[str]:
+    """Get the arm from wherever it is to a named posture.
+
+    Reads the posture first, then walks the measured edges.  An arm in the rail
+    pocket asked for the presentation pose leaves the pocket on its own — that
+    is a fact about the rig, not something an operator should have to know and
+    type.  What it will NOT do is invent an edge: no path is a refusal.
+    """
+    here = R.posture_of(present_pose(arm))
+    if here is None:
+        name, distance = R.nearest_waypoint(present_pose(arm))
+        raise RecoveryNeeded(
+            "my arm is not at a posture I have a measured route out of — the "
+            f"nearest waypoint is {name}, {distance:.0f} degrees away. I will "
+            "not guess a path from here."
+        )
+    steps = R.path(here, to)
+    if steps is None:
+        raise RecoveryNeeded(
+            f"there is no measured way from {here} to {to}, so I will not "
+            "invent one."
+        )
+    flown: List[str] = []
+    for route in steps:
+        if should_abort is not None and should_abort():
+            break
+        if on_phase is not None:
+            on_phase(route)
+        kw = {"should_abort": should_abort, "on_phase": on_phase}
+        if route in ("RAISE_TO_SIDE", "STOW_FROM_SIDE"):
+            kw = {"robot": robot} if route == "STOW_FROM_SIDE" else {}
+        flown.extend(ROUTE_RUNNERS[route](arm, **kw))
+        if route == "STOW_FROM_SIDE" and robot is not None:
+            robot.turn_on("r_arm")
+    return flown

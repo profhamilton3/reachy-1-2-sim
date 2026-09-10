@@ -61,7 +61,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 log = logging.getLogger("reachy12.panel.executor")
 
@@ -212,6 +212,23 @@ class SimulatorExecutor:
         if scene.error:
             return False, f"I cannot read the scene: {scene.error}"
 
+        # An ability is FOR a posture, not for one route.  "Store your arm"
+        # means end in the pocket, and which measured routes get there depends
+        # on where the arm is standing — from the presentation pose it is
+        # PRESENT_RETURN then STOW_FROM_SIDE, neither of which is STOW_ROUTE.
+        # So availability asks whether ANY validated route leads where the
+        # ability is going; the executor checks the ACTUAL path once it can
+        # see the arm, and refuses there if a leg of it is not validated.
+        if proposal.end_posture:
+            into = [route for (_a, b), route in R.POSTURE_TRANSITIONS.items()
+                    if b == proposal.end_posture]
+            usable = [r for r in into if R.check_route(r, scene.name)[0]]
+            if not usable:
+                blocked = [R.check_route(r, scene.name)[1] for r in into]
+                return False, (blocked[0] if blocked else
+                               f"nothing measured reaches {proposal.end_posture}")
+            return True, ""
+
         ok, why = R.check_route(proposal.route, scene.name)
         if not ok:
             # Named in the scene's own terms.  This is the refusal the
@@ -315,31 +332,67 @@ class SimulatorExecutor:
                             f"{distance:.0f} degrees away. I will not guess a "
                             "path from here."),
                     evidence={"recovery_needed": True, "nearest": name})
+
+            # The arm is usually parked with the motors OFF — the stow that
+            # ran before this one turns them off deliberately — and turning
+            # them on is not instant.  Asking for 40 degrees of shoulder
+            # before the controller has taken hold produced exactly one
+            # symptom: the arm did not move at all, and the pocket-exit guard
+            # refused, roughly one attempt in three.  So wait for the joint to
+            # report itself driven rather than sleeping a guessed interval.
+            robot.turn_on("r_arm")
+            if not _wait_for_motors(arm):
+                return ExecutionResult(
+                    status="failed",
+                    detail=("the arm's motors did not come on, so I will not "
+                            "command a move it cannot make."),
+                    evidence={"motors_off": True})
+
+            # GETTING THERE IS PART OF DOING IT.  An arm stored in the rail
+            # pocket cannot wave from where it is, and that is a fact about
+            # the rig rather than something the operator should have to know
+            # and type.  So the approach is flown, by measured edges only —
+            # `travel` refuses rather than inventing one.
+            approach: List[str] = []
             if wanted and start != wanted:
-                bridge = R.transition(start, wanted)
-                if bridge is None:
+                steps = R.path(start, wanted)
+                if steps is None:
                     return ExecutionResult(
                         status="failed",
-                        detail=(f"my arm is at {start} and that route starts "
+                        detail=(f"my arm is at {start} and that needs to start "
                                 f"at {wanted}. There is no measured way from "
                                 f"{start} to {wanted}, so I will not invent "
                                 "one."),
                         evidence={"posture": start, "wanted": wanted})
-                return ExecutionResult(
-                    status="failed",
-                    detail=(f"my arm is at {start}; getting to {wanted} means "
-                            f"flying {bridge} first. Ask me for that and then "
-                            "ask me for this."),
-                    evidence={"posture": start, "wanted": wanted,
-                              "bridge": bridge})
+                for route in steps:
+                    ok, why = R.check_route(route, scene.name)
+                    if not ok:
+                        return ExecutionResult(
+                            status="failed",
+                            detail=(f"getting from {start} to {wanted} means "
+                                    f"flying {route} first, and {why}"),
+                            evidence={"posture": start, "wanted": wanted,
+                                      "blocked_on": route})
+                phase(f"leaving {start}")
+                approach = M.travel(arm, wanted, robot=robot,
+                                    should_abort=(should_cancel or (lambda: False)),
+                                    on_phase=phase)
+                robot.turn_on("r_arm")
+                time.sleep(0.2)
 
-            robot.turn_on("r_arm")
             time.sleep(0.3)
             before = {oid: o.position for oid, o in scene.objects.items()
                       if o.position is not None}
 
-            runner = {"rest_forearm": M.deploy_to_rest,
-                      "stow_arm": M.stow_to_home}.get(proposal.task_type)
+            def go_to(posture):
+                def _run(a, **kw):
+                    return M.travel(a, posture, robot=robot, **kw)
+                return _run
+
+            runner = {"rest_forearm": go_to(R.POSTURE_REST),
+                      "stow_arm": go_to(R.POSTURE_HOME),
+                      "wave": lambda a, **kw: ["wave x%d" % M.wave(a, **kw)],
+                      }.get(proposal.task_type)
             if runner is None:
                 return ExecutionResult(
                     status="failed",
@@ -357,7 +410,7 @@ class SimulatorExecutor:
                     status="failed", detail=str(exc),
                     evidence={"stopped_mid_route": True})
 
-            return self._verify_posture(arm, proposal, flown, before)
+            return self._verify_posture(arm, proposal, approach + flown, before)
 
         except Exception as exc:
             log.exception("ability execution failed")
@@ -378,9 +431,14 @@ class SimulatorExecutor:
         from reachy_ai.motion import rig_routes as R
         from reachy_ai.tasks import rig_motion as M
 
+        # Where the ability said it would leave the arm.  The wave ends raised,
+        # on purpose and out loud: stowing afterwards is a separate request,
+        # not something appended so the arm looks tidy.
         wanted = proposal.route
-        end = {"PLACE_ROUTE": R.POSTURE_REST,
-               "STOW_ROUTE": R.POSTURE_HOME}.get(wanted, "")
+        end = proposal.end_posture or {
+            "PLACE_ROUTE": R.POSTURE_REST,
+            "STOW_ROUTE": R.POSTURE_HOME,
+            "WAVE": R.POSTURE_PRESENT}.get(wanted, "")
         posture = R.posture_of(M.present_pose(arm))
         drift = {}
         scene = self._scene_provider()
@@ -604,6 +662,31 @@ class SimulatorExecutor:
                 "verified": "live_pose",
             },
         )
+
+
+#: How long to wait for `turn_on` to actually take effect.
+MOTOR_ON_TIMEOUT_S = 3.0
+
+
+def _wait_for_motors(arm, timeout: float = MOTOR_ON_TIMEOUT_S) -> bool:
+    """Wait until the arm reports itself driven rather than compliant.
+
+    `turn_on` is a request, not a fact.  Some joints do not expose
+    `compliant` at all, and a missing attribute is not evidence of anything —
+    so those are taken on trust and the ones that do report are believed.
+    """
+    deadline = time.time() + timeout
+    watched = [n for n in ("r_shoulder_pitch", "r_elbow_pitch")
+               if hasattr(getattr(arm, n, None), "compliant")]
+    if not watched:
+        time.sleep(0.5)
+        return True
+    while time.time() < deadline:
+        if all(getattr(arm, n).compliant is False for n in watched):
+            time.sleep(0.2)          # let the controller settle on its hold
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def _euclid(a, b) -> float:

@@ -172,7 +172,7 @@ def test_the_routes_are_validated_where_they_were_measured():
         assert ok, why
 
 
-@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE", "WAVE"])
+@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE"])
 def test_the_panel_scene_is_not_validated(route):
     """FWDCenterLabSivaPool is where the panel runs, and it is not listed.
 
@@ -198,9 +198,23 @@ def test_a_rejected_route_says_it_was_flown_and_why_it_failed():
 
 
 def test_a_route_nobody_flew_here_is_a_different_answer_from_one_that_failed():
-    _, wave = R.check_route("WAVE", "FWDCenterLabSivaPool")
-    assert "has not been flown" in wave
-    assert "rejected" not in wave
+    _, why = R.check_route("PLACE_ROUTE", "SomeSceneNobodyTried")
+    assert "has not been flown in SomeSceneNobodyTried" in why
+    assert "rejected" not in why
+
+
+def test_the_wave_and_its_approach_are_validated_in_the_panel_scene():
+    """Flown from the rail pocket: the arm leaves it, waves, and stays raised.
+
+    The wave was refused here for want of an approach, not for want of room —
+    it has 13 cm of it.
+    """
+    for route in ("WAVE", "PRESENT_ROUTE", "PRESENT_RETURN"):
+        ok, why = R.check_route(route, "FWDCenterLabSivaPool")
+        assert ok, "{}: {}".format(route, why)
+    row = R.validation_for("WAVE", "FWDCenterLabSivaPool")
+    assert "+13.1" in row.evidence
+    assert "rail pocket" in row.evidence
 
 
 def test_every_attempt_records_an_outcome_and_the_numbers():
@@ -232,7 +246,9 @@ def test_every_validation_row_carries_its_evidence():
     safety argument in one line."""
     for row in R.ROUTE_COMPATIBILITY:
         assert row.evidence.strip()
-        assert "tlh_motion-routine" in row.evidence
+        # Either the notebook that measured it, or a dated flight of it.
+        assert ("tlh_motion-routine" in row.evidence
+                or "2026-" in row.evidence), row.route
 
 
 # ---------------------------------------------------------------------------
@@ -294,9 +310,50 @@ def test_the_wave_is_a_transition_from_present_to_itself():
     """It ends where it started.  Getting to rest or the pocket afterwards is
     a separate transition, and there is not one."""
     assert R.transition(R.POSTURE_PRESENT, R.POSTURE_PRESENT) == "WAVE"
-    assert R.reachable_from(R.POSTURE_PRESENT) == (R.POSTURE_PRESENT,)
+    assert R.POSTURE_PRESENT in R.reachable_from(R.POSTURE_PRESENT)
 
 
-def test_home_and_rest_each_reach_exactly_one_other_posture():
-    assert R.reachable_from(R.POSTURE_HOME) == (R.POSTURE_REST,)
-    assert R.reachable_from(R.POSTURE_REST) == (R.POSTURE_HOME,)
+def test_everything_out_of_the_pocket_goes_through_the_side_hub():
+    """The hub is the junction: it is the one pose with the pocket behind the
+    arm and the rail beside it rather than in front."""
+    assert set(R.reachable_from(R.POSTURE_HOME)) == {R.POSTURE_REST,
+                                                     R.POSTURE_SIDE_HUB}
+    assert set(R.reachable_from(R.POSTURE_SIDE_HUB)) == {R.POSTURE_HOME,
+                                                         R.POSTURE_PRESENT}
+    assert set(R.reachable_from(R.POSTURE_REST)) == {R.POSTURE_HOME}
+
+
+def test_an_arm_in_the_pocket_is_routed_out_of_it():
+    """"Wave" asked of a stored arm is not a refusal: it is two moves.
+
+    The arm has to leave the pocket before it can do anything, and that is a
+    fact about the rig rather than something the operator should have to know
+    and type.
+    """
+    assert R.path(R.POSTURE_HOME, R.POSTURE_PRESENT) == ["RAISE_TO_SIDE",
+                                                         "PRESENT_ROUTE"]
+    assert R.path(R.POSTURE_PRESENT, R.POSTURE_HOME) == ["PRESENT_RETURN",
+                                                         "STOW_FROM_SIDE"]
+
+
+def test_a_path_from_rest_goes_all_the_way_round():
+    assert R.path(R.POSTURE_REST, R.POSTURE_PRESENT) == [
+        "STOW_ROUTE", "RAISE_TO_SIDE", "PRESENT_ROUTE"]
+
+
+def test_already_there_is_no_moves_and_the_wave_is_the_exception():
+    assert R.path(R.POSTURE_HOME, R.POSTURE_HOME) == []
+    assert R.path(R.POSTURE_PRESENT, R.POSTURE_PRESENT) == ["WAVE"]
+
+
+def test_a_path_that_does_not_exist_is_still_a_real_answer():
+    """It is what stops a plan inventing a way through."""
+    assert R.path("nowhere", R.POSTURE_HOME) is None
+    assert R.path(R.POSTURE_HOME, "nowhere") is None
+
+
+def test_every_edge_has_something_that_can_fly_it():
+    from reachy_ai.tasks import rig_motion as M
+
+    for route in set(R.POSTURE_TRANSITIONS.values()):
+        assert route in M.ROUTE_RUNNERS, route
