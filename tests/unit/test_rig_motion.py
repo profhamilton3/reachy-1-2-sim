@@ -48,11 +48,27 @@ class StubArm:
                    for n, v in pose.items())
 
 
+def exact_move(arm, pose, seconds):
+    """A mover that tracks perfectly.  Injected, never patched in: the module's
+    default is the SDK's `goto`, and a test that reached in and replaced
+    `smooth_move` would keep passing after the default changed — which is
+    exactly what happened, and why the routes could not be flown."""
+    for name, value in pose.items():
+        getattr(arm, name).goal_position = value
+
+
 @pytest.fixture(autouse=True)
 def _no_sleeping(monkeypatch):
     """The routes are ~35 s of real motion; the logic under test is not."""
     monkeypatch.setattr(M.time, "sleep", lambda _s: None)
     monkeypatch.setattr(M.P.time, "sleep", lambda _s: None)
+
+
+@pytest.fixture(autouse=True)
+def _inject_exact_mover(monkeypatch):
+    """Default the module's mover to the exact stub for tests that do not
+    pass one, so no test silently reaches for the real SDK."""
+    monkeypatch.setattr(M, "sdk_move", exact_move)
 
 
 # ---------------------------------------------------------------------------
@@ -375,3 +391,110 @@ def test_a_rested_arm_can_be_stowed_straight_afterwards():
     M.deploy_to_rest(arm)
     assert M.stow_to_home(arm) == [w.name for w in R.STOW_ROUTE]
     assert arm.at(R.HOME)
+
+
+# ---------------------------------------------------------------------------
+# Re-streaming (found by flying it, not by reading it)
+#
+# The first version of fly_route commanded each waypoint once.  Under
+# mujoco-remote the arm only moves WHILE setpoints are streaming, so a fast
+# segment finishes short and holding the goal does not close the gap.  A live
+# run in FWDCenterLabSivaPool stopped at CURL with the elbow 77 deg off; a
+# direct write to goal_position afterwards read back unchanged.
+#
+# The stub above tracks perfectly, which is exactly why the suite was green
+# while the real arm was not.  This one does not.
+# ---------------------------------------------------------------------------
+
+class LaggingArm(StubArm):
+    """Closes a fraction of the remaining error on each streamed command.
+
+    One pass always falls short.  Repeated passes converge, which is the
+    behaviour the notebook's `move_to` relies on and the property the route
+    runner has to have.
+    """
+
+    def __init__(self, pose=None, closes=0.6):
+        super().__init__(pose)
+        self.closes = closes
+        self.commands = 0
+        for name in R.R_JOINTS:
+            joint = getattr(self, name)
+            joint._arm = self
+
+    def _apply(self, name, goal):
+        joint = getattr(self, name)
+        joint.present_position += (goal - joint.present_position) * self.closes
+
+
+def lagging_move(arm, pose, duration):
+    arm.commands += 1
+    for name, value in pose.items():
+        arm._apply(name, value)
+
+
+@pytest.fixture
+def lagging(monkeypatch):
+    monkeypatch.setattr(M, "sdk_move", lagging_move)
+
+
+def test_one_pass_is_not_enough_and_the_runner_knows_it(lagging):
+    """A single command leaves 40% of the error; TRACK_TOL is 6 degrees."""
+    arm = LaggingArm(R.REST_SHUT)
+    flown = M.stow_to_home(arm)
+    assert flown == [w.name for w in R.STOW_ROUTE]
+    # More commands than waypoints: every waypoint needed re-streaming.
+    assert arm.commands > len(R.STOW_ROUTE)
+    for name, value in R.HOME.items():
+        if name == "r_gripper":
+            continue
+        assert abs(getattr(arm, name).present_position - value) <= R.TRACK_TOL
+
+
+def test_a_joint_that_never_converges_still_stops_the_route(lagging):
+    """Re-streaming is not a way to fly through a jam.  A joint that does not
+    move is still a stop — that is what the waypoint tolerance is for."""
+    arm = LaggingArm(R.REST_SHUT)
+    arm.closes = 0.0                      # commanded, never moves
+    with pytest.raises(M.RouteError) as exc:
+        M.stow_to_home(arm)
+    assert "re-streamed passes" in str(exc.value)
+
+
+def test_re_streaming_stops_once_the_waypoint_is_reached(lagging):
+    """Not a fixed number of passes: a waypoint the arm reaches first time
+    costs one command, so a well-behaved arm is not slowed down."""
+    arm = LaggingArm(R.REST_SHUT)
+    arm.closes = 1.0                      # perfect tracking
+    M.stow_to_home(arm)
+    assert arm.commands == len(R.STOW_ROUTE)
+
+
+def test_the_module_defaults_to_the_sdk_trajectory_generator():
+    """The mover is part of what "validated" means.
+
+    `primitives.smooth_move` is a 25 Hz interpolator; the notebook flies these
+    routes with the SDK's `goto`/MINIMUM_JERK, and measured live at CURL the
+    two behave differently in kind — smooth_move oscillates around 10 deg short
+    and never converges, goto closes monotonically.  Substituting one for the
+    other is not an implementation detail.
+
+    Read from the module's source rather than through the attribute, because
+    the fixture above replaces that attribute — which is the same reach-in the
+    old tests did, and the reason a suite of 26 green tests said nothing about
+    whether the routes could be flown.
+    """
+    import ast
+    import pathlib
+
+    tree = ast.parse(pathlib.Path(M.__file__).read_text())
+    fn = next(n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name == "sdk_move")
+    names = {n.attr for n in ast.walk(fn) if isinstance(n, ast.Attribute)}
+    names |= {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
+    assert "MINIMUM_JERK" in names
+    assert "smooth_move" not in names
+
+    import inspect
+    for f in (M.fly_route, M.deploy_to_rest, M.stow_to_home, M.wave):
+        assert "move" in inspect.signature(f).parameters

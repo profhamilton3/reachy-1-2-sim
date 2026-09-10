@@ -173,16 +173,40 @@ def test_the_routes_are_validated_where_they_were_measured():
 
 
 @pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE", "WAVE"])
-def test_the_panel_scene_is_not_validated_yet(route):
-    """FWDCenterLabSivaPool is where the panel runs and is deliberately absent.
+def test_the_panel_scene_is_not_validated(route):
+    """FWDCenterLabSivaPool is where the panel runs, and it is not listed.
 
-    Endpoint equality does not prove the corridor is clear, and the two scenes
-    differ in object population.
+    That is now a measured answer.  Both routes were flown there on
+    2026-09-10: they completed, they arrived, and they did not touch the
+    board — and SWING_1 came within 2 mm of rig_rail_outer_right, then went
+    2 mm inside it on the fourth pass.  A corridor that completes is not the
+    same as a corridor with margin.
     """
     ok, why = R.check_route(route, "FWDCenterLabSivaPool")
     assert not ok
     assert "FWDCenterLabSivaPool" in why
-    assert "FWDCenterLabMCC" in why
+
+
+def test_a_rejected_route_says_it_was_flown_and_why_it_failed():
+    """"Not listed" reads as "nobody has got to it yet", which invites a row
+    on the strength of one clean run."""
+    _, why = R.check_route("STOW_ROUTE", "FWDCenterLabSivaPool")
+    assert "rejected" in why
+    assert "SWING_1" in why
+    assert "-0.2 cm" in why
+
+
+def test_a_route_nobody_flew_here_is_a_different_answer_from_one_that_failed():
+    _, wave = R.check_route("WAVE", "FWDCenterLabSivaPool")
+    assert "has not been flown" in wave
+    assert "rejected" not in wave
+
+
+def test_every_attempt_records_an_outcome_and_the_numbers():
+    for attempt in R.VALIDATION_ATTEMPTS:
+        assert attempt.outcome in ("rejected", "not attempted")
+        assert attempt.when
+        assert len(attempt.detail) > 40
 
 
 def test_pointing_is_not_a_validated_route_anywhere():

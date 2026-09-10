@@ -277,7 +277,57 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     # objects — a can shifted 0.189 m by an arm reporting positive clearance —
     # so it is not a validated route anywhere, and saying so here is more use
     # than a comment somewhere else saying it is imperfect.
+    #
+    # FWDCenterLabSivaPool is not listed either, and that is now a MEASURED
+    # answer rather than an untested assumption.  See VALIDATION_ATTEMPTS.
 )
+
+
+@dataclass(frozen=True)
+class ValidationAttempt:
+    """A route flown in a scene and NOT accepted, with the numbers.
+
+    Worth keeping next to the passes.  "Not listed" reads as "nobody has got to
+    it yet", which invites someone to add a row on the strength of one clean
+    run.  "Flown four times, one pass went 2 mm inside the rail" does not.
+    """
+
+    route: str
+    scene: str
+    when: str
+    outcome: str
+    detail: str
+
+
+VALIDATION_ATTEMPTS: Tuple[ValidationAttempt, ...] = (
+    ValidationAttempt(
+        "PLACE_ROUTE", "FWDCenterLabSivaPool", "2026-09-10", "rejected",
+        "Flown twice, HOME->REST, both times complete and arrived, board "
+        "undisturbed (all 10 objects 0.0000 m). Rejected on clearance: worst "
+        "realised at SWING_1 vs rig_rail_outer_right was +0.2 cm and +0.1 cm "
+        "against a planned +0.6 cm.",
+    ),
+    ValidationAttempt(
+        "STOW_ROUTE", "FWDCenterLabSivaPool", "2026-09-10", "rejected",
+        "Flown twice, REST->HOME, both times complete and arrived, board "
+        "undisturbed. Rejected on clearance: SWING_1 vs rig_rail_outer_right "
+        "measured +0.7 cm and then -0.2 cm — the model puts the arm INSIDE the "
+        "rail on the second pass. Four SWING_1 samples across both routes: "
+        "+0.2, +0.7, +0.1, -0.2 cm. The corridor completes, and it has no "
+        "margin at its tightest waypoint.",
+    ),
+    ValidationAttempt(
+        "WAVE", "FWDCenterLabSivaPool", "2026-09-10", "not attempted",
+        "The wave starts from PRESENT, and the transition into PRESENT from "
+        "either endpoint of the routes above is itself unvalidated here. "
+        "Flying it would have measured the wave and asserted the approach.",
+    ),
+)
+
+
+def attempts_for(route: str, scene: str) -> Tuple[ValidationAttempt, ...]:
+    return tuple(a for a in VALIDATION_ATTEMPTS
+                 if a.route == route and a.scene == scene)
 
 
 def validation_for(route: str, scene: str) -> Optional[RouteValidation]:
@@ -299,6 +349,18 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
     row = validation_for(route, scene)
     if row is not None:
         return True, ""
+    tried = attempts_for(route, scene)
+    if tried:
+        # Say what happened, not just that the row is missing.  "Not listed"
+        # invites someone to add a row after one clean run; "flown and
+        # rejected, here is the number" does not.  And a route nobody has
+        # flown here is a different answer from one that was flown and failed.
+        attempt = tried[0]
+        if attempt.outcome == "rejected":
+            return False, (f"the {route} route was flown in {scene} on "
+                           f"{attempt.when} and rejected: {attempt.detail}")
+        return False, (f"the {route} route has not been flown in {scene}: "
+                       f"{attempt.detail}")
     flown_in = sorted({r.scene for r in ROUTE_COMPATIBILITY if r.route == route})
     if not flown_in:
         return False, (f"the {route} route has not been validated in any "

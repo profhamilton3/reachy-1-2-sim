@@ -54,18 +54,68 @@ class RecoveryNeeded(RouteError):
     """
 
 
+def sdk_move(arm, pose: Dict[str, float], seconds: float) -> None:
+    """Command a pose with the SDK's own minimum-jerk trajectory generator.
+
+    NOT `primitives.smooth_move`, and the difference is not cosmetic.  The
+    first version of this module used smooth_move — a hand-rolled 25 Hz
+    interpolator — and the routes could not be flown at all.  Measured live at
+    CURL (elbow -125 deg) in FWDCenterLabSivaPool, re-streaming the same target:
+
+        smooth_move   -112.6  -116.3  -110.4  -113.5  -123.4  -113.8  -119.5
+        goto/JERK     -119.8  -123.2  -123.9  -124.3
+
+    smooth_move reaches the target and sags off it again; the joint oscillates
+    around 10 deg short and never converges, so a 6 deg waypoint tolerance is
+    unreachable.  `goto` closes monotonically.  The notebook flies these routes
+    with `goto`, and that is part of what "the routes are validated" means.
+    """
+    from reachy_sdk.trajectory import goto
+    from reachy_sdk.trajectory.interpolation import InterpolationMode
+
+    goto({getattr(arm, name): value for name, value in pose.items()},
+         duration=seconds,
+         interpolation_mode=InterpolationMode.MINIMUM_JERK)
+
+
 def present_pose(arm) -> Dict[str, float]:
     return {n: getattr(arm, n).present_position for n in R.R_JOINTS}
 
 
+def _worst_error(arm, targets: Dict[str, float]) -> Tuple[str, float]:
+    worst = max(targets, key=lambda n: abs(getattr(arm, n).present_position
+                                           - targets[n]))
+    return worst, abs(getattr(arm, worst).present_position - targets[worst])
+
+
 def fly_route(arm, route, *, should_abort: Abort = None, on_phase: Phase = None,
-              settle_s: float = 0.3) -> List[str]:
+              settle_s: float = 0.3, retries: int = 5,
+              settle_pass_s: float = 0.8, move=None) -> List[str]:
     """Walk a route waypoint by waypoint.  Returns the waypoints flown.
 
-    Stops at a waypoint that did not converge rather than pressing on: the next
-    waypoint's clearance was measured FROM this one, so continuing from a pose
-    the arm never reached is flying an unmeasured segment.
+    RE-STREAMING IS NOT OPTIONAL, and the notebook says so where it defines
+    `move_to`:
+
+        A short second pass to the same target re-streams the setpoints and
+        pulls out the tracking lag; without it the physics arm can finish a
+        fast segment 10-20 deg short, and simply HOLDING a goal will not close
+        the gap — under mujoco-remote the arm only moves while setpoints are
+        streaming.
+
+    The first version of this function dropped that, and a live run in
+    FWDCenterLabSivaPool showed exactly the documented failure: HOME to CURL
+    asks the elbow for -125 deg, one pass left it at -48, and a direct write to
+    `goal_position` afterwards did not move it at all — the value read back
+    unchanged, because nothing was streaming.  Progressively longer passes are
+    what close it.
+
+    Two thresholds, kept apart for the reason the notebook keeps them apart:
+    convergence (TRACK_TOL) decides when to stop re-streaming, and the
+    waypoint's own `tol` decides when to give up.  A route stops at a waypoint
+    it did not reach rather than pressing on, because the next waypoint's
+    clearance was measured FROM this one.
     """
+    move = move or sdk_move
     flown: List[str] = []
     for wp in route:
         if should_abort is not None and should_abort():
@@ -73,18 +123,23 @@ def fly_route(arm, route, *, should_abort: Abort = None, on_phase: Phase = None,
             return flown
         if on_phase is not None:
             on_phase(wp.name)
-        P.smooth_move(arm, wp.pose, wp.seconds)
         guarded = {n: v for n, v in wp.pose.items() if n != "r_gripper"}
-        if not P.wait_until(arm, guarded, tol=wp.tol,
-                            timeout=max(2.0, wp.seconds)):
-            worst = max(guarded,
-                        key=lambda n: abs(getattr(arm, n).present_position
-                                          - guarded[n]))
-            off = abs(getattr(arm, worst).present_position - guarded[worst])
+
+        move(arm, wp.pose, wp.seconds)
+        for k in range(retries + 1):
+            if _worst_error(arm, guarded)[1] <= R.TRACK_TOL:
+                break
+            # Longer each time: the wrist joints are weak and one short pass
+            # leaves a large offset half-closed.
+            move(arm, wp.pose, settle_pass_s * (1 + k))
+
+        worst, off = _worst_error(arm, guarded)
+        if off > wp.tol:
             raise RouteError(
                 f"the arm did not reach {wp.name}: {worst} is {off:.1f} deg "
-                f"off, tolerance {wp.tol:.1f}. Stopping here rather than "
-                "flying the next segment from a pose it never reached."
+                f"off, tolerance {wp.tol:.1f}, after {retries} re-streamed "
+                "passes. Stopping here rather than flying the next segment "
+                "from a pose it never reached."
             )
         flown.append(wp.name)
         if settle_s:
@@ -118,7 +173,7 @@ def check_start(arm, route, *, tol: float = 8.0) -> Tuple[bool, str]:
 
 
 def deploy_to_rest(arm, *, should_abort: Abort = None,
-                   on_phase: Phase = None) -> List[str]:
+                   on_phase: Phase = None, move=None) -> List[str]:
     """Out of the rail pocket and onto the board, ending with the forearm rested.
 
     Resting deliberately allows forearm-to-table contact, which is why the last
@@ -135,11 +190,11 @@ def deploy_to_rest(arm, *, should_abort: Abort = None,
     if not ok:
         raise RecoveryNeeded(why)
     return fly_route(arm, R.PLACE_ROUTE, should_abort=should_abort,
-                     on_phase=on_phase)
+                     on_phase=on_phase, move=move)
 
 
 def stow_to_home(arm, *, should_abort: Abort = None,
-                 on_phase: Phase = None) -> List[str]:
+                 on_phase: Phase = None, move=None) -> List[str]:
     """Back into the rail pocket, the placement route run backwards.
 
     Nothing may cut across it: a direct move from anywhere over the board to
@@ -155,11 +210,11 @@ def stow_to_home(arm, *, should_abort: Abort = None,
     if not ok:
         raise RecoveryNeeded(why)
     return fly_route(arm, R.STOW_ROUTE, should_abort=should_abort,
-                     on_phase=on_phase)
+                     on_phase=on_phase, move=move)
 
 
 def wave(arm, *, cycles: int = R.WAVE_CYCLES, should_abort: Abort = None,
-         on_phase: Phase = None) -> int:
+         on_phase: Phase = None, move=None) -> int:
     """A bounded wave from PRESENT, ending back at PRESENT.
 
     `cycles` is capped at the measured count.  The 1.8 s a swing is measured
@@ -168,6 +223,7 @@ def wave(arm, *, cycles: int = R.WAVE_CYCLES, should_abort: Abort = None,
     re-measuring is how a bounded behaviour stops being bounded, so the cap is
     here rather than in a comment asking callers not to.
     """
+    move = move or sdk_move
     cycles = max(0, min(int(cycles), R.WAVE_CYCLES))
     # Judged on the gross joints at a POSTURE tolerance, not the wave's
     # tracking tolerance.  LESSON_TOL is 90 degrees — the slack those three
@@ -186,10 +242,13 @@ def wave(arm, *, cycles: int = R.WAVE_CYCLES, should_abort: Abort = None,
         for label, target in (("a", R.WAVE_A), ("b", R.WAVE_B)):
             if on_phase is not None:
                 on_phase(f"wave {i + 1}{label}")
-            P.smooth_move(arm, target, R.WAVE_SECONDS)
-            P.wait_until(arm, {n: v for n, v in target.items()
-                               if n != "r_gripper"},
-                         tol=R.LESSON_TOL, timeout=R.WAVE_SECONDS + 1.0)
+            move(arm, target, R.WAVE_SECONDS)
+            guarded = {n: v for n, v in target.items() if n != "r_gripper"}
+            if _worst_error(arm, guarded)[1] > R.LESSON_TOL:
+                # Same re-stream as the routes.  The wave is the move the
+                # notebook measured the lag ON: three weak joints reversing
+                # together at 0.9 s finished tens of degrees short.
+                move(arm, target, R.WAVE_SECONDS)
         done += 1
     if on_phase is not None:
         on_phase("returning to the presentation pose")
@@ -197,7 +256,7 @@ def wave(arm, *, cycles: int = R.WAVE_CYCLES, should_abort: Abort = None,
     # defined relative to PRESENT, so this retreat stays inside the envelope
     # the wave was measured in.  It is not a jump to rest or to the pocket —
     # those are separate validated transitions.
-    P.smooth_move(arm, R.PRESENT, R.WAVE_SECONDS)
+    move(arm, R.PRESENT, R.WAVE_SECONDS)
     P.wait_until(arm, {n: v for n, v in R.PRESENT.items() if n != "r_gripper"},
                  tol=R.LESSON_TOL, timeout=R.WAVE_SECONDS + 1.0)
     return done
