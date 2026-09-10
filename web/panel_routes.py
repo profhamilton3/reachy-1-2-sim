@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from panel_planner import DeterministicPlanner
+from panel_planner import DeterministicPlanner, LiveProposalValidator
 from tasks import Capabilities, TaskCoordinator, TaskError
 
 #: Cookie the panel is identified by.  Not a security boundary against a user
@@ -44,11 +44,31 @@ class PanelRoutes:
     """Routing table for `/capabilities` and `/tasks...`."""
 
     def __init__(self, scene_provider: Callable[[], Any],
-                 capabilities: Optional[Capabilities] = None) -> None:
+                 capabilities: Optional[Capabilities] = None,
+                 link: Any = None) -> None:
         self.capabilities = capabilities or Capabilities()
+        self.link = link
         self.coordinator = TaskCoordinator(
-            DeterministicPlanner(scene_provider), capabilities=self.capabilities
+            DeterministicPlanner(scene_provider),
+            capabilities=self.capabilities,
+            # The validator reads the scene fresh, so it sees the board as it
+            # is at the moment Confirm is pressed rather than as it was when
+            # the plan was drawn.
+            revalidate=LiveProposalValidator(scene_provider),
         )
+
+    def _capabilities_payload(self) -> dict:
+        payload = {"capabilities": self.capabilities.as_dict()}
+        # The link's state is read per request, not frozen at construction:
+        # the simulator can be started, stopped, or restarted under a running
+        # page, and a badge that lied about that would be worse than none.
+        payload["sim_link"] = (
+            self.link.status if self.link is not None
+            else {"state": "absent", "live": False,
+                  "detail": "no simulator link configured"}
+        )
+        payload["capabilities"]["live_scene"] = bool(payload["sim_link"]["live"])
+        return payload
 
     # -- helpers -----------------------------------------------------------
 
@@ -69,7 +89,7 @@ class PanelRoutes:
 
     def handle_get(self, path: str, session_id: str) -> Optional[Response]:
         if path == "/capabilities":
-            return 200, {"capabilities": self.capabilities.as_dict()}
+            return 200, self._capabilities_payload()
 
         task_id = self._task_id(path)
         if task_id is None:
@@ -127,6 +147,8 @@ class PanelRoutes:
 
     def shutdown(self) -> None:
         self.coordinator.shutdown()
+        if self.link is not None:
+            self.link.stop()
 
 
 def _error(exc: TaskError) -> Response:

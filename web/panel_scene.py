@@ -5,11 +5,11 @@ the board, not enough to plan against.  It carries no tags, so nothing there can
 tell `soda_can` from `foam_block`, and no live poses, so nothing there can tell
 an object sitting on r2c2 from one parked on the floor in the pool.
 
-This module builds the richer view, and is explicit about the half it cannot
-fill in yet.  `ObjectView.on_board` is None in stage 1 and means *unknown*, not
-False; the planner must never read a None as "not on the table".  Issue #50
-supplies live object poses from the simulator's `state` messages and turns
-those Nones into answers.
+This module builds the richer view.  `ObjectView.on_board` is None until a
+live snapshot is applied, and None means *unknown*, not False — the planner
+must never read one as "not on the table".  `apply_snapshot()` (issue #50)
+turns those Nones into answers using the poses the simulator pushes, and an
+object the snapshot does not mention stays None rather than becoming False.
 
 TAGS ARE MATCHED EXACTLY
 ------------------------
@@ -49,6 +49,8 @@ class ObjectView:
     on_board: Optional[bool] = None
     #: Grid cell the object currently occupies, when live poses say so.
     cell: Optional[str] = None
+    #: Live world position, when a snapshot has been applied.
+    position: Optional[tuple] = None
 
     @property
     def is_recyclable(self) -> bool:
@@ -65,6 +67,66 @@ class CellView:
     reachable: bool = True
     distance_m: float = 0.0
     occupant: Optional[str] = None
+    # Geometry, carried so occupancy can be decided here rather than guessed.
+    x: float = 0.0
+    y: float = 0.0
+    top_z: float = 0.0
+    half_extent: float = 0.0
+
+    def contains(self, pos) -> bool:
+        """Is an object at `pos` sitting on this cell?
+
+        Deliberately the same predicate as `ObjectPlacer.occupant_of` in
+        native_mujoco/placement.py.  The panel and the simulator disagreeing
+        about what "on r2c2" means would be the worst kind of bug here: both
+        would be self-consistent and the proposal would still be wrong.
+        """
+        return (abs(pos[0] - self.x) <= self.half_extent
+                and abs(pos[1] - self.y) <= self.half_extent
+                and pos[2] > self.top_z - 0.01)
+
+
+#: Destination values IITG's `planner/schema.py` enum can represent.  Grid
+#: cells are NOT among them, which is why proposals carry a DestinationRef and
+#: the legacy value is offered only when one genuinely exists.
+LEGACY_DESTINATIONS = frozenset(
+    {"left_tray", "right_tray", "handover_zone", "point_only"}
+)
+
+
+@dataclass(frozen=True)
+class DestinationRef:
+    """Where a plan puts something, as a validated reference.
+
+    Two kinds, kept apart on purpose.  A `destination` is a tagged place in the
+    scene — a tray, later a bin.  A `cell` is a coordinate on the board: a
+    valid target, but not a container, and the panel says so rather than
+    calling one a bin.
+    """
+
+    kind: str            # "cell" | "destination"
+    ref_id: str
+    label: str = ""
+
+    def as_str(self) -> str:
+        return f"{self.kind}:{self.ref_id}"
+
+    def describe(self) -> str:
+        return f"grid cell {self.ref_id}" if self.kind == "cell" else (
+            self.label or self.ref_id)
+
+    def legacy_destination(self) -> Optional[str]:
+        """The IITG `Destination` enum value, or None when there is none.
+
+        None is the answer for every grid cell, and returning it is the whole
+        point of this adapter.  The enum has no way to say "r2c2", and the one
+        value that would type-check — `left_tray` — names a tray this scene
+        deliberately removed.  A caller that needs a legacy value must handle
+        None, not accept a substitute.
+        """
+        if self.kind == "destination" and self.ref_id in LEGACY_DESTINATIONS:
+            return self.ref_id
+        return None
 
 
 @dataclass
@@ -89,12 +151,24 @@ class SceneView:
     destinations: Dict[str, DestinationView] = field(default_factory=dict)
     #: False while poses come from the scene file rather than the simulator.
     live: bool = False
+    scene_revision: str = ""
+    sim_step: int = 0
     error: str = ""
 
     # -- queries the planner uses -----------------------------------------
 
     def reachable_cells(self) -> List[str]:
         return sorted(n for n, c in self.cells.items() if c.reachable)
+
+    def available_cells(self) -> List[str]:
+        """Reachable and unoccupied — the cells worth offering someone.
+
+        Before live poses, `occupant` is None everywhere and this is the same
+        list as `reachable_cells`.  Once a snapshot is applied it stops
+        offering a cell the next turn would only refuse.
+        """
+        return sorted(n for n, c in self.cells.items()
+                      if c.reachable and not c.occupant)
 
     def recyclables(self) -> List[ObjectView]:
         return [o for o in self.objects.values() if o.is_recyclable]
@@ -153,5 +227,46 @@ def scene_view_from_doc(doc: Mapping[str, Any], cells: Mapping[str, Any],
             name=str(name),
             reachable=bool(getattr(cell, "reachable", True)),
             distance_m=round(float(getattr(cell, "shoulder_distance_m", 0.0)), 3),
+            x=float(getattr(cell, "x", 0.0)),
+            y=float(getattr(cell, "y", 0.0)),
+            top_z=float(getattr(cell, "top_z", 0.0)),
+            half_extent=float(getattr(cell, "half_extent", 0.0)),
         )
+    return view
+
+
+def apply_snapshot(view: SceneView, snapshot) -> SceneView:
+    """Fold live object poses into a scene view, in place.
+
+    `snapshot` is a panel_sim_link.SimSnapshot, or None.  With None the view is
+    left exactly as it was — unknown stays unknown, and the planner goes on
+    refusing to assert what is on the board.  That is the honest reading of a
+    dropped link; the alternative, treating "no data" as "nothing there", would
+    have the panel confidently report an empty board while the simulator shows
+    a full one.
+    """
+    if snapshot is None:
+        return view
+
+    for obj in view.objects.values():
+        pos = snapshot.objects.get(obj.object_id)
+        if pos is None:
+            # Not in the snapshot at all: still unknown, not absent.  A pool
+            # object the tracker does not report is a gap in our knowledge.
+            continue
+        obj.position = pos
+        obj.cell = next(
+            (c.name for c in view.cells.values() if c.contains(pos)), None
+        )
+        obj.on_board = obj.cell is not None
+
+    for cell in view.cells.values():
+        cell.occupant = next(
+            (o.object_id for o in view.objects.values() if o.cell == cell.name),
+            None,
+        )
+
+    view.live = True
+    view.scene_revision = snapshot.scene_revision
+    view.sim_step = snapshot.sim_step
     return view

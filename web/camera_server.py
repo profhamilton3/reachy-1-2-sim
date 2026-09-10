@@ -533,7 +533,16 @@ _INDEX_HTML = b"""\
       }).then(function (res) {
         if (!res.ok) {
           tstatus(res.d.error || 'That request was refused.', 'bad');
-          if (task) { render(task); }
+          // A refusal can also have CHANGED the task: a plan invalidated by
+          // the board moving is refused and failed in the same breath.  Re-read
+          // rather than redrawing the copy we already had, which would leave a
+          // dead proposal on screen next to the reason it was refused.
+          if (task) {
+            fetch('/tasks/' + task.task_id)
+              .then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (d) { if (d) { render(d); } })
+              .catch(function () {});
+          }
           return;
         }
         render(res.d);
@@ -585,13 +594,35 @@ _INDEX_HTML = b"""\
     });
     sendEl.onclick = submit;
 
-    fetch('/capabilities').then(function (r) { return r.json(); })
-      .then(function (d) {
-        caps = d.capabilities || caps;
-        document.getElementById('mode').textContent =
-          (caps.live_execution ? 'live execution' : 'planning only') +
-          ' \\u00b7 ' + (caps.semantic_source === 'scene_data'
-                        ? 'scene data' : caps.semantic_source);
+    // The badge says three things, and all three can change under a running
+    // page: whether an executor exists, where semantics come from, and
+    // whether the board is actually being seen right now.  So it is refreshed
+    // on the status poll rather than read once at load.
+    function renderBadge(link) {
+      var source = caps.semantic_source === 'scene_data'
+        ? 'scene data' : caps.semantic_source;
+      var board = (link && link.live) ? 'board live' : 'board unseen';
+      document.getElementById('mode').textContent =
+        (caps.live_execution ? 'live execution' : 'planning only') +
+        ' \\u00b7 ' + source + ' \\u00b7 ' + board;
+      document.getElementById('mode').title = (link && link.live)
+        ? 'Live object poses from the simulator (scene revision ' +
+          (link.scene_revision || '?') + ')'
+        : 'No live object poses: ' + ((link && link.detail) || 'link down') +
+          '. I will not say what is on the board.';
+    }
+
+    function refreshCaps() {
+      return fetch('/capabilities').then(function (r) { return r.json(); })
+        .then(function (d) {
+          caps = d.capabilities || caps;
+          renderBadge(d.sim_link);
+          return d;
+        });
+    }
+
+    refreshCaps()
+      .then(function () {
         turn('reachy', 'Tell me what you would like me to do.');
       })
       .catch(function () {
@@ -615,6 +646,9 @@ _INDEX_HTML = b"""\
     }
     setInterval(poll, 1000);
     poll();
+    // Same cadence as the frame-age poll, and cheap for the same reason: it
+    // reads state the server already holds.
+    setInterval(function () { refreshCaps().catch(function () {}); }, 1000);
   })();
   </script>
 </body>
@@ -708,20 +742,29 @@ def _scene_payload() -> dict:
     }
 
 
+_SIM_LINK = None
+
+
 def _scene_view():
     """The planner's view of the scene, rebuilt per request.
 
     Per request rather than cached because scene control places and recalls
     objects between one command and the next, and a planner reasoning over a
     stale document would propose moving something that is no longer there.
-    Stage 1 leaves live poses unknown; issue #50 fills them in from the
-    simulator's `state` messages.
+
+    Semantics come from the scene document; live object poses come from the
+    simulator link when it has a fresh snapshot.  With no snapshot the view
+    stays non-live and the planner goes on saying it cannot see the board,
+    which is the truth rather than an empty board.
     """
-    from panel_scene import SceneView, scene_view_from_doc
+    from panel_scene import SceneView, apply_snapshot, scene_view_from_doc
     doc, cells, placeable, error = _load_scene()
     if error:
         return SceneView(error=error)
-    return scene_view_from_doc(doc, cells, placeable=placeable)
+    view = scene_view_from_doc(doc, cells, placeable=placeable)
+    if _SIM_LINK is not None:
+        apply_snapshot(view, _SIM_LINK.snapshot())
+    return view
 
 
 _PANEL = None
@@ -734,10 +777,16 @@ def _panel():
     the conversation code must degrade to "no panel" rather than taking the
     camera server down with it.
     """
-    global _PANEL
+    global _PANEL, _SIM_LINK
     if _PANEL is None:
         from panel_routes import PanelRoutes
-        _PANEL = PanelRoutes(_scene_view)
+        from panel_sim_link import SimLink
+        # Read-only, and its own connection: server.py gives every client its
+        # own state/frame/place_ack queues, so this takes nothing away from
+        # the browser panel's socket.
+        _SIM_LINK = SimLink()
+        _SIM_LINK.start()
+        _PANEL = PanelRoutes(_scene_view, link=_SIM_LINK)
     return _PANEL
 
 
