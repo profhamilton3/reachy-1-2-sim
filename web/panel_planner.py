@@ -41,6 +41,8 @@ import uuid
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+import panel_abilities as abilities
+from panel_abilities import AbilityRefusal
 from panel_scene import (NON_RECYCLABLE_TAG, RECYCLABLE_TAG, DestinationRef,
                          SceneView)
 from tasks import ConversationEvent, PlannerOutcome, PlannerRequest, Proposal
@@ -176,10 +178,12 @@ def _is_bin_phrase(phrase: str) -> bool:
     return any(re.search(rf"\b{w}\b", norm) for w in _BIN_WORDS)
 
 
-#: Slot names.  A clarification says which one it is asking about, and the
-#: answer fills that slot and no other.
-SLOT_CELL = "which_cell"
-SLOT_OBJECT = "which_object"
+#: Slot names, from the registry so a clarification here and an ability there
+#: cannot drift into naming the same slot differently.
+SLOT_CELL = abilities.SLOT_CELL
+SLOT_OBJECT = abilities.SLOT_OBJECT
+SLOT_ARM = abilities.SLOT_ARM
+SLOT_POSTURE = abilities.SLOT_POSTURE
 
 
 def _clarify(message: str, choices: Optional[List[str]] = None,
@@ -204,10 +208,6 @@ class DeterministicPlanner:
         self._scene_provider = scene_provider
 
     def __call__(self, request: PlannerRequest) -> PlannerOutcome:
-        scene = self._scene_provider()
-        if scene.error:
-            return _unsupported(f"I cannot read the scene right now: {scene.error}")
-
         command, answers = _split_history(request.history, request.text)
         if _JOINT_RE.search(command) or any(_JOINT_RE.search(a)
                                             for _, a in answers):
@@ -216,6 +216,19 @@ class DeterministicPlanner:
                 "which object, and where it should go — and the motion layer "
                 "works out the angles."
             )
+
+        # Abilities are matched BEFORE the pick-and-place grammar, because two
+        # of them open with a pick-and-place verb: "put your arm away" and
+        # "place your forearm on the table".  Left to the old order they parse
+        # as a move with "your arm" for a target, and the panel answers that it
+        # does not know an object by that name.
+        ability = self._ability_outcome(command, answers)
+        if ability is not None:
+            return ability
+
+        scene = self._scene_provider()
+        if scene.error:
+            return _unsupported(f"I cannot read the scene right now: {scene.error}")
 
         intent = parse_intent(command)
         if intent is None:
@@ -233,6 +246,73 @@ class DeterministicPlanner:
             return target_outcome
 
         return self._propose(scene, target_id, destination)
+
+    # -- abilities ---------------------------------------------------------
+
+    def _ability_outcome(self, command: str,
+                         answers: List[Tuple[str, str]]) -> Optional[PlannerOutcome]:
+        """Answer a non-pick-and-place request, or None to fall through.
+
+        Stage #61 lands recognition, not motion.  A recognised ability is
+        refused BY NAME — "I understand: wave" — because "I did not understand
+        that" for a phrase the registry knows is a worse answer than an honest
+        no, and because it is the difference between the operator rephrasing
+        forever and the operator reading the issue.
+        """
+        try:
+            match = abilities.match(command)
+        except AbilityRefusal as exc:
+            return _unsupported(exc.message)
+        if match is None:
+            return None
+
+        given = {slot: text for slot, text in answers if slot}
+
+        if match.ambiguous_between:
+            resolved = _posture_answer(given.get(SLOT_POSTURE, ""))
+            if resolved is None:
+                return _clarify(
+                    "\"Rest\" can mean two different places, and they are "
+                    "eleven waypoints apart: my forearm supported on the "
+                    "tabletop, or my arm stored back in the rail pocket. "
+                    "Which did you mean?",
+                    ["on the table", "in the rail pocket"],
+                    SLOT_POSTURE,
+                )
+            match.name = resolved
+            match.ability = abilities.REGISTRY[resolved]
+            match.ambiguous_between = ()
+
+        ability = match.ability
+        if ability.arm_specific and match.arm != abilities.DEFAULT_ARM:
+            # The corridor in tlh_motion-routine.ipynb was measured for the
+            # right arm through a rig that is not symmetric.  Mirroring it is
+            # an assumption about geometry, not a translation.
+            return _unsupported(
+                f"I can only {ability.summary} with my right arm. The route "
+                "was measured for that arm through a rig that is not "
+                "symmetric, so I will not mirror it without validating it."
+            )
+
+        if SLOT_CELL in ability.slots and SLOT_CELL not in match.slots:
+            cell = given.get(SLOT_CELL, "")
+            if not cell:
+                scene = self._scene_provider()
+                choices = [] if scene.error else scene.reachable_cells()
+                return _clarify("Which cell should I point to?", choices,
+                                SLOT_CELL)
+            match.slots[SLOT_CELL] = cell
+
+        if SLOT_OBJECT in ability.slots and SLOT_OBJECT not in match.slots:
+            obj = given.get(SLOT_OBJECT, "")
+            if not obj:
+                scene = self._scene_provider()
+                choices = [] if scene.error else sorted(scene.objects)
+                return _clarify("Which object should I point to?", choices,
+                                SLOT_OBJECT)
+            match.slots[SLOT_OBJECT] = obj
+
+        return _unsupported(_not_yet(match))
 
     # -- destination -------------------------------------------------------
 
@@ -396,6 +476,37 @@ class DeterministicPlanner:
                 state_evidence=_evidence(scene, target_id, destination),
             ),
         )
+
+
+def _posture_answer(text: str) -> Optional[str]:
+    """Which posture an answer to the rest/stow question names.
+
+    None means it named neither, and the question gets asked again rather than
+    resolved by preference.  The two postures are eleven waypoints apart
+    through the rig; a coin-flip here is a long arm movement nobody asked for.
+    """
+    norm = _normalise(text)
+    if not norm:
+        return None
+    if re.search(r"\b(table|tabletop|desk|board|forearm|down|surface)\b", norm):
+        return "rest_forearm"
+    if re.search(r"\b(pocket|rail|home|away|stow|store|default|back)\b", norm):
+        return "stow_arm"
+    return None
+
+
+def _not_yet(match) -> str:
+    """Refuse one ability by name, saying what would make it possible."""
+    what = match.ability.summary
+    if match.slots.get(abilities.SLOT_CELL):
+        what = f"{what} — {match.slots[abilities.SLOT_CELL]}"
+    elif match.slots.get(abilities.SLOT_OBJECT):
+        what = f"{what} — {match.slots[abilities.SLOT_OBJECT]}"
+    return (
+        f"I understand: {what}. I cannot do it yet — the validated route for "
+        "it is not wired into this server. I can move objects between grid "
+        "cells today; ask me for that and I will plan it."
+    )
 
 
 def _dest_ref(scene: SceneView, destination_id: str) -> DestinationRef:

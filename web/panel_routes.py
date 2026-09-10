@@ -27,6 +27,7 @@ import json
 from dataclasses import replace
 from typing import Any, Callable, Dict, Optional, Tuple
 
+import panel_abilities
 from panel_planner import DeterministicPlanner, LiveProposalValidator
 from tasks import Capabilities, TaskCoordinator, TaskError
 
@@ -96,6 +97,12 @@ class PanelRoutes:
         )
         payload["capabilities"]["live_scene"] = bool(payload["sim_link"]["live"])
         payload["execution"] = {"available": can_execute, "detail": why_not}
+        # Served rather than duplicated in the page's JavaScript (#61).  A
+        # browser holding its own copy of the alias list eventually offers an
+        # ability this server has never heard of, which is worse than offering
+        # nothing: the operator types it, waits, and is told it was not
+        # understood by the one component that was supposed to know.
+        payload["abilities"] = panel_abilities.describe_all()
         return payload
 
     # -- helpers -----------------------------------------------------------
