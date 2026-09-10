@@ -37,11 +37,10 @@ from typing import Dict, List, Optional, Tuple
 POSTURE_HOME = "home"
 POSTURE_REST = "rest"
 POSTURE_PRESENT = "present"
-#: Raised and fully abducted, out to the robot's right.  Not a resting place —
-#: it is the junction.  Everything that leaves the rail pocket goes through it,
-#: because it is the one pose with the pocket behind the arm and the rail
-#: beside it rather than in front.
-POSTURE_SIDE_HUB = "side_hub"
+#: There is no side-hub posture.  There used to be one at roll -88, invented
+#: for `raise_to_side` and reached by a sweep the clearance model puts inside
+#: both the board and the outer rail.  PRESENT is the junction now, and PRESENT
+#: is a measured pose — see the routes below.
 
 #: Gripper angles.  The sign is inverted from the obvious reading: negative
 #: OPENS.  Verified on the physical robot, not inferred from the joint name.
@@ -188,42 +187,46 @@ STOW_ROUTE: Tuple[Waypoint, ...] = (
     Waypoint("HOME", HOME, 2.5, 25.0),
 )
 
-# ── Getting to the presentation pose ────────────────────────────────────────
-# The wave starts and ends at PRESENT, and nothing measured how to GET there in
-# this rig — which is why "wave" was refused in FWDCenterLabSivaPool while the
-# wave itself had 18 cm of room.
+# ── Getting to the presentation pose (notebook section 4) ───────────────────
 #
-# TWO LEGS, AND THE ORDER IS THE WHOLE POINT.  Interpolated as one move from
-# the side hub, the joints do not arrive in step: the roll adducts before the
-# pitch lifts, so the arm swings IN across the rail before it swings UP over
-# it.  Flown that way the shoulder never made the forward swing at all and the
-# arm ended at roll -33 with the model reading -9.4 cm.  Lifting first and
-# adducting second is monotonic and roomy: +24.5 cm then +18.1 cm.
+# THE NOTEBOOK HAS NO SIDE HUB, AND THIS NO LONGER INVENTS ONE.  There used to
+# be a `SIDE_HUB` at roll -88 with a two-leg `PRESENT_ROUTE` onto it, none of
+# which appears anywhere in the measured route.  The notebook reaches the
+# raised pose from REST, in one move (cell 18), and it comes back down by
+# flying STOW_ROUTE from PRESENT (cell 34) — whose first waypoint is REST_SHUT.
+# Those two moves are what these routes are.
 #
-#: Roll the arm is lifted at.  Matches `primitives.SIDE_HIGH`'s abduction —
-#: defined here rather than imported because primitives imports THIS module.
-_HUB_ROLL = -88.0
+# The -88 hub was worse than unmeasured, it was wrong: getting to it swept the
+# hand from 0 to -88 of roll at a fixed pitch, which the clearance model puts
+# 4.3 to 6.5 cm inside `table_top` — the HAND against the board's near edge —
+# for every degree of that sweep, clearing only in the last ten.  The notebook
+# names that
+# exact manoeuvre as its FAILURE exercise: "Try the sideways version and watch
+# it fail ... the arm jams against the outer rail.  That jamming IS the
+# feedback."
+#
+# PRESENT IS THE RAISED SIDE POSE.  It is what "out to the robot's right"
+# means here, and unlike the hub it was measured: notebook section 4 records
+# +8.9 cm worst whole-arm clearance over the entire routine, against the -1.9
+# cm of the pose it replaced.  So there is no separate hub posture any more —
+# PRESENT is the junction, and it is a notebook pose.
 
-#: Half way through the forward swing, still fully abducted.
+#: REST -> PRESENT.  Notebook cell 18, one move.  Modelled monotonic the whole
+#: way: +4.1 cm a quarter in, +7.2 at the half, +13.8 cm on arrival, with the
+#: only negative at the REST end where the forearm is deliberately supported on
+#: the board.
 #:
-#: Not decoration.  Commanded straight from the hub's -25 to -70 in one move,
-#: the shoulder went to +84 — 154 degrees the WRONG WAY, taking the long way
-#: round at full abduction.  Stepped, it tracks: probed -25 -> 0 -> -25 -> -45
-#: -> -70 held -2, -22, -40, -64.  Both poses have 20 cm of room; this exists
-#: purely so the joint goes the short way.
-PRESENT_MID = pose(r_shoulder_pitch=-45.0, r_shoulder_roll=_HUB_ROLL,
-                   r_elbow_pitch=-90.0)
+#: The notebook flies this with `tol=LESSON_TOL`, which switches the abort off
+#: because section 4 is a teaching sweep and stopping it would hide the joint
+#: behaviour it exists to show.  That is not a safety judgement about the move,
+#: so the guard here is the gross joints at 10 degrees, as every other route
+#: in this module uses.
+LIFT_TO_PRESENT: Tuple["Waypoint", ...] = ()
 
-#: Lifted, still fully abducted: the pose the forward swing happens at, where
-#: there is no rail in front of the arm to swing into.
-PRESENT_LIFT = pose(r_shoulder_pitch=-70.0, r_shoulder_roll=_HUB_ROLL,
-                    r_elbow_pitch=-80.0)
-
-#: Side hub -> PRESENT.  Entered from the hub, which `raise_to_side` reaches.
-PRESENT_ROUTE: Tuple["Waypoint", ...] = ()
-
-#: PRESENT -> side hub.  The same two legs backwards.
-PRESENT_RETURN: Tuple["Waypoint", ...] = ()
+#: PRESENT -> REST.  The first move of the notebook's stow (PRESENT ->
+#: REST_SHUT, cell 34) followed by the route's own last waypoint, which opens
+#: the hand.  Both poses are the measured ones; neither move is new.
+LOWER_TO_REST: Tuple["Waypoint", ...] = ()
 
 # ── The wave (notebook 4.6) ──────────────────────────────────────────────────
 # Defined relative to PRESENT, so the wave inherits PRESENT's clearance
@@ -246,25 +249,32 @@ WAVE_SECONDS = 1.8
 WAVE_START = "present"
 WAVE_END = "present"
 
-#: The side hub, as a pose.  Mirrors `primitives.SIDE_HIGH`; defined here
-#: because primitives imports this module and not the other way round.
-SIDE_HUB = pose(r_shoulder_pitch=-25.0, r_shoulder_roll=_HUB_ROLL,
-                r_elbow_pitch=-100.0)
-
 _PRESENT_GUARD = ("r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
                   "r_elbow_pitch")
 
-PRESENT_ROUTE = (
-    Waypoint("PRESENT_MID", PRESENT_MID, 2.5, 10.0, _PRESENT_GUARD),
-    Waypoint("PRESENT_LIFT", PRESENT_LIFT, 2.5, 10.0, _PRESENT_GUARD),
-    Waypoint("PRESENT", PRESENT, 3.0, 10.0, _PRESENT_GUARD),
+#: The tolerance is 8, not 10, and it matches `posture_of`'s on purpose.
+#:
+#: At 10 the route could ARRIVE and still not be RECOGNISED: flown three
+#: times, one run finished between 8 and 12 degrees off PRESENT, reported
+#: success, and the wave that followed refused with "the arm is not at the
+#: presentation pose" — which is true, confusing, and avoidable.  A route that
+#: says it got there and a posture check that says it did not are the same
+#: question asked twice with different answers.
+LIFT_TO_PRESENT = (
+    Waypoint("PRESENT", PRESENT, 3.0, 8.0, _PRESENT_GUARD),
 )
 
-PRESENT_RETURN = (
-    Waypoint("PRESENT_LIFT", PRESENT_LIFT, 3.0, 10.0, _PRESENT_GUARD),
-    Waypoint("PRESENT_MID", PRESENT_MID, 2.5, 10.0, _PRESENT_GUARD),
-    Waypoint("SIDE_HUB", SIDE_HUB, 3.0, 14.0, _PRESENT_GUARD),
+LOWER_TO_REST = (
+    Waypoint("REST_SHUT", REST_SHUT, 3.0, TRACK_TOL, _PRESENT_GUARD),
+    Waypoint("REST", REST, 3.0, TRACK_TOL, _PRESENT_GUARD),
 )
+
+#: HOME -> PRESENT and back, as `primitives.raise_to_side` and
+#: `primitives.stow_from_side` fly them: the measured route out of the pocket,
+#: then the lift, and the exact reverse coming back.  Named because the posture
+#: graph and the compatibility record work in route names.
+RAISE_TO_SIDE: Tuple["Waypoint", ...] = PLACE_ROUTE + LIFT_TO_PRESENT
+STOW_FROM_SIDE: Tuple["Waypoint", ...] = STOW_ROUTE
 
 # ── Pointing (notebook 4.7) ──────────────────────────────────────────────────
 #: Air wanted under the pad.  This number is about POINTING; it is not what
@@ -303,6 +313,22 @@ POINT_MARGIN = SAFE_MARGIN
 GROSS_JOINTS: Tuple[str, ...] = (
     "r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw", "r_elbow_pitch",
 )
+
+#: The joints a route waypoint is JUDGED on — the notebook's `CRITICAL`.
+#:
+#: The gross four, which put the elbow and forearm where the clearance was
+#: measured, plus the WRIST PITCH: that one folds the hand and is part of the
+#: shape that fits through the pocket, which is why CURL carries +45.
+#:
+#: The forearm yaw, the wrist roll and the gripper are NOT in it, and leaving
+#: them out is not laziness.  They spin the hand about its own axis and move
+#: the elbow nowhere; they are weak (kp=60, 10 Nm) and converge over several
+#: waypoints; and a few degrees on them moves the pad by millimetres inside
+#: margins of 20 mm or more.  Holding them to TRACK_TOL aborts routes that are
+#: in no danger — measured: a stow flown from PRESENT stopped at SWING_2
+#: because `r_wrist_roll` was 23 degrees into a 30 degree move, with the whole
+#: arm 2.3 cm from anything and the board untouched.
+CRITICAL_JOINTS: Tuple[str, ...] = GROSS_JOINTS + ("r_wrist_pitch",)
 
 
 # ---------------------------------------------------------------------------
@@ -349,45 +375,134 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
         "scene drift checked afterwards",
     ),
     RouteValidation(
+        "LIFT_TO_PRESENT", "FWDCenterLabMCC",
+        "notebooks/tlh_motion-routine.ipynb cell 18: REST -> PRESENT in one "
+        "move, then the whole of section 4 flown from it with the board "
+        "instrumented cell by cell and every object still on its cell",
+    ),
+    RouteValidation(
+        "LOWER_TO_REST", "FWDCenterLabMCC",
+        "notebooks/tlh_motion-routine.ipynb cell 34: PRESENT -> REST_SHUT is "
+        "the first move of the stow, flown at the end of every section 4 run",
+    ),
+    RouteValidation(
+        "RAISE_TO_SIDE", "FWDCenterLabMCC",
+        "PLACE_ROUTE then LIFT_TO_PRESENT, both above: "
+        "notebooks/tlh_motion-routine.ipynb flies exactly this pair, in this "
+        "order, in sections 3 and 4",
+    ),
+    RouteValidation(
+        "STOW_FROM_SIDE", "FWDCenterLabMCC",
+        "STOW_ROUTE, above: the stow in notebooks/tlh_motion-routine.ipynb IS "
+        "the return from PRESENT, because its first waypoint is REST_SHUT",
+    ),
+    # ── FWDCenterLabSivaPool, accepted 2026-09-10 ───────────────────────────
+    #
+    # THE DECISION THESE ROWS REST ON IS RECORDED IN docs/adr/0002.  In short:
+    # the SWING_1 crossing has about 6 mm of modelled budget and the physics
+    # arm's tracking error is the same size, so every flight of every route
+    # through it reads a few millimetres negative.  #74 rejected PLACE_ROUTE on
+    # exactly that and was right to, on the evidence it had.  What is different
+    # now is the evidence: eighteen legs sampled at 20 Hz through the whole
+    # flight rather than at the waypoints, WITH OBJECTS ON THE BOARD, and the
+    # board undisturbed in all eighteen.  A graze that never moves anything,
+    # measured through the move rather than at its ends, is a model
+    # disagreement at a known rail — the one #73 documents as disagreeing in
+    # both directions — and not a collision.
+    #
+    # This is deliberately not the same argument the deleted hub rows made.
+    # Those rested on "flown six times, board undisturbed" against a board that
+    # was EMPTY, for a path that was 4.3 to 6.5 cm inside the board.  Rows are
+    # not evidence; the runs behind them are, and an empty board proves nothing
+    # about disturbance.
+    RouteValidation(
         "RAISE_TO_SIDE", "FWDCenterLabSivaPool",
-        "2026-09-10: HOME -> side hub, flown six times (three in the #73 "
-        "round trips, three in the wave runs), reaching roll -82 to -87 "
-        "against a hub of -88 every time, board undisturbed. THE MODEL AND "
-        "THE PHYSICS DISAGREE ON THIS LEG and the row says so: the tucked "
-        "sweep reads about -5 cm inside rig_rail_outer_right while the arm "
-        "passes, and the straight sweep it replaced reads -3.2 cm and stops "
-        "dead at roll -14. Flown behaviour is what this row rests on. See #73.",
+        "2026-09-10: HOME->PRESENT, flown SIX times, sampled at 20 Hz through "
+        "the flight. Completed every time, 37-45 s; recognised at PRESENT on "
+        "five of six (the sixth arrived 8-12 deg short, which is why "
+        "LIFT_TO_PRESENT's tolerance is now 8 and not 10). Worst realised vs "
+        "the rig -0.33, -0.55, -0.59, -0.76, -0.77 and -1.32 cm at the SWING_1 "
+        "crossing of rig_rail_outer_right. Worst overall -2.55 to -4.41 cm, "
+        "hand vs table_top, which is REST and is the route's INTENT. Board "
+        "undisturbed all six runs, soda_can on r1c1 and foam_block on r2c3.",
+    ),
+    RouteValidation(
+        "PLACE_ROUTE", "FWDCenterLabSivaPool",
+        "2026-09-10: the first eleven waypoints of every RAISE_TO_SIDE flight "
+        "above are this route, so its six flights are these six. Supersedes "
+        "the rejection recorded in VALIDATION_ATTEMPTS, which measured the "
+        "waypoints rather than the flight and had no objects on the board.",
+    ),
+    RouteValidation(
+        "LIFT_TO_PRESENT", "FWDCenterLabSivaPool",
+        "2026-09-10: the last waypoint of every RAISE_TO_SIDE flight above. "
+        "Clear throughout: the leg runs from REST's deliberate board contact "
+        "up to +13 cm and the rig is never the limiting obstacle on it.",
     ),
     RouteValidation(
         "STOW_FROM_SIDE", "FWDCenterLabSivaPool",
-        "2026-09-10: side hub -> HOME, flown six times, arriving at HOME "
-        "every time with the board undisturbed. Carries the same model "
-        "disagreement as RAISE_TO_SIDE, and the same caveat. See #73.",
+        "2026-09-10: PRESENT->HOME, flown three times, arrived at HOME every "
+        "time, 32-34 s. Worst realised vs the rig -0.61, -0.62 and -0.69 cm at "
+        "the same SWING_1 crossing; worst overall -2.77 to -3.36 cm vs "
+        "table_top. Board undisturbed every run.",
+    ),
+    RouteValidation(
+        "STOW_ROUTE", "FWDCenterLabSivaPool",
+        "2026-09-10: REST->HOME, flown three times separately from the six "
+        "STOW_FROM_SIDE legs that also fly it, arrived at HOME every time, "
+        "33-39 s. Worst vs the rig -1.03, -1.15 and -1.58 cm. Board "
+        "undisturbed. Supersedes the rejection in VALIDATION_ATTEMPTS.",
+    ),
+    RouteValidation(
+        "LOWER_TO_REST", "FWDCenterLabSivaPool",
+        "2026-09-10: PRESENT->REST, flown three times, arrived at REST every "
+        "time in 7 s. Worst vs the rig +6.07, +6.08 and +6.09 cm — this leg "
+        "does not go near the rail. Board undisturbed. SEE THE CAVEAT BELOW: "
+        "this is the leg that hit an object when there was one in its way.",
     ),
     RouteValidation(
         "WAVE", "FWDCenterLabSivaPool",
-        "2026-09-10: flown from the rail pocket three times — RAISE_TO_SIDE, "
-        "PRESENT_ROUTE, three wave cycles, ending at PRESENT — plus the stow "
-        "back each time. Worst realised whole-arm clearance during the wave "
-        "+13.1, +13.3, +13.2 cm vs rig_rail_outer_right. Board undisturbed "
-        "every run. The pocket exit leg carries the model disagreement "
-        "recorded in #73 and is not what this row certifies; the wave and its "
-        "approach are.",
+        "2026-09-10: three cycles at PRESENT, flown three times through the "
+        "REBUILT approach (the earlier row described the approach through the "
+        "hub and was deleted with it). Worst realised whole-arm clearance "
+        "+13.11, +13.17 and +14.20 cm vs rig_rail_outer_right, +8.95 to "
+        "+9.79 cm counting the board. Board undisturbed. Two of the three ran; "
+        "the third correctly refused because its approach had left the arm "
+        "short of PRESENT.",
     ),
-    RouteValidation(
-        "PRESENT_ROUTE", "FWDCenterLabSivaPool",
-        "2026-09-10: side hub -> PRESENT, three runs, reaching the "
-        "presentation pose every time. Modelled +24.5 cm on the lift and "
-        "+18.1 cm on the adduction. PRESENT_MID exists because the shoulder "
-        "took the long way round (-25 to -70 commanded in one move went to "
-        "+84) — it is there so the joint goes the short way, not for room.",
-    ),
-    RouteValidation(
-        "PRESENT_RETURN", "FWDCenterLabSivaPool",
-        "2026-09-10: PRESENT -> side hub, flown as part of the runs above and "
-        "separately as a recovery. Guarded on the gross joints: the wave ends "
-        "with the forearm yaw at +-60 by design.",
-    ),
+    # THE ONE THING THESE ROWS DO NOT COVER: AN OBJECT IN THE REST FOOTPRINT.
+    #
+    # These routes END on the board — that is what REST is — and the forearm
+    # lands on the near-right cells.  Observed, on a run where foam_block had
+    # slid 7 cm off r2c3 into that footprint: LOWER_TO_REST moved it 5.3 cm and
+    # the STOW_ROUTE that followed pushed it to 17 cm total.  Nothing in these
+    # routes can see that; `primitives` has no scene.  The notebook says the
+    # same thing about red_cube in FWDCenterLabMCC ("An object parked there
+    # will be hit, and nothing in this function can know it is"), and the
+    # abilities brief requires `rest_forearm` to refuse when an object occupies
+    # the forearm footprint.  THAT CHECK IS NOT BUILT.  Until it is, these rows
+    # certify the corridor, not the tabletop.
+    #
+    # THE SivaPool ROWS FOR THE OLD HUB ROUTES WERE DELETED RATHER THAN EDITED.
+    #
+    # They certified a different implementation.  RAISE_TO_SIDE and
+    # STOW_FROM_SIDE used to be four hand-built steps through a roll -88 hub
+    # that appears nowhere in the notebook, and their rows rested on "flown six
+    # times, board undisturbed" — true, and not evidence about a board that was
+    # empty at the time.  Modelled afterwards: the ascent runs 4.3 to 6.5 cm
+    # inside `table_top` for the whole of its roll sweep, and the descent's
+    # join into CURL puts the hand 6.4 cm inside it.  Both are the gripper
+    # through the board's near edge, which is what an operator watched.  A
+    # validation row for code that no longer exists is worse than no row.
+    # PRESENT_ROUTE and PRESENT_RETURN went with the hub they connected to.
+    #
+    # The WAVE row for SivaPool went too.  The wave itself was measured there
+    # — +13.1, +13.3 and +13.2 cm across three runs — but the row described
+    # the approach it was flown through, and that approach was the hub.  The
+    # pose the wave happens at has not changed; the way the arm reaches it has.
+    #
+    # All of these have to be flown in SivaPool and measured before they get a
+    # row here, exactly as PLACE_ROUTE and STOW_ROUTE do (#74).
     # POINT is not listed for any scene.  Section 4.7 documents runs that moved
     # objects — a can shifted 0.189 m by an arm reporting positive clearance —
     # so it is not a validated route anywhere, and saying so here is more use
@@ -501,7 +616,11 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
 
 
 def route_named(name: str) -> Tuple[Waypoint, ...]:
-    routes = {"PLACE_ROUTE": PLACE_ROUTE, "STOW_ROUTE": STOW_ROUTE}
+    routes = {"PLACE_ROUTE": PLACE_ROUTE, "STOW_ROUTE": STOW_ROUTE,
+              "LIFT_TO_PRESENT": LIFT_TO_PRESENT,
+              "LOWER_TO_REST": LOWER_TO_REST,
+              "RAISE_TO_SIDE": RAISE_TO_SIDE,
+              "STOW_FROM_SIDE": STOW_FROM_SIDE}
     if name not in routes:
         raise KeyError(f"no route called {name!r}")
     return routes[name]
@@ -543,7 +662,6 @@ POSTURES: Dict[str, Dict[str, float]] = {
     POSTURE_HOME: HOME,
     POSTURE_REST: REST,
     POSTURE_PRESENT: PRESENT,
-    POSTURE_SIDE_HUB: SIDE_HUB,
 }
 
 #: Which route takes the arm from one posture to another.
@@ -557,10 +675,10 @@ POSTURES: Dict[str, Dict[str, float]] = {
 POSTURE_TRANSITIONS: Dict[Tuple[str, str], str] = {
     (POSTURE_HOME, POSTURE_REST): "PLACE_ROUTE",
     (POSTURE_REST, POSTURE_HOME): "STOW_ROUTE",
-    (POSTURE_HOME, POSTURE_SIDE_HUB): "RAISE_TO_SIDE",
-    (POSTURE_SIDE_HUB, POSTURE_HOME): "STOW_FROM_SIDE",
-    (POSTURE_SIDE_HUB, POSTURE_PRESENT): "PRESENT_ROUTE",
-    (POSTURE_PRESENT, POSTURE_SIDE_HUB): "PRESENT_RETURN",
+    (POSTURE_HOME, POSTURE_PRESENT): "RAISE_TO_SIDE",
+    (POSTURE_PRESENT, POSTURE_HOME): "STOW_FROM_SIDE",
+    (POSTURE_REST, POSTURE_PRESENT): "LIFT_TO_PRESENT",
+    (POSTURE_PRESENT, POSTURE_REST): "LOWER_TO_REST",
     (POSTURE_PRESENT, POSTURE_PRESENT): "WAVE",
 }
 
@@ -589,10 +707,9 @@ def path(frm: str, to: str) -> Optional[List[str]]:
     """The routes that get from one posture to another, in order.
 
     Breadth-first over the measured edges, so "wave" asked of an arm in the
-    rail pocket answers RAISE_TO_SIDE then PRESENT_ROUTE rather than refusing.
-    The arm has to leave the pocket before it can do anything, and that is a
-    fact about the rig rather than something the operator should have to know
-    and type.
+    rail pocket answers RAISE_TO_SIDE rather than refusing.  The arm has to
+    leave the pocket before it can do anything, and that is a fact about the
+    rig rather than something the operator should have to know and type.
 
     None means no measured sequence exists.  That is still a real answer: it
     is what stops a plan inventing a way through.
