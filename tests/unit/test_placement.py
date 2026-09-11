@@ -94,9 +94,12 @@ class TestReachability:
     """Distances are computed; reachable/not is READ from the scene.
 
     MCC measured reachability per cell with 40-restart DLS IK.  This module
-    reports the distance and defers the verdict, which also sidesteps MCC's own
-    inconsistency: it states a 0.609 m maximum, then labels cell_r3c3 at 0.622 m
-    reachable while calling 0.649 m unreachable.
+    reports the distance and defers the verdict, which also sidesteps what used
+    to read as an inconsistency: MCC's header stated a 0.609 m "maximum" while
+    its own table labelled cell_r3c3 at 0.622 m reachable and 0.649 m
+    unreachable.  Issue #41 reproduced the sweep and confirmed the per-cell
+    verdicts below are correct (reach is direction-dependent, not spherical);
+    only the header's "maximum" framing was wrong, and it has been corrected.
     """
 
     # FWDCenterLabMCC's published shoulder-to-cell table.

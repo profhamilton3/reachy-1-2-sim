@@ -30,10 +30,15 @@ REACHABILITY IS READ, NOT DERIVED
     reachable/not from the cell's own tags, because the IK result is the
     measurement and a sphere radius is only a proxy for it.
 
-    Note for whoever revisits MCC: its table is internally inconsistent.  It
-    states a 0.609 m maximum, then labels cell_r3c3 at 0.622 m as reachable
-    while calling 0.649 m unreachable.  Deferring to the per-cell IK labels is
-    what keeps this module from having to pick a side.
+    Note for whoever revisits MCC: it used to state a 0.609 m maximum
+    alongside a per-cell table that labelled cell_r3c3 at 0.622 m reachable
+    while calling 0.649 m unreachable -- apparently self-contradictory if
+    0.609 m were a hard sphere.  Issue #41 re-ran the sweep and confirmed the
+    per-cell table (this module's source of truth) was right and the single
+    "maximum" figure was the wrong framing: reach here is direction-dependent,
+    not a sphere, so cell_r3c3's cell tags were never in doubt.  See MCC's
+    header for the reproduction.  Deferring to the per-cell IK labels is what
+    keeps this module from having to pick a side.
 """
 
 from __future__ import annotations
