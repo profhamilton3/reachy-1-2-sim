@@ -555,14 +555,25 @@ class SimulatorExecutor:
         """
         if self._recorder is None or proposal.task_type == "pick_place":
             return
-        scene = self._scene_provider()
-        self._recorder.record(
-            proposal, result,
-            phases=phases.entries(),
-            started_at=started,
-            ended_at=time.time(),
-            scene_name=getattr(scene, "name", "") or proposal.scene_name,
-        )
+        try:
+            # INSIDE THE WALL.  `record` swallows its own failures, but the
+            # scene read that feeds it is this method's, and the scene
+            # provider raises on a scene that will not load.  Recording must
+            # not be able to fail a movement that already succeeded.
+            scene = self._scene_provider()
+            self._recorder.record(
+                proposal, result,
+                phases=phases.entries(),
+                started_at=started,
+                ended_at=time.time(),
+                scene_name=getattr(scene, "name", "") or proposal.scene_name,
+                # The revision moves when the board is edited; the name does
+                # not.  The record wants the one that moves.
+                scene_revision=getattr(scene, "scene_revision", ""),
+            )
+        except Exception:
+            log.exception("could not record the episode for plan %s",
+                          proposal.plan_id)
 
     def _execute_locked(self, proposal, should_cancel, on_phase) -> ExecutionResult:
         if proposal.task_type != "pick_place":

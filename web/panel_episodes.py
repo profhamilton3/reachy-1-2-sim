@@ -39,6 +39,7 @@ BOUNDS THIS ACCEPTS
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -48,9 +49,14 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 log = logging.getLogger("panel.episodes")
 
-#: Where the episodes go.  Beside the search CLI's own convention (`runs/`),
-#: and overridable for a container that mounts its state elsewhere.
-DEFAULT_DB = os.path.join("runs", "panel_episodes.db")
+#: Where the episodes go, in the search CLI's own convention (`runs/`).
+#:
+#: RESOLVED AGAINST THE REPO, NOT THE PROCESS CWD.  supervisord starts the
+#: panel with CWD "/", and a relative default there writes `/runs/...` — the
+#: container's ephemeral layer, outside every mounted volume and outside the
+#: `.gitignore` rule that is supposed to cover it.  Set
+#: REACHY_PANEL_EPISODE_DB to put it on a volume.
+DEFAULT_DB = ""
 
 #: How many live-interactive episodes to keep.  Roughly a month of steady
 #: demonstration use; old ones are dropped newest-first-kept.
@@ -100,7 +106,7 @@ class EpisodeRecorder:
     def __init__(self, scene_file: str = "", *, db_path: str = "",
                  keep: int = DEFAULT_KEEP) -> None:
         self._scene_file = scene_file
-        self._db_path = db_path or DEFAULT_DB
+        self._db_path = db_path or str(_repo_root() / "runs" / "panel_episodes.db")
         self._keep = keep
         #: Built from git and a file hash, so it is rebuilt only when the
         #: scene file changes rather than once per movement.
@@ -111,7 +117,7 @@ class EpisodeRecorder:
 
     def record(self, proposal, result, *, phases: Sequence[Tuple[str, float]] = (),
                started_at: float = 0.0, ended_at: float = 0.0,
-               scene_name: str = "") -> Optional[str]:
+               scene_name: str = "", scene_revision: str = "") -> Optional[str]:
         """Record one episode.  Returns the trial id, or None if nothing was
         written — which is a log line and never an exception.
 
@@ -120,7 +126,7 @@ class EpisodeRecorder:
         """
         try:
             return self._record(proposal, result, phases, started_at,
-                                ended_at, scene_name)
+                                ended_at, scene_name, scene_revision)
         except Exception:
             # Deliberately broad.  The alternative to swallowing this is a
             # failed motion report for a movement that actually succeeded.
@@ -131,7 +137,7 @@ class EpisodeRecorder:
     # -- everything below may raise; `record` is the wall -------------------
 
     def _record(self, proposal, result, phases, started_at, ended_at,
-                scene_name) -> str:
+                scene_name, scene_revision) -> str:
         _ensure_paths()
         from reachy_ai.evaluation.base import ViolationKind
         from reachy_ai.experience.models import (EpisodeConfig, EpisodeResult,
@@ -154,7 +160,10 @@ class EpisodeRecorder:
         spec = TaskSpec(
             task_id=f"panel:{proposal.task_type}",
             task_type=proposal.task_type,
-            scene_revision=scene_name or getattr(proposal, "scene_name", ""),
+            # The REVISION, which moves when the board is edited — not the
+            # scene's name, which does not.  Two episodes either side of a
+            # placement must not read as the same world.
+            scene_revision=scene_revision,
             arm_policy=getattr(proposal, "arm", "") or "right",
             # The rule the executor actually applied, in the words it applied
             # it in.  A success definition invented here would describe a
@@ -168,7 +177,7 @@ class EpisodeRecorder:
         )
 
         config = EpisodeConfig(
-            simulator_identity=self._identity_for(scene_name),
+            simulator_identity=self._identity_for(scene_revision),
             # Zero because there was no seed, not because the seed was zero.
             # `live_interactive` is what tells a reader to disregard it.
             seed=0,
@@ -188,7 +197,8 @@ class EpisodeRecorder:
             trial_id = store.create_trial(
                 STUDY_ID, spec, self._route_json(proposal), config,
                 live_interactive=True,
-                optimizer_metadata=self._metadata(proposal, phases, evidence),
+                optimizer_metadata=self._metadata(proposal, phases, evidence,
+                                                  scene_name),
             )
             store.start_trial(trial_id)
 
@@ -238,10 +248,11 @@ class EpisodeRecorder:
             "end_posture": getattr(proposal, "end_posture", ""),
         })
 
-    def _metadata(self, proposal, phases, evidence) -> Dict[str, Any]:
+    def _metadata(self, proposal, phases, evidence, scene_name) -> Dict[str, Any]:
         return {
             "live_interactive": True,
             "source": "panel",
+            "scene_name": scene_name or getattr(proposal, "scene_name", ""),
             "plan_id": getattr(proposal, "plan_id", ""),
             "plan_version": getattr(proposal, "plan_version", 0),
             "requested_cell": getattr(proposal, "cell", None),
@@ -257,29 +268,43 @@ class EpisodeRecorder:
             "scene_changed": bool(evidence.get("scene_changed", False)),
         }
 
-    def _identity_for(self, scene_name: str):
+    def _identity_for(self, scene_revision: str):
+        """The identity for this episode, cached on the scene file.
+
+        HASHED WHERE THE FILE IS, RECORDED WHERE IT LIVES IN THE REPO.  Those
+        are two different paths and conflating them cost the hash: passing the
+        repo-relative path straight to `build_simulator_identity` makes it open
+        that path relative to the PROCESS CWD, which under supervisord is "/".
+        The read fails, `_sha256_path` returns "", and every record carries a
+        scene_source_path with no scene_sha256 — the degenerate identity
+        `assert_research_context` exists to refuse.
+        """
         from reachy_ai.experience.identity import build_simulator_identity
 
-        path = pathlib.Path(self._scene_file) if self._scene_file else None
+        absolute = os.path.abspath(self._scene_file) if self._scene_file else ""
         try:
-            stat = path.stat() if path else None
+            stat = os.stat(absolute) if absolute else None
         except OSError:
             stat = None
-        key = (str(path), stat.st_mtime_ns if stat else 0,
-               stat.st_size if stat else 0, scene_name)
-        if self._identity is not None and self._identity_key == key:
-            return self._identity
+        key = (absolute, stat.st_mtime_ns if stat else 0,
+               stat.st_size if stat else 0)
+        if self._identity is None or self._identity_key != key:
+            # `build_simulator_identity` shells out to git twice.  Off the
+            # motion path, and cached on the scene file, so a session of twenty
+            # waves pays for it once.
+            identity = build_simulator_identity(
+                scene_path=absolute,
+                backend_name="sdk_bridge",
+            )
+            self._identity = dataclasses.replace(
+                identity, scene_source_path=_relative(self._scene_file))
+            self._identity_key = key
 
-        # `build_simulator_identity` shells out to git twice.  Off the motion
-        # path, and cached on the scene file, so a session of twenty waves
-        # pays for it once.
-        self._identity = build_simulator_identity(
-            scene_path=_relative(self._scene_file),
-            scene_revision=scene_name,
-            backend_name="sdk_bridge",
-        )
-        self._identity_key = key
-        return self._identity
+        # The revision is the cheap half and the half that moves: it changes
+        # every time the board is edited, and rebuilding the whole identity
+        # (two git subprocesses) for it would be paying a lot for one string.
+        return dataclasses.replace(self._identity,
+                                   scene_revision=scene_revision)
 
 
 def build_recorder(scene_file: str = "") -> Optional[EpisodeRecorder]:

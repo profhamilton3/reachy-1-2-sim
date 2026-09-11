@@ -116,8 +116,14 @@ class IdentityMismatchError(ExperienceStoreError):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+#: ``datetime.UTC`` is 3.11+, and the panel container this store is now opened
+#: from is ros:foxy — Ubuntu 20.04, python3.8.  ``timezone.utc`` is the same
+#: object under a name that has always existed.
+_UTC = datetime.timezone.utc
+
+
 def _now_iso() -> str:
-    return datetime.datetime.now(datetime.UTC).isoformat()
+    return datetime.datetime.now(_UTC).isoformat()
 
 
 def _sha256_file(path: pathlib.Path) -> Optional[str]:
@@ -585,7 +591,7 @@ class ExperienceStore:
         runners that never called complete/fail/abort.
         """
         cutoff = (
-            datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=threshold_s)
+            datetime.datetime.now(_UTC) - datetime.timedelta(seconds=threshold_s)
         ).isoformat()
         now = _now_iso()
         with self._conn:

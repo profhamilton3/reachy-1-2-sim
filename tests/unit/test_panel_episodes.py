@@ -402,6 +402,84 @@ def test_the_record_carries_no_host_port_or_absolute_path(db, fake_sdk,
                    for part in blob.split('"'))
 
 
+def test_the_scene_is_hashed_from_a_directory_that_is_not_the_repo(
+        db, tmp_path, monkeypatch, fake_sdk, validated):
+    """The container runs with CWD "/".  A repo-relative path handed to
+    `build_simulator_identity` is opened relative to THAT, so the read fails,
+    the hash comes back empty, and every record carries a scene_source_path
+    with no scene_sha256 — the degenerate identity `assert_research_context`
+    exists to refuse."""
+    scene_file = tmp_path / "scene.yaml"
+    scene_file.write_text("name: TestScene\n")
+    monkeypatch.chdir(tmp_path / "..")
+
+    ex = SimulatorExecutor(StubLink(), live_scene, str(scene_file),
+                           worker=StubWorker(),
+                           recorder=EpisodeRecorder(str(scene_file), db_path=db))
+    ex.execute(_ability())
+
+    identity = SimulatorIdentity.from_json(rows(db)[0]["identity_json"])
+    assert identity.scene_sha256, "the scene was not hashed"
+    # And the path recorded next to it is still not an absolute one.
+    assert not identity.scene_source_path.startswith("/")
+
+
+def test_the_revision_recorded_is_the_one_that_moves(db, fake_sdk, validated):
+    """`SceneView` carries a name and a revision.  The name does not change
+    when the board is edited; the revision does, and that is the whole reason
+    these episodes are marked live-interactive."""
+    executor(db).execute(_ability())
+
+    row, = rows(db)
+    identity = SimulatorIdentity.from_json(row["identity_json"])
+    spec = json.loads(row["task_spec_json"])
+    assert identity.scene_revision == "rev-1"
+    assert spec["scene_revision"] == "rev-1"
+    # The name is kept, just not where the revision belongs.
+    assert json.loads(row["optimizer_metadata_json"])["scene_name"] == "TestScene"
+
+
+def test_a_scene_that_will_not_load_costs_a_record_and_not_a_motion(
+        db, fake_sdk, validated):
+    """The scene read that feeds the recorder is the executor's, not the
+    recorder's, so it needs the same wall around it."""
+    state = {"flown": False, "reads_after": 0}
+
+    class Flags(StubWorker):
+        def run(self, job, **kw):
+            state["flown"] = True
+            return self.result
+
+    def provider():
+        # Anchored to the motion rather than to a raw call count: the reads
+        # before it belong to availability and to the pre-lease snapshot, and
+        # failing one of those is a refusal rather than the case under test.
+        if state["flown"]:
+            state["reads_after"] += 1
+            if state["reads_after"] > 1:        # past _verify_posture's read
+                raise RuntimeError("the scene file is gone")
+        return live_scene()
+
+    ex = SimulatorExecutor(StubLink(), provider, "scene.yaml",
+                           worker=Flags(),
+                           recorder=EpisodeRecorder("scene.yaml", db_path=db))
+    out = ex.execute(_ability())
+    assert out.status == "completed", out.detail
+    assert state["reads_after"] > 1, "the recorder never reached its scene read"
+    assert not os.path.exists(db)
+
+
+def test_the_default_database_is_not_resolved_against_the_process_cwd(
+        tmp_path, monkeypatch):
+    """supervisord starts the panel with CWD "/", where a relative default
+    writes into the container's ephemeral layer."""
+    monkeypatch.chdir(tmp_path)
+    recorder = EpisodeRecorder("scene.yaml")
+    assert os.path.isabs(recorder._db_path)
+    assert not recorder._db_path.startswith(str(tmp_path))
+    assert recorder._db_path.endswith(os.path.join("runs", "panel_episodes.db"))
+
+
 def test_the_route_is_recorded_as_a_route_and_not_as_a_recipe(db, fake_sdk,
                                                               validated):
     """The abilities have no TrajectoryRecipe yet — that is #91 — and an empty
@@ -417,23 +495,80 @@ def test_the_route_is_recorded_as_a_route_and_not_as_a_recipe(db, fake_sdk,
 # The schema change
 # ---------------------------------------------------------------------------
 
+def _write_v1_database(path):
+    """A real v1 file, built the way v1 built one.
+
+    Not a v2 file with the column dropped: ALTER TABLE ... DROP COLUMN needs
+    SQLite 3.35, and the project's own ros:foxy image ships 3.31, where that
+    scaffolding would error before it tested anything.  Reconstructing the old
+    schema also tests the migration against what v1 actually wrote rather than
+    against an approximation of it.
+    """
+    import sqlite3
+
+    from reachy_ai.experience.store import _DDL
+
+    v1_ddl = _DDL.replace(",\n    live_interactive        INTEGER NOT NULL DEFAULT 0", "")
+    v1_ddl = "\n".join(
+        block for block in v1_ddl.split("\n\n")
+        if "idx_trials_live\n" not in block + "\n"
+    )
+    assert "live_interactive" not in v1_ddl, v1_ddl
+
+    conn = sqlite3.connect(path)
+    conn.executescript(v1_ddl)
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+
+
 def test_a_v1_database_migrates_and_keeps_its_rows(tmp_path):
     """Every row a v1 file holds was written by an offline runner, which is
     exactly what the new column's default says."""
     import sqlite3
 
     path = str(tmp_path / "v1.db")
+    _write_v1_database(path)
+    conn = sqlite3.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(trials)")}
+    assert "live_interactive" not in columns
+    conn.close()
+
+    # Opening it is the migration.
     with ExperienceStore.open(path) as store:
         _offline_trial(store, build_simulator_identity())
+        rows_ = store.list_trials("study-offline", limit=None)
+
+    assert len(rows_) == 1
+    assert rows_[0]["live_interactive"] == 0
 
     conn = sqlite3.connect(path)
-    conn.execute("DROP INDEX idx_trials_live")
-    conn.execute("ALTER TABLE trials DROP COLUMN live_interactive")
-    conn.execute("PRAGMA user_version = 1")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    conn.close()
+
+
+def test_a_v1_database_keeps_the_rows_it_already_had(tmp_path):
+    """The rows survive the ALTER, not just the schema."""
+    import sqlite3
+
+    path = str(tmp_path / "v1-with-rows.db")
+    _write_v1_database(path)
+
+    identity = build_simulator_identity()
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "INSERT INTO trials (trial_id, study_id, task_type, task_spec_json, "
+        "recipe_json, config_json, result_json, identity_json, status, "
+        "success, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("old-1", "study-v1", "stow_arm", "{}", "{}", "{}", "{}",
+         identity.to_json(), EpisodeStatus.SUCCEEDED.value, 1,
+         "2026-01-01T00:00:00+00:00"))
     conn.commit()
     conn.close()
 
     with ExperienceStore.open(path) as store:
-        rows_ = store.list_trials("study-offline", limit=None)
-        assert len(rows_) == 1
-        assert rows_[0]["live_interactive"] == 0
+        row, = store.list_trials("study-v1", limit=None)
+
+    assert row["trial_id"] == "old-1"
+    assert row["live_interactive"] == 0
