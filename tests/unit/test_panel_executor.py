@@ -17,6 +17,7 @@ import pytest
 _HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(_HERE, "../../web"))
 sys.path.insert(0, os.path.join(_HERE, "../../native_mujoco"))
+sys.path.insert(0, os.path.join(_HERE, "../../src"))
 
 from panel_executor import (  # noqa: E402
     ExecutionResult,
@@ -204,6 +205,15 @@ def fake_sdk(monkeypatch):
     monkeypatch.setitem(sys.modules, "reachy_sdk",
                         types.SimpleNamespace(ReachySDK=object))
     monkeypatch.setenv("REACHY_SIM_BACKEND", "mujoco-remote")
+    # #82's footprint check reads a real scene FILE (object geometry lives
+    # there, not on the SceneView these tests stub).  Every test in this
+    # module points scene_file at a placeholder ("scene.yaml") that was never
+    # meant to touch disk, so stand in with an object-free model here — the
+    # dedicated footprint tests below build a real one deliberately.
+    from reachy_ai.scene.awareness import SceneModel
+    monkeypatch.setattr(
+        SceneModel, "from_yaml",
+        staticmethod(lambda path: SceneModel("pedestal", [], None)))
     yield
 
 
@@ -1208,3 +1218,151 @@ def test_pointing_at_the_one_object_on_the_board_is_allowed(monkeypatch,
                                     end_posture="present",
                                     expected_start_posture="present"))
     assert ok, why
+
+
+# ---------------------------------------------------------------------------
+# #82: refuse rest_forearm (and anything else that crosses REST) rather than
+# command it, if a live object is where the swept path would land.
+# ---------------------------------------------------------------------------
+
+def _rest_hand_point():
+    """A world point the REST pose's hand capsule actually occupies.
+
+    Computed from the real kinematics rather than hand-typed, the same way
+    test_arm_clearance.py pins its own reference points: if the link lengths
+    or REST itself ever change, this point moves with them instead of quietly
+    testing a footprint that no longer matches the real pose.
+    """
+    from reachy_ai.motion import rig_routes as RR
+    from reachy_ai.motion.kinematics import link_capsules
+    q = [RR.REST[j] for j in RR.ARM7]
+    _name, p0, p1, _radius = next(
+        c for c in link_capsules(q, side="right") if c[0] == "hand")
+    return tuple((a + b) / 2.0 for a, b in zip(p0, p1))
+
+
+def _scene_model_with(point, oid="soda_can"):
+    from reachy_ai.scene.awareness import SceneModel, SceneObject
+    obj = SceneObject(id=oid, kind="box", center=point, size=(0.06, 0.06, 0.06),
+                      dynamic=True, tracked=True)
+    return SceneModel("pedestal", [obj], None)
+
+
+def _scene_with_object_at(point, oid="soda_can", cell="r2c3"):
+    scene = make_scene()
+    from panel_scene import apply_snapshot
+    apply_snapshot(scene, SimSnapshot(
+        scene_revision="rev-1", objects={oid: point},
+        received_at=time.monotonic(),
+    ))
+    scene.objects[oid].cell = cell
+    return scene
+
+
+class TestFootprintCheck:
+    """rest_forearm has no scene, so nothing in primitives.py can know an
+    object drifted into the forearm footprint — the check has to sit above
+    it, where `_ability_available` already has a fresh scene under the lease.
+    """
+
+    def test_an_object_in_the_rest_footprint_refuses(self, monkeypatch, fake_sdk):
+        _validated(monkeypatch)
+        point = _rest_hand_point()
+        from reachy_ai.scene.awareness import SceneModel
+        monkeypatch.setattr(SceneModel, "from_yaml",
+                            staticmethod(lambda path: _scene_model_with(point)))
+        scene = _scene_with_object_at(point)
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="rest_forearm", route="PLACE_ROUTE",
+            end_posture="rest", expected_start_posture="home"))
+
+        assert ok is False
+        assert "soda_can" in why and "r2c3" in why
+
+    def test_an_object_one_cell_away_does_not_refuse(self, monkeypatch, fake_sdk):
+        _validated(monkeypatch)
+        far_away = (5.0, 5.0, 5.0)
+        from reachy_ai.scene.awareness import SceneModel
+        monkeypatch.setattr(SceneModel, "from_yaml",
+                            staticmethod(lambda path: _scene_model_with(far_away)))
+        scene = _scene_with_object_at(far_away, cell="r1c1")
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="rest_forearm", route="PLACE_ROUTE",
+            end_posture="rest", expected_start_posture="home"))
+
+        assert ok is True, why
+
+    def test_a_cleared_footprint_behaves_exactly_as_before(self, monkeypatch,
+                                                            fake_sdk):
+        """No object at all: unchanged behaviour, same as every existing
+        rest_forearm test in this file (which use the empty fake_sdk model)."""
+        _validated(monkeypatch)
+        scene = live_scene()
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="rest_forearm", route="PLACE_ROUTE",
+            end_posture="rest", expected_start_posture="home"))
+
+        assert ok is True, why
+
+    def test_the_refusal_uses_live_poses_not_the_scene_files_own(
+            self, monkeypatch, fake_sdk):
+        """An object moved out of the footprint since the scene loaded must
+        stop blocking it — the live position wins, not the YAML's."""
+        _validated(monkeypatch)
+        rest_point = _rest_hand_point()
+        from reachy_ai.scene.awareness import SceneModel
+        # The FILE says the object sits in the footprint; the LIVE snapshot
+        # says it has since moved away.  update_poses() must make the live
+        # position the one that is actually checked.
+        monkeypatch.setattr(
+            SceneModel, "from_yaml",
+            staticmethod(lambda path: _scene_model_with(rest_point)))
+        scene = _scene_with_object_at((5.0, 5.0, 5.0), cell="r1c1")
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="rest_forearm", route="PLACE_ROUTE",
+            end_posture="rest", expected_start_posture="home"))
+
+        assert ok is True, why
+
+    def test_it_also_gates_wave_from_the_pocket(self, monkeypatch, fake_sdk):
+        """RAISE_TO_SIDE reaches PRESENT by way of REST, so a wave requested
+        from the pocket crosses the identical footprint PLACE_ROUTE does —
+        the decision #82 asks for, recorded in rig_routes.FOOTPRINT_LEGS."""
+        _validated(monkeypatch)
+        point = _rest_hand_point()
+        from reachy_ai.scene.awareness import SceneModel
+        monkeypatch.setattr(SceneModel, "from_yaml",
+                            staticmethod(lambda path: _scene_model_with(point)))
+        scene = _scene_with_object_at(point)
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="wave", route="WAVE",
+            end_posture="present", expected_start_posture="present"))
+
+        assert ok is False
+        assert "soda_can" in why
+
+    def test_stow_arm_is_gated_the_same_way(self, monkeypatch, fake_sdk):
+        _validated(monkeypatch)
+        point = _rest_hand_point()
+        from reachy_ai.scene.awareness import SceneModel
+        monkeypatch.setattr(SceneModel, "from_yaml",
+                            staticmethod(lambda path: _scene_model_with(point)))
+        scene = _scene_with_object_at(point)
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="stow_arm", route="STOW_ROUTE",
+            end_posture="home", expected_start_posture="rest"))
+
+        assert ok is False
+        assert "soda_can" in why

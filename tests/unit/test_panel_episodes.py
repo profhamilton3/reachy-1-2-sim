@@ -123,6 +123,13 @@ def fake_sdk(monkeypatch):
     monkeypatch.setitem(sys.modules, "reachy_sdk",
                         types.SimpleNamespace(ReachySDK=object))
     monkeypatch.setenv("REACHY_SIM_BACKEND", "mujoco-remote")
+    # #82's footprint check reads a real scene FILE; every executor() call in
+    # this module points scene_file at a placeholder ("scene.yaml") that was
+    # never meant to touch disk, so stand in with an object-free model.
+    from reachy_ai.scene.awareness import SceneModel
+    monkeypatch.setattr(
+        SceneModel, "from_yaml",
+        staticmethod(lambda path: SceneModel("pedestal", [], None)))
     yield
 
 

@@ -112,14 +112,20 @@ are, and an empty board proves nothing about disturbance.
 
 ### What is explicitly not covered
 
-**An object in the rest footprint will be hit.** These routes end on the board;
-the forearm lands on the near-right cells. Observed on a run where `foam_block`
-had slid 7 cm off r2c3 into that footprint: `LOWER_TO_REST` moved it 5.3 cm and
-the `STOW_ROUTE` after it pushed the total to 17 cm. `primitives` has no scene
-and cannot see this. The notebook records the same about `red_cube` in
-FWDCenterLabMCC. The abilities brief requires `rest_forearm` to refuse when an
-object occupies the forearm footprint; **that check is not built**. Until it is,
-these rows certify the corridor, not the tabletop.
+**An object in the rest footprint will be hit — RESOLVED by #82.** These routes
+end on the board; the forearm lands on the near-right cells. Observed on a run
+where `foam_block` had slid 7 cm off r2c3 into that footprint: `LOWER_TO_REST`
+moved it 5.3 cm and the `STOW_ROUTE` after it pushed the total to 17 cm.
+`primitives` has no scene and cannot see this, which is why the check sits
+above it, in `web/panel_executor.py::_ability_available` — it sweeps
+`reachy_ai.motion.rig_routes.FOOTPRINT_LEGS` (the HOVER/PRESENT → REST_SHUT →
+REST tail or head of every route that lands on, or departs from, REST) against
+live object poses and refuses the whole ability rather than commanding a move
+that would hit something. It gates `rest_forearm`, `stow_arm`, and any `wave`
+or `point_*` request flown from the pocket by way of `RAISE_TO_SIDE`, which
+crosses the identical corridor. These rows now certify the tabletop as well as
+the corridor — for the REST-adjacent leg specifically; guarding the rest of the
+rig corridor (`SWING_1` and #74) is still open.
 
 **Recovery from mid-corridor is still narrow.** `rig_motion.stranded_at` only
 recognises the four pocket waypoints. An arm left at `SWING_2` is reported, not
@@ -132,8 +138,6 @@ Revisit this ADR when:
 - any flight of these routes disturbs the board, or the realised rig clearance
   goes materially past −1.6 cm;
 - the rig geometry or the scene's rail placement changes;
-- the forearm-footprint check lands, which would let the rest routes certify the
-  tabletop as well as the corridor;
 - a measured shortcut from `SWING_3` to `PRESENT` is flown — modelled at +3.8 cm,
   it would remove the touch-down at `REST` on the way out, and it is currently
   unmeasured and therefore not used.

@@ -370,3 +370,52 @@ def test_every_edge_has_something_that_can_fly_it():
 
     for route in set(R.POSTURE_TRANSITIONS.values()):
         assert route in M.ROUTE_RUNNERS, route
+
+
+# ---------------------------------------------------------------------------
+# #82: FOOTPRINT_LEGS names the tabletop-adjacent tail/head of each route the
+# forearm-footprint check sweeps against live object poses.
+# ---------------------------------------------------------------------------
+
+class TestFootprintLegs:
+    def test_every_named_route_is_a_real_posture_edge(self):
+        """A route this points at that does not exist in the posture graph
+        would be checking a footprint nothing ever flies."""
+        edges = set(R.POSTURE_TRANSITIONS.values())
+        for route in R.FOOTPRINT_LEGS:
+            assert route in edges, route
+
+    def test_place_route_and_raise_to_side_share_the_same_tail(self):
+        """RAISE_TO_SIDE is PLACE_ROUTE + LIFT_TO_PRESENT, so it crosses the
+        identical tabletop corridor on its way through — checked once, by
+        route name, rather than duplicated per ability."""
+        assert R.FOOTPRINT_LEGS["RAISE_TO_SIDE"] == R.FOOTPRINT_LEGS["PLACE_ROUTE"]
+
+    def test_stow_route_and_stow_from_side_share_the_same_tail(self):
+        assert (R.FOOTPRINT_LEGS["STOW_FROM_SIDE"]
+                == R.FOOTPRINT_LEGS["STOW_ROUTE"])
+
+    def test_place_routes_tail_matches_its_own_last_three_waypoints(self):
+        """The checked legs are not an approximation of PLACE_ROUTE's real
+        tail — they are it, in the same order the route actually flies."""
+        last_three = tuple(w.pose for w in R.PLACE_ROUTE[-3:])
+        assert last_three == (R.HOVER, R.REST_SHUT, R.REST)
+        assert R.FOOTPRINT_LEGS["PLACE_ROUTE"] == last_three
+
+    def test_stow_routes_head_is_place_routes_tail_reversed(self):
+        """STOW_ROUTE departs the board the way PLACE_ROUTE arrives at it,
+        flown backwards — the same corridor, not a second one."""
+        assert (R.FOOTPRINT_LEGS["STOW_ROUTE"]
+                == tuple(reversed(R.FOOTPRINT_LEGS["PLACE_ROUTE"])))
+
+    def test_lower_to_rest_starts_from_present_not_hover(self):
+        """LOWER_TO_REST is flown FROM the presentation pose, not from the
+        pocket-exit corridor — a different entry, the same landing."""
+        assert R.FOOTPRINT_LEGS["LOWER_TO_REST"][0] == R.PRESENT
+        assert R.FOOTPRINT_LEGS["LOWER_TO_REST"][-2:] == (R.REST_SHUT, R.REST)
+
+    def test_wave_and_lift_to_present_are_absent_on_purpose(self):
+        """Neither route lands the arm on REST or departs from it, so neither
+        can catch an object its own named route did not already put there."""
+        assert "WAVE" not in R.FOOTPRINT_LEGS
+        assert "LIFT_TO_PRESENT" not in R.FOOTPRINT_LEGS

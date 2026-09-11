@@ -517,6 +517,9 @@ class SimulatorExecutor:
                 blocked = [R.check_route(r, scene.name)[1] for r in into]
                 return False, (blocked[0] if blocked else
                                f"nothing measured reaches {proposal.end_posture}")
+            refusal = self._footprint_refusal(scene, usable)
+            if refusal is not None:
+                return False, refusal
             return True, ""
 
         ok, why = R.check_route(proposal.route, scene.name)
@@ -526,7 +529,57 @@ class SimulatorExecutor:
             # correct answer there, not a placeholder for one.
             return False, why
 
+        refusal = self._footprint_refusal(scene, [proposal.route])
+        if refusal is not None:
+            return False, refusal
+
         return True, ""
+
+    def _footprint_refusal(self, scene, route_names) -> Optional[str]:
+        """#82: refuse rather than command, if a live object is where one of
+        `route_names` would land the arm on (or depart it from) REST.
+
+        Checked against ALL routes that could resolve the ability's posture
+        transition, not only the one that will actually fly — `available()`
+        has no live joint telemetry, so it cannot tell which posture the arm
+        is standing at, and refusing on the superset can only be more
+        cautious than strictly necessary, never less.  See
+        `reachy_ai.motion.rig_routes.FOOTPRINT_LEGS` for which routes this
+        applies to and why.
+        """
+        _ensure_paths()
+        from reachy_ai.motion import rig_routes as R
+        from reachy_ai.motion.kinematics import CartesianPlanner
+        from reachy_ai.scene.awareness import SceneModel
+
+        legs = [R.FOOTPRINT_LEGS[r] for r in route_names if r in R.FOOTPRINT_LEGS]
+        if not legs:
+            return None
+
+        model = SceneModel.from_yaml(self._scene_file)
+        model.update_poses({oid: o.position for oid, o in scene.objects.items()
+                            if o.position is not None})
+        # arm=None: every clearance method is pure geometry over the scene and
+        # never touches the SDK, which is what makes this callable here rather
+        # than only from the motion process that actually owns an arm.
+        planner = CartesianPlanner(arm=None, scene=model, side="right")
+
+        worst: Dict[str, float] = {}
+        for waypoints in legs:
+            for a, b in zip(waypoints, waypoints[1:]):
+                qa = [a[j] for j in R.ARM7]
+                qb = [b[j] for j in R.ARM7]
+                for oid, c in planner.path_clearances(qa, qb).items():
+                    if oid not in worst or c.distance < worst[oid]:
+                        worst[oid] = c.distance
+
+        blocking = sorted((d, oid) for oid, d in worst.items() if d < 0.0)
+        if not blocking:
+            return None
+        d, oid = blocking[0]
+        cell = scene.objects[oid].cell or "off the grid"
+        return (f"I will not do that — {oid} is on {cell}, inside where my "
+                f"arm would land ({-d * 100:.1f} cm into it)")
 
     # -- execution ---------------------------------------------------------
 
