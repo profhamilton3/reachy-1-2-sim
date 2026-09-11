@@ -118,7 +118,7 @@ class EpisodeRecorder:
     def record(self, proposal, result, *, phases: Sequence[Tuple[str, float]] = (),
                started_at: float = 0.0, ended_at: float = 0.0,
                scene_name: str = "", scene_revision: str = "",
-               obstacles: Sequence[str] = ()) -> Optional[str]:
+               obstacles: Optional[Sequence[str]] = None) -> Optional[str]:
         """Record one episode.  Returns the trial id, or None if nothing was
         written — which is a log line and never an exception.
 
@@ -139,7 +139,7 @@ class EpisodeRecorder:
     # -- everything below may raise; `record` is the wall -------------------
 
     def _record(self, proposal, result, phases, started_at, ended_at,
-                scene_name, scene_revision, obstacles=()) -> str:
+                scene_name, scene_revision, obstacles=None) -> str:
         _ensure_paths()
         from reachy_ai.evaluation.base import ViolationKind
         from reachy_ai.experience.models import (EpisodeConfig, EpisodeResult,
@@ -256,12 +256,12 @@ class EpisodeRecorder:
             "live_interactive": True,
             "source": "panel",
             "scene_name": scene_name or getattr(proposal, "scene_name", ""),
-            # WHICH OBJECTS WERE ON THE BOARD.  The reuse gate (#89) rejects a
-            # candidate that never recorded one, because a route certified
-            # over an unknown board is certified over nothing — so an episode
-            # that does not write this down can never become evidence for
-            # anything, however well it went.
-            "obstacles": sorted(obstacles),
+            # WHICH OBJECTS WERE ON THE BOARD, or null for "nobody looked".
+            # The reuse gate (#89) rejects a candidate that never recorded
+            # one, because a route certified over an unknown board is
+            # certified over nothing — and an empty list written where nothing
+            # was observed would claim an empty board instead.
+            "obstacles": None if obstacles is None else sorted(obstacles),
             "plan_id": getattr(proposal, "plan_id", ""),
             "plan_version": getattr(proposal, "plan_version", 0),
             "requested_cell": getattr(proposal, "cell", None),

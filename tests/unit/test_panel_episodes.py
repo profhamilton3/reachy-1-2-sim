@@ -10,6 +10,7 @@ resolves only when the whole suite runs and leaves the file broken in
 isolation.
 """
 
+import dataclasses
 import json
 import os
 import sys
@@ -486,6 +487,43 @@ def test_the_board_the_episode_happened_on_is_recorded(db, fake_sdk, validated):
     executor(db).execute(_ability())
     meta = json.loads(rows(db)[0]["optimizer_metadata_json"])
     assert meta["obstacles"] == ["soda_can"]
+
+
+def test_an_object_off_the_board_is_not_recorded_as_an_obstacle(db, fake_sdk,
+                                                                validated):
+    """`scene.objects` is the declared pool. An object sitting in the pool
+    rather than on the table is not an obstacle, and recording it as one makes
+    a later, correctly-computed board fail to match."""
+    scene = live_scene()
+    scene.objects["red_cube"] = dataclasses.replace(
+        next(iter(scene.objects.values())), object_id="red_cube",
+        on_board=False)
+
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=StubWorker(),
+                           recorder=EpisodeRecorder("scene.yaml", db_path=db))
+    ex.execute(_ability())
+    meta = json.loads(rows(db)[0]["optimizer_metadata_json"])
+    assert meta["obstacles"] == ["soda_can"]
+
+
+def test_a_board_nobody_observed_is_recorded_as_not_recorded(db, fake_sdk,
+                                                             validated):
+    """A scene with no snapshot has `on_board` None everywhere — unknown, not
+    absent. Writing [] there would certify a route against an empty board that
+    was never seen, which is the inversion the gate's rule exists to stop."""
+    scene = make_scene()                    # never given a snapshot
+
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=StubWorker(),
+                           recorder=EpisodeRecorder("scene.yaml", db_path=db))
+    ex.execute(_ability())
+    meta = json.loads(rows(db)[0]["optimizer_metadata_json"])
+    assert meta["obstacles"] is None
+
+    # And the gate refuses it, rather than reading it as an empty board.
+    from reachy_ai.experience.compatibility import ReuseCandidate
+    assert ReuseCandidate.from_row(rows(db)[0]).obstacles is None
 
 
 def test_an_episode_this_panel_recorded_is_refused_by_the_reuse_gate(

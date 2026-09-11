@@ -570,9 +570,14 @@ class SimulatorExecutor:
                 # The revision moves when the board is edited; the name does
                 # not.  The record wants the one that moves.
                 scene_revision=getattr(scene, "scene_revision", ""),
-                # The board this episode happened on, which the reuse gate
-                # (#89) needs in order to certify a route against anything.
-                obstacles=sorted(getattr(scene, "objects", {}) or {}),
+                # THE BOARD THAT WAS OBSERVED, or None for "nobody looked".
+                # `scene.objects` is the declared pool: it includes objects
+                # parked off the board, it is empty on a scene that failed to
+                # load, and `on_board` is None everywhere until a snapshot
+                # arrives.  Recording any of those as a board would certify a
+                # route against a board that was never seen — the inversion
+                # the gate's "not recorded is not empty" rule exists to stop.
+                obstacles=_observed_board(scene),
             )
         except Exception:
             log.exception("could not record the episode for plan %s",
@@ -900,6 +905,22 @@ class SimulatorExecutor:
                 "verified": "live_pose",
             },
         )
+
+
+def _observed_board(scene) -> Optional[List[str]]:
+    """Which objects were on the board, or None if that was not observed.
+
+    None is a real answer and the conservative one.  `on_board is True` and
+    not merely truthy, because it is None until a snapshot has been applied
+    and unknown is not absent — the same test `SceneView.on_board_tagged`
+    makes for the same reason.
+    """
+    if scene is None or getattr(scene, "error", ""):
+        return None
+    objects = getattr(scene, "objects", None) or {}
+    if any(o.on_board is None for o in objects.values()):
+        return None
+    return sorted(oid for oid, o in objects.items() if o.on_board is True)
 
 
 def _euclid(a, b) -> float:

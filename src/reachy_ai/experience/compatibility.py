@@ -119,20 +119,45 @@ class Mismatch:
         return f"{self.field}: wanted {self.wanted!r}, found {self.found!r}"
 
 
+#: What a stored `recipe_json` may be, and which fields identify it.
+#:
+#: The panel writes an `ability_route` — a measured route flown by name.  The
+#: search engine writes a `TrajectoryRecipe`, identified by recipe id and
+#: version, whose `bounded_parameters` are the whole point of it and which has
+#: no route name at all.  Reading one with the other's keys reduces it to
+#: empty strings, and two recipes that differ only in their parameters then
+#: compare equal — the gate authorising a recipe it never actually compared.
+KIND_ABILITY_ROUTE = "ability_route"
+KIND_TRAJECTORY_RECIPE = "trajectory_recipe"
+
+
 @dataclasses.dataclass(frozen=True)
 class ReuseRequest:
     """What the arm is about to be asked to do, in the world as it is now."""
 
     task_type: str
     arm: str
-    route: str
-    route_version: int
-    start_posture: str
+    #: Which measured route, for an ability.  Empty for a searched recipe.
+    route: str = ""
+    route_version: int = 0
+    #: Which recipe, for a searched one.  Empty for an ability route.
+    recipe_id: str = ""
+    recipe_version: int = 0
+    start_posture: str = ""
     #: Object ids on the board right now.  A frozenset because which objects
     #: are present is the question; where they are is the route validator's,
     #: and conflating the two would put a pose comparison in a gate that has
     #: no tolerance to compare poses with.
     obstacles: FrozenSet[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        # Coerced, because the natural call site passes a list — the recorder
+        # writes `sorted(...)` — and a list never equals a frozenset, so an
+        # uncoerced one rejected every candidate with a reason about the board
+        # that had nothing to do with the board.
+        if not isinstance(self.obstacles, frozenset):
+            object.__setattr__(self, "obstacles", frozenset(
+                _obstacle_set(self.obstacles) or ()))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -142,9 +167,17 @@ class ReuseCandidate:
     trial_id: str
     identity: SimulatorIdentity
     task_type: str
+    #: "" when the trial did not record which arm actually moved.  Not the
+    #: same as recording "right": `TaskSpec.arm_policy` defaults to "auto",
+    #: which is a policy the runner resolved at run time and did not write
+    #: down.
     arm: str
+    #: Which shape of recipe this row holds, "" if it is unrecognisable.
+    kind: str
     route: str
     route_version: int
+    recipe_id: str
+    recipe_version: int
     start_posture: str
     promotion_state: str
     status: str
@@ -158,30 +191,50 @@ class ReuseCandidate:
     def from_row(cls, row: Dict[str, Any]) -> "ReuseCandidate":
         """Build a candidate from an ExperienceStore trial row.
 
-        Tolerant of a row from an older store: a missing column reads as the
+        Never raises on a malformed row: one bad value in a store must not be
+        able to kill a whole candidate sweep, and a field that cannot be read
+        is a field that did not match.  A missing column reads as the
         conservative value, never as permission.
         """
         meta = _loads(row.get("optimizer_metadata_json"))
         spec = _loads(row.get("task_spec_json"))
         recipe = _loads(row.get("recipe_json"))
-        obstacles = meta.get("obstacles")
+
+        kind = str(recipe.get("kind") or "")
+        if not kind and recipe.get("recipe_id"):
+            # A TrajectoryRecipe predates `kind` and does not carry one.
+            kind = KIND_TRAJECTORY_RECIPE
+
+        # `arm_policy` is a policy: "auto" means the runner picked one and did
+        # not record which.  The recipe's own `arm` is a resolved value, so it
+        # is preferred, and "auto" is downgraded to "not recorded" rather than
+        # compared as if it were an arm.
+        arm = str(recipe.get("arm") or spec.get("arm_policy") or "")
+        if arm == "auto":
+            arm = ""
+
+        live = bool(row.get("live_interactive", 0))
+        if meta.get("live_interactive"):
+            # The column can be lost to a restore or a migration; the metadata
+            # the recorder wrote says the same thing and is harder to lose.
+            live = True
 
         return cls(
             trial_id=str(row.get("trial_id", "")),
             identity=SimulatorIdentity.from_dict(_loads(row.get("identity_json"))),
             task_type=str(row.get("task_type") or spec.get("task_type") or ""),
-            arm=str(spec.get("arm_policy") or recipe.get("arm") or ""),
+            arm=arm,
+            kind=kind,
             route=str(recipe.get("route") or ""),
-            route_version=int(recipe.get("route_version") or 0),
+            route_version=_int(recipe.get("route_version")),
+            recipe_id=str(recipe.get("recipe_id") or ""),
+            recipe_version=_int(recipe.get("recipe_version")),
             start_posture=str(recipe.get("expected_start_posture") or ""),
             promotion_state=str(row.get("promotion_state") or "unpromoted"),
             status=str(row.get("status") or ""),
             success=bool(row.get("success")),
-            # Absent in a v1 store, where nothing live could have been
-            # written.  Absent in a row is not a claim that it was offline.
-            live_interactive=bool(row.get("live_interactive", 0)),
-            obstacles=(frozenset(str(o) for o in obstacles)
-                       if obstacles is not None else None),
+            live_interactive=live,
+            obstacles=_obstacle_set(meta.get("obstacles")),
         )
 
 
@@ -224,16 +277,30 @@ def check_reuse(candidate: ReuseCandidate, identity: SimulatorIdentity,
             "real model file."
         )
 
-    def no(reason: str, *mismatches: Mismatch) -> ReuseDecision:
+    matched: List[str] = []
+    mismatches: List[Mismatch] = []
+
+    def no(reason: str, *found: Mismatch) -> ReuseDecision:
+        # `matched` travels with every rejection.  A movement- or board-level
+        # refusal that reported no matched fields made "which fields agreed"
+        # unreadable in exactly the decisions someone would be reading.
         return ReuseDecision(False, candidate.trial_id, policy.policy_version,
-                             reason, mismatches=tuple(mismatches))
+                             reason, tuple(matched), tuple(found))
 
     # Outcome first: the cheapest questions, and the ones that make the rest
     # meaningless.  A failed trial's parameters are not a candidate at all.
-    if candidate.status != EpisodeStatus.SUCCEEDED.value or not candidate.success:
+    if candidate.status != EpisodeStatus.SUCCEEDED.value:
         return no(f"the trial did not succeed (status {candidate.status!r})",
                   Mismatch("status", EpisodeStatus.SUCCEEDED.value,
                            candidate.status))
+    if not candidate.success:
+        # The row says SUCCEEDED and its success flag says otherwise.  Which
+        # to believe is not a gate's question; naming the field that disagreed
+        # is, and reporting a status mismatch of SUCCEEDED against SUCCEEDED
+        # was worse than saying nothing.
+        return no("the trial is marked SUCCEEDED but its success flag is not "
+                  "set, so what it records is not consistent",
+                  Mismatch("success", True, candidate.success))
 
     if candidate.live_interactive and not policy.allow_live_interactive:
         return no(
@@ -254,8 +321,6 @@ def check_reuse(candidate: ReuseCandidate, identity: SimulatorIdentity,
             Mismatch("working_tree_dirty", False, True))
 
     # The world.
-    matched: List[str] = []
-    mismatches: List[Mismatch] = []
     for field in IDENTITY_FIELDS:
         wanted = getattr(identity, field)
         found = getattr(candidate.identity, field)
@@ -273,14 +338,38 @@ def check_reuse(candidate: ReuseCandidate, identity: SimulatorIdentity,
             + "; ".join(str(m) for m in mismatches),
             tuple(matched), tuple(mismatches))
 
-    # The movement.
+    # The movement.  WHAT IS COMPARED DEPENDS ON WHAT WAS STORED: a measured
+    # route is identified by its name and version, a searched recipe by its id
+    # and version and by nothing else — reading one with the other's keys
+    # reduces it to empty strings, and two recipes differing only in their
+    # bounded parameters then compare equal.
+    if candidate.kind == KIND_ABILITY_ROUTE:
+        movement = (("route", request.route, candidate.route),
+                    ("route_version", request.route_version,
+                     candidate.route_version))
+    elif candidate.kind == KIND_TRAJECTORY_RECIPE:
+        movement = (("recipe_id", request.recipe_id, candidate.recipe_id),
+                    ("recipe_version", request.recipe_version,
+                     candidate.recipe_version))
+    else:
+        return no(
+            f"the stored recipe is in a form this gate cannot compare "
+            f"({candidate.kind or 'no kind recorded'}), so it cannot be told "
+            "apart from any other",
+            Mismatch("kind", f"{KIND_ABILITY_ROUTE} or {KIND_TRAJECTORY_RECIPE}",
+                     candidate.kind))
+
+    if not candidate.arm:
+        return no("the trial did not record which arm it used, and the "
+                  "validated corridor is one arm's geometry through a rig "
+                  "that is not symmetric",
+                  Mismatch("arm", request.arm, None))
+
     for field, wanted, found in (
         ("task_type", request.task_type, candidate.task_type),
         ("arm", request.arm, candidate.arm),
-        ("route", request.route, candidate.route),
-        ("route_version", request.route_version, candidate.route_version),
         ("start_posture", request.start_posture, candidate.start_posture),
-    ):
+    ) + movement:
         if wanted != found:
             return no(f"the recorded movement is not this movement: "
                       f"{Mismatch(field, wanted, found)}",
@@ -330,6 +419,34 @@ def select_reusable(rows: Sequence[Dict[str, Any]], identity: SimulatorIdentity,
         if decision.allowed and chosen is None:
             chosen = candidate
     return chosen, decisions
+
+
+def _int(value: Any) -> int:
+    """An int, or 0 for anything that is not one.
+
+    0 is a value the gate compares like any other, so a version it cannot read
+    disagrees with a real one rather than raising.  Raising here killed the
+    whole candidate sweep over one malformed row.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _obstacle_set(value: Any) -> Optional[FrozenSet[str]]:
+    """The recorded board, or None for "not recorded".
+
+    A str is REFUSED rather than iterated: "soda_can" would otherwise become
+    a board of seven single-character objects, which is a fabricated fact
+    about a safety input.  Anything that is not a list, tuple or set is not a
+    board, and None already means the trial did not record one.
+    """
+    if value is None or isinstance(value, (str, bytes)):
+        return None
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return None
+    return frozenset(str(o) for o in value)
 
 
 def _loads(blob: Optional[str]) -> Dict[str, Any]:
