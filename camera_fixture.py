@@ -19,6 +19,7 @@ Frame content (deliberately simple for fixture use):
 from __future__ import annotations
 
 import io
+import json
 import os
 import threading
 import time
@@ -38,6 +39,9 @@ RIGHT: int = 1
 
 _LEFT_FILE: str = "/tmp/reachy_left.jpg"
 _RIGHT_FILE: str = "/tmp/reachy_right.jpg"
+# Named by whichever writer is actually producing the frames in _LEFT_FILE /
+# _RIGHT_FILE right now — see web/camera_server.py's /status (issue #40).
+_FRAME_META_FILE: str = "/tmp/reachy_frame_meta.json"
 
 
 @dataclass(frozen=True)
@@ -180,10 +184,30 @@ class CameraFixture:
             self._frames.update(new_frames)
 
 
+def _write_frame_meta(backend: str, path: Optional[str] = None) -> None:
+    """Atomically record which backend is producing the current frame files.
+
+    /status (web/camera_server.py) reads this rather than asserting a fixed
+    string, so a reader can tell fixture frames from live physics — and,
+    since only the backend that is actually writing frames right now updates
+    it, a dead writer leaves it (and the frame files) to simply go stale
+    rather than silently lying about what is live.
+    """
+    dest = path if path is not None else _FRAME_META_FILE
+    tmp = dest + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump({"backend": backend, "wall_time_ns": time.time_ns()}, f)
+        os.replace(tmp, dest)
+    except OSError:
+        pass  # transient filesystem error; next tick will retry
+
+
 def frame_file_writer(
     fixture: CameraFixture,
     left_path: Optional[str] = None,
     right_path: Optional[str] = None,
+    meta_path: Optional[str] = None,
 ) -> None:
     """Write left/right JPEG frames to files via atomic rename at ~15 Hz.
 
@@ -214,4 +238,5 @@ def frame_file_writer(
                     pass  # transient filesystem error; next tick will retry
                 last_seqs[cam_id] = frame.sequence
 
+        _write_frame_meta("fixture", meta_path)
         time.sleep(dt)

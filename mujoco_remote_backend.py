@@ -46,6 +46,10 @@ _MUJOCO_URL = os.environ.get("REACHY_SIM_MUJOCO_URL", _DEFAULT_URL)
 
 _LEFT_JPG  = pathlib.Path("/tmp/reachy_left.jpg")
 _RIGHT_JPG = pathlib.Path("/tmp/reachy_right.jpg")
+# Named by whichever writer is actually producing the frames above right now
+# — see web/camera_server.py's /status (issue #40) and camera_fixture.py's
+# matching writer for the fixture backend.
+_FRAME_META = pathlib.Path("/tmp/reachy_frame_meta.json")
 
 from kinematic_backend import JOINT_DEFS, JointCommand, JointSample, SimulationSnapshot
 
@@ -457,6 +461,11 @@ class MujocoRemoteBackend:
             _atomic_write(_LEFT_JPG, jpeg)
         elif cam == "right_camera":
             _atomic_write(_RIGHT_JPG, jpeg)
+        else:
+            return
+        _atomic_write(_FRAME_META, json.dumps(
+            {"backend": "mujoco-remote", "wall_time_ns": time.time_ns()}
+        ).encode())
 
     def _build_command(self, cmds: List[JointCommand]):
         """Merge per-UID SDK commands into 21-element protocol lists.
