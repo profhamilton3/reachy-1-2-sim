@@ -58,25 +58,50 @@ description: >-
 #   So cell_r1c3 is the near-right cell — the one the right arm reaches most
 #   easily — and cell_r2c2 is the centre square.
 #
-# RIGHT-ARM REACHABILITY — UPPER BOUND ONLY
+# RIGHT-ARM REACHABILITY — PER-CELL IK VERDICT, NOT A SPHERE RADIUS
 #
 # Measured in MuJoCo with 40-restart damped-least-squares IK on the r_tip site,
-# target 5 cm above the surface, ORIENTATION UNCONSTRAINED.  Max r_tip reach is
-# 0.609 m from the right shoulder at world (0, -0.19, 1.0).  Distances below are
-# shoulder-to-cell:
+# target 5 cm above the surface, ORIENTATION UNCONSTRAINED, from the right
+# shoulder at world (0, -0.19, 1.0).  Distances below are shoulder-to-cell:
 #
 #        col 1 (+y, left)   col 2 (mid)      col 3 (-y, right)
 #   r1     0.489  reach      0.398  reach     0.352  reach
 #   r2     0.590  reach      0.516  reach     0.482  reach
 #   r3     0.709  NO         0.649  NO        0.622  reach
 #
-# Read this as a NECESSARY, NOT SUFFICIENT condition:
+# Read this as a NECESSARY, NOT SUFFICIENT condition, and read the reach/NO
+# column per cell rather than any single "maximum reach" figure — this
+# used to say "Max r_tip reach is 0.609 m", stated as a hard sphere, and that
+# was self-contradictory: cell_r3c3 at 0.622 m is labelled reach while
+# 0.649 m and 0.709 m are labelled NO.  Issue #41 re-ran the sweep
+# (deterministic per-cell seeds 42-50, then 200 restarts/cell on the
+# disputed row, tol 1 mm) to settle which side of that was wrong:
 #
-#   * cell_r3c1 and cell_r3c2 are definitively OUT.  0.709 m and 0.649 m both
-#     exceed the 0.609 m maximum, so no orientation reaches them.  On a
-#     right-arm-only robot they cannot be pick or place targets.  Either the
-#     task uses the other seven cells, or the table moves closer / shifts
-#     toward -y before the full grid is usable.
+#   * cell_r3c3 is genuinely reachable, not a copy/paste error.  IK converges
+#     to sub-mm tip error repeatedly (141/200 restarts at the 200-restart
+#     follow-up) and the winning pose sits with every joint clear of its
+#     limit — a comfortable solution, not a marginal one.
+#   * cell_r3c1 and cell_r3c2 are genuinely OUT.  Across 200 restarts each,
+#     IK never converges: the closest pose still misses by 40 mm (r3c2) or
+#     98 mm (r3c1), with r_shoulder_pitch, r_shoulder_roll and r_elbow_pitch
+#     driven onto their stops — a real kinematic limit, not noise near a
+#     boundary.  On a right-arm-only robot they cannot be pick or place
+#     targets.  Either the task uses the other seven cells, or the table
+#     moves closer / shifts toward -y before the full grid is usable.
+#   * The reachable envelope is NOT a sphere: a radial max-reach sweep at
+#     this same height found ~0.649 m within ~10° of straight ahead of the
+#     shoulder, falling smoothly to ~0.62 m by 30° off that axis and ~0.52 m
+#     by 50° — cell_r3c3 sits at a shallow 3.7° bearing (near the roomy part
+#     of the envelope) while cell_r3c2 sits at 18.0° and cell_r3c1 at 30.4°
+#     (both past where the envelope has narrowed).  That is what actually
+#     separates the far row's one reachable cell from its two unreachable
+#     ones.  Where the previous 0.609 m figure came from could not be
+#     reproduced against any single bearing/seed/joint-limit combination
+#     checked here; treat its provenance as UNRESOLVED rather than as a
+#     threshold, and do not reintroduce it as a radius check.  Reachability
+#     for a specific target should be read from this table, or at runtime
+#     from the `no-right-arm` cell tag that native_mujoco/placement.py
+#     already defers to instead of deriving reach from a radius.
 #   * "reach" does NOT mean graspable.  It only means the tip can touch the
 #     point in SOME orientation.  A usable top-down-ish grasp is a much tighter
 #     constraint: the tuned demo workspace was only y in [-0.22, +0.02], and the
