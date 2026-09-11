@@ -263,6 +263,13 @@ class IntentState:
     answers: List[Tuple[str, str]] = field(default_factory=list)
     #: The slot the outstanding question is about; "" when none is pending.
     open_slot: str = ""
+    #: The outstanding question, exactly as it was asked, and the choices that
+    #: went with it.  Kept so that re-asking never means re-deriving: deriving
+    #: it again meant planning again, and planning again reads the scene — so
+    #: a greeting typed during a clarification failed the whole task whenever
+    #: the simulator was down, which is the one thing #62 exists to prevent.
+    open_question: str = ""
+    open_choices: List[str] = field(default_factory=list)
     #: The last target the operator explicitly settled on, as a scene id.
     #: Evidence for what "it" refers to — never authorization to skip asking.
     selected_target: str = ""
@@ -306,6 +313,8 @@ class IntentState:
             kind=self.kind,
             answers=list(self.answers),
             open_slot=self.open_slot,
+            open_question=self.open_question,
+            open_choices=list(self.open_choices),
             selected_target=self.selected_target,
             plan_version=self.plan_version,
         )

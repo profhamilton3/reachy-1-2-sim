@@ -11,6 +11,7 @@ Offline and stdlib-only.  Sets up its own sys.path rather than inheriting one
 from another test module, so it means the same thing run alone as in the suite.
 """
 
+import dataclasses
 import os
 import sys
 import time
@@ -199,12 +200,94 @@ def test_a_greeting_answered_into_an_open_question_keeps_the_question(coord):
     assert task.proposal.cell == "r2c2"
 
 
+def test_a_greeting_mid_question_works_with_the_simulator_down():
+    """#62's guarantee, which re-planning to re-derive the question broke.
+
+    Answering a greeting must not need the board.  Re-planning the stored
+    intent read `scene.error` and failed the whole task — destroying exactly
+    the question the greeting path exists to protect.
+    """
+    scenes = {"live": True}
+
+    def provider():
+        if scenes["live"]:
+            return make_scene()
+        broken = make_scene()
+        broken.error = "the simulator is not connected"
+        return broken
+
+    planner = DeterministicPlanner(provider)
+    coord = TaskCoordinator(planner, aside=planner.aside)
+    try:
+        # A PICK-AND-PLACE intent, deliberately.  The ability path degrades
+        # politely on a scene error — it asks with an empty choice list — so
+        # it would not have caught this.  `_plan`'s pick-and-place branch
+        # refuses outright on `scene.error`, which is where re-planning turned
+        # a greeting into a failed task.
+        task = settle(coord, coord.submit("s1", "put soda_can on r3c1").task_id)
+        assert task.state is TaskState.needs_clarification, task.detail
+        asked = task.events[-1].text
+
+        scenes["live"] = False                  # the simulator goes away
+        task = answer(coord, task, "Hello")
+
+        assert task.state is TaskState.needs_clarification, task.detail
+        assert task.events[-1].text == f"Hello. {asked}"
+        assert task.intent.command == "put soda_can on r3c1"
+
+        scenes["live"] = True
+        task = answer(coord, task, "r2c2")
+        assert task.state is TaskState.awaiting_confirmation, task.detail
+        assert task.proposal.destination == "cell:r2c2"
+    finally:
+        coord.shutdown()
+
+
+def test_a_greeting_never_turns_into_a_plan_card(coord):
+    """If the board moved on between the question and the greeting, "Hello"
+    must still be answered with a greeting — not silently proposed."""
+    task = settle(coord, coord.submit("s1", "point to a cell").task_id)
+    asked = task.events[-1].text
+
+    task = answer(coord, task, "Hello")
+    assert task.state is TaskState.needs_clarification
+    assert task.proposal is None
+    assert task.events[-1].text == f"Hello. {asked}"
+
+
+def test_the_question_is_repeated_verbatim_with_its_choices(coord):
+    task = settle(coord, coord.submit("s1", "point to a cell").task_id)
+    asked = [e for e in task.events if e.question_id][-1]
+
+    task = answer(coord, task, "Hello")
+    repeated = [e for e in task.events if e.question_id][-1]
+    assert repeated.text == f"Hello. {asked.text}"
+    assert repeated.choices == asked.choices
+    assert repeated.slot == asked.slot
+
+
 def test_a_greeting_does_not_fill_the_slot_it_was_typed_into(coord):
     """It is not an answer, so it must not be remembered as one."""
     task = settle(coord, coord.submit("s1", "point to a cell").task_id)
     task = answer(coord, task, "Hello")
     assert task.intent.filled_slots() == {}
     assert task.intent.answers == []
+
+
+def test_only_a_greeting_takes_the_aside_path(coord, monkeypatch):
+    """The wording it replies with is `greet`'s. The next ability that needs
+    neither scene nor motion must not be swallowed and answered with it."""
+    import panel_abilities as abilities
+
+    quiet = dataclasses.replace(abilities.REGISTRY["greet"], name="thanks",
+                                patterns=(r"thanks",))
+    monkeypatch.setitem(abilities.REGISTRY, "thanks", quiet)
+    monkeypatch.setattr(abilities, "_ORDER", tuple(abilities.REGISTRY))
+
+    task = settle(coord, coord.submit("s1", "point to a cell").task_id)
+    task = answer(coord, task, "thanks")
+    # Whatever it does with it, it does not answer with the greeting.
+    assert not task.events[-1].text.startswith("Hello. ")
 
 
 def test_a_real_request_typed_into_an_open_question_is_still_a_change_of_mind(coord):

@@ -247,13 +247,27 @@ class DeterministicPlanner:
         task completed — destroying a question the operator was halfway
         through answering.
 
-        The question is re-derived by planning the UNCHANGED intent again,
-        rather than by fishing the last question out of the transcript.  Same
-        state, same question, same slot, and nothing here has to keep a second
-        copy of the wording.
+        THE QUESTION IS REPEATED FROM THE INTENT, NOT RE-DERIVED.  Planning
+        the stored intent again would produce the same question in the normal
+        case and something else entirely in three others: with the simulator
+        down it reads `scene.error` and fails the whole task — the one thing
+        #62 exists to prevent — and if the board has moved on it returns a
+        PROPOSAL, so "Hello" silently produces a plan card with no greeting
+        anywhere in it.  The question was already known when it was asked, so
+        it is kept and repeated verbatim.
+
+        Nothing here reads the scene.  That is the point: a greeting is
+        answerable with the simulator switched off, whether or not there is a
+        question open at the time.
         """
         prior = request.intent
         if prior is None or not prior.command or not prior.open_slot:
+            return None
+        if not prior.open_question:
+            # A question was outstanding but its wording was not recorded — a
+            # task in flight across this change.  Falling through treats the
+            # greeting as the turn it looks like rather than inventing words
+            # to put in Reachy's mouth.
             return None
         try:
             match = abilities.match(request.text)
@@ -261,16 +275,27 @@ class DeterministicPlanner:
             return None          # understood and refused: that is an answer
         if match is None or match.ability is None:
             return None
+        # The same test `aside` applies, plus the name.  Both, because the
+        # greeting wording below is `greet`'s: the next ability that needs
+        # neither scene nor motion would otherwise be swallowed mid-question
+        # and answered with somebody else's.
+        if match.name != "greet":
+            return None
         if match.ability.needs_scene or match.ability.needs_motion:
             return None          # a real request, and a real change of mind
 
-        outcome = self._plan(prior.command, list(prior.answers))
-        if outcome.kind == "clarification":
-            # Greeted, then asked again.  Not the full GREETING: it lists what
-            # the panel can do, which is a strange thing to recite at someone
-            # who is mid-way through asking for one of them.
-            outcome.message = f"Hello. {outcome.message}"
-        return _record_intent(outcome, prior.copy())
+        state = prior.copy()
+        outcome = PlannerOutcome(
+            kind="clarification",
+            # Not the full GREETING: it recites what the panel can do, which
+            # is a strange thing to say to someone already mid-way through
+            # asking for one of those things.
+            message=f"Hello. {state.open_question}",
+            choices=list(state.open_choices),
+            slot=state.open_slot,
+        )
+        outcome.intent = state
+        return outcome
 
     def _plan(self, command: str,
               answers: List[Tuple[str, str]]) -> PlannerOutcome:
@@ -940,7 +965,16 @@ def _record_intent(outcome: PlannerOutcome, state: IntentState) -> PlannerOutcom
     coordinator stores it before it branches, so a failed or completed task
     still records what it was about.
     """
-    state.open_slot = outcome.slot if outcome.kind == "clarification" else ""
+    if outcome.kind == "clarification":
+        state.open_slot = outcome.slot
+        # Kept so it can be repeated without being re-derived.  See
+        # `_aside_during_a_question`.
+        state.open_question = outcome.message
+        state.open_choices = list(outcome.choices)
+    else:
+        state.open_slot = ""
+        state.open_question = ""
+        state.open_choices = []
 
     proposal = outcome.proposal
     if proposal is not None:
