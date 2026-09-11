@@ -64,6 +64,10 @@ MAX_TASKS = 200                # total tasks retained before oldest are dropped
 PLANNING_TIMEOUT_S = 20.0      # a planner slower than this is declared failed
 TASK_TTL_S = 30 * 60           # idle task lifetime before it expires
 MAX_QUEUED_JOBS = 8            # backpressure: refuse rather than pile up
+#: Answers that named no slot, retained per task.  One per slot is kept
+#: regardless — those are the intent — and this bounds only the pre-#59
+#: fallback, which places an answer by its shape and reads them in order.
+MAX_SLOTLESS_ANSWERS = 8
 
 
 class TaskState(str, Enum):
@@ -264,6 +268,30 @@ class IntentState:
     selected_target: str = ""
     #: The plan version these answers belong to.
     plan_version: int = 0
+
+    def remember(self, slot: str, text: str) -> None:
+        """Record one answer, keeping the list bounded.
+
+        `Task.events` is capped at MAX_EVENTS because an unbounded transcript
+        in a long-lived container is a slow leak nobody watches, and moving
+        the planner's source of truth here would have re-opened exactly that:
+        every `reply()` resets the task's deadline, so a client answering the
+        same question forever is never swept.
+
+        An answer for a slot REPLACES that slot's previous answer rather than
+        stacking on it, which is what re-asking a question already meant to
+        both readers — `_apply_answers` and the ability path each take the
+        last value for a slot.  Slotless answers keep their order, because the
+        fallback that places them by shape reads them in order, and they are
+        capped.
+        """
+        if slot:
+            self.answers = [(s, a) for s, a in self.answers if s != slot]
+        self.answers.append((slot, text))
+        slotless = [i for i, (s, _) in enumerate(self.answers) if not s]
+        for i in slotless[:max(0, len(slotless) - MAX_SLOTLESS_ANSWERS)]:
+            self.answers[i] = None          # type: ignore[call-overload]
+        self.answers = [a for a in self.answers if a is not None]
 
     def filled_slots(self) -> Dict[str, str]:
         """Slot -> the answer that filled it.  A later answer replaces an
@@ -844,6 +872,11 @@ class TaskCoordinator:
         elif outcome.kind == "proposal" and outcome.proposal is not None:
             proposal = outcome.proposal
             proposal.plan_version = task.version
+            # The intent was stored above, before this stamp existed, so the
+            # version it copied off the proposal was the constructor's 0.
+            # Carried across here rather than moving the store below the
+            # branch: every other kind of outcome needs it stored first.
+            task.intent.plan_version = proposal.plan_version
             # Ask the executor about THIS plan, not the configured default.
             # It is the same question confirm() will ask, so the card cannot
             # promise motion that Confirm then declines to perform — or say

@@ -227,9 +227,50 @@ class DeterministicPlanner:
         self._scene_provider = scene_provider
 
     def __call__(self, request: PlannerRequest) -> PlannerOutcome:
+        held = self._aside_during_a_question(request)
+        if held is not None:
+            return held
         state = _intent_for(request)
         outcome = self._plan(state.command, list(state.answers))
         return _record_intent(outcome, state)
+
+    def _aside_during_a_question(self,
+                                 request: PlannerRequest
+                                 ) -> Optional[PlannerOutcome]:
+        """Answer a greeting typed into an open question, and keep the question.
+
+        `submit()` sends a greeting through `aside` and never disturbs the
+        active task.  The browser does not use `submit()` here: anything typed
+        while a task is awaiting an answer is POSTed to `reply()`, which has no
+        aside hook.  So "Hello" arrived as the answer, `_is_a_command` agreed
+        it was a request in its own right, the intent was replaced, and the
+        task completed — destroying a question the operator was halfway
+        through answering.
+
+        The question is re-derived by planning the UNCHANGED intent again,
+        rather than by fishing the last question out of the transcript.  Same
+        state, same question, same slot, and nothing here has to keep a second
+        copy of the wording.
+        """
+        prior = request.intent
+        if prior is None or not prior.command or not prior.open_slot:
+            return None
+        try:
+            match = abilities.match(request.text)
+        except AbilityRefusal:
+            return None          # understood and refused: that is an answer
+        if match is None or match.ability is None:
+            return None
+        if match.ability.needs_scene or match.ability.needs_motion:
+            return None          # a real request, and a real change of mind
+
+        outcome = self._plan(prior.command, list(prior.answers))
+        if outcome.kind == "clarification":
+            # Greeted, then asked again.  Not the full GREETING: it lists what
+            # the panel can do, which is a strange thing to recite at someone
+            # who is mid-way through asking for one of them.
+            outcome.message = f"Hello. {outcome.message}"
+        return _record_intent(outcome, prior.copy())
 
     def _plan(self, command: str,
               answers: List[Tuple[str, str]]) -> PlannerOutcome:
@@ -882,7 +923,10 @@ def _intent_for(request: PlannerRequest) -> IntentState:
         # The slot comes from the question that was asked, recorded when it
         # was asked (#59).  An answer arriving with no question outstanding
         # carries the empty slot and is placed by shape, as it always was.
-        state.answers.append((state.open_slot, request.text))
+        # `remember` rather than `append`: re-asking a slot replaces its
+        # answer, which is what both readers already meant by it, and keeps
+        # this list from growing for as long as a client keeps replying.
+        state.remember(state.open_slot, request.text)
 
     if state.answers and _is_a_command(state.answers[-1][1]):
         state = IntentState(command=state.answers[-1][1])

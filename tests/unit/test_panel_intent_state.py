@@ -169,7 +169,53 @@ def test_a_command_typed_into_an_open_question_replaces_the_request(coord):
 # A greeting is not a reset
 # ---------------------------------------------------------------------------
 
-def test_a_greeting_does_not_clear_an_open_question(coord):
+def test_a_greeting_answered_into_an_open_question_keeps_the_question(coord):
+    """THE PATH THE BROWSER ACTUALLY TAKES.
+
+    `camera_server.py` POSTs anything typed while a task is awaiting an answer
+    to /reply, not /tasks — and `reply()` has no aside hook.  So a greeting
+    arrives here as the answer, and the earlier version of this file only ever
+    tested `submit()`, which is the path the client never uses in this state.
+    """
+    task = settle(coord, coord.submit("s1", "point to a cell").task_id)
+    assert task.state is TaskState.needs_clarification
+    asked = [e.text for e in task.events if e.question_id]
+
+    task = answer(coord, task, "Hello")
+
+    assert task.state is TaskState.needs_clarification, task.detail
+    assert task.intent.command == "point to a cell"
+    assert task.intent.open_slot == "which_cell"
+    # Greeted, and then asked the same thing again — a new question id,
+    # because the browser answers the latest one.
+    latest = [e for e in task.events if e.question_id][-1]
+    assert latest.text.startswith("Hello. ")
+    assert latest.text.endswith(asked[-1])
+    assert latest.slot == "which_cell"
+
+    # And the conversation carries on where it left off.
+    task = answer(coord, task, "r2c2")
+    assert task.proposal.task_type == "point_cell"
+    assert task.proposal.cell == "r2c2"
+
+
+def test_a_greeting_does_not_fill_the_slot_it_was_typed_into(coord):
+    """It is not an answer, so it must not be remembered as one."""
+    task = settle(coord, coord.submit("s1", "point to a cell").task_id)
+    task = answer(coord, task, "Hello")
+    assert task.intent.filled_slots() == {}
+    assert task.intent.answers == []
+
+
+def test_a_real_request_typed_into_an_open_question_is_still_a_change_of_mind(coord):
+    """The greeting exception is exactly that.  "Wave" still replaces."""
+    task = settle(coord, coord.submit("s1", "point to a cell").task_id)
+    task = answer(coord, task, "wave")
+    assert task.state is TaskState.awaiting_confirmation, task.detail
+    assert task.intent.command == "wave"
+
+
+def test_a_greeting_submitted_as_its_own_message_still_stands_aside(coord):
     task = settle(coord, coord.submit("s1", "point to a cell").task_id)
     question = task.question_id
     assert task.state is TaskState.needs_clarification
@@ -193,6 +239,25 @@ def test_a_greeting_does_not_clear_an_open_question(coord):
 # ---------------------------------------------------------------------------
 # What the intent is not
 # ---------------------------------------------------------------------------
+
+def test_the_intent_records_the_version_of_the_plan_it_produced(coord):
+    """`plan_version` is stamped by the coordinator after the planner returns,
+    so the copy the planner made of it was always the constructor's 0."""
+    task = settle(coord, coord.submit("s1", "point to r2c2").task_id)
+    assert task.proposal.plan_version > 0
+    assert task.intent.plan_version == task.proposal.plan_version
+
+
+def test_the_answers_list_is_bounded_by_replacement(coord):
+    """A client answering the same question forever resets the task deadline
+    every time, so nothing sweeps it.  The list it feeds must not grow."""
+    task = settle(coord, coord.submit("s1", "point to a cell").task_id)
+    for i in range(50):
+        task = answer(coord, task, "r9c9")
+    assert task.state is TaskState.needs_clarification
+    assert len(task.intent.answers) == 1
+    assert task.intent.filled_slots() == {"which_cell": "r9c9"}
+
 
 def test_a_confirmation_is_not_retained_as_standing_authorization(coord):
     """One confirmation, one plan.  The intent state does not widen it."""
@@ -229,3 +294,38 @@ def test_the_planner_still_works_for_a_caller_that_keeps_no_state():
     out = planner(PlannerRequest(text="r2c2", history=history))
     assert out.kind == "proposal"
     assert out.proposal.cell == "r2c2"
+
+
+def test_an_abandoned_answer_no_longer_refuses_the_request_that_replaced_it():
+    """A behavioural change to the no-state path, asserted rather than assumed.
+
+    The joint-angle guard reads the command and its answers.  The new-command
+    rule now runs first, so answers given to a request the operator has since
+    replaced are dropped BEFORE the guard sees them — and a fresh "wave" is no
+    longer refused because an abandoned answer three turns ago said
+    "r_shoulder_pitch 30".  Nothing is honoured either way; the refusal moved.
+
+    Joint angles in the turn the operator just typed are still refused, which
+    is the case the guard exists for.
+    """
+    from tasks import ConversationEvent, PlannerRequest
+
+    planner = DeterministicPlanner(make_scene)
+    history = [
+        ConversationEvent(role="user", text="point to a cell"),
+        ConversationEvent(role="reachy", text="Which cell?", question_id="q1",
+                          slot="which_cell"),
+        ConversationEvent(role="user", text="r_shoulder_pitch 30"),
+        ConversationEvent(role="reachy", text="Which cell?", question_id="q2",
+                          slot="which_cell"),
+        ConversationEvent(role="user", text="wave"),
+    ]
+    out = planner(PlannerRequest(text="wave", history=history))
+    assert out.kind == "proposal"
+    assert out.proposal.task_type == "wave"
+
+    history[-1] = ConversationEvent(role="user", text="set r_wrist_pitch to 0.9 rad")
+    out = planner(PlannerRequest(text="set r_wrist_pitch to 0.9 rad",
+                                 history=history))
+    assert out.kind == "unsupported"
+    assert "joint angles" in out.message
