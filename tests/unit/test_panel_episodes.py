@@ -10,6 +10,7 @@ resolves only when the whole suite runs and leaves the file broken in
 isolation.
 """
 
+import dataclasses
 import json
 import os
 import sys
@@ -478,6 +479,79 @@ def test_the_default_database_is_not_resolved_against_the_process_cwd(
     assert os.path.isabs(recorder._db_path)
     assert not recorder._db_path.startswith(str(tmp_path))
     assert recorder._db_path.endswith(os.path.join("runs", "panel_episodes.db"))
+
+
+def test_the_board_the_episode_happened_on_is_recorded(db, fake_sdk, validated):
+    """The reuse gate rejects a candidate that never recorded one, so an
+    episode without it can never become evidence, however well it went."""
+    executor(db).execute(_ability())
+    meta = json.loads(rows(db)[0]["optimizer_metadata_json"])
+    assert meta["obstacles"] == ["soda_can"]
+
+
+def test_an_object_off_the_board_is_not_recorded_as_an_obstacle(db, fake_sdk,
+                                                                validated):
+    """`scene.objects` is the declared pool. An object sitting in the pool
+    rather than on the table is not an obstacle, and recording it as one makes
+    a later, correctly-computed board fail to match."""
+    scene = live_scene()
+    scene.objects["red_cube"] = dataclasses.replace(
+        next(iter(scene.objects.values())), object_id="red_cube",
+        on_board=False)
+
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=StubWorker(),
+                           recorder=EpisodeRecorder("scene.yaml", db_path=db))
+    ex.execute(_ability())
+    meta = json.loads(rows(db)[0]["optimizer_metadata_json"])
+    assert meta["obstacles"] == ["soda_can"]
+
+
+def test_a_board_nobody_observed_is_recorded_as_not_recorded(db, fake_sdk,
+                                                             validated):
+    """A scene with no snapshot has `on_board` None everywhere — unknown, not
+    absent. Writing [] there would certify a route against an empty board that
+    was never seen, which is the inversion the gate's rule exists to stop."""
+    scene = make_scene()                    # never given a snapshot
+
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=StubWorker(),
+                           recorder=EpisodeRecorder("scene.yaml", db_path=db))
+    ex.execute(_ability())
+    meta = json.loads(rows(db)[0]["optimizer_metadata_json"])
+    assert meta["obstacles"] is None
+
+    # And the gate refuses it, rather than reading it as an empty board.
+    from reachy_ai.experience.compatibility import ReuseCandidate
+    assert ReuseCandidate.from_row(rows(db)[0]).obstacles is None
+
+
+def test_an_episode_this_panel_recorded_is_refused_by_the_reuse_gate(
+        db, fake_sdk, validated):
+    """The two halves have to agree.  A wave that went perfectly is still one
+    run observed by one person, and the gate says so twice over: it was
+    live-interactive, and it was never promoted."""
+    from reachy_ai.experience.compatibility import (ReuseCandidate,
+                                                    ReuseRequest, check_reuse)
+
+    executor(db).execute(_ability())
+    row, = rows(db)
+    assert row["status"] == EpisodeStatus.SUCCEEDED.value
+
+    # A real model hash, so the gate judges the row rather than refusing to
+    # answer about a degenerate identity.
+    identity = SimulatorIdentity.from_dict(
+        {**SimulatorIdentity.from_json(row["identity_json"]).to_dict(),
+         "model_sha256": "m"})
+    candidate = ReuseCandidate.from_row(
+        {**row, "identity_json": identity.to_json()})
+
+    decision = check_reuse(candidate, identity, ReuseRequest(
+        task_type="stow_arm", arm="right", route="STOW_ROUTE",
+        route_version=1, start_posture="rest",
+        obstacles=frozenset({"soda_can"})))
+    assert not decision.allowed
+    assert "a person was driving" in decision.reason
 
 
 def test_the_route_is_recorded_as_a_route_and_not_as_a_recipe(db, fake_sdk,
