@@ -226,6 +226,26 @@ _ORDER: Tuple[str, ...] = tuple(REGISTRY)
 #: into confident matches, which is the opposite of what this module is for.
 _TYPOS = {"foream": "forearm", "forarm": "forearm", "gripepr": "gripper"}
 
+#: Joint angles and joint names, in any of the forms an operator or a model
+#: might write them.
+#:
+#: IT LIVES HERE BECAUSE TWO CALLERS MUST REFUSE THE SAME THING.  The planner
+#: refuses them from the operator; the language adapter refuses them from the
+#: model's output, on the same path and by the same rule (#92).  Two regexes
+#: would be two definitions of what counts as a joint angle, and the one that
+#: drifted would be the one a model's output went through.
+#:
+#: No leading `\b` before the joint names: they begin with `l_`/`r_` and an
+#: underscore is a word character, so a boundary there would never match the
+#: very names this is meant to catch.  Same for the plural in "degrees".
+#: `rad`/`deg` keep their own boundary so "radius" and "degrade" do not trip it.
+JOINT_RE = re.compile(
+    r"\b(joints?|radians?|rad\b|degrees?|deg\b|"
+    r"[lr]_(shoulder|elbow|forearm|wrist|arm|gripper)|"
+    r"neck_(roll|pitch|yaw))",
+    re.I,
+)
+
 #: A command opening with one of these is not a request to do the thing it
 #: names.  `fullmatch` already rejects most of them; this catches a pattern
 #: permissive enough to be fooled, where the failure would be a moving arm.

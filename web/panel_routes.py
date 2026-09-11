@@ -46,6 +46,11 @@ Response = Tuple[int, Dict[str, Any]]
 #: "look nothing up" and is what a test wanting no database passes.
 DEFAULT_RECIPES = object()
 
+#: "Build the deployment's own language adapter."  Distinct from None, which
+#: means "registry only" — the default behaviour and what every existing test
+#: gets, since `build_adapter` returns None unless it is switched on.
+DEFAULT_LANGUAGE = object()
+
 
 class PanelRoutes:
     """Routing table for `/capabilities` and `/tasks...`."""
@@ -53,7 +58,8 @@ class PanelRoutes:
     def __init__(self, scene_provider: Callable[[], Any],
                  capabilities: Optional[Capabilities] = None,
                  link: Any = None, executor: Any = None,
-                 scene_file: str = "", recipes: Any = DEFAULT_RECIPES) -> None:
+                 scene_file: str = "", recipes: Any = DEFAULT_RECIPES,
+                 language: Any = DEFAULT_LANGUAGE) -> None:
         self.capabilities = capabilities or Capabilities()
         self.link = link
         self.executor = executor
@@ -72,7 +78,14 @@ class PanelRoutes:
         if recipes is DEFAULT_RECIPES:
             from panel_recipes import build_library
             recipes = build_library(scene_file)
-        planner = DeterministicPlanner(scene_provider, recipes=recipes)
+        # The optional language adapter (#92).  Same sentinel arrangement, and
+        # the same reason: None must keep meaning "do not look", so a test can
+        # build a panel that reaches no model.
+        if language is DEFAULT_LANGUAGE:
+            from panel_language import build_adapter
+            language = build_adapter()
+        planner = DeterministicPlanner(scene_provider, recipes=recipes,
+                                       language=language)
         self.coordinator = TaskCoordinator(
             planner,
             capabilities=self.capabilities,

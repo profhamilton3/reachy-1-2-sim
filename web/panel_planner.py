@@ -39,10 +39,12 @@ import logging
 import math
 import re
 import uuid
+import dataclasses
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import panel_abilities as abilities
+import panel_language as language
 import panel_provenance as _P
 from panel_abilities import AbilityRefusal
 from panel_scene import (NON_RECYCLABLE_TAG, RECYCLABLE_TAG, DestinationRef,
@@ -76,12 +78,10 @@ _CELL_RE = re.compile(r"\br([1-9])c([1-9])\b", re.I)
 # would never match the very names this is meant to catch.  Same for the plural
 # in "degrees".  `rad`/`deg` keep their own boundary so "radius" and "degrade"
 # do not trip it.
-_JOINT_RE = re.compile(
-    r"\b(joints?|radians?|rad\b|degrees?|deg\b|"
-    r"[lr]_(shoulder|elbow|forearm|wrist|arm|gripper)|"
-    r"neck_(roll|pitch|yaw))",
-    re.I,
-)
+#: One definition, in `panel_abilities`.  The language adapter refuses the
+#: model's output by this same rule, and two regexes would be two answers to
+#: "is that a joint angle?".
+_JOINT_RE = abilities.JOINT_RE
 
 _HELP = ("I understand commands like \"put soda_can on r2c2\" or "
          "\"put the recycle item in the bin\".")
@@ -227,8 +227,11 @@ class DeterministicPlanner:
     happen between one command and the next.
     """
 
-    def __init__(self, scene_provider, recipes=None) -> None:
+    def __init__(self, scene_provider, recipes=None, language=None) -> None:
         self._scene_provider = scene_provider
+        # The optional language adapter (#92), or None for "registry only",
+        # which is the default and what every existing test gets.
+        self._language = language
         # Where promoted recipes come from, or None for "do not look" (#90).
         # Supplied rather than built here, so a planner in a test does not
         # open a database nobody asked it to.
@@ -330,6 +333,14 @@ class DeterministicPlanner:
 
         intent = parse_intent(command)
         if intent is None:
+            # LAST, AND ONLY HERE.  Every deterministic path has declined by
+            # now, and the ones that declined LOUDLY — a negated request, a
+            # compound one, a simulator reset wearing the stow alias — already
+            # returned above.  A model asked to interpret "don't wave" would
+            # very reasonably answer `wave`, so it is never asked.
+            outcome = self._language_outcome(command, answers)
+            if outcome is not None:
+                return outcome
             return _unsupported(f"I did not understand that. {_HELP}")
 
         # Answers to earlier clarifications fill whichever slot is still open.
@@ -344,6 +355,45 @@ class DeterministicPlanner:
             return target_outcome
 
         return self._propose(scene, target_id, destination)
+
+    def _language_outcome(self, command: str,
+                          answers: List[Tuple[str, str]]
+                          ) -> Optional[PlannerOutcome]:
+        """What the adapter made of a sentence nothing else recognised.
+
+        None means "still not understood", which is the deterministic answer
+        and a perfectly good one.
+
+        THE ACTION RE-ENTERS THROUGH THE FRONT DOOR.  It is written back out
+        as a canonical phrase and handed to the same `_ability_outcome` an
+        operator's typing goes through, so it is subject to every check that
+        applies there — full-intent matching, the arm rule, the slot
+        questions, the scene resolution, the confirmation requirement.  The
+        adapter widens what may be SAID; it is not a second parser and it
+        reaches nothing the first one does not.
+        """
+        if self._language is None:
+            return None
+        action, why = self._language.interpret(command)
+        if action is None:
+            log.info("language adapter declined: %s", why)
+            return None
+
+        outcome = self._ability_outcome(action.as_command(), answers)
+        if outcome is None or outcome.proposal is None:
+            # A clarification or a refusal is returned as it stands: those are
+            # the registry's own words and need no relabelling.
+            return outcome
+
+        # Said out loud, and BEFORE the operator confirms.  A plan that arrived
+        # by a path the operator cannot reproduce should say so on the card
+        # rather than in a log they will never read.
+        proposal = dataclasses.replace(
+            outcome.proposal,
+            interpreted_by=language.BY_MODEL,
+            summary=f"{outcome.proposal.summary} (read from your wording)")
+        return PlannerOutcome(kind="proposal", message=outcome.message,
+                              proposal=proposal)
 
     def aside(self, text: str) -> Optional[PlannerOutcome]:
         """Answer a message that needs no task, or None.
