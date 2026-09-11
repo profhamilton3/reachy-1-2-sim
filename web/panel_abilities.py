@@ -226,17 +226,62 @@ _ORDER: Tuple[str, ...] = tuple(REGISTRY)
 #: into confident matches, which is the opposite of what this module is for.
 _TYPOS = {"foream": "forearm", "forarm": "forearm", "gripepr": "gripper"}
 
+#: Joint angles and joint names, in any of the forms an operator or a model
+#: might write them.
+#:
+#: IT LIVES HERE BECAUSE TWO CALLERS MUST REFUSE THE SAME THING.  The planner
+#: refuses them from the operator; the language adapter refuses them from the
+#: model's output, on the same path and by the same rule (#92).  Two regexes
+#: would be two definitions of what counts as a joint angle, and the one that
+#: drifted would be the one a model's output went through.
+#:
+#: No leading `\b` before the joint names: they begin with `l_`/`r_` and an
+#: underscore is a word character, so a boundary there would never match the
+#: very names this is meant to catch.  Same for the plural in "degrees".
+#: `rad`/`deg` keep their own boundary so "radius" and "degrade" do not trip it.
+JOINT_RE = re.compile(
+    r"\b(joints?|radians?|rad\b|degrees?|deg\b|"
+    r"[lr]_(shoulder|elbow|forearm|wrist|arm|gripper)|"
+    r"neck_(roll|pitch|yaw))",
+    re.I,
+)
+
 #: A command opening with one of these is not a request to do the thing it
 #: names.  `fullmatch` already rejects most of them; this catches a pattern
 #: permissive enough to be fooled, where the failure would be a moving arm.
+#:
+#: TESTED AFTER THE POLITENESS IS STRIPPED.  Anchored at `^` against the raw
+#: command it fires on "don't wave" and not on "please don't wave" — and the
+#: second is the one an operator actually types.  That gap let a negated
+#: request fall through `match` as merely unrecognised, which is how it
+#: reached the language adapter (#92), which quite reasonably read it as a
+#: request to wave.
 _NEGATION_RE = re.compile(
     r"^(?:do\s+not|don't|dont|never|no|not|stop|cancel|abort|"
     r"you\s+(?:should|must)\s+not|avoid)\b"
 )
 
+#: The politeness and filler that may precede a negation.  Matched as a
+#: prefix, so "reachy, could you not wave" is stripped to "not wave".
+#: NOT BUILT FROM `_POLITE`.  That one is a `*` group, so it matches the empty
+#: string — and an alternation with an empty branch inside a `+` matches empty
+#: at position 0 and stops, stripping nothing at all.  The branches are spelled
+#: out here so every one of them consumes something.
+_COURTESY_RE = re.compile(
+    r"^(?:please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|"
+    r"will\s+you\s+|reachy[,\s]+|"
+    r"i\s+(?:would\s+like\s+you\s+to\s+|want\s+you\s+to\s+))+"
+)
+
+
+def _without_courtesy(norm: str) -> str:
+    return _COURTESY_RE.sub("", norm, count=1).strip()
+
 #: Conjunctions that join two requests.  Ordered longest-first so "and then"
 #: is not split as "and" leaving a dangling "then".
 _JOINERS = (r"\s+and\s+then\s+", r"\s+and\s+also\s+", r"\s*;\s*",
+            r"\s+and\s+afterwards\s+", r"\s+and\s+after\s+that\s+",
+            r"\s+afterwards\s+", r"\s+followed\s+by\s+",
             r"\s+then\s+", r"\s+after\s+that\s+", r"\s+and\s+")
 _JOINER_RE = re.compile("|".join(_JOINERS))
 
@@ -296,6 +341,19 @@ def normalise(text: str) -> str:
     return " ".join(words)
 
 
+def fragments(text: str) -> List[str]:
+    """The pieces a command splits into on a conjunction.
+
+    Exposed because the language adapter needs a CONSERVATIVE compound test of
+    its own: `match`'s version requires two fragments that already look like
+    commands, which is exactly the judgement the adapter exists because the
+    registry cannot always make.  "wave and afterwards store the arm" split
+    into a fragment the registry recognises and one it does not, so no compound
+    refusal was raised and half of it was proposed.
+    """
+    return [p.strip() for p in _JOINER_RE.split(normalise(text)) if p and p.strip()]
+
+
 def _looks_like_a_command(fragment: str) -> bool:
     if not fragment:
         return False
@@ -338,7 +396,7 @@ def match(text: str) -> Optional[AbilityMatch]:
     if not norm:
         return None
 
-    if _NEGATION_RE.match(norm):
+    if _NEGATION_RE.match(norm) or _NEGATION_RE.match(_without_courtesy(norm)):
         raise AbilityRefusal(
             "That reads as telling me not to do something. Ask me for what "
             "you do want and I will do that instead.",

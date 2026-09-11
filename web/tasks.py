@@ -197,6 +197,12 @@ class Proposal:
     #: that link dies in the planner and the trace stops at "something was
     #: retrieved".  0 means nothing was retrieved.
     recipe_policy_version: int = 0
+    #: Which path read the operator's sentence: the deterministic registry, or
+    #: the optional language adapter (#92).  Recorded because the two are not
+    #: equally inspectable — the registry's answer can be reproduced from the
+    #: pattern that matched it, and the adapter's cannot — so a plan nobody
+    #: expected is a different investigation depending on which produced it.
+    interpreted_by: str = "registry"
     #: The posture the route may be entered from, so the executor can refuse an
     #: unsupported start rather than discover it in flight.
     expected_start_posture: str = ""
@@ -241,6 +247,7 @@ class Proposal:
             "recipe_version": self.recipe_version,
             "recipe_parameters": dict(self.recipe_parameters),
             "recipe_policy_version": self.recipe_policy_version,
+            "interpreted_by": self.interpreted_by,
             "expected_start_posture": self.expected_start_posture,
             "end_posture": self.end_posture,
             "destination_kind": self.destination_kind,
@@ -358,6 +365,18 @@ class PlannerOutcome:
     #: keeps no state, in which case the coordinator leaves the task's own
     #: state alone rather than clearing it.
     intent: Optional[IntentState] = None
+    #: The canonical command this turn was actually read as, when something
+    #: re-read it (#92).  Empty for the ordinary case.
+    #:
+    #: It becomes the intent's command, so a clarification that follows is
+    #: answered against the RESOLVED request.  Without it, every reply turn
+    #: re-planned the operator's original sentence — which by definition the
+    #: deterministic parser could not read, or nothing would have needed to
+    #: re-read it — so the language adapter was asked again, was free to
+    #: answer differently, and the operator's answer was applied to whatever
+    #: came back the second time.  A question about an object was answered
+    #: with a wave.
+    read_as: str = ""
 
 
 @dataclass
