@@ -1241,6 +1241,24 @@ def _rest_hand_point():
     return tuple((a + b) / 2.0 for a, b in zip(p0, p1))
 
 
+def _rest_hand_point_offset(offset):
+    """`_rest_hand_point`, displaced sideways by `offset` metres.
+
+    Used to place an object between the closed-hand and open-hand capsule
+    radius at REST — a distance the guard only reaches if it uses the WIDER
+    of a leg's two commanded gripper endpoints, converted through
+    `hand_radius`'s actual (nonlinear, sign-inverted) aperture, rather than
+    the numerically larger raw degree value.
+    """
+    from reachy_ai.motion import rig_routes as RR
+    from reachy_ai.motion.kinematics import link_capsules
+    q = [RR.REST[j] for j in RR.ARM7]
+    _name, p0, p1, _radius = next(
+        c for c in link_capsules(q, side="right") if c[0] == "hand")
+    x, y, z = ((a + b) / 2.0 for a, b in zip(p0, p1))
+    return (x, y + offset, z)
+
+
 def _descent_hand_point():
     """A world point the hand capsule occupies partway down the actual
     PRESENT -> REST_SHUT descent that `stow_arm` flies when leaving PRESENT
@@ -1357,6 +1375,32 @@ class TestFootprintCheck:
             end_posture="rest", expected_start_posture="home"))
 
         assert ok is True, why
+
+    def test_uses_the_wider_by_radius_endpoint_not_the_larger_raw_degree(
+            self, monkeypatch, fake_sdk):
+        """#82/A2: REST_SHUT -> REST commands the gripper from SHUT (+20) to
+        OPEN (-45) — numerically SMALLER, but `hand_radius` (nonlinear, and
+        the sign is inverted) makes OPEN the WIDER hand.  An object placed
+        0.12 m out from the REST hand centre overlaps the open-hand capsule
+        on that leg (0.5 cm) but clears both the shut-hand reading of the
+        same leg and the tail's other leg (HOVER -> REST_SHUT, genuinely SHUT
+        the whole way).  A guard that compared raw commanded degrees would
+        pick SHUT (20 > -45) for the REST_SHUT -> REST leg and clear
+        everywhere; using the wider radius must refuse."""
+        _validated(monkeypatch)
+        point = _rest_hand_point_offset(0.12)
+        from reachy_ai.scene.awareness import SceneModel
+        monkeypatch.setattr(SceneModel, "from_yaml",
+                            staticmethod(lambda path: _scene_model_with(point)))
+        scene = _scene_with_object_at(point)
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="rest_forearm", route="PLACE_ROUTE",
+            end_posture="rest", expected_start_posture="home"))
+
+        assert ok is False
+        assert "soda_can" in why
 
     def test_it_also_gates_wave_from_the_pocket(self, monkeypatch, fake_sdk):
         """RAISE_TO_SIDE reaches PRESENT by way of REST, so a wave requested

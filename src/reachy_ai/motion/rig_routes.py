@@ -68,6 +68,20 @@ LESSON_TOL = 90.0
 #: the arm that approaches anything.
 SAFE_MARGIN = 0.05
 
+#: The forearm-footprint guard's own clearance threshold (#82) —
+#: `panel_executor._footprint_refusal` refuses a leg whose worst modelled
+#: clearance is below this, in metres.
+#:
+#: NAMED HERE SO THE CHOICE IS VISIBLE, NOT BECAUSE IT HAS BEEN VALIDATED.
+#: It is today's actual, previously-implicit behaviour (a bare `d < 0.0` in
+#: the guard) written down unchanged — zero margin, not SAFE_MARGIN adopted
+#: on purpose.  Whether the guard should use SAFE_MARGIN, this value, or
+#: something else is #74's decision: the guard's own probe against
+#: ADR-0002's evidence board disagrees with the eighteen flown legs at both
+#: 0.0 and SAFE_MARGIN, and reconciling that needs the flight-measurement
+#: data neither this constant nor this commit has.
+FOOTPRINT_MARGIN = 0.0
+
 #: How far an object may move before the board counts as disturbed, in metres.
 #:
 #: ONE NUMBER, NOT THREE.  The live executor's post-move check, the episode
