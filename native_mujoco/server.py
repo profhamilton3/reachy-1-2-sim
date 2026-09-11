@@ -194,8 +194,10 @@ class SimState:
 
     # --- Called by sim thread each step ---
 
-    def apply_pending(self) -> Optional[str]:
-        """Apply queued commands; return reset request_id if reset occurred."""
+    def apply_pending(self) -> Optional[Dict[str, Any]]:
+        """Apply queued commands; return {"request_id", "_conn_id"} of the
+        reset that occurred, so the ack can be routed to whoever asked for
+        it rather than broadcast to whichever connection polls first."""
         with self._lock:
             pause = self._pending_pause
             cmd = self._pending_cmd
@@ -207,7 +209,7 @@ class SimState:
         if pause is not None:
             self.paused = pause
 
-        reset_id = None
+        reset_info = None
         if reset_req is not None:
             self._reset_physics()
             self.step = 0
@@ -221,7 +223,10 @@ class SimState:
             )
             self.interactive.reset(self.data)
             mujoco.mj_forward(self.model, self.data)
-            reset_id = reset_req.get("request_id", "")
+            reset_info = {
+                "request_id": reset_req.get("request_id", ""),
+                "_conn_id": reset_req.get("_conn_id"),
+            }
 
         if cmd is not None:
             tgt = cmd.get("target_rad", [])
@@ -244,7 +249,7 @@ class SimState:
             self._cmd_seq = cmd.get("seq", self._cmd_seq)
 
         self._apply_places()
-        return reset_id
+        return reset_info
 
     _RESHAPE_KEYS = frozenset({"size", "radius", "length", "rgba", "mass"})
 
@@ -493,13 +498,16 @@ class ReachyMujocoServer:
         # anywhere saying why.  One queue per connection, fanned out below.
         self._state_qs: dict = {}
         self._frame_qs: dict = {}
-        self._reset_ack_q: asyncio.Queue = None  # type: ignore[assignment]
-        # One queue PER CONNECTION, keyed by connection id.  A single shared
-        # queue is wrong here: the server accepts concurrent clients, each with
-        # its own send loop, so whichever loop called get_nowait() first took
-        # the ack — a notebook's placement ack would be delivered to the Docker
-        # bridge, which discards it, and the notebook would wait forever for a
-        # placement that had in fact already happened.  Observed exactly that.
+        # One queue PER CONNECTION, keyed by connection id, for both reset and
+        # placement acks.  A single shared queue is wrong here: the server
+        # accepts concurrent clients, each with its own send loop, so whichever
+        # loop called get_nowait() first took the ack — a notebook's placement
+        # ack would be delivered to the Docker bridge, which discards it, and
+        # the notebook would wait forever for a placement that had in fact
+        # already happened.  Observed exactly that; reset_ack had the identical
+        # bug (#84) since it was built the same way and never revisited when
+        # place_ack was fixed.
+        self._reset_ack_qs: dict = {}
         self._place_ack_qs: dict = {}
         self._next_conn_id = 0
         # Execution lease (issue #51).  None, or a dict with conn_id /
@@ -552,7 +560,7 @@ class ReachyMujocoServer:
                 continue
             next_step += step_period
 
-            reset_id = self._sim.apply_pending()
+            reset_info = self._sim.apply_pending()
 
             if not self._sim.paused:
                 self._sim.control_step(dt)   # R12-501 actuator/compliance model
@@ -621,16 +629,22 @@ class ReachyMujocoServer:
                         self._broadcast(self._frame_qs, cam_msg), self._loop
                     )
 
-            # Reset ack
-            if reset_id is not None and self._loop:
-                ack = ResetAck(
-                    request_id=reset_id,
-                    sim_step=self._sim.step,
-                    scene_revision=self._sim.scene_revision,
-                )
-                asyncio.run_coroutine_threadsafe(
-                    self._reset_ack_q.put(ack), self._loop
-                )
+            # Reset ack — routed to the connection that asked, not broadcast.
+            if reset_info is not None and self._loop:
+                queue = self._reset_ack_qs.get(reset_info.get("_conn_id"))
+                if queue is None:
+                    # The client disconnected between asking and landing.  The
+                    # reset still happened — it is a world change, not a reply
+                    # — so this only drops the receipt (same call place_ack
+                    # already makes, and for the same reason).
+                    pass
+                else:
+                    ack = ResetAck(
+                        request_id=reset_info["request_id"],
+                        sim_step=self._sim.step,
+                        scene_revision=self._sim.scene_revision,
+                    )
+                    asyncio.run_coroutine_threadsafe(queue.put(ack), self._loop)
 
             # Placement acks (R12-607).  Carry the sim step so a client can line
             # the next camera frame up with a placement whose pose it knows.
@@ -803,6 +817,7 @@ class ReachyMujocoServer:
         conn_id = self._next_conn_id
         self._next_conn_id += 1
         self._place_ack_qs[conn_id] = asyncio.Queue(maxsize=32)
+        self._reset_ack_qs[conn_id] = asyncio.Queue(maxsize=4)
         self._state_qs[conn_id] = asyncio.Queue(maxsize=10)
         self._frame_qs[conn_id] = asyncio.Queue(maxsize=4)
         log.info("Handshake complete with %s", addr)
@@ -823,11 +838,11 @@ class ReachyMujocoServer:
                     await ws.send(frame.encode())
                 except asyncio.QueueEmpty:
                     pass
-                # Drain reset ack
+                # Drain THIS connection's reset ack
                 try:
-                    rack = self._reset_ack_q.get_nowait()
+                    rack = self._reset_ack_qs[conn_id].get_nowait()
                     await ws.send(rack.encode())
-                except asyncio.QueueEmpty:
+                except (asyncio.QueueEmpty, KeyError):
                     pass
                 # Drain THIS connection's placement acks
                 try:
@@ -897,6 +912,7 @@ class ReachyMujocoServer:
                         self._recorder.record_command(decoded)
 
                 elif mtype == "reset":
+                    decoded["_conn_id"] = conn_id
                     self._sim.submit_reset(decoded)
                     if self._recorder is not None:
                         self._recorder.record_reset(
@@ -977,6 +993,7 @@ class ReachyMujocoServer:
             # A holder that drops its socket must not leave the scene frozen.
             self._release_control(conn_id)
             self._place_ack_qs.pop(conn_id, None)
+            self._reset_ack_qs.pop(conn_id, None)
             self._state_qs.pop(conn_id, None)
             self._frame_qs.pop(conn_id, None)
             log.info("Handler exited for %s", addr)
@@ -1040,7 +1057,6 @@ class ReachyMujocoServer:
     # ── Entry point ──────────────────────────────────────────────────────────
 
     async def run(self) -> None:
-        self._reset_ack_q = asyncio.Queue(maxsize=4)
         self._loop = asyncio.get_running_loop()
 
         sim_thread = threading.Thread(
