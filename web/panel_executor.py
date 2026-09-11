@@ -570,6 +570,9 @@ class SimulatorExecutor:
                 # The revision moves when the board is edited; the name does
                 # not.  The record wants the one that moves.
                 scene_revision=getattr(scene, "scene_revision", ""),
+                # The board this episode happened on, which the reuse gate
+                # (#89) needs in order to certify a route against anything.
+                obstacles=sorted(getattr(scene, "objects", {}) or {}),
             )
         except Exception:
             log.exception("could not record the episode for plan %s",

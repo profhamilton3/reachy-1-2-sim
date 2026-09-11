@@ -117,7 +117,8 @@ class EpisodeRecorder:
 
     def record(self, proposal, result, *, phases: Sequence[Tuple[str, float]] = (),
                started_at: float = 0.0, ended_at: float = 0.0,
-               scene_name: str = "", scene_revision: str = "") -> Optional[str]:
+               scene_name: str = "", scene_revision: str = "",
+               obstacles: Sequence[str] = ()) -> Optional[str]:
         """Record one episode.  Returns the trial id, or None if nothing was
         written — which is a log line and never an exception.
 
@@ -126,7 +127,8 @@ class EpisodeRecorder:
         """
         try:
             return self._record(proposal, result, phases, started_at,
-                                ended_at, scene_name, scene_revision)
+                                ended_at, scene_name, scene_revision,
+                                obstacles)
         except Exception:
             # Deliberately broad.  The alternative to swallowing this is a
             # failed motion report for a movement that actually succeeded.
@@ -137,7 +139,7 @@ class EpisodeRecorder:
     # -- everything below may raise; `record` is the wall -------------------
 
     def _record(self, proposal, result, phases, started_at, ended_at,
-                scene_name, scene_revision) -> str:
+                scene_name, scene_revision, obstacles=()) -> str:
         _ensure_paths()
         from reachy_ai.evaluation.base import ViolationKind
         from reachy_ai.experience.models import (EpisodeConfig, EpisodeResult,
@@ -198,7 +200,7 @@ class EpisodeRecorder:
                 STUDY_ID, spec, self._route_json(proposal), config,
                 live_interactive=True,
                 optimizer_metadata=self._metadata(proposal, phases, evidence,
-                                                  scene_name),
+                                                  scene_name, obstacles),
             )
             store.start_trial(trial_id)
 
@@ -248,11 +250,18 @@ class EpisodeRecorder:
             "end_posture": getattr(proposal, "end_posture", ""),
         })
 
-    def _metadata(self, proposal, phases, evidence, scene_name) -> Dict[str, Any]:
+    def _metadata(self, proposal, phases, evidence, scene_name,
+                  obstacles) -> Dict[str, Any]:
         return {
             "live_interactive": True,
             "source": "panel",
             "scene_name": scene_name or getattr(proposal, "scene_name", ""),
+            # WHICH OBJECTS WERE ON THE BOARD.  The reuse gate (#89) rejects a
+            # candidate that never recorded one, because a route certified
+            # over an unknown board is certified over nothing — so an episode
+            # that does not write this down can never become evidence for
+            # anything, however well it went.
+            "obstacles": sorted(obstacles),
             "plan_id": getattr(proposal, "plan_id", ""),
             "plan_version": getattr(proposal, "plan_version", 0),
             "requested_cell": getattr(proposal, "cell", None),

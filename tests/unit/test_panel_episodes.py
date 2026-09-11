@@ -480,6 +480,42 @@ def test_the_default_database_is_not_resolved_against_the_process_cwd(
     assert recorder._db_path.endswith(os.path.join("runs", "panel_episodes.db"))
 
 
+def test_the_board_the_episode_happened_on_is_recorded(db, fake_sdk, validated):
+    """The reuse gate rejects a candidate that never recorded one, so an
+    episode without it can never become evidence, however well it went."""
+    executor(db).execute(_ability())
+    meta = json.loads(rows(db)[0]["optimizer_metadata_json"])
+    assert meta["obstacles"] == ["soda_can"]
+
+
+def test_an_episode_this_panel_recorded_is_refused_by_the_reuse_gate(
+        db, fake_sdk, validated):
+    """The two halves have to agree.  A wave that went perfectly is still one
+    run observed by one person, and the gate says so twice over: it was
+    live-interactive, and it was never promoted."""
+    from reachy_ai.experience.compatibility import (ReuseCandidate,
+                                                    ReuseRequest, check_reuse)
+
+    executor(db).execute(_ability())
+    row, = rows(db)
+    assert row["status"] == EpisodeStatus.SUCCEEDED.value
+
+    # A real model hash, so the gate judges the row rather than refusing to
+    # answer about a degenerate identity.
+    identity = SimulatorIdentity.from_dict(
+        {**SimulatorIdentity.from_json(row["identity_json"]).to_dict(),
+         "model_sha256": "m"})
+    candidate = ReuseCandidate.from_row(
+        {**row, "identity_json": identity.to_json()})
+
+    decision = check_reuse(candidate, identity, ReuseRequest(
+        task_type="stow_arm", arm="right", route="STOW_ROUTE",
+        route_version=1, start_posture="rest",
+        obstacles=frozenset({"soda_can"})))
+    assert not decision.allowed
+    assert "a person was driving" in decision.reason
+
+
 def test_the_route_is_recorded_as_a_route_and_not_as_a_recipe(db, fake_sdk,
                                                               validated):
     """The abilities have no TrajectoryRecipe yet — that is #91 — and an empty

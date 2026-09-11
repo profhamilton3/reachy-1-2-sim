@@ -4,6 +4,16 @@ Imports are intentionally flat so callers do not need to know which sub-module
 owns each type.
 """
 
+from .compatibility import (
+    CompatibilityError,
+    Mismatch,
+    ReuseCandidate,
+    ReuseDecision,
+    ReusePolicy,
+    ReuseRequest,
+    check_reuse,
+    select_reusable,
+)
 from .identity import (
     ResearchContextError,
     assert_research_context,
@@ -26,6 +36,14 @@ from .store import (
 )
 
 __all__ = [
+    "CompatibilityError",
+    "Mismatch",
+    "ReuseCandidate",
+    "ReuseDecision",
+    "ReusePolicy",
+    "ReuseRequest",
+    "check_reuse",
+    "select_reusable",
     "ResearchContextError",
     "assert_research_context",
     "build_simulator_identity",

@@ -473,7 +473,9 @@ class ExperienceStore:
         promotion state, all of which SimulatorIdentity and TrialRecord record
         and none of which are checked here.  It is the right question for
         offline search within one world and the wrong one for "may the arm move
-        on this recipe" — see #89.
+        on this recipe" — that one is `compatibility.check_reuse`, which
+        enforces every identity field, the promotion state, and the board the
+        trial was actually certified against.
 
         Live-interactive episodes are excluded unless asked for: they were
         observed, not sampled, and letting them into a search population
