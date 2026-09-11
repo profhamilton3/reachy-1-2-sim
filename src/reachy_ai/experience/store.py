@@ -42,7 +42,7 @@ from .models import (
     TrialRecord,
 )
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _DEFAULT_ORPHAN_THRESHOLD_S = 3600.0
 
 _DDL = """
@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS trials (
     parent_trial_id         TEXT NOT NULL DEFAULT '',
     warm_start_trial_id     TEXT NOT NULL DEFAULT '',
     promotion_state         TEXT NOT NULL DEFAULT 'unpromoted',
-    review_metadata_json    TEXT
+    review_metadata_json    TEXT,
+    live_interactive        INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS artifacts (
@@ -87,6 +88,9 @@ CREATE INDEX IF NOT EXISTS idx_trials_status
     ON trials(status, success);
 CREATE INDEX IF NOT EXISTS idx_trials_identity
     ON trials(model_sha256, scene_sha256, status);
+CREATE INDEX IF NOT EXISTS idx_trials_live
+    ON trials(live_interactive, task_type, completed_at);
+
 CREATE INDEX IF NOT EXISTS idx_artifacts_trial
     ON artifacts(trial_id);
 """
@@ -127,10 +131,28 @@ def _sha256_file(path: pathlib.Path) -> Optional[str]:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     current: int = conn.execute("PRAGMA user_version").fetchone()[0]
-    if current < _SCHEMA_VERSION:
-        conn.executescript(_DDL)
-        conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-        conn.commit()
+    if current >= _SCHEMA_VERSION:
+        return
+
+    # v1 -> v2: live_interactive.  BEFORE the DDL, not after.  CREATE TABLE IF
+    # NOT EXISTS does nothing to a table that already exists, so a v1 file
+    # needs the column added explicitly — and _DDL now declares an index over
+    # that column, which fails the whole script on a table that has not got it
+    # yet.  Every row a v1 file holds was written by an offline runner, which
+    # is exactly what the 0 default says.
+    tables = {row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    if "trials" in tables:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(trials)")}
+        if "live_interactive" not in columns:
+            conn.execute(
+                "ALTER TABLE trials "
+                "ADD COLUMN live_interactive INTEGER NOT NULL DEFAULT 0"
+            )
+
+    conn.executescript(_DDL)
+    conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+    conn.commit()
 
 
 def _row_dict(cursor: sqlite3.Cursor, row: tuple) -> Dict[str, Any]:
@@ -201,8 +223,17 @@ class ExperienceStore:
         parent_trial_id: str = "",
         warm_start_trial_id: str = "",
         optimizer_metadata: Optional[Dict[str, Any]] = None,
+        live_interactive: bool = False,
     ) -> str:
-        """Create a new trial in PENDING state. Returns the new trial_id."""
+        """Create a new trial in PENDING state. Returns the new trial_id.
+
+        Set live_interactive for an episode observed while a person was
+        driving — a panel request, not a controlled rollout.  Those have no
+        fixed seed, no deterministic reset, and a scene that may have been
+        edited between one and the next, so they are evidence about what
+        happened and not a sample anything may optimise against.
+        `query_compatible_trials` excludes them unless asked for them.
+        """
         trial_id = uuid.uuid4().hex
         identity = config.simulator_identity
         now = _now_iso()
@@ -219,8 +250,8 @@ class ExperienceStore:
                     config_json, result_json, identity_json, status, success,
                     model_sha256, scene_sha256, scene_revision,
                     created_at, optimizer_metadata_json,
-                    parent_trial_id, warm_start_trial_id
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    parent_trial_id, warm_start_trial_id, live_interactive
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     trial_id,
@@ -240,6 +271,7 @@ class ExperienceStore:
                     json.dumps(optimizer_metadata or {}),
                     parent_trial_id,
                     warm_start_trial_id,
+                    1 if live_interactive else 0,
                 ),
             )
         return trial_id
@@ -340,9 +372,16 @@ class ExperienceStore:
         """Transition any non-terminal state → ABORTED."""
         self._force_terminal(trial_id, EpisodeStatus.ABORTED, reason)
 
-    def cancel_trial(self, trial_id: str) -> None:
-        """Transition any non-terminal state → CANCELLED."""
-        self._force_terminal(trial_id, EpisodeStatus.CANCELLED, "cancelled")
+    def cancel_trial(self, trial_id: str,
+                     result: Optional[EpisodeResult] = None) -> None:
+        """Transition any non-terminal state → CANCELLED.
+
+        Pass `result` when there is evidence worth keeping.  A cancelled
+        episode is not an empty one: the arm stopped somewhere, and where it
+        stopped is the fact a reader will want.
+        """
+        self._force_terminal(trial_id, EpisodeStatus.CANCELLED, "cancelled",
+                             result)
 
     def _force_terminal(
         self,
@@ -416,11 +455,23 @@ class ExperienceStore:
         task_type: Optional[str] = None,
         study_id: Optional[str] = None,
         limit: int = 100,
+        include_live_interactive: bool = False,
     ) -> List[Dict[str, Any]]:
         """Return SUCCEEDED trials whose model/scene hashes exactly match identity.
 
         Raises IdentityMismatchError if identity.model_sha256 is empty — an
         empty hash would match every trial, silently reusing incompatible data.
+
+        THIS IS NOT A REUSE GATE.  It compares two hashes and a status; it says
+        nothing about calibration, physics profile, backend, route version or
+        promotion state, all of which SimulatorIdentity and TrialRecord record
+        and none of which are checked here.  It is the right question for
+        offline search within one world and the wrong one for "may the arm move
+        on this recipe" — see #89.
+
+        Live-interactive episodes are excluded unless asked for: they were
+        observed, not sampled, and letting them into a search population
+        silently mixes the two.
         """
         if not identity.model_sha256:
             raise IdentityMismatchError(
@@ -436,6 +487,8 @@ class ExperienceStore:
             identity.scene_sha256,
             EpisodeStatus.SUCCEEDED.value,
         ]
+        if not include_live_interactive:
+            sql += " AND live_interactive=0"
         if task_type:
             sql += " AND task_type=?"
             params.append(task_type)
@@ -470,6 +523,32 @@ class ExperienceStore:
         )
         rows = cur.fetchall()
         return [_row_dict(cur, r) for r in rows]
+
+    def prune_live_interactive(self, keep: int) -> int:
+        """Drop all but the newest `keep` live-interactive trials.
+
+        A long-lived panel container writes one of these per confirmed
+        movement, forever.  Bounding it here rather than leaving it to whoever
+        notices the file is what makes recording safe to turn on by default.
+
+        Offline trials are never touched: they are the record a study's report
+        was written from, and deleting one would falsify it.
+        """
+        if keep < 0:
+            raise ValueError("keep must be >= 0")
+        with self._conn:
+            cur = self._conn.execute(
+                """
+                DELETE FROM trials WHERE trial_id IN (
+                    SELECT trial_id FROM trials
+                    WHERE live_interactive=1
+                    ORDER BY created_at DESC, rowid DESC
+                    LIMIT -1 OFFSET ?
+                )
+                """,
+                (keep,),
+            )
+        return cur.rowcount
 
     def get_artifacts(self, trial_id: str) -> List[Dict[str, Any]]:
         """Return all artifact records for a trial."""
