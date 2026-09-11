@@ -720,7 +720,7 @@ class SimulatorExecutor:
             now = scene.objects.get(oid)
             if now is not None and now.position is not None:
                 moved = _euclid(now.position, was)
-                if moved > 0.02:
+                if moved > R.OBJECT_DRIFT_TOL:
                     drift[oid] = round(moved, 4)
 
         evidence = {"route": wanted, "waypoints_flown": list(flown),

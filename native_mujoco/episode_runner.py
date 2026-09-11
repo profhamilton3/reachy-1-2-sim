@@ -44,6 +44,8 @@ import time
 import uuid
 from typing import Callable, Iterable, List, Optional, Sequence
 
+import mujoco
+
 from evaluation_snapshot import EvaluationSnapshot
 from simulation_core import SimulationCore
 
@@ -53,11 +55,25 @@ _SRC = os.path.join(os.path.dirname(__file__), "../src")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
+from joint_map import by_name
+
 from reachy_ai.experience.models import (
     EpisodeConfig,
     EpisodeResult,
     EpisodeStatus,
 )
+
+
+def _sdk_deg(name: str, rad: float) -> float:
+    """MuJoCo radians for one joint as the SDK's signed degrees.
+
+    An unknown joint falls back to a plain radian->degree conversion: the sign
+    table is what makes the two domains agree, and a name it does not cover is
+    a name nothing downstream compares against a measured pose either.
+    """
+    entry = by_name(name)
+    return (entry.mjcf_rad_to_sdk_deg(float(rad)) if entry is not None
+            else math.degrees(float(rad)))
 
 # Hard-failure contype pairs (robot↔fixture = 2↔8)
 _ROBOT_CONTYPE   = 2
@@ -95,12 +111,36 @@ class EpisodeRunner:
         self.core = core
         self.config = config
 
+    def _place_at(self, pose_rad: Sequence[float]) -> None:
+        """Put the arm at a starting posture before the episode begins.
+
+        EVERY EPISODE USED TO BEGIN AT THE HOME KEYFRAME, which is right for
+        pick-and-place — home IS its start — and wrong for any route whose
+        precondition is a different posture.  Flying the stow corridor from
+        home meant interpolating straight from the pocket to REST_SHUT, which
+        is precisely the cut-across the corridor exists to forbid: a direct
+        move from over the board to HOME drives the upper arm through the
+        board's near edge.
+
+        This is a PLACEMENT, not a motion: the arm is put where the route
+        requires it to already be, the way the live path requires the operator
+        to have got it there.  Nothing is measured about the placement, and it
+        contributes no steps to the episode.
+        """
+        for i, value in enumerate(pose_rad):
+            if i < self.core.model.nq:
+                self.core.data.qpos[i] = float(value)
+        self.core.data.qvel[:] = 0.0
+        mujoco.mj_forward(self.core.model, self.core.data)
+        self.core.controller.sync_targets_to_current(self.core.data)
+
     def run(
         self,
         commands: Iterable[StepCommand] = (),
         *,
         on_snapshot: Optional[Callable[[EvaluationSnapshot], None]] = None,
         cancelled: Optional[threading.Event] = None,
+        start_pose_rad: Optional[Sequence[float]] = None,
     ) -> EpisodeResult:
         """Execute a command sequence and return a structured EpisodeResult.
 
@@ -124,6 +164,8 @@ class EpisodeRunner:
 
         wall_start = time.monotonic()
         self.core.reset(seed=cfg.seed)
+        if start_pose_rad is not None:
+            self._place_at(start_pose_rad)
 
         start_step = self.core.step
         snapshots_collected: List[EvaluationSnapshot] = []
@@ -265,5 +307,14 @@ class EpisodeRunner:
                 for i, o in enumerate(final_snap.objects)
             },
             warnings=[],
+            # WHERE THE ARM FINISHED, in the SDK's degrees rather than MuJoCo's
+            # radians, because every threshold that judges arrival — the route
+            # tolerances, `posture_of`, the waypoint guards — is written in
+            # degrees.  Converting at the boundary means no evaluator has to.
+            final_joint_positions_deg={
+                j["name"]: _sdk_deg(j["name"], j["position_rad"])
+                for j in final_snap.joints
+                if j.get("name") and math.isfinite(j.get("position_rad", float("nan")))
+            },
         )
         return result

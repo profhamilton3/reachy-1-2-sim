@@ -68,6 +68,19 @@ LESSON_TOL = 90.0
 #: the arm that approaches anything.
 SAFE_MARGIN = 0.05
 
+#: How far an object may move before the board counts as disturbed, in metres.
+#:
+#: ONE NUMBER, NOT THREE.  The live executor's post-move check, the episode
+#: recorder's success definition and the searched-recipe evaluators all ask the
+#: same question — "did this motion move anything?" — and answering it with
+#: three separately maintained literals is how they drift apart.  It lives here
+#: because it belongs to the rig rather than to any one caller.
+#:
+#: 2 cm is the panel's own threshold, carried forward rather than re-derived.
+#: It is a DISTURBANCE threshold and not a measurement accuracy: the pose
+#: estimate is better than this, and a shove is much worse.
+OBJECT_DRIFT_TOL = 0.02
+
 
 def pose(**kw) -> Dict[str, float]:
     """A full seven-joint pose, gripper open unless told otherwise."""

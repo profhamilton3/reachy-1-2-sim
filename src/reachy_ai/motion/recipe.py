@@ -62,6 +62,19 @@ class TrajectoryRecipe:
     effort_limits: Dict[str, float]         = dataclasses.field(default_factory=dict)
     source: str                             = "baseline"
     parent_recipe_id: str                   = ""
+    #: The measured route this recipe is a variation OF, when it is one (#91).
+    #:
+    #: Empty for the two task families that have no named route.  For an
+    #: ability route these are what `check_route_integrity` compares against,
+    #: and what the reuse gate reads back out of a stored recipe — it matches a
+    #: route by NAME and VERSION, so a recipe that loses them on a round trip
+    #: is a recipe the gate can no longer tell apart from any other.
+    route: str                              = ""
+    route_version: int                      = 0
+    #: The posture the route may be entered from.  The gate compares it, and
+    #: it is a field here rather than a loose key in the JSON because a loose
+    #: key does not survive `to_dict()`.
+    expected_start_posture: str             = ""
 
     def to_dict(self) -> Dict[str, Any]:
         d = dataclasses.asdict(self)

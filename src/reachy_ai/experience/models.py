@@ -172,6 +172,50 @@ class PickPlaceTaskSpec(TaskSpec):
         return cls(**{k: v for k, v in d.items() if k in known})
 
 
+@dataclasses.dataclass
+class PanelRouteTaskSpec(TaskSpec):
+    """A measured rig route flown as an ability (#91).
+
+    The five abilities the panel flies are not pick-and-place and not the
+    control panel.  They are named routes through a rig whose geometry IS the
+    safety argument, so what this spec carries is what an evaluator needs to
+    decide whether the route was flown as measured — the route's name and
+    version, the postures it claims to start and end at, and the board it was
+    flown over.
+
+    `initial_object_positions` is here because an EpisodeResult records where
+    the objects ENDED and nothing records where they began.  "Nothing moved"
+    is a comparison, and a spec that cannot supply the first half of it makes
+    the evaluator say so rather than assume an undisturbed board.
+    """
+    ability: str                                = ""
+    route: str                                  = ""
+    route_version: int                          = 1
+    expected_start_posture: str                 = ""
+    expected_end_posture: str                   = ""
+    #: object_id -> [x, y, z] in metres, read after reset and before the move.
+    initial_object_positions: Dict[str, List[float]] = dataclasses.field(
+        default_factory=dict)
+    #: Contact this route is EXPECTED to make.  Resting the forearm on the
+    #: table is the task, not a violation; an empty list means no contact with
+    #: anything is intended.
+    intended_contact_bodies: List[str]          = dataclasses.field(
+        default_factory=list)
+    #: Where a point was asked to hover, in metres, and how near counts as
+    #: arrived.  Empty for the routes that do not point.
+    hover_target_xyz: List[float]               = dataclasses.field(
+        default_factory=list)
+    hover_clearance_required_m: float           = 0.0
+    #: How many wave cycles were asked for.  Zero for the routes that do not
+    #: wave.
+    expected_wave_cycles: int                   = 0
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "PanelRouteTaskSpec":
+        known = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in known})
+
+
 # ---------------------------------------------------------------------------
 # EpisodeConfig (Section 7.4)
 # ---------------------------------------------------------------------------
@@ -231,6 +275,14 @@ class EpisodeResult:
     final_control_states: Dict[str, Any]        = dataclasses.field(default_factory=dict)
     artifact_paths: List[str]                   = dataclasses.field(default_factory=list)
     warnings: List[str]                         = dataclasses.field(default_factory=list)
+    #: Where the arm finished, joint name -> SDK degrees (#91).
+    #:
+    #: EMPTY IS NOT "AT ZERO".  A result from before this field existed, or
+    #: from a path that does not record joints, deserialises to {} — and an
+    #: evaluator that reads {} as a pose would certify arrival at HOME for
+    #: every episode ever recorded.  The evaluators treat it as "I cannot tell
+    #: whether the arm arrived", which fails the episode rather than passing it.
+    final_joint_positions_deg: Dict[str, float] = dataclasses.field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         d = dataclasses.asdict(self)

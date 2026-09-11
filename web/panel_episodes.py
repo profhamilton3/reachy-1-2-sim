@@ -74,6 +74,11 @@ DEFAULT_DB = "panel_episodes.db"
 #: something the arm did.  The same number the executor judges drift by —
 #: `panel_executor._verify_posture` — because two thresholds for one question
 #: is how a record comes to disagree with what the operator was told.
+#:
+#: THE AUTHORITY IS `rig_routes.OBJECT_DRIFT_TOL`, and #91's evaluators read it
+#: from there.  It is mirrored here rather than imported because this module is
+#: imported by the executor at start-up and must not be able to fail there —
+#: `test_panel_episodes.py` pins the two equal so the mirror cannot drift.
 DRIFT_TOLERANCE_M = 0.02
 
 

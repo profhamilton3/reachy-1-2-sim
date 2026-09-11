@@ -1,0 +1,115 @@
+# Point at a grid cell: approach, hover, and back to PRESENT.
+#
+# THE SEARCHABLE TENSION HERE IS CLEARANCE AGAINST ACCURACY, and it is the one
+# the notebook already found the wrong end of: an earlier version added 10 cm
+# of slop on top of the hover, which bought nothing — a run with the taller
+# hover still threw the blue cylinder 1.06 m off the board, because the object
+# was hit by the FOREARM in transit and no pad height addresses that — and
+# wrecked the pointing it existed to demonstrate.
+#
+# So every clearance below may only be made STRICTER by the search, never
+# looser, and the approach leg count may only go UP.  The legs ARE the
+# path-clearance check: the guard models the arm between two poses as a
+# joint-space straight line, which is the assumption that failed when
+# cell_r2c1 reported +5.5 cm and still moved the can 0.189 m — the guard
+# measured the ENDPOINTS and the can was hit in the middle.
+#
+# The evaluator scores the hover against half a grid cell, because that is what
+# this ability claims.  It is not a calibrated ray and the current miss over an
+# empty board is 2 to 9 cm.
+
+recipe_id: point_cell_baseline_v1
+recipe_version: 1
+task_type: point_cell
+arm: right
+source: baseline
+parent_recipe_id: ""
+route: POINT
+route_version: 1
+expected_start_posture: present
+
+bounded_parameters:
+  # A multiplier on every waypoint's measured duration.  One knob
+  # rather than one per waypoint: the corridor is flown as a whole and
+  # the tracking lag that a faster flight produces is a property of the
+  # whole flight.  Below 1.0 is faster than measured, which is allowed
+  # and is what the waypoint tolerances exist to catch.
+  segment_duration_scale:
+    value: 1.0
+    min: 0.8
+    max: 1.6
+    step: 0.2
+    unit: ratio
+    description: multiplier on each waypoint's measured seconds
+  # How long a settle pass is when a waypoint has not converged.  The
+  # live route runner re-streams progressively longer passes; this is
+  # the first one's length.
+  settle_pass_s:
+    value: 0.8
+    min: 0.4
+    max: 2.0
+    step: 0.4
+    unit: s
+    description: length of the first re-stream pass after a short waypoint
+  point_legs:
+    value: 6
+    min: 6            # fewer legs measures the arm in fewer places
+    max: 14
+    step: 2
+    unit: legs
+    description: hops the approach is broken into for the clearance check
+  point_clearance_m:
+    value: 0.06
+    min: 0.06         # measured floor; stricter only
+    max: 0.12
+    step: 0.02
+    unit: m
+    description: air wanted under the pad
+  point_hover_floor_m:
+    value: 0.12
+    min: 0.12         # measured floor; stricter only
+    max: 0.20
+    step: 0.02
+    unit: m
+    description: floor under the hover on an empty board
+  point_margin_m:
+    value: 0.05
+    min: 0.05         # SAFE_MARGIN; stricter only
+    max: 0.10
+    step: 0.01
+    unit: m
+    description: clearance margin the whole rig uses
+
+joint_limits: {}
+velocity_limits: {}
+effort_limits: {}
+
+# THE ROUTE.  Generated from `reachy_ai.motion.rig_routes` — the module the
+# arm actually flies — and pinned to it by a test.  Editing a name, an order
+# or a tolerance here does not change what the robot does; it makes this file
+# disagree with the robot, which the integrity check then reports.
+primitive_sequence:
+  - primitive: point_approach
+    parameters:
+      name: APPROACH
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: point_hover
+    parameters:
+      name: HOVER
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: point_return
+    parameters:
+      name: PRESENT
+      seconds: 1.8
+      tol: 8.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+
+# Ends at: present
