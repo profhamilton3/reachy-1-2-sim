@@ -274,8 +274,39 @@ def test_a_retrieved_recipe_is_named_on_the_card(db):
     assert out.proposal.recipe_trial_id == tid
     # Named before the operator confirms.  A plan that silently flew somebody
     # else's search result is the one thing retrieval must never do.
-    assert "promoted recipe" in out.proposal.summary
-    assert tid[:8] in out.proposal.summary
+    summary = out.proposal.summary
+    assert "promoted" in summary
+    assert tid[:8] in summary
+
+
+def test_the_card_says_only_what_the_record_actually_holds(db):
+    """An ability route carries no recipe id and no recipe version.
+
+    Asserting the substrings is not enough, and this is the test that says so:
+    the sentence used to read "recipe trial 1a2b3c4d (v0, trial 1a2b3c4d)" —
+    naming the trial twice and reporting a version that was 0 only because
+    nothing ever set one — and every substring assertion above still passed.
+    """
+    tid = write_trial(db, start_posture="")
+    out = plan(make_scene(), "stow your arm", recipes=library(db))
+    summary = out.proposal.summary
+
+    # The trial is named once, not twice.
+    assert summary.count(tid[:8]) == 1
+    # No version is claimed, because none was recorded.  "v0" is not a version.
+    assert "v0" not in summary
+    # And nothing is called a "recipe" when no recipe id exists to name.
+    assert "promoted recipe" not in summary
+
+
+def test_the_card_names_a_recipe_when_there_is_one_to_name(db):
+    from panel_recipes import RetrievedRecipe
+
+    described = RetrievedRecipe(trial_id="abcdef0123456789", recipe_id="wave_v2",
+                                recipe_version=2, parameters={},
+                                policy_version=1).describe()
+    assert "promoted recipe wave_v2 v2" in described
+    assert described.count("abcdef01") == 1
 
 
 def test_a_planner_with_no_library_never_looks(db):
@@ -332,3 +363,164 @@ def test_the_library_can_be_switched_off(monkeypatch):
     assert build_library(SCENE_FILE) is None
     monkeypatch.setenv("REACHY_PANEL_RECIPES", "1")
     assert build_library(SCENE_FILE) is not None
+
+
+# ---------------------------------------------------------------------------
+# Review of #98: one implementation each, and provenance that does not go stale
+# ---------------------------------------------------------------------------
+
+def test_the_board_is_read_by_exactly_one_function():
+    """The planner asks about a board; the executor records one.
+
+    `check_reuse` compares the two for EXACT SET EQUALITY, so two
+    implementations would have to agree byte for byte in behaviour forever —
+    and the failure when they stopped agreeing would be silent: retrieval
+    would simply never match, which reads exactly like "nothing promoted yet".
+    """
+    import panel_executor
+    import panel_planner
+    import panel_provenance
+
+    assert panel_planner._board_of is panel_provenance.observed_board
+    assert panel_executor._observed_board is panel_provenance.observed_board
+
+
+def test_the_robot_model_is_resolved_by_exactly_one_function():
+    """Two resolutions would be two `model_sha256` values, and nothing would
+    ever match what the other side wrote."""
+    import panel_episodes
+    import panel_provenance
+
+    from panel_recipes import _robot_model
+
+    assert _robot_model is panel_provenance.robot_model
+    assert panel_episodes._robot_model is panel_provenance.robot_model
+
+
+def test_an_identity_is_rebuilt_when_the_robot_model_changes(tmp_path, monkeypatch):
+    """The cache used to key on the scene file alone.
+
+    The panel is a long-lived process and the identity is no longer mostly the
+    scene: it hashes the robot model too.  A key that does not watch the model
+    answers with a stale `model_sha256` for the rest of the process's life.
+    """
+    import panel_provenance
+
+    model = tmp_path / "reachy_1_2.xml"
+    model.write_text("<mujoco/>")
+    monkeypatch.setattr(panel_provenance, "robot_model", lambda: str(model))
+
+    cache = panel_provenance.IdentityCache(SCENE_FILE)
+    first = cache.for_scene("rev-1")
+    assert first.model_sha256
+
+    model.write_text("<mujoco> <!-- edited --> </mujoco>")
+    second = cache.for_scene("rev-1")
+    assert second.model_sha256 != first.model_sha256
+
+
+def test_a_cached_identity_expires(tmp_path, monkeypatch):
+    """`working_tree_dirty` comes from git, and no stat can watch it.
+
+    So the git half is bounded by time instead.  Without the bound, a panel
+    started from a clean checkout claims a clean tree forever — and
+    `require_clean_tree`, the guard whose whole job is refusing exactly that,
+    passes on provenance from hours ago.
+    """
+    import panel_provenance
+
+    builds = []
+
+    import reachy_ai.experience.identity as identity_mod
+    real_build = identity_mod.build_simulator_identity
+
+    def counting_build(**kw):
+        builds.append(kw)
+        return real_build(**kw)
+
+    monkeypatch.setattr(identity_mod, "build_simulator_identity", counting_build)
+
+    cache = panel_provenance.IdentityCache(SCENE_FILE, ttl_s=0.0)
+    cache.for_scene("rev-1")
+    cache.for_scene("rev-1")
+    assert len(builds) == 2, "a zero TTL must rebuild rather than answer from cache"
+
+    cache = panel_provenance.IdentityCache(SCENE_FILE, ttl_s=3600.0)
+    before = len(builds)
+    cache.for_scene("rev-1")
+    cache.for_scene("rev-1")
+    assert len(builds) - before == 1, "inside the TTL it must not shell out twice"
+
+
+def test_an_inapplicable_recipe_does_not_mask_a_usable_one(db):
+    """The parameter check belongs inside the sweep, not after it.
+
+    `select_reusable` returns the FIRST allowed row.  Asking "can this ability
+    apply that?" of the winner afterwards lets one newer promoted recipe
+    varying something unusable permanently hide an older, fully applicable one
+    — and the answer is "nothing to reuse" while something reusable sits in
+    the next row.
+    """
+    # The usable one FIRST so it is the older of the two: rows come back
+    # `ORDER BY completed_at DESC`, which puts the unusable one at the head of
+    # the sweep where it can do the masking this test is about.
+    usable = write_trial(db, parameters={})
+    unusable = write_trial(db, parameters={"segment_duration_s": 2.0})
+
+    recipe, reasons = find(library(db))
+    assert recipe is not None, "a usable promoted trial was masked by an unusable one"
+    assert recipe.trial_id == usable
+    assert any(unusable[:8] in r and "no way to apply" in r for r in reasons)
+
+
+def test_an_unreadable_board_is_refused_before_any_store_is_opened(tmp_path):
+    """Nothing after this check can change its answer, and the things after it
+    are two git subprocesses and a database open, on the path a human waits on.
+
+    Discriminating because the store does not exist: the old ordering returned
+    the store's silent (None, []) and never said why."""
+    lib = RecipeLibrary(SCENE_FILE, db_path=str(tmp_path / "absent.db"))
+    recipe, reasons = find(lib, obstacles=None)
+    assert recipe is None
+    assert any("objects are on the board" in r for r in reasons)
+
+
+def test_the_library_does_not_read_the_live_episode_log_by_default():
+    """Every row the recorder writes is live-interactive, and
+    `query_compatible_trials` excludes those by construction — so pointing the
+    library at that file is a guaranteed-empty query charged to a waiting
+    human on every plan."""
+    import panel_episodes
+    from panel_recipes import DEFAULT_DB
+
+    assert DEFAULT_DB != panel_episodes.DEFAULT_DB
+    assert "episode" not in DEFAULT_DB
+
+
+def test_panel_routes_can_be_built_without_a_store():
+    """`recipes=None` means "look nothing up" to the planner, and used to mean
+    "build the deployment's library" here — leaving no way to construct a
+    PanelRoutes that opens no database.  Tests then read whatever store was on
+    the developer's machine while CI, having none, took the early return."""
+    from panel_routes import DEFAULT_RECIPES, PanelRoutes
+
+    routes = PanelRoutes(lambda: make_scene(), recipes=None)
+    assert routes.coordinator is not None
+    assert DEFAULT_RECIPES is not None
+
+
+def test_the_policy_that_allowed_a_reuse_is_carried_and_recorded(db):
+    """The gate's contract is that an accepted reuse carries the trial it came
+    from AND the rule that accepted it, so a bad episode traces back to the
+    rule.  That link used to die in the planner."""
+    write_trial(db, start_posture="")
+    out = plan(make_scene(), "stow your arm", recipes=library(db))
+    assert out.proposal.recipe_policy_version == 1
+    assert out.proposal.as_dict()["recipe_policy_version"] == 1
+
+    import panel_episodes
+    meta = panel_episodes.EpisodeRecorder._metadata(
+        object.__new__(panel_episodes.EpisodeRecorder),
+        out.proposal, [], {}, "TestScene", ["soda_can"])
+    assert meta["recipe_policy_version"] == 1
+    assert meta["recipe_trial_id"] == out.proposal.recipe_trial_id

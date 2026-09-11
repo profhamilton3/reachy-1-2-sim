@@ -190,6 +190,13 @@ class Proposal:
     recipe_id: str = ""
     recipe_version: int = 0
     recipe_parameters: Dict[str, Any] = field(default_factory=dict)
+    #: WHICH RULE LET IT THROUGH.  The gate's contract is that an accepted
+    #: reuse carries both the trial it came from and the policy version that
+    #: accepted it, so an episode that went wrong can be traced back to the
+    #: rule that allowed it.  Carried here, and into the episode record, or
+    #: that link dies in the planner and the trace stops at "something was
+    #: retrieved".  0 means nothing was retrieved.
+    recipe_policy_version: int = 0
     #: The posture the route may be entered from, so the executor can refuse an
     #: unsupported start rather than discover it in flight.
     expected_start_posture: str = ""
@@ -233,6 +240,7 @@ class Proposal:
             "recipe_id": self.recipe_id,
             "recipe_version": self.recipe_version,
             "recipe_parameters": dict(self.recipe_parameters),
+            "recipe_policy_version": self.recipe_policy_version,
             "expected_start_posture": self.expected_start_posture,
             "end_posture": self.end_posture,
             "destination_kind": self.destination_kind,

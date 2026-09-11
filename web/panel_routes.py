@@ -42,13 +42,18 @@ MAX_BODY_BYTES = 8 * 1024
 Response = Tuple[int, Dict[str, Any]]
 
 
+#: "Build the deployment's own library."  Distinct from None, which means
+#: "look nothing up" and is what a test wanting no database passes.
+DEFAULT_RECIPES = object()
+
+
 class PanelRoutes:
     """Routing table for `/capabilities` and `/tasks...`."""
 
     def __init__(self, scene_provider: Callable[[], Any],
                  capabilities: Optional[Capabilities] = None,
                  link: Any = None, executor: Any = None,
-                 scene_file: str = "", recipes: Any = None) -> None:
+                 scene_file: str = "", recipes: Any = DEFAULT_RECIPES) -> None:
         self.capabilities = capabilities or Capabilities()
         self.link = link
         self.executor = executor
@@ -57,7 +62,14 @@ class PanelRoutes:
         # database, and passed at construction so retrieval happens while the
         # plan is being drawn — the card has to describe the motion that will
         # actually run.
-        if recipes is None:
+        #
+        # DEFAULT_RECIPES, not None: None is what the planner means by "do not
+        # look", and overloading it here left no way to construct a PanelRoutes
+        # that opens no database.  Every test then read whatever store happened
+        # to be on the developer's machine while CI, which has none, took the
+        # early return — green in both places for different reasons, which is
+        # the asymmetry worth spending a sentinel to avoid.
+        if recipes is DEFAULT_RECIPES:
             from panel_recipes import build_library
             recipes = build_library(scene_file)
         planner = DeterministicPlanner(scene_provider, recipes=recipes)

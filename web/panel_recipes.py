@@ -44,9 +44,9 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
-import pathlib
-import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import panel_provenance as _P
 
 log = logging.getLogger("panel.recipes")
 
@@ -54,27 +54,24 @@ log = logging.getLogger("panel.recipes")
 #: the planning path, which a human is waiting on.
 MAX_CANDIDATES = 25
 
+#: The store this reads, and it is NOT the panel's own episode log.
+#:
+#: Every row `panel_episodes` writes is `live_interactive=True`, and
+#: `query_compatible_trials` excludes those by construction — a chat turn is
+#: not a controlled trial.  So pointing the library at `panel_episodes.db`
+#: cannot ever retrieve anything: it would open a database, run a query
+#: guaranteed to return nothing, and charge a waiting human for it on every
+#: plan.  The two files are separate because the two populations are: this one
+#: holds what a search promoted, and it does not exist until a search has
+#: promoted something.
+DEFAULT_DB = "promoted_recipes.db"
 
-def _ensure_paths() -> None:
-    here = os.path.dirname(os.path.abspath(__file__))
-    for candidate in (os.path.join(here, "..", "src"), "/opt/src"):
-        if os.path.isdir(candidate) and candidate not in sys.path:
-            sys.path.insert(0, candidate)
 
-
-#: The robot MJCF the simulator compiles.  `model_sha256` means this file, and
-#: without it the identity is degenerate — the gate refuses to answer about a
-#: world it cannot tell apart from any other, and `query_compatible_trials`
-#: raises rather than matching everything.  It lives in the repo, so the panel
-#: can hash it even though it never loads it: the panel talks to the simulator
-#: over the SDK bridge and has no model of its own.
-def _robot_model() -> str:
-    for candidate in (pathlib.Path(__file__).resolve().parent.parent
-                      / "native_mujoco" / "model" / "reachy_1_2.xml",
-                      pathlib.Path("/opt/native_mujoco/model/reachy_1_2.xml")):
-        if candidate.is_file():
-            return str(candidate)
-    return ""
+#: One copy, in `panel_provenance`.  The library and the recorder must resolve
+#: the SAME model file: two that disagreed would compute two `model_sha256`
+#: values, and nothing either wrote would ever match what the other asked for.
+_ensure_paths = _P.ensure_paths
+_robot_model = _P.robot_model
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,10 +86,22 @@ class RetrievedRecipe:
     study_id: str = ""
 
     def describe(self) -> str:
-        """What the operator is told before they confirm."""
-        what = self.recipe_id or f"trial {self.trial_id[:8]}"
-        return (f"flying promoted recipe {what} "
-                f"(v{self.recipe_version}, trial {self.trial_id[:8]})")
+        """What the operator is told before they confirm.
+
+        SAYS ONLY WHAT WAS RECORDED.  An `ability_route` — the only shape
+        reachable today — carries no recipe id and no recipe version, and an
+        earlier version of this sentence padded those gaps out anyway: it read
+        "recipe trial 1a2b3c4d (v0, trial 1a2b3c4d)", naming the trial twice
+        and reporting a version that was 0 only because nothing ever set one.
+        This is the one sentence standing between the operator and a silent
+        substitution, so it names the trial once, and names a recipe and a
+        version only when there is one.
+        """
+        trial = f"trial {self.trial_id[:8]}" if self.trial_id else "an unnamed trial"
+        if self.recipe_id:
+            version = f" v{self.recipe_version}" if self.recipe_version else ""
+            return f"flying promoted recipe {self.recipe_id}{version} ({trial})"
+        return f"flying the promoted route recorded in {trial}"
 
 
 class RecipeLibrary:
@@ -100,11 +109,8 @@ class RecipeLibrary:
 
     def __init__(self, scene_file: str = "", *, db_path: str = "") -> None:
         self._scene_file = scene_file
-        self._db_path = db_path or str(
-            pathlib.Path(__file__).resolve().parent.parent
-            / "runs" / "panel_episodes.db")
-        self._identity = None
-        self._identity_key: Optional[Tuple[Any, ...]] = None
+        self._db_path = db_path or str(_P.repo_root() / "runs" / DEFAULT_DB)
+        self._identity = _P.IdentityCache(scene_file)
 
     def find(self, *, task_type: str, arm: str, route: str, route_version: int,
              start_posture: str, obstacles: Optional[Sequence[str]],
@@ -128,6 +134,18 @@ class RecipeLibrary:
 
     def _find(self, task_type, arm, route, route_version, start_posture,
               obstacles, tunable, scene_revision):
+        # A BOARD NOBODY LOOKED AT IS NOT AN EMPTY BOARD.  The gate says so
+        # about the candidate; the same has to hold for the request, or a plan
+        # made against an unread scene would be matched to a recipe certified
+        # over a specific one.
+        #
+        # Asked FIRST, because nothing below can change the answer and the
+        # things below are two git subprocesses and a database open, on the
+        # planning path, with a human waiting on it.
+        if obstacles is None:
+            return None, ["I could not read which objects are on the board, "
+                          "so I will not match this against a recorded one."]
+
         if not os.path.exists(self._db_path):
             return None, []
 
@@ -155,29 +173,33 @@ class RecipeLibrary:
         if not rows:
             return None, []
 
-        # A BOARD NOBODY LOOKED AT IS NOT AN EMPTY BOARD.  The gate says so
-        # about the candidate; the same has to hold for the request, or a
-        # plan made against an unread scene would be matched to a recipe
-        # certified over a specific one.
-        if obstacles is None:
-            return None, ["I could not read which objects are on the board, "
-                          "so I will not match this against a recorded one."]
+        def applicable(candidate) -> Optional[str]:
+            """Whether this ability could act on what the candidate varies.
 
-        chosen, decisions = select_reusable(rows, identity, request)
+            Refused, not applied.  An ability that cannot act on a parameter
+            would fly its default route while the card claimed a promoted
+            recipe — the silent substitution this issue exists to forbid.
+
+            Asked INSIDE the sweep rather than of the winner afterwards: one
+            newer promoted recipe varying something this ability cannot apply
+            would otherwise mask every older, fully applicable one behind it,
+            and the answer would be "nothing to reuse" while something
+            reusable sat in the next row.
+            """
+            unknown = sorted(set(_parameters_of(candidate)) - set(tunable))
+            if not unknown:
+                return None
+            return (f"promoted trial {candidate.trial_id[:8]} varies "
+                    f"{', '.join(unknown)}, which this ability has no way "
+                    "to apply")
+
+        chosen, decisions = select_reusable(rows, identity, request,
+                                            acceptable=applicable)
         reasons = [d.reason for d in decisions if not d.allowed]
         if chosen is None:
             return None, reasons
 
         parameters = _parameters_of(chosen)
-        unknown = sorted(set(parameters) - set(tunable))
-        if unknown:
-            # Refused, not applied.  An ability that cannot act on a parameter
-            # would fly its default route while the card claimed a promoted
-            # recipe — the silent substitution this issue exists to forbid.
-            return None, reasons + [
-                f"promoted trial {chosen.trial_id[:8]} varies "
-                f"{', '.join(unknown)}, which this ability has no way to apply"]
-
         winner = next(d for d in decisions if d.allowed)
         return RetrievedRecipe(
             trial_id=chosen.trial_id,
@@ -188,21 +210,7 @@ class RecipeLibrary:
         ), reasons
 
     def _identity_for(self, scene_revision: str):
-        from reachy_ai.experience.identity import build_simulator_identity
-
-        absolute = os.path.abspath(self._scene_file) if self._scene_file else ""
-        try:
-            stat = os.stat(absolute) if absolute else None
-        except OSError:
-            stat = None
-        key = (absolute, stat.st_mtime_ns if stat else 0,
-               stat.st_size if stat else 0)
-        if self._identity is None or self._identity_key != key:
-            self._identity = build_simulator_identity(
-                model_path=_robot_model(), scene_path=absolute,
-                backend_name="sdk_bridge")
-            self._identity_key = key
-        return dataclasses.replace(self._identity, scene_revision=scene_revision)
+        return self._identity.for_scene(scene_revision)
 
 
 def _parameters_of(candidate) -> Dict[str, Any]:
@@ -226,6 +234,12 @@ def build_library(scene_file: str = "") -> Optional[RecipeLibrary]:
     finds none, and the ability flies the route it always flies.
     `REACHY_PANEL_RECIPES=0` turns it off; `REACHY_PANEL_RECIPE_DB` points it
     at a study's own file.
+
+    `REACHY_PANEL_RECIPE_DB` is deliberately a DIFFERENT variable from
+    `REACHY_PANEL_EPISODE_DB`, and pointing them at one file is a mistake
+    rather than a shortcut: the episode log holds live-interactive rows, which
+    this must never reuse.  Moving the episode log onto a volume therefore
+    does not move this, which is the correct outcome and not an oversight.
     """
     if os.environ.get("REACHY_PANEL_RECIPES", "1").lower() in (
             "0", "false", "no", "off"):

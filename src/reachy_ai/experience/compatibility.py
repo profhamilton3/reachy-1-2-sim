@@ -48,7 +48,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
+from typing import (Any, Callable, Dict, FrozenSet, List, Optional, Sequence,
+                    Tuple)
 
 from .models import EpisodeStatus, SimulatorIdentity
 
@@ -410,7 +411,9 @@ def check_reuse(candidate: ReuseCandidate, identity: SimulatorIdentity,
 
 def select_reusable(rows: Sequence[Dict[str, Any]], identity: SimulatorIdentity,
                     request: ReuseRequest,
-                    policy: Optional[ReusePolicy] = None
+                    policy: Optional[ReusePolicy] = None,
+                    acceptable: Optional[Callable[[ReuseCandidate],
+                                                  Optional[str]]] = None
                     ) -> Tuple[Optional[ReuseCandidate], List[ReuseDecision]]:
     """The first reusable candidate, and the decision for every row examined.
 
@@ -418,12 +421,26 @@ def select_reusable(rows: Sequence[Dict[str, Any]], identity: SimulatorIdentity,
     reusable" is a thing a caller has to be able to explain, and the reasons
     are the explanation.  Rows are judged in the order given, so a caller that
     wants newest-first should hand them over that way.
+
+    `acceptable` is the CALLER's half of the question, asked inside the loop
+    rather than afterwards.  The gate decides whether a candidate describes
+    this world; only the caller knows whether it can act on what the candidate
+    varies, and an ability that cannot apply a parameter must not fly a default
+    route while claiming a promoted recipe.  Asking that after the loop would
+    let one unusable row mask every usable row behind it: return a reason and
+    the sweep goes on to the next candidate, with the reason recorded like any
+    other rejection.
     """
     decisions: List[ReuseDecision] = []
     chosen: Optional[ReuseCandidate] = None
     for row in rows:
         candidate = ReuseCandidate.from_row(row)
         decision = check_reuse(candidate, identity, request, policy)
+        if decision.allowed and acceptable is not None:
+            refusal = acceptable(candidate)
+            if refusal:
+                decision = dataclasses.replace(
+                    decision, allowed=False, reason=refusal)
         decisions.append(decision)
         if decision.allowed and chosen is None:
             chosen = candidate

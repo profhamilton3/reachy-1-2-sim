@@ -80,6 +80,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import panel_provenance as _P
 from panel_episodes import build_recorder
 
 log = logging.getLogger("reachy12.panel.executor")
@@ -917,20 +918,10 @@ class SimulatorExecutor:
         )
 
 
-def _observed_board(scene) -> Optional[List[str]]:
-    """Which objects were on the board, or None if that was not observed.
-
-    None is a real answer and the conservative one.  `on_board is True` and
-    not merely truthy, because it is None until a snapshot has been applied
-    and unknown is not absent — the same test `SceneView.on_board_tagged`
-    makes for the same reason.
-    """
-    if scene is None or getattr(scene, "error", ""):
-        return None
-    objects = getattr(scene, "objects", None) or {}
-    if any(o.on_board is None for o in objects.values()):
-        return None
-    return sorted(oid for oid, o in objects.items() if o.on_board is True)
+#: Which objects were on the board, or None if that was not observed.  One
+#: implementation, in `panel_provenance`, shared with the planner — the gate
+#: compares the two for exact set equality, so they cannot be two functions.
+_observed_board = _P.observed_board
 
 
 def _euclid(a, b) -> float:

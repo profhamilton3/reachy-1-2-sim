@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import panel_abilities as abilities
+import panel_provenance as _P
 from panel_abilities import AbilityRefusal
 from panel_scene import (NON_RECYCLABLE_TAG, RECYCLABLE_TAG, DestinationRef,
                          SceneView)
@@ -519,6 +520,7 @@ class DeterministicPlanner:
             recipe_id=recipe.recipe_id if recipe else "",
             recipe_version=recipe.recipe_version if recipe else 0,
             recipe_parameters=dict(recipe.parameters) if recipe else {},
+            recipe_policy_version=recipe.policy_version if recipe else 0,
             expected_start_posture=(ability.start_postures[0]
                                     if ability.start_postures else ""),
             end_posture=ability.end_posture,
@@ -783,20 +785,15 @@ def _is_a_command(text: str) -> bool:
     return parse_intent(text) is not None
 
 
-def _board_of(scene) -> Optional[List[str]]:
-    """Which objects are on the board, or None if that is not known.
-
-    The same test the recorder makes, for the same reason: `on_board` is None
-    until a snapshot has arrived, and unknown is not absent.  A plan made
-    against an unread board must not be matched to a recipe certified over a
-    board somebody did read.
-    """
-    if scene is None or getattr(scene, "error", ""):
-        return None
-    objects = getattr(scene, "objects", None) or {}
-    if any(o.on_board is None for o in objects.values()):
-        return None
-    return sorted(oid for oid, o in objects.items() if o.on_board is True)
+#: Which objects are on the board, or None if that is not known.
+#:
+#: IMPORTED, NOT COPIED.  `check_reuse` requires exact set equality between the
+#: board the executor recorded and the board the planner asks about, so two
+#: implementations of this would have to agree byte for byte in behaviour
+#: forever — and the failure when they stopped agreeing would be silent:
+#: retrieval would simply never match, which reads exactly like "nothing has
+#: been promoted yet".
+_board_of = _P.observed_board
 
 
 def _posture_answer(text: str) -> Optional[str]:
