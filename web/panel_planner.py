@@ -35,6 +35,7 @@ ignored "set r_elbow_pitch to -75" would be one edit away from honouring it.
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 import uuid
@@ -47,6 +48,8 @@ from panel_scene import (NON_RECYCLABLE_TAG, RECYCLABLE_TAG, DestinationRef,
                          SceneView)
 from tasks import (ConversationEvent, IntentState, PlannerOutcome,
                    PlannerRequest, Proposal)
+
+log = logging.getLogger("panel.planner")
 
 #: How far a tracked object may drift before a proposal built on its position
 #: stops describing the world.  Objects at rest in MuJoCo jitter by far less
@@ -223,8 +226,12 @@ class DeterministicPlanner:
     happen between one command and the next.
     """
 
-    def __init__(self, scene_provider) -> None:
+    def __init__(self, scene_provider, recipes=None) -> None:
         self._scene_provider = scene_provider
+        # Where promoted recipes come from, or None for "do not look" (#90).
+        # Supplied rather than built here, so a planner in a test does not
+        # open a database nobody asked it to.
+        self._recipes = recipes
 
     def __call__(self, request: PlannerRequest) -> PlannerOutcome:
         held = self._aside_during_a_question(request)
@@ -492,6 +499,13 @@ class DeterministicPlanner:
             obj = oid
             summary = f"{summary} {oid}"
 
+        # A PROMOTED RECIPE, OR THE ROUTE THE ABILITY ALWAYS FLIES.  Looked up
+        # at planning time and not at execution time, because the card the
+        # operator confirms has to describe the motion that will actually run.
+        recipe, _refused = self._promoted_recipe(ability, match, scene)
+        if recipe is not None:
+            summary = f"{summary} — {recipe.describe()}"
+
         proposal = Proposal(
             plan_id=uuid.uuid4().hex,
             plan_version=0,
@@ -501,6 +515,10 @@ class DeterministicPlanner:
             object_id=obj,
             route=ability.route,
             route_version=ability.route_version,
+            recipe_trial_id=recipe.trial_id if recipe else "",
+            recipe_id=recipe.recipe_id if recipe else "",
+            recipe_version=recipe.recipe_version if recipe else 0,
+            recipe_parameters=dict(recipe.parameters) if recipe else {},
             expected_start_posture=(ability.start_postures[0]
                                     if ability.start_postures else ""),
             end_posture=ability.end_posture,
@@ -511,6 +529,37 @@ class DeterministicPlanner:
             state_evidence=_ability_evidence(match, scene),
         )
         return PlannerOutcome(kind="proposal", proposal=proposal)
+
+    def _promoted_recipe(self, ability, match, scene):
+        """A promoted recipe for this ability in this world, or None.
+
+        None is the ordinary answer and says nothing to the operator: the
+        ability flies its registry route, which is what it would have done
+        before any of this existed.  The refusal reasons are returned for the
+        log rather than the card — "I considered a recipe and turned it down"
+        is not something to put in front of someone who asked for a wave.
+
+        NOTHING HERE CAN START A SEARCH.  `RecipeLibrary` reads the store and
+        imports nothing from `reachy_ai.search`; a test asserts that no module
+        reachable from a typed command can.
+        """
+        if self._recipes is None:
+            return None, []
+        recipe, refused = self._recipes.find(
+            task_type=match.name,
+            arm=match.arm,
+            route=ability.route,
+            route_version=ability.route_version,
+            start_posture=(ability.start_postures[0]
+                           if ability.start_postures else ""),
+            obstacles=_board_of(scene),
+            tunable=ability.tunable,
+            scene_revision=(getattr(scene, "scene_revision", "")
+                            if scene is not None else ""),
+        )
+        for reason in refused:
+            log.info("recipe not reused: %s", reason)
+        return recipe, refused
 
     # -- destination -------------------------------------------------------
 
@@ -732,6 +781,22 @@ def _is_a_command(text: str) -> bool:
         # the refusal, not have "don't wave" filed as a cell name.
         return True
     return parse_intent(text) is not None
+
+
+def _board_of(scene) -> Optional[List[str]]:
+    """Which objects are on the board, or None if that is not known.
+
+    The same test the recorder makes, for the same reason: `on_board` is None
+    until a snapshot has arrived, and unknown is not absent.  A plan made
+    against an unread board must not be matched to a recipe certified over a
+    board somebody did read.
+    """
+    if scene is None or getattr(scene, "error", ""):
+        return None
+    objects = getattr(scene, "objects", None) or {}
+    if any(o.on_board is None for o in objects.values()):
+        return None
+    return sorted(oid for oid, o in objects.items() if o.on_board is True)
 
 
 def _posture_answer(text: str) -> Optional[str]:

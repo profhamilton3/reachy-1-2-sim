@@ -180,6 +180,16 @@ class Proposal:
     #: Which measured motion this plan flies, and which version of it.
     route: str = ""
     route_version: int = 0
+    #: Where the motion's parameters came from, when they came from anywhere
+    #: but the registry.  Empty is the ordinary case and means the ability
+    #: flies its own measured route — not a failure, and not shown to anyone.
+    #: Non-empty is NAMED on the card before the operator confirms: a plan
+    #: that silently flew somebody's search result would be the one thing
+    #: retrieval must never do (#90).
+    recipe_trial_id: str = ""
+    recipe_id: str = ""
+    recipe_version: int = 0
+    recipe_parameters: Dict[str, Any] = field(default_factory=dict)
     #: The posture the route may be entered from, so the executor can refuse an
     #: unsupported start rather than discover it in flight.
     expected_start_posture: str = ""
@@ -219,6 +229,10 @@ class Proposal:
             "object_id": self.object_id,
             "route": self.route,
             "route_version": self.route_version,
+            "recipe_trial_id": self.recipe_trial_id,
+            "recipe_id": self.recipe_id,
+            "recipe_version": self.recipe_version,
+            "recipe_parameters": dict(self.recipe_parameters),
             "expected_start_posture": self.expected_start_posture,
             "end_posture": self.end_posture,
             "destination_kind": self.destination_kind,

@@ -186,6 +186,12 @@ class ReuseCandidate:
     #: None means the trial never recorded one, which is not the same as
     #: having recorded an empty board.
     obstacles: Optional[FrozenSet[str]] = None
+    #: What a searched recipe varies.  CARRIED, NOT COMPARED: a recipe is
+    #: identified by its id and version, and comparing parameter dicts would
+    #: invite a tolerance where the gate has none.  `compare=False` because a
+    #: dict is not hashable and every other field here is.
+    bounded_parameters: Dict[str, Any] = dataclasses.field(
+        default_factory=dict, compare=False)
 
     @classmethod
     def from_row(cls, row: Dict[str, Any]) -> "ReuseCandidate":
@@ -235,6 +241,9 @@ class ReuseCandidate:
             success=bool(row.get("success")),
             live_interactive=live,
             obstacles=_obstacle_set(meta.get("obstacles")),
+            bounded_parameters=(recipe.get("bounded_parameters")
+                                if isinstance(recipe.get("bounded_parameters"),
+                                              dict) else {}),
         )
 
 

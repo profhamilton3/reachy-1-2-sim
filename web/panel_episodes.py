@@ -73,6 +73,21 @@ STUDY_ID = "panel-live"
 DRIFT_TOLERANCE_M = 0.02
 
 
+#: The robot MJCF the simulator compiles.  `model_sha256` means this file, and
+#: without it the identity is degenerate — the gate refuses to answer about a
+#: world it cannot tell apart from any other, and `query_compatible_trials`
+#: raises rather than matching everything.  It lives in the repo, so the panel
+#: can hash it even though it never loads it: the panel talks to the simulator
+#: over the SDK bridge and has no model of its own.
+def _robot_model() -> str:
+    for candidate in (pathlib.Path(__file__).resolve().parent.parent
+                      / "native_mujoco" / "model" / "reachy_1_2.xml",
+                      pathlib.Path("/opt/native_mujoco/model/reachy_1_2.xml")):
+        if candidate.is_file():
+            return str(candidate)
+    return ""
+
+
 def _repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parent.parent
 
@@ -302,11 +317,14 @@ class EpisodeRecorder:
             # motion path, and cached on the scene file, so a session of twenty
             # waves pays for it once.
             identity = build_simulator_identity(
+                model_path=_robot_model(),
                 scene_path=absolute,
                 backend_name="sdk_bridge",
             )
             self._identity = dataclasses.replace(
-                identity, scene_source_path=_relative(self._scene_file))
+                identity,
+                model_source_path=_relative(_robot_model()),
+                scene_source_path=_relative(self._scene_file))
             self._identity_key = key
 
         # The revision is the cheap half and the half that moves: it changes

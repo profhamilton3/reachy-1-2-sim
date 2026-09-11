@@ -47,11 +47,20 @@ class PanelRoutes:
 
     def __init__(self, scene_provider: Callable[[], Any],
                  capabilities: Optional[Capabilities] = None,
-                 link: Any = None, executor: Any = None) -> None:
+                 link: Any = None, executor: Any = None,
+                 scene_file: str = "", recipes: Any = None) -> None:
         self.capabilities = capabilities or Capabilities()
         self.link = link
         self.executor = executor
-        planner = DeterministicPlanner(scene_provider)
+        # Promoted recipes, if this deployment has any (#90).  Built here
+        # rather than inside the planner so a planner under test opens no
+        # database, and passed at construction so retrieval happens while the
+        # plan is being drawn — the card has to describe the motion that will
+        # actually run.
+        if recipes is None:
+            from panel_recipes import build_library
+            recipes = build_library(scene_file)
+        planner = DeterministicPlanner(scene_provider, recipes=recipes)
         self.coordinator = TaskCoordinator(
             planner,
             capabilities=self.capabilities,
