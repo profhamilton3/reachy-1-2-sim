@@ -320,10 +320,10 @@ def test_an_unwired_ability_is_named_rather_than_crashed(monkeypatch, validated)
     from reachy_ai.tasks import rig_motion as M
     monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
 
-    out = W.run_ability(_job(task_type="point_cell",
+    out = W.run_ability(_job(task_type="point_object",
                              expected_start_posture="home"), _conn())
     assert out["status"] == "failed"
-    assert "point_cell" in out["detail"]
+    assert "point_object" in out["detail"]
 
 
 def test_a_raising_job_becomes_a_result_rather_than_a_traceback(monkeypatch):
@@ -361,3 +361,73 @@ def test_the_child_answers_a_job_and_exits_when_its_parent_goes():
     proc.stdin.close()
     assert proc.wait(timeout=10) == 0
     assert json.loads(line)["result"]["status"] == "failed"
+
+
+# -- pointing --------------------------------------------------------------
+
+def test_the_hover_is_derived_from_what_is_on_the_board():
+    """The notebook's rule, with "manipulable" read as "actually on the
+    board": an empty board answers with the floor because there is nothing to
+    clear, and every occupied case is that plus what is standing there."""
+    from reachy_ai.scene.awareness import SceneModel
+    from reachy_ai.tasks import rig_motion as M
+
+    scene = os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml")
+    empty = SceneModel.from_yaml(scene)
+    assert M.hover_height(empty) == pytest.approx(0.12)
+
+    # Heights are the scene's own geometry, not guesses: a 11.5 cm can wants
+    # 17.5 cm, a 5 cm block is under the floor and gets 12.
+    for oid, want in (("foam_block", 0.12), ("pool_cyl_1", 0.14),
+                      ("blue_cylinder", 0.16), ("soda_can", 0.175)):
+        board = SceneModel.from_yaml(scene)
+        cx, cy, cz = board.cell_center("cell_r2c2")
+        obj = board.get(oid)
+        board.update_poses({oid: (cx, cy, cz + (obj.top_z - obj.center[2]))})
+        assert M.hover_height(board) == pytest.approx(want), oid
+
+
+def test_an_object_in_the_pool_does_not_raise_the_hover():
+    """Ten objects exist in this scene and six of them are parked on the floor
+    at y = +-0.75.  They say nothing about how high the arm must fly over the
+    grid, and counting them would lift every hover for no reason."""
+    from reachy_ai.scene.awareness import SceneModel
+    from reachy_ai.tasks import rig_motion as M
+
+    scene = SceneModel.from_yaml(
+        os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml"))
+    assert scene.get("soda_can").top_z < scene.table_surface_z   # in the pool
+    assert M.hover_height(scene) == pytest.approx(0.12)
+
+
+def test_the_point_runner_resolves_its_own_names(monkeypatch, validated,
+                                                 tmp_path):
+    """It is a module-level helper, and `M`, `R` and `P` are imported inside
+    `run_ability`, not at module scope.  Live, that was a `NameError` four
+    seconds into a request — invisible to every test that stubbed the worker,
+    which is all of them.  So this one calls it for real.
+    """
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.tasks import rig_motion as M
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
+
+    reached = {}
+
+    def fake_point(planner, label, xy, base_z, **kw):
+        reached.update(label=label, base_z=base_z)
+        return M.PointResult(True, label, (xy[0], xy[1], base_z),
+                             achieved=(xy[0], xy[1], base_z), miss_m=0.01)
+
+    monkeypatch.setattr(M, "point_at", fake_point)
+    monkeypatch.setattr(W.P if hasattr(W, "P") else M, "point_at", fake_point,
+                        raising=False)
+
+    scene = os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml")
+    out = W.run_ability(_job(task_type="point_cell", route="POINT",
+                             expected_start_posture="present",
+                             cell="cell_r2c2", scene_file=scene, live={}),
+                        _conn())
+    assert out["status"] == "moved", out
+    assert reached["label"] == "cell_r2c2"
+    # An empty board, so the floor is the hover and nothing lifts it.
+    assert reached["base_z"] == pytest.approx(0.740 + 0.12, abs=1e-6)

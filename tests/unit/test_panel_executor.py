@@ -1036,3 +1036,76 @@ def test_a_process_that_cannot_be_started_is_a_failed_task(child):
     out = worker.run({"kind": "ability"})
     assert out["status"] == "failed"
     assert out["evidence"].get("worker_died") is True
+
+
+def test_pointing_is_refused_while_anything_is_on_the_board(fake_sdk):
+    """Measured over an empty board and nowhere else yet.  The empty-board run
+    had nothing to hit, so it says nothing about section 4.7's catalogue — a
+    can moved 0.189 m by an arm reporting +5.5 cm of clearance."""
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+    ok, why = ex.available(_ability(task_type="point_cell", route="POINT",
+                                    cell="r2c2", end_posture="present",
+                                    expected_start_posture="present"))
+    assert ok is False
+    assert "empty board" in why
+    assert "soda_can" in why
+    assert "0.189 m" in why
+
+
+def test_pointing_is_allowed_once_the_board_is_clear(monkeypatch, fake_sdk):
+    _validated(monkeypatch)
+    scene = live_scene()
+    for obj in scene.objects.values():
+        obj.on_board = False
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+    ok, why = ex.available(_ability(task_type="point_cell", route="POINT",
+                                    cell="r2c2", end_posture="present",
+                                    expected_start_posture="present"))
+    assert ok, why
+
+
+def test_the_point_job_names_the_cell_in_the_scenes_own_terms(monkeypatch,
+                                                              fake_sdk):
+    """The panel says r2c2; SceneModel calls it cell_r2c2, and the motion
+    process has no link to ask."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    for obj in scene.objects.values():
+        obj.on_board = False
+    worker = StubWorker({"status": "moved", "flown": ["cell_r2c2 hover 12 cm"],
+                         "final_posture": "present"})
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=worker)
+    ex.execute(_ability(task_type="point_cell", route="POINT", cell="r2c2",
+                        end_posture="present",
+                        expected_start_posture="present"))
+    job, = worker.jobs
+    assert job["cell"] == "cell_r2c2"
+    assert job["scene_file"] == "scene.yaml"
+    assert "soda_can" in job["live"]
+
+
+def test_a_point_reports_what_it_achieved_not_that_it_finished(monkeypatch,
+                                                               fake_sdk):
+    """The notebook measured 21 cm of pad miss on a move that completed, and
+    the brief requires this be labelled a hover pointer rather than a ray."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    for obj in scene.objects.values():
+        obj.on_board = False
+    worker = StubWorker({"status": "moved",
+                         "flown": ["GRIP_SHUT", "BACK",      # the approach
+                                   "point: cell_r2c2 at a 12 cm hover",
+                                   "point: missed by 2.6 cm",
+                                   "point: lifted 0 cm"],
+                         "final_posture": "present"})
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=worker)
+    out = ex.execute(_ability(task_type="point_cell", route="POINT",
+                              cell="r2c2", end_posture="present",
+                              expected_start_posture="present"))
+    assert out.status == "completed"
+    assert "missed by 2.6 cm" in out.detail
+    assert "not a calibrated ray" in out.detail
+    assert "GRIP_SHUT" not in out.detail        # the approach is evidence,
+    assert "GRIP_SHUT" in out.evidence["waypoints_flown"]   # not the answer

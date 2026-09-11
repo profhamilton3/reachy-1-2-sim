@@ -181,7 +181,11 @@ _register(Ability(
     slots=(SLOT_CELL, SLOT_ARM),
     route="POINT",
     start_postures=("present",),
-    end_posture="hover",
+    # It hovers, holds, and comes back to the raised pose — which is said
+    # out loud, the way the wave's endpoint is.  The hover is not a posture
+    # anything has a measured route out of, so an arm left there would refuse
+    # every request afterwards.
+    end_posture="present",
 ))
 
 _register(Ability(
@@ -193,7 +197,11 @@ _register(Ability(
     slots=(SLOT_OBJECT, SLOT_ARM),
     route="POINT",
     start_postures=("present",),
-    end_posture="hover",
+    # It hovers, holds, and comes back to the raised pose — which is said
+    # out loud, the way the wave's endpoint is.  The hover is not a posture
+    # anything has a measured route out of, so an arm left there would refuse
+    # every request afterwards.
+    end_posture="present",
 ))
 
 #: Order matters: `point_cell` must be tried before `point_object`, whose
