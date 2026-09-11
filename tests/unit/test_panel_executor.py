@@ -1130,3 +1130,81 @@ def test_a_point_reports_what_it_achieved_not_that_it_finished(monkeypatch,
     assert "not a calibrated ray" in out.detail
     assert "GRIP_SHUT" not in out.detail        # the approach is evidence,
     assert "GRIP_SHUT" in out.evidence["waypoints_flown"]   # not the answer
+
+
+def test_the_point_job_carries_the_object_it_is_aimed_at(monkeypatch, fake_sdk):
+    """Pointing at an object is planned against that object's own top, and the
+    motion process has no link to the simulator — so the id travels with the
+    job the same way the board does.  It is the scene's own id by then: the
+    planner resolves "soda can" to `soda_can` and writes it back."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    for oid, obj in scene.objects.items():
+        obj.on_board = (oid == "soda_can")
+    worker = StubWorker({"status": "moved",
+                         "flown": ["point: soda_can at a 18 cm hover",
+                                   "point: missed by 1.4 cm",
+                                   "point: lifted 0 cm"],
+                         "final_posture": "present"})
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=worker)
+    out = ex.execute(_ability(task_type="point_object", route="POINT",
+                              object_id="soda_can", end_posture="present",
+                              expected_start_posture="present"))
+    assert out.status == "completed", out.detail
+    job, = worker.jobs
+    assert job["object_id"] == "soda_can"
+    assert job["cell"] == ""            # no cell, and no placeholder for one
+    assert "missed by 1.4 cm" in out.detail
+    assert "not a calibrated ray" in out.detail
+
+
+def test_an_object_off_the_board_is_refused_under_the_lease(monkeypatch,
+                                                            fake_sdk):
+    """The planner refuses a pool object when the plan is made and again when
+    it is confirmed.  This is the check that runs with the arm about to move:
+    an object can be lifted off the board in between, and the motion it would
+    cause is a tabletop reach aimed at the floor."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    for obj in scene.objects.values():
+        obj.on_board = False
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+    ok, why = ex.available(_ability(task_type="point_object", route="POINT",
+                                    object_id="soda_can",
+                                    end_posture="present",
+                                    expected_start_posture="present"))
+    assert ok is False
+    assert "soda_can" in why
+    assert "not on the board" in why
+
+
+def test_an_object_that_left_the_scene_is_named(monkeypatch, fake_sdk):
+    _validated(monkeypatch)
+    scene = live_scene()
+    scene.objects.pop("soda_can", None)
+    for obj in scene.objects.values():
+        obj.on_board = False
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+    ok, why = ex.available(_ability(task_type="point_object", route="POINT",
+                                    object_id="soda_can",
+                                    end_posture="present",
+                                    expected_start_posture="present"))
+    assert ok is False
+    assert "soda_can" in why
+
+
+def test_pointing_at_the_one_object_on_the_board_is_allowed(monkeypatch,
+                                                            fake_sdk):
+    """The single-object gate counts what is standing there, not what is being
+    aimed at — so the object you are pointing at does not refuse itself."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    for oid, obj in scene.objects.items():
+        obj.on_board = (oid == "soda_can")
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+    ok, why = ex.available(_ability(task_type="point_object", route="POINT",
+                                    object_id="soda_can",
+                                    end_posture="present",
+                                    expected_start_posture="present"))
+    assert ok, why

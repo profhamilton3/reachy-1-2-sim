@@ -316,14 +316,17 @@ def test_an_unknown_job_is_named_rather_than_crashed(monkeypatch):
 
 
 def test_an_unwired_ability_is_named_rather_than_crashed(monkeypatch, validated):
+    """An ability the registry knows and this process has no runner for.  It
+    used to be `point_object`, which is now wired; the case it covers is the
+    gap between the two halves, so it needs a name that is still in it."""
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
     monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
 
-    out = W.run_ability(_job(task_type="point_object",
+    out = W.run_ability(_job(task_type="shake_hands",
                              expected_start_posture="home"), _conn())
     assert out["status"] == "failed"
-    assert "point_object" in out["detail"]
+    assert "shake_hands" in out["detail"]
 
 
 def test_a_raising_job_becomes_a_result_rather_than_a_traceback(monkeypatch):
@@ -431,3 +434,122 @@ def test_the_point_runner_resolves_its_own_names(monkeypatch, validated,
     assert reached["label"] == "cell_r2c2"
     # An empty board, so the floor is the hover and nothing lifts it.
     assert reached["base_z"] == pytest.approx(0.740 + 0.12, abs=1e-6)
+
+
+def test_pointing_at_an_object_aims_at_its_own_top(monkeypatch, validated):
+    """The notebook uses `hover_point` for objects and the board-wide hover
+    for cells, and the difference is the whole point of the distinction: a
+    flat block and a tall can get the same AIR UNDER THE PAD rather than the
+    same height above the table.
+
+    Measured against the scene's own geometry — the can is 11.5 cm, so its top
+    sits 11.5 cm over the 0.740 m surface and the pad goes 6 cm above that.
+    The board-wide rule would have answered 17.5 cm over the table, which is
+    the same place; put the can somewhere shorter than the tallest thing on
+    the board and the two rules separate, which is the next test.
+    """
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.scene.awareness import SceneModel
+    from reachy_ai.tasks import rig_motion as M
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
+
+    scene = os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml")
+    board = SceneModel.from_yaml(scene)
+    cx, cy, cz = board.cell_center("cell_r2c2")
+    can = board.get("soda_can")
+    stood = (cx, cy, cz + (can.top_z - can.center[2]))
+
+    seen = {}
+
+    def fake_point(planner, label, xy, base_z, **kw):
+        seen.update(label=label, xy=xy, base_z=base_z,
+                    approaching=kw.get("approaching"), secs=kw.get("secs"))
+        return M.PointResult(True, label, (xy[0], xy[1], base_z),
+                             achieved=(xy[0], xy[1], base_z), miss_m=0.01)
+
+    monkeypatch.setattr(M, "point_at", fake_point)
+    out = W.run_ability(_job(task_type="point_object", route="POINT",
+                             expected_start_posture="present",
+                             object_id="soda_can", cell="", scene_file=scene,
+                             live={"soda_can": list(stood)}), _conn())
+
+    assert out["status"] == "moved", out
+    assert seen["label"] == "soda_can"
+    assert seen["xy"] == pytest.approx((cx, cy))
+    # Its own top plus the clearance, not the board's floor.
+    assert seen["base_z"] == pytest.approx(0.740 + 0.115 + R.POINT_CLEARANCE,
+                                           abs=2e-3)
+    # NAMED TO THE GUARD.  Dropping the target from the check is the defect
+    # that let blue_cylinder be hovered to 1.6 cm and moved 0.123 m while the
+    # loop reported a clean flight.
+    assert seen["approaching"] == "soda_can"
+    assert seen["secs"] == pytest.approx(2.2)
+
+
+def test_a_short_object_is_not_given_the_tall_board_hover(monkeypatch,
+                                                          validated):
+    """Where the two rules separate.  A 4 cm box on the board gets 6 cm of air
+    over ITS top — 10 cm over the table — and not the 12 cm floor a cell would
+    get, because a cell has to be crossed to and a box does not."""
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.scene.awareness import SceneModel
+    from reachy_ai.tasks import rig_motion as M
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
+
+    scene = os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml")
+    board = SceneModel.from_yaml(scene)
+    cx, cy, cz = board.cell_center("cell_r2c2")
+    box = board.get("pool_box_1")
+    stood = (cx, cy, cz + (box.top_z - box.center[2]))
+
+    seen = {}
+    monkeypatch.setattr(M, "point_at", lambda planner, label, xy, base_z, **kw:
+                        (seen.update(base_z=base_z) or
+                         M.PointResult(True, label, (xy[0], xy[1], base_z),
+                                       achieved=(xy[0], xy[1], base_z),
+                                       miss_m=0.01)))
+    out = W.run_ability(_job(task_type="point_object", route="POINT",
+                             expected_start_posture="present",
+                             object_id="pool_box_1", cell="", scene_file=scene,
+                             live={"pool_box_1": list(stood)}), _conn())
+
+    assert out["status"] == "moved", out
+    assert seen["base_z"] == pytest.approx(0.740 + 0.04 + R.POINT_CLEARANCE,
+                                           abs=2e-3)
+    # And the board-wide rule, which is what a CELL would have been given, is
+    # a different and higher number.
+    board.update_poses({"pool_box_1": stood})
+    assert M.hover_height(board) == pytest.approx(0.12)
+
+
+def test_the_object_hover_is_reported_against_the_table(monkeypatch,
+                                                        validated):
+    """Both kinds of point report a hover, and they have to mean the same
+    thing.  "6 cm" over a can and "12 cm" over a cell measured from different
+    places would be the same sentence describing two different heights."""
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.scene.awareness import SceneModel
+    from reachy_ai.tasks import rig_motion as M
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
+
+    scene = os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml")
+    board = SceneModel.from_yaml(scene)
+    cx, cy, cz = board.cell_center("cell_r2c2")
+    cyl = board.get("blue_cylinder")
+    stood = (cx, cy, cz + (cyl.top_z - cyl.center[2]))
+
+    monkeypatch.setattr(M, "point_at", lambda planner, label, xy, base_z, **kw:
+                        M.PointResult(True, label, (xy[0], xy[1], base_z),
+                                      achieved=(xy[0], xy[1], base_z),
+                                      miss_m=0.014, lift_m=0.0))
+    out = W.run_ability(_job(task_type="point_object", route="POINT",
+                             expected_start_posture="present",
+                             object_id="blue_cylinder", cell="",
+                             scene_file=scene,
+                             live={"blue_cylinder": list(stood)}), _conn())
+
+    said = [f for f in out["flown"] if str(f).startswith("point: ")]
+    # 10 cm of cylinder plus 6 cm of air, over the TABLE — not the 6 cm over
+    # the object, which is where the pad sits relative to a different thing.
+    assert "blue_cylinder at a 16 cm hover" in said[0], said
+    assert "missed by 1.4 cm" in said[1]

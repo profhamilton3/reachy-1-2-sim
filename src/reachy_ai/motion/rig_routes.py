@@ -519,7 +519,32 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
         "same: 'hand clears blue_cylinder by 3.6 cm on leg 6 of 6, under the "
         "5.0 cm margin'. TWO OR MORE OBJECTS IS NOT COVERED — what has not "
         "been flown is a reach threading past a second object — and "
-        "`_ability_available` enforces that.",
+        "`_ability_available` enforces that. "
+        "AND THEN POINTING AT THE OBJECT ITSELF, wired through the panel "
+        "(#57), where the hover is the object's OWN top plus POINT_CLEARANCE "
+        "rather than the board-wide floor. Nine attempts reached the pointing "
+        "code, over six object types alone on the centre cell, each started "
+        "from the rail pocket: EIGHT left the board untouched, and ONE THREW "
+        "foam_block 13.4 m. Every one of the eight needed a +5 cm lift; pad "
+        "miss 2.2 to 6.6 cm at the centre cell and 13.0 cm at r1c1 through "
+        "the panel, which is why this is a hover pointer. "
+        "THE ONE FAILURE IS SECTION 4.7'S RESIDUAL, NOT A NEW DEFECT: the "
+        "closed-loop guard stopped the flight at leg 6 of 6 reading 0.5 cm "
+        "against a 1.1 cm floor where it had planned 4.2 cm — it measured the "
+        "contact AFTER it happened, because contact happens between samples. "
+        "Re-run three times each on the two types that failed first: "
+        "foam_block 2 clean of 3, blue_cylinder 2 clean of 3, and the third "
+        "of each never reached the pointing code at all — the arm was "
+        "stranded by the previous run's abort and recovery stopped at HOVER "
+        "and at SWING_3 rather than inventing a path, which is the correct "
+        "answer. "
+        "IT SHIPS ENABLED ANYWAY, and that is a decision rather than a "
+        "measurement: the operator asked for it on, the failure mode is a "
+        "knocked object rather than a damaged arm or rig, and the guard does "
+        "stop the motion when it sees it. A run that reads 'I moved "
+        "something' is the system working as designed. Closing that last gap "
+        "needs a guard that bounds the excursion BETWEEN legs, not another "
+        "constant — see ADR-0002.",
     ),
     # THE ONE THING THESE ROWS DO NOT COVER: AN OBJECT IN THE REST FOOTPRINT.
     #

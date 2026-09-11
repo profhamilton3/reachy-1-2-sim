@@ -257,12 +257,16 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
         return _run
 
     def point(a, **kw):
-        return _point_at_cell(job, robot, a, phase, **kw)
+        return _point_at_target(job, robot, a, phase, **kw)
 
     runner = {"rest_forearm": go_to(R.POSTURE_REST),
               "stow_arm": go_to(R.POSTURE_HOME),
               "wave": lambda a, **kw: ["wave x%d" % M.wave(a, **kw)],
+              # THE SAME FLIGHT, AIMED DIFFERENTLY.  A cell and an object are
+              # not two manoeuvres; they are one manoeuvre given a different
+              # height and a different thing to be careful of.
               "point_cell": point,
+              "point_object": point,
               }.get(job.get("task_type"))
     if runner is None:
         return _fail(f"I have no runner wired up for {job.get('task_type')}")
@@ -279,16 +283,36 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
             "final_posture": R.posture_of(M.present_pose(arm))}
 
 
-def _point_at_cell(job, robot, arm, phase, *, should_abort=None, on_phase=None):
-    """Hover the pad over one grid cell, then come back to PRESENT.
+def _point_at_target(job, robot, arm, phase, *, should_abort=None, on_phase=None):
+    """Hover the pad over one spot on the board, then come back to PRESENT.
 
-    THE HOVER IS DERIVED FROM THIS BOARD, not from a constant.  `hover_height`
-    takes the tallest thing actually standing on the grid, adds the air wanted
-    under the pad, and floors it — so an empty board answers 12 cm and a board
-    with a can on it answers 17.5 cm.  Reading it here rather than passing it
-    in the job is deliberate: the scene travelled with the job, and the number
-    should be computed from the same snapshot everything else is checked
-    against.
+    A CELL AND AN OBJECT ARE THE SAME FLIGHT AIMED DIFFERENTLY, which is the
+    notebook's own shape — one `point_at`, called twice with different
+    arguments — and it is kept because the two differ in exactly three things
+    and agree on everything else.  Writing them as separate routines would
+    duplicate the approach, the guard and the return, and the return is where
+    the last defect was.
+
+    OVER A CELL the height comes from the whole board: `hover_height` takes the
+    tallest thing actually standing on the grid, adds the air wanted under the
+    pad, and floors it — so an empty board answers 12 cm and a board with a can
+    on it answers 17.5 cm.  That is right for a cell, because the arm has to
+    cross whatever else is up there to get to it.
+
+    OVER AN OBJECT the height comes from THAT OBJECT: the notebook uses
+    `hover_point`, which is the object's own top plus the clearance.  This is
+    the number a grasp actually needs — a flat block and a tall can get the
+    same air under the pad rather than the same height above the table — and
+    over the tallest thing on the board the two rules agree anyway.  The object
+    is also named to the guard as `approaching`, which earns it a margin
+    derived from the destination hover instead of the flat 5 cm that would
+    refuse every approach that could ever be made.  It is NOT dropped from the
+    check; dropping it is the defect that let blue_cylinder be hovered to
+    1.6 cm and moved 0.123 m while the loop reported a clean flight.
+
+    Reading the geometry here rather than passing it in the job is deliberate:
+    the scene travelled with the job, and the number should be computed from
+    the same snapshot everything else is checked against.
 
     THE RETURN TO PRESENT IS UNGUARDED, on purpose and for the notebook's
     reason: a refusal means "do not move", which is the wrong answer for a move
@@ -307,10 +331,18 @@ def _point_at_cell(job, robot, arm, phase, *, should_abort=None, on_phase=None):
     model.update_poses({oid: tuple(xyz) for oid, xyz in job["live"].items()})
     planner = CartesianPlanner(arm, scene=model)
 
-    cell = job["cell"]
-    cx, cy, cz = model.cell_center(cell)
-    hover = M.hover_height(model)
-    phase(f"planning a hover {hover * 100:.0f} cm over {cell}")
+    oid = job.get("object_id") or ""
+    if oid:
+        label, approaching, secs = oid, oid, 2.2
+        x, y, z = model.hover_point(oid, R.POINT_CLEARANCE)
+        hover = z - model.table_surface_z
+        phase(f"planning a hover {R.POINT_CLEARANCE * 100:.0f} cm over {oid}")
+    else:
+        label, approaching, secs = job["cell"], None, 2.0
+        x, y, base = model.cell_center(label)
+        hover = M.hover_height(model)
+        z = base + hover
+        phase(f"planning a hover {hover * 100:.0f} cm over {label}")
 
     def send(joints, secs):
         pose = dict(zip(R_ARM_JOINTS, joints), r_gripper=R.SHUT)
@@ -320,7 +352,8 @@ def _point_at_cell(job, robot, arm, phase, *, should_abort=None, on_phase=None):
     def read():
         return [getattr(arm, n).present_position for n in R_ARM_JOINTS]
 
-    out = M.point_at(planner, cell, (cx, cy), cz + hover, send=send, read=read,
+    out = M.point_at(planner, label, (x, y), z, send=send, read=read,
+                     approaching=approaching, secs=secs,
                      should_abort=should_abort, on_phase=on_phase)
 
     # THE RETURN UNWINDS THE HAND, not just the arm.  The IK spends the arm's
@@ -338,15 +371,17 @@ def _point_at_cell(job, robot, arm, phase, *, should_abort=None, on_phase=None):
                passes=8)
 
     if not out.reached:
-        raise M.RouteError(out.detail or f"I could not point at {cell}")
+        raise M.RouteError(out.detail or f"I could not point at {label}")
     if out.disturbed_the_board:
         names = ", ".join(f"{k} by {v * 100:.0f} cm"
                           for k, v in out.drift.items())
-        raise M.RouteError(f"I reached {cell} but I moved something: {names}")
+        raise M.RouteError(f"I reached {label} but I moved something: {names}")
     # Tagged, because the flown list also carries the approach out of the
     # pocket and the operator asked about the point, not the twelve waypoints
-    # it took to get somewhere it could point from.
-    return [f"point: {cell} at a {hover * 100:.0f} cm hover",
+    # it took to get somewhere it could point from.  The hover is reported
+    # against the TABLE either way, so "7 cm" over a can and "12 cm" over a
+    # cell are not quietly the same sentence measured from different places.
+    return [f"point: {label} at a {hover * 100:.0f} cm hover",
             f"point: missed by {out.miss_m * 100:.1f} cm",
             f"point: lifted {out.lift_m * 100:.0f} cm"]
 

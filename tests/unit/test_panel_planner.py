@@ -530,3 +530,64 @@ def test_real_pool_scene_nothing_is_known_to_be_on_the_board():
     # Stage 1 has no live poses, so candidacy is unknown — not False.
     assert all(o.on_board is None for o in scene.objects.values())
     assert scene.tabletop_recyclables() == []
+
+
+# ---------------------------------------------------------------------------
+# Pointing at an object (#57)
+# ---------------------------------------------------------------------------
+
+def test_pointing_at_an_object_resolves_the_words_to_the_id():
+    """"the soda can" and `soda_can` are the same object to a reader and two
+    different strings to a lookup.  The resolution is written back onto the
+    proposal, because everything downstream — the evidence, the card, the
+    motion job — indexes the scene by id."""
+    scene = make_scene()
+    scene.objects["soda_can"].on_board = True
+    out = plan(scene, "point to the soda can")
+    assert out.kind == "proposal", out.message
+    assert out.proposal.task_type == "point_object"
+    assert out.proposal.object_id == "soda_can"
+    # Pointing has no pick target and no destination, and writing a
+    # placeholder into either would put a value meaning ABSENT into fields
+    # whose readers all assume PRESENT.
+    assert out.proposal.target_id is None
+    assert out.proposal.destination is None
+
+
+def test_pointing_at_an_object_in_the_pool_is_explained_not_attempted():
+    """The brief is explicit: a can in the off-board pool should produce an
+    explanation, not a tabletop reach aimed off the tabletop."""
+    scene = make_scene()
+    scene.objects["soda_can"].on_board = False
+    out = plan(scene, "point to the soda_can")
+    assert out.kind == "unsupported"
+    assert "not on the board" in out.message
+    assert "Place it on a cell first" in out.message
+
+
+def test_pointing_at_an_unknown_object_asks_rather_than_guessing():
+    out = plan(make_scene(), "point to the banana")
+    assert out.kind == "clarification"
+    assert "do not know an object" in out.message
+    assert set(out.choices) == {"soda_can", "foam_block", "red_cube"}
+
+
+def test_a_cell_is_still_read_as_a_cell_and_not_as_an_object():
+    """`point_object`'s pattern deliberately accepts anything after "point
+    to", so registry order is what keeps "point to r2c2" a cell.  A regression
+    here would silently look for an object called "r2c2"."""
+    out = plan(make_scene(), "point to r2c2")
+    assert out.kind == "proposal", out.message
+    assert out.proposal.task_type == "point_cell"
+    assert out.proposal.cell == "r2c2"
+    assert out.proposal.object_id is None
+
+
+def test_pointing_at_an_object_survives_an_occupied_cell():
+    """Pointing is a hover.  Pick-and-place's "the destination must be empty"
+    rule refuses exactly the most natural request in a populated scene."""
+    scene = make_scene(occupant=("r2c2", "foam_block"))
+    scene.objects["foam_block"].on_board = True
+    out = plan(scene, "point at the foam_block")
+    assert out.kind == "proposal", out.message
+    assert out.proposal.object_id == "foam_block"
