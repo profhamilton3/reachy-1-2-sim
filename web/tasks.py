@@ -365,6 +365,18 @@ class PlannerOutcome:
     #: keeps no state, in which case the coordinator leaves the task's own
     #: state alone rather than clearing it.
     intent: Optional[IntentState] = None
+    #: The canonical command this turn was actually read as, when something
+    #: re-read it (#92).  Empty for the ordinary case.
+    #:
+    #: It becomes the intent's command, so a clarification that follows is
+    #: answered against the RESOLVED request.  Without it, every reply turn
+    #: re-planned the operator's original sentence — which by definition the
+    #: deterministic parser could not read, or nothing would have needed to
+    #: re-read it — so the language adapter was asked again, was free to
+    #: answer differently, and the operator's answer was applied to whatever
+    #: came back the second time.  A question about an object was answered
+    #: with a wave.
+    read_as: str = ""
 
 
 @dataclass

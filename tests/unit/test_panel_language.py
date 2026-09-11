@@ -367,3 +367,244 @@ def test_the_sentence_is_all_the_model_is_given():
     _, text = stub.seen[0]
     assert text == "indicate the middle square"
     assert "soda_can" not in text
+
+
+# ---------------------------------------------------------------------------
+# Review of #100: the seams
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "please don't wave",
+    "reachy, do not wave",
+    "could you not wave",
+    "would you please not stow your arm",
+])
+def test_a_polite_negation_is_still_a_negation(text):
+    """`_NEGATION_RE` is anchored at `^`, so it fired on "don't wave" and not
+    on "please don't wave" — and the second is the one an operator types.
+
+    That gap let a negated request fall through `match` as merely
+    unrecognised, which is how it reached the adapter, which quite reasonably
+    read it as a request to wave.  The panel proposed one."""
+    stub = Stub(says("wave", confidence=1.0))
+    out = plan(text, language_adapter=LanguageAdapter(stub))
+    assert out.kind == "unsupported"
+    assert "telling me not to" in out.message
+    assert stub.seen == [], "the model was asked to reinterpret a negation"
+
+
+def test_the_registry_refuses_a_polite_negation_on_its_own():
+    """Fixed in `abilities.match`, not in the adapter, because the gap was the
+    registry's and the registry is what everything else asks."""
+    with pytest.raises(abilities.AbilityRefusal) as e:
+        abilities.match("please don't wave")
+    assert e.value.reason == "negated"
+
+
+@pytest.mark.parametrize("text", [
+    "could you wave and afterwards store the arm",
+    "wave and then put the arm away",
+    "give me a wave followed by a stow",
+])
+def test_a_compound_is_never_handed_to_the_model(text):
+    """`abilities.match` refuses a compound only when two fragments already
+    LOOK like commands — which is the judgement the adapter exists because the
+    registry cannot always make.  "wave and afterwards store the arm" split
+    into one fragment the registry knew and one it did not, raised no refusal,
+    and half of it was proposed."""
+    stub = Stub(says("wave", confidence=1.0))
+    out = plan(text, language_adapter=LanguageAdapter(stub))
+    assert out.kind == "unsupported"
+    assert "one thing at a time" in out.message
+    assert stub.seen == []
+
+
+def test_an_action_whose_phrase_loses_an_argument_is_refused():
+    """`as_command` silently dropped `which_arm` for the two point abilities —
+    both of which DECLARE that slot, so validation accepted it — and a request
+    to point with the left arm produced a RIGHT-arm proposal whose card did
+    not mention an arm.  Every other ability got the "I can only do that with
+    my right arm" refusal; these two got a moving arm."""
+    action, why = validate(
+        says("point_cell", {"which_cell": "r2c2", "which_arm": "left"}))
+    assert action is None
+    assert "left arm" in why
+
+    out = plan("indicate the middle square with your left hand",
+               language_adapter=adapter(
+                   says("point_cell", {"which_cell": "r2c2",
+                                       "which_arm": "left"})))
+    assert out.kind == "unsupported"
+
+
+def test_every_accepted_action_reads_back_as_itself():
+    """The wall between the model and the registry: the action is written out
+    as a phrase and read back by `abilities.match`, and unless what comes back
+    is the same ability with the same slot values it is refused."""
+    for name, arguments in [
+        ("greet", {}),
+        ("rest_forearm", {}),
+        ("stow_arm", {}),
+        ("stow_arm", {"which_arm": "left"}),
+        ("wave", {}),
+        ("wave", {"which_arm": "right"}),
+        ("point_cell", {"which_cell": "r2c2"}),
+        ("point_object", {"which_object": "soda_can"}),
+    ]:
+        action, why = validate(says(name, arguments))
+        assert action is not None, f"{name} {arguments}: {why}"
+        readable, why = action.reads_back()
+        assert readable, why
+
+
+def test_an_action_with_an_unfilled_slot_reaches_the_slot_question():
+    """`as_command` returned "point to", which matches no pattern at all — so
+    the one path that would ask "Which cell should I point to?" was the one
+    path that could not."""
+    out = plan("show me one of the squares",
+               language_adapter=adapter(says("point_cell")))
+    assert out.kind == "clarification"
+    assert "Which cell" in out.message
+    assert out.slot == abilities.SLOT_CELL
+
+
+def test_point_object_with_no_object_is_refused_not_guessed():
+    """No slot-less phrasing exists for that one."""
+    action, why = validate(says("point_object"))
+    assert action is None
+    assert "no phrasing this panel can re-read" in why
+
+
+def test_a_clarification_is_answered_against_the_resolved_request():
+    """Every reply turn used to re-plan the operator's ORIGINAL sentence —
+    which by definition nothing deterministic could read — so the adapter was
+    asked again, was free to answer differently, and the operator's answer was
+    applied to whatever came back.  A question about a cell was answered with
+    a wave."""
+    class Changeable:
+        def __init__(self):
+            self.replies = [says("point_cell"), says("wave", confidence=1.0)]
+            self.calls = 0
+
+        def complete(self, prompt, text, timeout_s):
+            self.calls += 1
+            return self.replies.pop(0) if self.replies else says("wave")
+
+    provider = Changeable()
+    planner = DeterministicPlanner(lambda: make_scene(), recipes=None,
+                                   language_adapter=LanguageAdapter(provider))
+
+    first = planner(PlannerRequest(text="show me one of the squares",
+                                   history=[]))
+    assert first.kind == "clarification"
+    assert first.read_as, "the resolved request was not carried forward"
+
+    intent = first.intent
+    intent.remember(intent.open_slot, "r2c2")
+    second = planner(PlannerRequest(text="r2c2", history=[], intent=intent))
+
+    assert second.kind == "proposal"
+    assert second.proposal.task_type == "point_cell", \
+        "the operator's answer was applied to a different action"
+    assert second.proposal.cell == "r2c2"
+    assert provider.calls == 1, "the model was asked again on the reply turn"
+
+
+def test_a_truncated_reply_is_not_a_model_that_declined(monkeypatch):
+    """Without this, a budget that ran out looks identical to a model that was
+    unsure — and the panel reports the second while suffering the first."""
+    import json as _json
+    import urllib.request
+
+    from panel_language import AnthropicProvider
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = _json.dumps(payload).encode()
+
+        def read(self):
+            return self._payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(
+        urllib.request, "urlopen",
+        lambda *a, **k: FakeResponse({"stop_reason": "max_tokens",
+                                      "content": []}))
+    with pytest.raises(RuntimeError) as e:
+        AnthropicProvider().complete("p", "t", 1.0)
+    assert "truncated" in str(e.value)
+
+
+def test_the_request_switches_thinking_off_and_leaves_room(monkeypatch):
+    """A one-shot classification on the path a human waits on has nothing
+    worth reasoning about at length, and a tight budget spent on thinking
+    produces an EMPTY answer rather than a short one."""
+    import json as _json
+    import urllib.request
+
+    from panel_language import _MAX_TOKENS, AnthropicProvider
+
+    sent = {}
+
+    class FakeResponse:
+        def read(self):
+            return b'{"content": [{"type": "text", "text": "{}"}]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def capture(request, timeout=None):
+        sent.update(_json.loads(request.data))
+        return FakeResponse()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(urllib.request, "urlopen", capture)
+    AnthropicProvider().complete("prompt", "text", 1.0)
+
+    assert sent["thinking"] == {"type": "disabled"}
+    assert sent["max_tokens"] == _MAX_TOKENS >= 1024
+
+
+def test_an_http_status_is_logged_because_it_carries_no_secret(caplog):
+    """A revoked key, a bad model id and a dead network all read as
+    `HTTPError` and nothing else, leaving an adapter that appears to be on and
+    never answers.  The status tells them apart and carries neither host nor
+    header."""
+    import urllib.error
+
+    failure = urllib.error.HTTPError(
+        "https://api.anthropic.com/v1/messages", 401,
+        "Unauthorized: key sk-ant-secret123", {}, None)
+    with caplog.at_level("INFO"):
+        _, why = adapter(raises=failure).interpret("put the arm away")
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "401" in why and "401" in logged
+    assert "sk-ant-secret123" not in logged + why
+    assert "api.anthropic.com" not in logged + why
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("80", language.DEFAULT_MIN_CONFIDENCE),     # read as a percentage
+    ("-1", language.DEFAULT_MIN_CONFIDENCE),
+    ("nonsense", language.DEFAULT_MIN_CONFIDENCE),
+    ("0.5", 0.5),
+])
+def test_a_confidence_bar_outside_zero_to_one_is_a_typo(monkeypatch, raw,
+                                                        expected):
+    """80, read as a percentage, rejects every reply forever and says so only
+    at INFO; -1 accepts a reply the model said it was not at all sure about."""
+    monkeypatch.setenv("REACHY_PANEL_LANGUAGE", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("REACHY_PANEL_LANGUAGE_MIN_CONFIDENCE", raw)
+    built = build_adapter()
+    assert built is not None
+    assert built._min_confidence == pytest.approx(expected)

@@ -227,11 +227,17 @@ class DeterministicPlanner:
     happen between one command and the next.
     """
 
-    def __init__(self, scene_provider, recipes=None, language=None) -> None:
+    def __init__(self, scene_provider, recipes=None,
+                 language_adapter=None, language=None) -> None:
         self._scene_provider = scene_provider
         # The optional language adapter (#92), or None for "registry only",
         # which is the default and what every existing test gets.
-        self._language = language
+        #
+        # `language_adapter` is the name to use.  `language` is kept as an
+        # accepted alias because it shadows the module imported as `language`
+        # in this file — fragile rather than broken today, and the kind of
+        # thing that becomes broken during an unrelated edit.
+        self._language = language_adapter if language_adapter is not None else language
         # Where promoted recipes come from, or None for "do not look" (#90).
         # Supplied rather than built here, so a planner in a test does not
         # open a database nobody asked it to.
@@ -374,6 +380,23 @@ class DeterministicPlanner:
         """
         if self._language is None:
             return None
+
+        # MORE THAN ONE REQUEST, CONSERVATIVELY JUDGED.  `abilities.match`
+        # refuses a compound only when two fragments already LOOK like
+        # commands — which is exactly the judgement the adapter exists because
+        # the registry cannot always make.  "wave and afterwards store the
+        # arm" split into one fragment the registry knew and one it did not,
+        # raised no refusal, and half of it was proposed.  Anything that
+        # splits into two substantial fragments is not handed to the model at
+        # all: executing half of something the operator asked for as a pair is
+        # worse than not understanding it.
+        parts = abilities.fragments(command)
+        if len(parts) > 1 and sum(len(p.split()) > 1 for p in parts) > 1:
+            return _unsupported(
+                "That reads as more than one request. Ask me for one thing at "
+                "a time — I will not do half of something you asked for as a "
+                "pair.")
+
         action, why = self._language.interpret(command)
         if action is None:
             log.info("language adapter declined: %s", why)
@@ -382,7 +405,12 @@ class DeterministicPlanner:
         outcome = self._ability_outcome(action.as_command(), answers)
         if outcome is None or outcome.proposal is None:
             # A clarification or a refusal is returned as it stands: those are
-            # the registry's own words and need no relabelling.
+            # the registry's own words and need no relabelling.  A
+            # clarification still carries the resolved command, or answering
+            # its question would send the original sentence back to the model.
+            if outcome is not None and outcome.kind == "clarification":
+                return dataclasses.replace(outcome,
+                                           read_as=action.as_command())
             return outcome
 
         # Said out loud, and BEFORE the operator confirms.  A plan that arrived
@@ -393,7 +421,8 @@ class DeterministicPlanner:
             interpreted_by=language.BY_MODEL,
             summary=f"{outcome.proposal.summary} (read from your wording)")
         return PlannerOutcome(kind="proposal", message=outcome.message,
-                              proposal=proposal)
+                              proposal=proposal,
+                              read_as=action.as_command())
 
     def aside(self, text: str) -> Optional[PlannerOutcome]:
         """Answer a message that needs no task, or None.
@@ -1087,6 +1116,14 @@ def _record_intent(outcome: PlannerOutcome, state: IntentState) -> PlannerOutcom
         state.open_slot = ""
         state.open_question = ""
         state.open_choices = []
+
+    if outcome.read_as:
+        # From here on this exchange is ABOUT the resolved request.  The
+        # original sentence is the one nothing deterministic could read, so
+        # re-planning it on the next turn would ask the adapter again — free to
+        # answer differently, with the operator's clarification applied to
+        # whatever came back.
+        state.command = outcome.read_as
 
     proposal = outcome.proposal
     if proposal is not None:

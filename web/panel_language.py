@@ -84,9 +84,17 @@ DEFAULT_MODEL = "claude-sonnet-5"
 _API_URL = "https://api.anthropic.com/v1/messages"
 _API_VERSION = "2023-06-01"
 
-#: Kept small on purpose: the output is a name and a couple of short strings,
-#: and a larger budget only buys room for prose nobody reads.
-_MAX_TOKENS = 256
+#: Generous on purpose, and NOT because the answer is long.
+#:
+#: The answer is a name and a couple of short strings — 64 tokens would carry
+#: it.  But extended thinking, where a model does it, spends this same budget
+#: before any text is emitted, so a tight cap does not produce a short answer:
+#: it produces an EMPTY one, which arrives here as "the model returned
+#: nothing" and reaches the operator as "I did not understand that", for every
+#: command, with nothing anywhere saying the adapter is misconfigured rather
+#: than merely unsure.  Thinking is also switched off explicitly below; this is
+#: the belt to that pair of braces.
+_MAX_TOKENS = 2048
 
 
 @dataclasses.dataclass(frozen=True)
@@ -114,19 +122,65 @@ class Action:
         arm = self.arguments.get(abilities.SLOT_ARM, "")
         cell = self.arguments.get(abilities.SLOT_CELL, "")
         obj = self.arguments.get(abilities.SLOT_OBJECT, "")
+        side = f"{arm} " if arm else ""
         if self.ability == "greet":
             return "hello"
         if self.ability == "rest_forearm":
-            return f"rest {arm + ' ' if arm else ''}forearm".strip()
+            return f"rest {side}forearm"
         if self.ability == "stow_arm":
-            return f"stow {arm + ' ' if arm else ''}arm".strip()
+            return f"stow {side}arm"
         if self.ability == "wave":
-            return f"wave {arm + ' ' if arm else ''}hand".strip() if arm else "wave"
+            return f"wave {side}hand" if arm else "wave"
         if self.ability == "point_cell":
-            return f"point to {cell}".strip()
+            # WITH NO CELL, the slot-less phrasing — which reads back as
+            # point_cell with the slot unfilled, and so reaches "Which cell
+            # should I point to?".  Returning "point to" instead matched no
+            # pattern at all, so the one path that would ask the slot question
+            # was the one path that could not.
+            return f"point to {cell}" if cell else "point to a cell"
         if self.ability == "point_object":
-            return f"point to {obj}".strip()
+            # No slot-less phrasing exists for this one, so an action with no
+            # object is refused rather than guessed at.
+            return f"point to {obj}" if obj else ""
         return ""
+
+    def reads_back(self) -> Tuple[bool, str]:
+        """Whether the canonical phrase says exactly what this action says.
+
+        THE WALL BETWEEN THE MODEL AND THE REGISTRY IS THIS ROUND TRIP.  The
+        action is written out as a phrase and read back by `abilities.match`,
+        and unless what comes back is the same ability with the same slot
+        values, the action is refused.
+
+        Written after `as_command` silently dropped `which_arm` for the two
+        point abilities — both of which DECLARE that slot, so validation
+        accepted it — and a request to point with the left arm produced a
+        right-arm proposal whose card did not mention an arm.  Every other
+        ability got the "I can only do that with my right arm" refusal; these
+        two got a moving arm.  A check that the phrase means what the action
+        meant catches that, and catches the next one of its kind without
+        anybody having to think of it.
+        """
+        phrase = self.as_command()
+        if not phrase:
+            return False, f"'{self.ability}' has no phrasing this panel can re-read"
+        try:
+            match = abilities.match(phrase)
+        except abilities.AbilityRefusal as exc:
+            return False, f"the phrasing for '{self.ability}' is refused: {exc.reason}"
+        if match is None or match.name != self.ability:
+            got = (match.name or "an ambiguous request") if match else "nothing"
+            return False, (f"'{phrase}' reads back as {got}, not "
+                           f"'{self.ability}'")
+        for slot, value in self.arguments.items():
+            if slot == abilities.SLOT_ARM:
+                if match.arm != value:
+                    return False, (f"'{phrase}' does not carry the "
+                                   f"{value} arm this action asked for")
+                continue
+            if match.slots.get(slot, "") != value:
+                return False, (f"'{phrase}' does not carry {slot}={value!r}")
+        return True, ""
 
 
 class Provider:
@@ -154,12 +208,20 @@ class AnthropicProvider(Provider):
         if not key:
             raise RuntimeError("no API key in the environment")
 
-        body = json.dumps({
+        # THINKING OFF, EXPLICITLY.  This is a one-shot classification on the
+        # path a human is waiting on: there is nothing here worth reasoning
+        # about at length, and a model left to decide for itself spends the
+        # token budget and the operator's patience on it.  Sent as a field the
+        # API ignores where it does not apply, rather than left to a default
+        # that may differ per model.
+        payload_out = {
             "model": self.model,
             "max_tokens": _MAX_TOKENS,
             "system": prompt,
+            "thinking": {"type": "disabled"},
             "messages": [{"role": "user", "content": text}],
-        }).encode("utf-8")
+        }
+        body = json.dumps(payload_out).encode("utf-8")
 
         request = urllib.request.Request(
             self._api_url, data=body, method="POST",
@@ -168,6 +230,12 @@ class AnthropicProvider(Provider):
                      "x-api-key": key})
         with urllib.request.urlopen(request, timeout=timeout_s) as response:
             payload = json.loads(response.read().decode("utf-8"))
+
+        # TRUNCATION IS NOT AN UNSURE MODEL.  Without this a budget that ran
+        # out looks identical to a model that declined, and the panel reports
+        # the second while suffering the first.
+        if payload.get("stop_reason") == "max_tokens":
+            raise RuntimeError("the reply was truncated at max_tokens")
 
         parts = payload.get("content") or []
         return "".join(p.get("text", "") for p in parts
@@ -232,11 +300,19 @@ class LanguageAdapter:
         try:
             raw = self._provider.complete(self._prompt, text, self._timeout_s)
         except (urllib.error.URLError, OSError, RuntimeError, ValueError) as exc:
-            # The class of failure, never the message: a URL error's string
-            # carries the host, and an auth failure's can carry the header.
+            # The class of failure and, for an HTTP error, the STATUS — never
+            # the message and never the body: a URL error's string carries the
+            # host, and an auth failure's can carry the header.  The status
+            # carries neither, and it is the difference between "the key is
+            # revoked", "that model id does not exist" and "the network is
+            # down" — three things that otherwise all read as `HTTPError` and
+            # leave an adapter that appears to be on and never answers.
+            code = getattr(exc, "code", None)
+            label = (f"{type(exc).__name__} {code}" if isinstance(code, int)
+                     else type(exc).__name__)
             log.info("language adapter unavailable (%s); using the registry",
-                     type(exc).__name__)
-            return None, f"the adapter was unavailable ({type(exc).__name__})"
+                     label)
+            return None, f"the adapter was unavailable ({label})"
         except Exception:                      # noqa: BLE001
             log.exception("language adapter failed; using the registry")
             return None, "the adapter failed"
@@ -316,8 +392,9 @@ def validate(raw: str, *, min_confidence: float = DEFAULT_MIN_CONFIDENCE
                       f"{min_confidence:.2f} is the bar")
 
     action = Action(ability=name, arguments=arguments, confidence=confidence)
-    if not action.as_command():
-        return None, f"'{name}' has no phrasing this panel can re-read"
+    readable, why = action.reads_back()
+    if not readable:
+        return None, why
     return action, ""
 
 
@@ -339,13 +416,24 @@ def build_adapter() -> Optional[LanguageAdapter]:
     return LanguageAdapter(
         AnthropicProvider(),
         min_confidence=_float_env("REACHY_PANEL_LANGUAGE_MIN_CONFIDENCE",
-                                  DEFAULT_MIN_CONFIDENCE),
+                                  DEFAULT_MIN_CONFIDENCE, low=0.0, high=1.0),
         timeout_s=_float_env("REACHY_PANEL_LANGUAGE_TIMEOUT_S",
-                             DEFAULT_TIMEOUT_S))
+                             DEFAULT_TIMEOUT_S, low=0.1, high=60.0))
 
 
-def _float_env(name: str, default: float) -> float:
+def _float_env(name: str, default: float, *, low: float = None,
+               high: float = None) -> float:
     try:
-        return float(os.environ.get(name, "") or default)
+        value = float(os.environ.get(name, "") or default)
     except ValueError:
         return default
+    if (low is not None and value < low) or (high is not None and value > high):
+        # A BAR OUTSIDE [0, 1] IS A TYPO, and the two typos have opposite and
+        # equally bad outcomes: 80, read as a percentage, rejects every reply
+        # forever and says so only at INFO; -1 accepts a reply the model said
+        # it was not at all sure about.  The same range `validate` already
+        # enforces on the model's own number.
+        log.warning("%s=%s is outside [%s, %s]; using %s",
+                    name, value, low, high, default)
+        return default
+    return value
