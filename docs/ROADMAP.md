@@ -363,9 +363,40 @@ Preferred: make a ROS bridge read snapshots directly in-process or from a bounde
 - Measure simulation real-time factor, render FPS, frame age, command-to-state latency, command-to-frame latency, CPU, memory, and dropped frames.
 - Compare native MuJoCo, container headless MuJoCo, and kinematic fixture on target Apple-Silicon machines.
 
+### R12-605 Camera zoom control
+
+**Tasks**
+
+- Forward a motorised zoom level from the SDK-facing backend (`mujoco_remote_backend.py`) through the wire protocol (`native_mujoco/protocol.py`) to the native server.
+- Apply the pending zoom on the render thread and retune both cameras' vertical FOV (`native_mujoco/renderer.py`).
+- Keep zoom real under `mujoco-remote` and a documented no-op under the kinematic/fixture backends (`fake_reachy_server.py`).
+
+**Exit gate**
+
+- `tests/unit/test_mujoco_remote_backend.py` zoom-forwarding cases pass against the native server.
+
+### R12-606 Synthetic dataset generator
+
+**Tasks**
+
+- Render a labelled detection/classification dataset offline from a scene, without a live client (`native_mujoco/dataset.py`, `native_mujoco/cli/generate_dataset.py`).
+- Match exposure and other sensor effects to the real camera feed so the generated set is usable for detector training.
+
+**Exit gate**
+
+- `scripts/build_detection_handoff.py` reproduces a labelled set from `FWDCenterLabSiva.yaml` that matches the shipped detector fixtures.
+
+### R12-607 Runtime object placement
+
+**Tasks**
+
+- Implement `place`/`stow`/`reshape` over the sim protocol so a client can move objects onto tabletop grid cells at runtime (`native_mujoco/placement.py`, issue #38).
+- Since MuJoCo freezes `nbody`/`njnt`/`ngeom` at compile time, provide a pool of spare object slots so more objects can be made available than a scene declares outright — `scenes/FWDCenterLabSivaPool.yaml` is the scene exercising this: it starts with the board empty and six spare box/cylinder slots parked off-board, which is what makes it useful for perception ground-truth checks (place a known object, run the detector, compare against ground truth) and for exercising `reshape()` against spare slots. `FWDCenterLabSiva.yaml` remains the scene in active use; the pool scene is a parallel capability, not a replacement.
+
 **Exit gate for Epic 6**
 
 - A versioned benchmark report and reproducible research bundle are produced.
+- `tests/unit/test_placement.py` covers place/stow/reshape against both `FWDCenterLabSiva.yaml` and `FWDCenterLabSivaPool.yaml`.
 
 ## EPIC 7 — Optional Gazebo adapter
 
@@ -400,5 +431,5 @@ Do not begin until the backend, scene, and camera contracts are stable.
 6. R12-400 through R12-404
 7. R12-201 and R12-203 refinements
 8. R12-500 through R12-503
-9. R12-600 through R12-604
+9. R12-600 through R12-607
 10. R12-700 only after an explicit decision
