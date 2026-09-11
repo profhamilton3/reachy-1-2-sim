@@ -525,6 +525,49 @@ class TestServerPath:
         assert ack.encode()
 
 
+class TestResetAckRouting:
+    """#43 / #84: reset_ack had the identical bug place_ack was fixed for —
+    one server-level queue drained by every connection's send loop, so
+    whichever loop polled first took the ack regardless of who asked. Mirrors
+    TestServerPath's place_ack routing tests, against the same contract:
+    apply_pending() must carry the submitting connection through so the ack
+    can be routed rather than broadcast.
+    """
+
+    @pytest.fixture
+    def sim_state(self, scene_xml, pool_doc):
+        from server import SimState
+        model = mujoco.MjModel.from_xml_string(scene_xml)
+        return SimState(model, scene_doc=pool_doc)
+
+    def test_reset_info_names_the_connection_that_asked(self, sim_state):
+        sim_state.submit_reset({"request_id": "r1", "_conn_id": 7})
+        info = sim_state.apply_pending()
+        assert info == {"request_id": "r1", "_conn_id": 7}
+
+    def test_a_second_reset_names_its_own_connection(self, sim_state):
+        """Two clients, sequential resets — each ack must carry the asker
+        that requested it, not whichever connection happened to be first."""
+        sim_state.submit_reset({"request_id": "r1", "_conn_id": 7})
+        first = sim_state.apply_pending()
+        sim_state.submit_reset({"request_id": "r2", "_conn_id": 9})
+        second = sim_state.apply_pending()
+        assert first["_conn_id"] == 7 and second["_conn_id"] == 9
+        assert first["request_id"] == "r1" and second["request_id"] == "r2"
+
+    def test_no_pending_reset_returns_none(self, sim_state):
+        assert sim_state.apply_pending() is None
+
+    def test_reset_without_a_conn_id_still_reports_its_request_id(self, sim_state):
+        """A reset submitted without _conn_id (e.g. a unit test constructing
+        the message directly) must not raise — the ack is simply unroutable,
+        which server.py's sim-thread loop already treats as a dropped receipt,
+        not an error."""
+        sim_state.submit_reset({"request_id": "bare"})
+        info = sim_state.apply_pending()
+        assert info == {"request_id": "bare", "_conn_id": None}
+
+
 class TestBroadcastFanOut:
     """State and camera frames are broadcasts: every client is entitled to all
     of them.  They were single shared queues drained by whichever send loop
