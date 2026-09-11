@@ -52,7 +52,8 @@ from reachy_ai.experience.models import (
 )
 from reachy_ai.motion.recipe import TrajectoryRecipe
 from reachy_ai.motion.recipe_executor import (
-    PANEL_ROUTES_EXECUTABLE, RecipeExecutionError, RecipeExecutor,
+    PANEL_ROUTES_EXECUTABLE, SIM_TIMESTEP_S, RecipeExecutionError,
+    RecipeExecutor,
 )
 
 #: Robot geoms are contype 2.  The runner's own forbidden-contact counter pairs
@@ -126,6 +127,24 @@ class OfflineRouteRunner:
         self._executor = RecipeExecutor()
         self._power_on(recipe_arm)
         self._collidable = self._collidable_bodies()
+        self._check_timestep()
+
+    def _check_timestep(self) -> None:
+        """The commands were built in STEPS; the model decides what a step is.
+
+        `recipe_executor` cannot import the model — it is deliberately free of
+        any native_mujoco dependency — so it converts a waypoint's measured
+        seconds into steps using its own `SIM_TIMESTEP_S`.  If the model's
+        timestep ever moves away from that, every duration in every recipe
+        silently means something else, and a study would go on reporting
+        seconds it never flew.  Loud here, rather than wrong everywhere.
+        """
+        actual = float(self._core.model.opt.timestep)
+        if abs(actual - SIM_TIMESTEP_S) > 1e-9:
+            raise RecipeExecutionError(
+                f"the model steps at {actual} s and recipes are built at "
+                f"{SIM_TIMESTEP_S} s, so every duration in them would mean "
+                f"{actual / SIM_TIMESTEP_S:.2f}x what it says")
 
     def _collidable_bodies(self) -> List[str]:
         """Non-robot bodies in this scene the arm could actually collide with.
@@ -142,9 +161,19 @@ class OfflineRouteRunner:
         model = self._core.model
         out: List[str] = []
         for g in range(model.ngeom):
+            # A BITMASK, NOT AN ENUM.  `contype in (0, 2)` drops a geom
+            # carrying a combined mask (6 = robot|objects) out of the list of
+            # what could have been hit — producing exactly the silently empty
+            # contact record this list exists to prevent.  And a geom with
+            # contype 0 can still be collided INTO by something whose own
+            # contype pairs with its conaffinity, so it is only excluded when
+            # it can take part in no contact at all.
             contype = int(model.geom_contype[g])
-            if contype in (0, _ROBOT_CONTYPE):
+            conaffinity = int(model.geom_conaffinity[g])
+            if contype == 0 and conaffinity == 0:
                 continue
+            if contype and not (contype & ~_ROBOT_CONTYPE):
+                continue   # purely robot
             body = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY,
                                      int(model.geom_bodyid[g]))
             if body and body not in out:
@@ -200,10 +229,13 @@ class OfflineRouteRunner:
         turned out not to be trustworthy.
         """
         for c in snap.contacts:
-            types = {c.contype1, c.contype2}
-            if _ROBOT_CONTYPE not in types or types == {_ROBOT_CONTYPE}:
-                continue
-            other = c.body2 if c.contype1 == _ROBOT_CONTYPE else c.body1
+            # Masked, not compared: a geom may carry robot|something, and
+            # `== _ROBOT_CONTYPE` would drop the contact entirely.
+            first = bool(c.contype1 & _ROBOT_CONTYPE)
+            second = bool(c.contype2 & _ROBOT_CONTYPE)
+            if first == second:
+                continue        # neither is the robot, or both are (self)
+            other = c.body2 if first else c.body1
             if other:
                 tally[other] = tally.get(other, 0) + 1
 
@@ -216,7 +248,18 @@ class OfflineRouteRunner:
         _native_on_path()
         from episode_runner import EpisodeRunner, StepCommand
 
-        specs = self._executor.build_commands(recipe)
+        # THE PLACEMENT AND THE COMMANDS ARE ONE THING.  Building from home
+        # while the arm sits at REST makes the first commanded target ~0
+        # degrees, driving it from over the board back toward the pocket
+        # outside the corridor — so the arm is placed FIRST, the resulting
+        # pose is read back out of the model, and the commands are built from
+        # that.  The runner resets and re-places deterministically, so what it
+        # flies begins exactly where these commands assume it does.
+        start = self._start_pose(recipe)
+        self._core.reset(seed=seed)
+        if start:
+            _place(self._core, start)
+        specs = self._executor.build_commands(recipe, start_qpos=self._qpos())
         commands = [StepCommand(target_rad=list(s.target_rad),
                                 hold_steps=s.hold_steps) for s in specs]
 
@@ -246,8 +289,7 @@ class OfflineRouteRunner:
             if self.route == "WAVE":
                 counter.observe(snap)
 
-        result = runner.run(commands, on_snapshot=watch,
-                            start_pose_rad=self._start_pose(recipe))
+        result = runner.run(commands, on_snapshot=watch, start_pose_rad=start)
         result.contact_summary = dict(result.contact_summary or {})
         result.contact_summary[CONTACT_BODIES_KEY] = tally
         # WHAT COULD HAVE BEEN HIT, so that an empty tally can be read as "the
@@ -259,33 +301,54 @@ class OfflineRouteRunner:
         spec = self.task_spec(recipe, initial)
         return result, spec
 
-    def _start_pose(self, recipe: TrajectoryRecipe) -> Optional[List[float]]:
-        """The posture the route requires the arm to already be at, in MuJoCo
-        radians — or None when the route starts from home and there is nothing
-        to place.
+    def _start_pose(self, recipe: TrajectoryRecipe) -> Dict[str, float]:
+        """The posture the route requires the arm to already be at, as joint
+        name -> MuJoCo radians.  Empty when the route starts from home and
+        there is nothing to place.
 
         The live path REFUSES a route whose start posture the arm is not at,
         rather than driving it there: the connecting move is the one thing
         nothing measured.  Offline there is no arm to refuse, so the
         precondition is established instead — and stating it as a placement
         keeps it out of the measurement.
+
+        BY NAME, AND ONLY THE JOINTS THE POSTURE NAMES.  A 21-long vector here
+        would carry fourteen zeros for joints the posture says nothing about,
+        and writing those resets the neck away from the home keyframe.
         """
         from reachy_ai.motion import rig_routes as R
 
         name = recipe.expected_start_posture or ""
         pose = R.POSTURES.get(name)
         if pose is None or name == R.POSTURE_HOME:
-            return None
+            return {}
 
         _native_on_path()
-        from joint_map import JOINT_TABLE, NUM_JOINTS, by_name
+        from joint_map import by_name
 
-        qpos = [0.0] * NUM_JOINTS
+        out: Dict[str, float] = {}
         for joint, deg in pose.items():
             entry = by_name(joint)
             if entry is not None:
-                qpos[entry.mjcf_index] = entry.sdk_deg_to_mjcf_rad(deg)
-        return qpos
+                out[joint] = entry.sdk_deg_to_mjcf_rad(deg)
+        return out
+
+    def _qpos(self) -> List[float]:
+        """The robot's joints as `build_commands` indexes them, read from the
+        model rather than assumed."""
+        _native_on_path()
+        from joint_map import JOINT_TABLE, NUM_JOINTS
+
+        import mujoco
+
+        model, data = self._core.model, self._core.data
+        out = [0.0] * NUM_JOINTS
+        for entry in JOINT_TABLE:
+            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT,
+                                    entry.sdk_name)
+            if jid >= 0:
+                out[entry.mjcf_index] = float(data.qpos[int(model.jnt_qposadr[jid])])
+        return out
 
     def task_spec(self, recipe: TrajectoryRecipe,
                   initial: Dict[str, List[float]]) -> PanelRouteTaskSpec:
@@ -377,6 +440,20 @@ def _amplitude_in(recipe: TrajectoryRecipe) -> float:
         return float(spec)
     except (TypeError, ValueError):
         return 60.0
+
+
+def _place(core, pose_rad: Dict[str, float]) -> None:
+    """Same placement the runner makes, so the two cannot disagree."""
+    import mujoco
+
+    model, data = core.model, core.data
+    for name, value in pose_rad.items():
+        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        if jid >= 0:
+            data.qpos[int(model.jnt_qposadr[jid])] = float(value)
+    data.qvel[:] = 0.0
+    mujoco.mj_forward(model, data)
+    core.controller.sync_targets_to_current(data)
 
 
 def _cycles_in(recipe: TrajectoryRecipe) -> int:

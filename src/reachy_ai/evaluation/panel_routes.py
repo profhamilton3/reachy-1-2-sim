@@ -14,8 +14,17 @@ actually asked of the motion:
   * **Rest** reaches the supported posture, touches only what it meant to
     touch, and leaves the board undisturbed.
   * **Stow** reaches the pocket by walking the corridor, and touches nothing.
-  * **Wave** completes the cycles it was asked for, inside the tracking
-    tolerance, and finishes recognisably at the presentation pose.
+  * **Wave** completes the cycles it was asked for and finishes recognisably
+    at the presentation pose.
+
+    NOT "within the tracking tolerance", which is what this said until a
+    reviewer asked which code checked it.  The offline executor streams a
+    pose sequence open-loop: it reads no joint positions, so it cannot tell
+    whether a waypoint converged, and there is no per-waypoint tracking check
+    in this path at all.  The live route runner does re-stream and re-check;
+    these evaluators judge the ENDPOINT and the board.  A criterion nothing
+    enforces is worse than an absent one, because the verdict reads as though
+    it was checked.
   * **Point** reaches the hover region it selected, keeps its clearance, and
     leaves the board undisturbed.
 
@@ -105,9 +114,6 @@ class PanelRoutePolicy(EvaluationPolicy):
     #: ability claims, not the calibrated ray it does not.
     hover_miss_tolerance_m: float = GRID_CELL_M / 2.0
 
-    #: Waypoint tracking, in degrees.  The route's own `tol` is per waypoint
-    #: and stricter in places; this is the fallback for a step that names none.
-    tracking_tolerance_deg: float = R.TRACK_TOL
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +169,19 @@ def canonical_steps(route: str, *, wave_cycles: int = R.WAVE_CYCLES,
         return tuple(steps)
 
     if route == "POINT":
-        return (
-            RouteStep("point_approach", "APPROACH", R.WAVE_SECONDS,
-                      R.LESSON_TOL, ()),
+        # ONE STEP PER LEG.  The legs ARE the path-clearance check — the guard
+        # models the arm between two poses as a joint-space straight line, and
+        # six legs puts a measurement every ~4 cm of pad travel.  An earlier
+        # version took `point_legs` as an argument and returned a fixed
+        # three-step route regardless, so the one parameter this module calls
+        # load-bearing shaped nothing the integrity check compared: a recipe
+        # could declare fourteen legs, carry one approach step, and pass.
+        legs = max(1, int(point_legs))
+        return tuple(
+            RouteStep("point_approach", f"APPROACH_{i + 1}", R.WAVE_SECONDS,
+                      R.LESSON_TOL, ())
+            for i in range(legs)
+        ) + (
             RouteStep("point_hover", "HOVER", R.WAVE_SECONDS, R.LESSON_TOL, ()),
             RouteStep("point_return", "PRESENT", R.WAVE_SECONDS, 8.0,
                       tuple(R.GROSS_JOINTS)),
@@ -189,22 +205,41 @@ def align_to_parameters(recipe: TrajectoryRecipe) -> TrajectoryRecipe:
     exists to catch is a recipe that came out of a store or off disk, and
     those are not aligned by anybody.
 
-    Only the count changes.  Durations are left where the recipe put them,
-    because duration is what the search is varying.
+    THE DURATIONS THE SEARCH CHOSE ARE KEPT.  An earlier version rebuilt every
+    step from the canonical route, which hard-coded 1.8 s onto each swing — so
+    a winner searched to 3.0 s exported a YAML declaring 1.8, and anyone
+    reading the exported file as the flown motion got the wrong number.  The
+    swings and the return take their seconds from `wave_seconds`, which is what
+    the executor actually flies them at.
     """
     route = str(recipe.route or "")
     if route != "WAVE":
         return recipe
 
     cycles = _int(recipe.bounded_parameters.get("wave_cycles"), R.WAVE_CYCLES)
+
+    # THE STORED PARAMETER IS THE ONE THAT WAS FLOWN.  A continuous sampler
+    # hands back 1.6066 for a count of cycles; `_int` truncates it to 1 and the
+    # arm waves once, but a recipe left declaring 1.6066 tells a later reader
+    # the trial ran one-and-a-bit cycles, which is not a thing that happened.
+    # Written back as the integer, so the record and the motion agree.
+    bounded = dict(recipe.bounded_parameters or {})
+    spec = bounded.get("wave_cycles")
+    if isinstance(spec, dict):
+        bounded["wave_cycles"] = dict(spec, value=cycles)
+    elif spec is not None:
+        bounded["wave_cycles"] = cycles
+
+    seconds = _bp_float(bounded, "wave_seconds", R.WAVE_SECONDS)
     steps = [
         PrimitiveStep(primitive=s.primitive,
-                      parameters={"name": s.name, "seconds": s.seconds,
+                      parameters={"name": s.name, "seconds": seconds,
                                   "tol": s.tol,
                                   "guard": list(s.guard) if s.guard else None})
         for s in canonical_steps(route, wave_cycles=cycles)
     ]
-    return dataclasses.replace(recipe, primitive_sequence=steps)
+    return dataclasses.replace(recipe, primitive_sequence=steps,
+                               bounded_parameters=bounded)
 
 
 def _steps_of(recipe: TrajectoryRecipe) -> List[PrimitiveStep]:
@@ -879,11 +914,20 @@ def evaluate_point(
     undisturbed = _undisturbed(result, spec, policy, violations, lines)
     arrived = _arrived(result, R.POSTURE_PRESENT, policy, violations, lines)
 
+    # ONLY WHAT WAS MEASURED.  Writing 0.0 for an unrecorded miss records the
+    # BEST POSSIBLE one, and 0.0 for an unrecorded clearance records contact —
+    # both of them a measurement, in the same verdict that just said no
+    # measurement exists.  A missing key is the only honest way to say it.
+    extra: Dict[str, float] = {}
+    if miss is not None:
+        extra["pad_miss_m"] = float(miss)
+    if worst is not None:
+        extra["worst_clearance_m"] = float(worst)
+
     return _verdict(result, spec, policy, violations, lines, accuracy=accuracy,
                     successful=reached and clear and clean and undisturbed
                     and arrived,
-                    extra={"pad_miss_m": float(miss or 0.0),
-                           "worst_clearance_m": float(worst or 0.0)})
+                    extra=extra)
 
 
 #: One evaluator per ability, by the name `panel_abilities` registers it under.

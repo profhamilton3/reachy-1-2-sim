@@ -108,6 +108,8 @@ def main(argv=None) -> int:
         eval_aggregation="pessimistic",
         finalist_k=args.finalist_k,
         finalist_seeds=_seeds(args.finalist_seeds),
+        # So the recipe recorded against a trial is the recipe that ran.
+        recipe_normaliser=align_to_parameters,
     )
     search = SearchRunner(config)
 
@@ -130,7 +132,7 @@ def main(argv=None) -> int:
     return 0
 
 
-def _report(args, result, baseline) -> None:
+def _report(args, result, baseline) -> None:  # noqa: C901
     print(f"\n=== {args.ability}: {result.trials_run} trial(s) run, "
           f"{result.trials_skipped} reused ===")
     print(f"scene   : {args.scene}")
@@ -145,7 +147,25 @@ def _report(args, result, baseline) -> None:
     verdict = result.best.verdict
     print(f"\nbest    : {result.best.trial_id[:8]}  "
           f"successful={verdict.is_successful}")
-    print(f"          {dict(result.best_search_point or {})}")
+    # WHAT WAS FLOWN, not what the sampler proposed.  A continuous sampler
+    # suggests 1.6066 cycles; the arm waves once.  Printing the raw point
+    # invites a reader to believe the first number.
+    flown = align_to_parameters(apply_best_to_recipe(result, baseline))
+    if flown is not None:
+        print("          " + ", ".join(
+            f"{k}={_shown(v)}"
+            for k, v in sorted(_values(flown.bounded_parameters).items())))
+
+
+def _values(bounded) -> dict:
+    out = {}
+    for name, spec in (bounded or {}).items():
+        out[name] = spec.get("value") if isinstance(spec, dict) else spec
+    return out
+
+
+def _shown(value) -> str:
+    return f"{value:.4g}" if isinstance(value, float) else str(value)
 
     # THE SPREAD, NOT JUST THE MEAN.  `_aggregate_verdicts` records a `_std`
     # for every ranking score; a mean with no spread beside it is how a

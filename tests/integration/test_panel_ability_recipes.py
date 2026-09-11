@@ -102,10 +102,9 @@ def test_the_corridor_actually_carries_the_arm_somewhere(ability):
     runner = runner_for(ability)
     start = runner._start_pose(recipe)
     began = {j: 0.0 for j in R.GROSS_JOINTS}
-    if start is not None:
-        for j in R.GROSS_JOINTS:
-            entry = by_name(j)
-            began[j] = entry.mjcf_rad_to_sdk_deg(start[entry.mjcf_index])
+    for j in R.GROSS_JOINTS:
+        if j in start:
+            began[j] = by_name(j).mjcf_rad_to_sdk_deg(start[j])
 
     result, _ = runner.run(recipe, seed=0)
     ended = {j: result.final_joint_positions_deg[j] for j in R.GROSS_JOINTS}
@@ -132,12 +131,13 @@ def test_the_stow_corridor_starts_at_rest_not_at_the_pocket():
     _skip_without_mujoco()
     runner = runner_for("stow_arm")
     pose = runner._start_pose(load("stow_arm"))
-    assert pose is not None, "stow must be placed at REST before it flies"
+    assert pose, "stow must be placed at REST before it flies"
 
     from joint_map import by_name
-    entry = by_name("r_shoulder_pitch")
-    assert entry.mjcf_rad_to_sdk_deg(pose[entry.mjcf_index]) == pytest.approx(
-        R.REST["r_shoulder_pitch"])
+    assert by_name("r_shoulder_pitch").mjcf_rad_to_sdk_deg(
+        pose["r_shoulder_pitch"]) == pytest.approx(R.REST["r_shoulder_pitch"])
+    # Only the joints REST names, so the neck keeps its keyframe pitch.
+    assert "neck_pitch" not in pose
 
 
 def test_an_empty_contact_record_says_what_could_have_been_hit():
@@ -246,3 +246,121 @@ def test_a_failed_trial_stays_in_the_store(tmp_path):
     rows = list(conn.execute("SELECT status, success FROM trials"))
     conn.close()
     assert len(rows) >= 2, "trials were pruned out of the store"
+
+
+def test_a_model_whose_timestep_moved_fails_loudly(monkeypatch):
+    """Recipes are built in STEPS and the model decides what a step is.
+
+    `recipe_executor` is deliberately free of any native_mujoco dependency, so
+    it converts a waypoint's measured seconds using its own constant.  If the
+    model's timestep moves away from that, every duration in every recipe
+    quietly means something else and a study goes on reporting seconds it never
+    flew."""
+    _skip_without_mujoco()
+    from reachy_ai.evaluation.panel_offline import OfflineRouteRunner
+    from simulation_core import SimulationCore
+
+    real = SimulationCore.from_paths
+
+    def slower(model_path, scene_path=None):
+        core = real(model_path, scene_path)
+        core.model.opt.timestep = 0.004
+        return core
+
+    monkeypatch.setattr(SimulationCore, "from_paths", staticmethod(slower))
+    with pytest.raises(RecipeExecutionError) as e:
+        OfflineRouteRunner("wave", str(_MODEL), str(_SCENE))
+    assert "2.00x what it says" in str(e.value)
+
+
+@pytest.mark.parametrize("ability", ["stow_arm", "wave"])
+def test_the_first_command_is_where_the_arm_actually_is(ability):
+    """PLACING THE ARM AND BUILDING FROM HOME ARE TWO HALVES OF ONE THING.
+
+    `start_pose_rad` put the arm at REST; `build_commands` then interpolated
+    from the home keyframe regardless, so the FIRST commanded target was ~0
+    degrees — the stiffened arm driven from over the board straight back
+    toward the pocket, outside the corridor, before the corridor's first
+    waypoint.  That is the exact unmeasured transit STOW_ROUTE exists to
+    forbid, and every duration, clearance and drift number from those episodes
+    described it.
+
+    Doing only the placement was worse than doing neither, because it looked
+    fixed.  This measures the thing that was actually wrong: the gap between
+    where the arm is put and what it is first asked for.
+    """
+    _skip_without_mujoco()
+    from joint_map import by_name
+    from reachy_ai.evaluation.panel_offline import _place
+
+    recipe = load(ability)
+    runner = runner_for(ability)
+    start = runner._start_pose(recipe)
+    assert start, f"{ability} has a starting posture to be placed at"
+
+    runner._core.reset(seed=0)
+    _place(runner._core, start)
+    commands = runner._executor.build_commands(recipe, start_qpos=runner._qpos())
+
+    for joint in R.GROSS_JOINTS:
+        entry = by_name(joint)
+        placed = entry.mjcf_rad_to_sdk_deg(start[joint])
+        first = entry.mjcf_rad_to_sdk_deg(commands[0].target_rad[entry.mjcf_index])
+        assert abs(first - placed) < 1.0, (
+            f"{joint}: the arm is placed at {placed:.1f} deg and the first "
+            f"command asks for {first:.1f} deg")
+
+
+def test_the_placement_leaves_the_head_where_the_keyframe_put_it():
+    """Zero-filling the joints the posture does not name resets the neck, and
+    the neck actuators are stiff by default so the goal is pinned there —
+    which left placed episodes running head-level and unplaced ones pitched at
+    the workspace.  Two populations with different head states are not
+    comparable, and nothing said so."""
+    _skip_without_mujoco()
+    import mujoco
+
+    from reachy_ai.evaluation.panel_offline import _place
+
+    runner = runner_for("stow_arm")
+    core = runner._core
+    core.reset(seed=0)
+    jid = mujoco.mj_name2id(core.model, mujoco.mjtObj.mjOBJ_JOINT, "neck_pitch")
+    adr = int(core.model.jnt_qposadr[jid])
+    before = float(core.data.qpos[adr])
+
+    _place(core, runner._start_pose(load("stow_arm")))
+    assert float(core.data.qpos[adr]) == pytest.approx(before)
+
+
+def test_the_recipe_stored_with_a_trial_is_the_one_that_ran(tmp_path):
+    """A candidate sampled to one cycle was stored with `wave_cycles: 1`
+    beside the baseline's six swing steps — a combination the integrity check
+    rejects, describing a motion that was never flown."""
+    _skip_without_mujoco()
+    import json
+    import sqlite3
+
+    from reachy_ai.evaluation.panel_routes import align_to_parameters
+    from reachy_ai.experience.store import ExperienceStore
+    from reachy_ai.motion.recipe import TrajectoryRecipe as TR
+    from reachy_ai.search.runner import SearchConfig, SearchRunner
+
+    db = str(tmp_path / "stored.db")
+    config = SearchConfig(
+        study_id="test-stored", baseline_recipe=load("wave"), budget=2,
+        sampler="random", random_seed=5, eval_seeds=[0], finalist_seeds=[],
+        recipe_normaliser=align_to_parameters,
+    )
+    with ExperienceStore.open(db) as store:
+        SearchRunner(config).run(runner_for("wave").evaluate_fn(), store=store)
+
+    conn = sqlite3.connect(db)
+    recipes = [r[0] for r in conn.execute("SELECT recipe_json FROM trials")]
+    conn.close()
+    assert recipes
+
+    for raw in recipes:
+        stored = TR.from_dict(json.loads(raw))
+        assert check_route_integrity(stored, "WAVE") == [], \
+            "a stored recipe describes a motion that was never flown"

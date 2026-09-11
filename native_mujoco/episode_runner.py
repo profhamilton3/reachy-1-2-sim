@@ -42,7 +42,8 @@ import math
 import threading
 import time
 import uuid
-from typing import Callable, Iterable, List, Optional, Sequence
+from typing import (Callable, Iterable, List, Mapping, Optional,
+                    Sequence)
 
 import mujoco
 
@@ -111,7 +112,7 @@ class EpisodeRunner:
         self.core = core
         self.config = config
 
-    def _place_at(self, pose_rad: Sequence[float]) -> None:
+    def _place_at(self, pose_rad: "Mapping[str, float]") -> None:
         """Put the arm at a starting posture before the episode begins.
 
         EVERY EPISODE USED TO BEGIN AT THE HOME KEYFRAME, which is right for
@@ -127,10 +128,28 @@ class EpisodeRunner:
         to have got it there.  Nothing is measured about the placement, and it
         contributes no steps to the episode.
         """
-        for i, value in enumerate(pose_rad):
-            if i < self.core.model.nq:
-                self.core.data.qpos[i] = float(value)
-        self.core.data.qvel[:] = 0.0
+        # ADDRESSED BY NAME, which is the only addressing that is actually
+        # robust.  Indexing by a joint's table position and indexing by its
+        # qpos address are two assumptions that happen to agree today — the
+        # robot's 21 hinges are compiled first, one qpos each — and swapping
+        # one for the other buys nothing: in the scenario that breaks the
+        # first (a scene free joint compiled ahead of the robot) the second is
+        # wrong too, just differently.  `mj_name2id` is right in both.
+        #
+        # ONLY THE JOINTS THE POSTURE NAMES ARE WRITTEN.  Zero-filling the
+        # other fourteen resets the neck away from the home keyframe, and the
+        # neck actuators are stiff by default so the goal is pinned there —
+        # which left every placed episode running with the head level instead
+        # of pitched at the workspace, and unplaced episodes doing the
+        # opposite.  Two episode populations with different head states are
+        # not comparable, and nothing said so.
+        model, data = self.core.model, self.core.data
+        for name, value in pose_rad.items():
+            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if jid < 0:
+                continue
+            data.qpos[int(model.jnt_qposadr[jid])] = float(value)
+        data.qvel[:] = 0.0
         mujoco.mj_forward(self.core.model, self.core.data)
         self.core.controller.sync_targets_to_current(self.core.data)
 
@@ -140,7 +159,7 @@ class EpisodeRunner:
         *,
         on_snapshot: Optional[Callable[[EvaluationSnapshot], None]] = None,
         cancelled: Optional[threading.Event] = None,
-        start_pose_rad: Optional[Sequence[float]] = None,
+        start_pose_rad: Optional[Mapping[str, float]] = None,
     ) -> EpisodeResult:
         """Execute a command sequence and return a structured EpisodeResult.
 

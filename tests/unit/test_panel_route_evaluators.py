@@ -264,9 +264,26 @@ def test_pointing_clearances_may_be_tightened_and_never_loosened(key, floor):
 
 
 def test_fewer_approach_legs_measures_the_arm_in_fewer_places():
+    """Refused twice over, and both refusals are the point: the step list no
+    longer matches the route, AND the count is under the measured minimum.
+
+    The legs are the path-clearance check — the guard models the arm between
+    two poses as a joint-space straight line, which is the assumption that
+    failed when cell_r2c1 reported +5.5 cm and still moved the can 0.189 m,
+    because the guard measured the ENDPOINTS and the can was hit in the
+    middle."""
     def fewer(r):
         r.bounded_parameters["point_legs"]["value"] = 2
+
+    # The step list still carries six approaches, so the shapes disagree.
     v = check_route_integrity(mutated("point_cell", fewer), "POINT")
+    assert any("step(s) and the recipe has" in x.description for x in v)
+
+    # And with the list shortened to match, the floor still refuses it.
+    def fewer_and_shorter(r):
+        fewer(r)
+        del r.primitive_sequence[:4]
+    v = check_route_integrity(mutated("point_cell", fewer_and_shorter), "POINT")
     assert any("measured minimum" in x.description for x in v)
 
 
@@ -447,3 +464,81 @@ def test_the_policy_says_which_policy_it_is():
     d = PanelRoutePolicy().to_dict()
     assert d["policy_scope"] == "panel_routes"
     assert "object_drift_tolerance_m" in d
+
+
+def test_an_integer_parameter_is_recorded_as_the_integer_that_was_flown():
+    """A continuous sampler hands back 1.6066 for a count of cycles.  The arm
+    waves once; a recipe left declaring 1.6066 tells a later reader the trial
+    ran one-and-a-bit cycles, which is not a thing that happened."""
+    r = TrajectoryRecipe.from_dict(copy.deepcopy(load("wave").to_dict()))
+    r.bounded_parameters["wave_cycles"]["value"] = 1.6066
+
+    aligned = align_to_parameters(r)
+    assert aligned.bounded_parameters["wave_cycles"]["value"] == 1
+    # One cycle is two swings and a return.
+    assert len(aligned.primitive_sequence) == 3
+    assert check_route_integrity(aligned, "WAVE") == []
+
+
+def test_aligning_does_not_mutate_the_recipe_it_was_given():
+    r = load("wave")
+    before = copy.deepcopy(r.to_dict())
+    align_to_parameters(r)
+    assert r.to_dict() == before
+
+
+# ---------------------------------------------------------------------------
+# Review of #99: the placement, the legs, and measurements nobody made
+# ---------------------------------------------------------------------------
+
+def test_more_approach_legs_is_a_longer_route_not_a_declaration():
+    """The legs ARE the path-clearance check.  `canonical_steps` used to take
+    `point_legs` and return the same three steps whatever it was, so a recipe
+    could declare fourteen legs, carry one approach step, and pass."""
+    six = canonical_steps("POINT", point_legs=6)
+    ten = canonical_steps("POINT", point_legs=10)
+    assert len(six) == 6 + 2       # approaches, then hover and return
+    assert len(ten) == 10 + 2
+    assert [s.primitive for s in six[:6]] == ["point_approach"] * 6
+
+
+def test_a_recipe_claiming_more_legs_than_it_carries_is_refused():
+    def claim(r):
+        r.bounded_parameters["point_legs"]["value"] = 12
+    v = check_route_integrity(mutated("point_cell", claim), "POINT")
+    assert v, "a leg count that shapes nothing is not a clearance check"
+    assert any("step(s) and the recipe has" in x.description for x in v)
+
+
+def test_aligning_keeps_the_duration_the_search_chose():
+    """Rebuilding every step from the canonical route hard-coded 1.8 s onto
+    each swing, so a winner searched to 3.0 s exported a file declaring 1.8 —
+    and anyone reading the export as the flown motion got the wrong number."""
+    r = TrajectoryRecipe.from_dict(copy.deepcopy(load("wave").to_dict()))
+    r.bounded_parameters["wave_seconds"]["value"] = 3.0
+
+    aligned = align_to_parameters(r)
+    for step in aligned.primitive_sequence:
+        assert float(step.parameters["seconds"]) == pytest.approx(3.0)
+    assert check_route_integrity(aligned, "WAVE") == []
+
+
+def test_an_unmeasured_point_records_no_measurement():
+    """Writing 0.0 for an unrecorded miss records the BEST POSSIBLE one, and
+    0.0 for an unrecorded clearance records contact — both a measurement, in
+    the same verdict that just said no measurement exists."""
+    v = evaluate("point_cell", a_result("present", objects={}),
+                 a_spec("point_cell", initial={}), load("point_cell"))
+    assert "pad_miss_m" not in v.metrics
+    assert "worst_clearance_m" not in v.metrics
+    assert not v.is_valid
+
+
+def test_the_policy_promises_nothing_it_does_not_check():
+    """The offline executor streams open-loop — it reads no joint positions,
+    so it cannot tell whether a waypoint converged.  A tracking tolerance on
+    the policy was a knob nothing read, beside a success sentence claiming it
+    was applied."""
+    assert not hasattr(PanelRoutePolicy(), "tracking_tolerance_deg")
+    import reachy_ai.evaluation.panel_routes as mod
+    assert "inside the tracking tolerance" not in mod.__doc__

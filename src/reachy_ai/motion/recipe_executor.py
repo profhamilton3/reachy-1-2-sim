@@ -42,6 +42,16 @@ if os.path.isdir(_NATIVE) and _NATIVE not in sys.path:
 
 from joint_map import JOINT_TABLE, by_name, NUM_JOINTS
 
+#: Seconds per simulation step, used to turn a waypoint's measured DURATION
+#: into a number of steps.
+#:
+#: One name rather than four literals, and it is a duplicate of two things this
+#: module deliberately cannot import: the MJCF's `option timestep` and
+#: `EpisodeConfig.fixed_timestep`.  `panel_offline` checks the loaded model
+#: against it, so a model whose timestep changed fails loudly instead of
+#: halving or doubling every duration a study ever searched.
+SIM_TIMESTEP_S = 0.002
+
 NUM_RIGHT_ARM = 8   # indices 0-7
 NUM_BOTH_ARMS = 16  # indices 0-15
 NUM_HEAD = 5        # indices 16-20
@@ -216,8 +226,8 @@ class _PanelRouteMixin:
         # The runner's timestep is the episode's, not the recipe's; 500 Hz is
         # the configured default and the one the two existing recipe families
         # already assume when they count steps.
-        n = max(1, int(round(seconds / 0.002)))
-        settle_steps = max(1, int(round(settle_s / 0.002)))
+        n = max(1, int(round(seconds / SIM_TIMESTEP_S)))
+        settle_steps = max(1, int(round(settle_s / SIM_TIMESTEP_S)))
 
         name = str(_param(step, "name", ""))
 
@@ -246,7 +256,7 @@ class _PanelRouteMixin:
             amplitude = float(_bp_value(recipe, "wave_amplitude_deg",
                                         abs(R.WAVE_A["r_forearm_yaw"])))
             swing_s = float(_bp_value(recipe, "wave_seconds", R.WAVE_SECONDS))
-            n = max(1, int(round(swing_s * scale / 0.002)))
+            n = max(1, int(round(swing_s * scale / SIM_TIMESTEP_S)))
             side = name[-1].lower() if name else "a"
             base = R.WAVE_A if side == "a" else R.WAVE_B
             sign = -1.0 if side == "a" else 1.0
@@ -256,7 +266,7 @@ class _PanelRouteMixin:
 
         if p == "wave_return":
             swing_s = float(_bp_value(recipe, "wave_seconds", R.WAVE_SECONDS))
-            n = max(1, int(round(swing_s * scale / 0.002)))
+            n = max(1, int(round(swing_s * scale / SIM_TIMESTEP_S)))
             target = _pose_to_qpos(R.PRESENT, current)
             cmds = _interpolate(current, target, n)
             cmds.append(CommandSpec(target_rad=list(target),
@@ -296,11 +306,24 @@ class RecipeExecutor(_PanelRouteMixin):
                     pass  # non-numeric parameter (e.g. object_id)
         return errors
 
-    def build_commands(self, recipe: TrajectoryRecipe) -> List[CommandSpec]:
+    def build_commands(self, recipe: TrajectoryRecipe,
+                       start_qpos: Optional[List[float]] = None,
+                       ) -> List[CommandSpec]:
         """Convert recipe primitive_sequence to a CommandSpec list.
 
-        Starts from the home/zero position and linearly interpolates between
-        named joint targets for each primitive phase.
+        Linearly interpolates between named joint targets for each primitive
+        phase, beginning at `start_qpos`.
+
+        `start_qpos` IS NOT A COSMETIC DEFAULT.  It used to be the home/zero
+        position unconditionally, which is right for pick-and-place — home is
+        its start — and wrong for any route with a different precondition.
+        Placing the arm at REST and then building from home makes the FIRST
+        commanded target ~0 degrees: the arm is driven from over the board
+        straight back toward the pocket before the corridor's first waypoint,
+        which is the exact unmeasured transit the corridor exists to forbid.
+        Placing the arm and building from home are two halves of one thing, and
+        doing only the first is worse than doing neither, because it looks
+        fixed.
         """
         errors = self.validate(recipe)
         if errors:
@@ -309,7 +332,8 @@ class RecipeExecutor(_PanelRouteMixin):
                 "\n".join(f"  - {e}" for e in errors)
             )
 
-        current = [0.0] * NUM_JOINTS  # home keyframe = all zeros
+        current = (list(start_qpos) if start_qpos is not None
+                   else [0.0] * NUM_JOINTS)   # home keyframe = all zeros
         commands: List[CommandSpec] = []
 
         # Dispatch to the appropriate handler family

@@ -82,7 +82,37 @@ effort_limits: {}
 primitive_sequence:
   - primitive: point_approach
     parameters:
-      name: APPROACH
+      name: APPROACH_1
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: point_approach
+    parameters:
+      name: APPROACH_2
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: point_approach
+    parameters:
+      name: APPROACH_3
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: point_approach
+    parameters:
+      name: APPROACH_4
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: point_approach
+    parameters:
+      name: APPROACH_5
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: point_approach
+    parameters:
+      name: APPROACH_6
       seconds: 1.8
       tol: 90.0
       guard: null
