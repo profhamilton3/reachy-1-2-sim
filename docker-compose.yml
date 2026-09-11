@@ -34,6 +34,23 @@ services:
       # and every click after that went nowhere with the status bar still
       # reading "connected".
       - ./web:/opt/web
+      # The robot MJCF, read-only.  `model_sha256` MEANS this file: the panel
+      # hashes it to say which robot an episode was recorded against, even
+      # though it never loads it (it talks to the simulator over the SDK
+      # bridge and has no model of its own).  Without the file the hash is
+      # empty, which is the DEGENERATE identity the reuse gate refuses to
+      # answer about and `query_compatible_trials` raises on — so every
+      # episode recorded is unusable as evidence and retrieval can never fire,
+      # silently, with the panel otherwise working perfectly.
+      #
+      # Read-only because nothing in the container may edit the robot: a
+      # changed model is a different world, and this is the file that says so.
+      - ./native_mujoco/model:/opt/native_mujoco/model:ro
+      # The experience stores.  Without this they live in the container's
+      # writable layer and a rebuild silently discards every episode the panel
+      # ever recorded — which is the one thing the memory epic exists to keep.
+      # `runs/` is gitignored, so nothing here reaches a commit.
+      - ./runs:/opt/runs
     environment:
       - DISPLAY=:1
       # Backend selector (overridable from the shell):
@@ -56,6 +73,33 @@ services:
       # with a page upgrade.  Even with it on, the executor still refuses
       # unless the simulator advertises the execution lease.
       - REACHY_PANEL_EXECUTOR=${REACHY_PANEL_EXECUTOR:-0}
+      # Episode recording (#88).  On by default: recording observes, it does
+      # not act, and the episodes it would have missed are the ones nobody can
+      # get back.  Set to 0 to switch it off.
+      - REACHY_PANEL_EPISODES=${REACHY_PANEL_EPISODES:-1}
+      - REACHY_PANEL_EPISODE_DB=${REACHY_PANEL_EPISODE_DB:-}
+      - REACHY_PANEL_EPISODE_KEEP=${REACHY_PANEL_EPISODE_KEEP:-}
+      # Promoted-recipe retrieval (#90).  On by default because with nothing
+      # promoted it changes nothing: it looks, finds none, and the ability
+      # flies the route it always flies.  Reads promoted_recipes.db, NOT the
+      # live episode log — every row in that one is live-interactive and
+      # excluded from reuse by construction.
+      - REACHY_PANEL_RECIPES=${REACHY_PANEL_RECIPES:-1}
+      - REACHY_PANEL_RECIPE_DB=${REACHY_PANEL_RECIPE_DB:-}
+      # Language adapter (#92).  OFF unless asked for, and off again if no key
+      # is present: it sends the operator's sentence to a cloud model, which is
+      # a deliberate act by whoever runs the container and not something that
+      # should arrive with an image upgrade.
+      #
+      # The key is passed THROUGH from the host shell and is not written into
+      # this file.  It is still visible to `docker inspect` on this machine,
+      # which is the normal cost of an environment variable — if that matters
+      # here, use a Docker secret instead.
+      - REACHY_PANEL_LANGUAGE=${REACHY_PANEL_LANGUAGE:-0}
+      - REACHY_PANEL_LANGUAGE_MODEL=${REACHY_PANEL_LANGUAGE_MODEL:-}
+      - REACHY_PANEL_LANGUAGE_MIN_CONFIDENCE=${REACHY_PANEL_LANGUAGE_MIN_CONFIDENCE:-}
+      - REACHY_PANEL_LANGUAGE_TIMEOUT_S=${REACHY_PANEL_LANGUAGE_TIMEOUT_S:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     stdin_open: true
     tty: true
     restart: unless-stopped
