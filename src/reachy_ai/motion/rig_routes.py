@@ -783,8 +783,18 @@ POSTURE_TRANSITIONS: Dict[Tuple[str, str], str] = {
 #: leg(s) that actually cross onto REST are worth the cost:
 #:
 #:   PLACE_ROUTE / RAISE_TO_SIDE   HOVER -> REST_SHUT -> REST  (arriving)
-#:   STOW_ROUTE / STOW_FROM_SIDE   REST -> REST_SHUT -> HOVER  (departing,
+#:   STOW_ROUTE                    REST -> REST_SHUT -> HOVER  (departing,
 #:                                 the identical corridor flown backwards)
+#:   STOW_FROM_SIDE                PRESENT -> REST_SHUT -> HOVER  (also
+#:                                 departing, but STOW_FROM_SIDE *is*
+#:                                 STOW_ROUTE's Waypoint objects flown from a
+#:                                 different actual start: PRESENT, not REST —
+#:                                 see the note above LIFT_TO_PRESENT/STOW_ROUTE.
+#:                                 Its real first leg is therefore the
+#:                                 PRESENT -> REST_SHUT descent, not the
+#:                                 gripper-only REST -> REST_SHUT change; using
+#:                                 the latter here left that descent unchecked
+#:                                 (#82 incident, corrected here).)
 #:   LOWER_TO_REST                 PRESENT -> REST_SHUT -> REST
 #:
 #: WAVE, LIFT_TO_PRESENT and POINT are absent on purpose: none of them lands
@@ -801,7 +811,7 @@ FOOTPRINT_LEGS: Dict[str, Tuple[Dict[str, float], ...]] = {
     "PLACE_ROUTE": (HOVER, REST_SHUT, REST),
     "RAISE_TO_SIDE": (HOVER, REST_SHUT, REST),
     "STOW_ROUTE": (REST, REST_SHUT, HOVER),
-    "STOW_FROM_SIDE": (REST, REST_SHUT, HOVER),
+    "STOW_FROM_SIDE": (PRESENT, REST_SHUT, HOVER),
     "LOWER_TO_REST": (PRESENT, REST_SHUT, REST),
 }
 

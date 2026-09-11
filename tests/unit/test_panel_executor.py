@@ -1241,6 +1241,32 @@ def _rest_hand_point():
     return tuple((a + b) / 2.0 for a, b in zip(p0, p1))
 
 
+def _descent_hand_point():
+    """A world point the hand capsule occupies partway down the actual
+    PRESENT -> REST_SHUT descent that `stow_arm` flies when leaving PRESENT
+    (STOW_FROM_SIDE, #82) — off the REST/REST_SHUT/HOVER corridor entirely,
+    so only a footprint check that starts this leg at PRESENT (not REST) can
+    see it.  Computed from the real kinematics for the same reason
+    `_rest_hand_point` is: it moves with the poses instead of quietly testing
+    a leg that no longer matches what is actually flown.
+    """
+    from reachy_ai.motion import rig_routes as RR
+    from reachy_ai.motion.kinematics import link_capsules, joint_path
+    # Sample 1 of 13 (close to the PRESENT end): the REST_SHUT/HOVER end of
+    # this same descent sits within a few cm of the REST->REST_SHUT->HOVER
+    # corridor once the object's own size is folded in, which would make a
+    # midpoint an unreliable discriminator between the buggy and fixed leg
+    # tables.  Verified offline: with FOOTPRINT_LEGS["STOW_FROM_SIDE"] wrongly
+    # starting at REST, this point clears by +18.2 cm; started at PRESENT (the
+    # fix), the same point reads -11.3 cm.
+    q_present = [RR.PRESENT[j] for j in RR.ARM7]
+    q_rest_shut = [RR.REST_SHUT[j] for j in RR.ARM7]
+    sample = joint_path(q_present, q_rest_shut, steps=13)[1]
+    _name, p0, p1, _radius = next(
+        c for c in link_capsules(sample, side="right") if c[0] == "hand")
+    return tuple((a + b) / 2.0 for a, b in zip(p0, p1))
+
+
 def _scene_model_with(point, oid="soda_can"):
     from reachy_ai.scene.awareness import SceneModel, SceneObject
     obj = SceneObject(id=oid, kind="box", center=point, size=(0.06, 0.06, 0.06),
@@ -1363,6 +1389,30 @@ class TestFootprintCheck:
         ok, why = ex.available(_ability(
             task_type="stow_arm", route="STOW_ROUTE",
             end_posture="home", expected_start_posture="rest"))
+
+        assert ok is False
+        assert "soda_can" in why
+
+    def test_stow_from_present_refuses_for_the_descent_not_only_the_tail(
+            self, monkeypatch, fake_sdk):
+        """#82/A1: `stow_arm` requested from PRESENT flies STOW_FROM_SIDE,
+        whose real first leg is the PRESENT -> REST_SHUT descent onto the
+        board — not the REST -> REST_SHUT gripper change STOW_ROUTE departs
+        from.  An object standing only in that descent's path (not at the
+        REST/REST_SHUT/HOVER tail every other footprint test uses) must still
+        refuse; before FOOTPRINT_LEGS["STOW_FROM_SIDE"] started at PRESENT
+        this object was invisible to the guard."""
+        _validated(monkeypatch)
+        point = _descent_hand_point()
+        from reachy_ai.scene.awareness import SceneModel
+        monkeypatch.setattr(SceneModel, "from_yaml",
+                            staticmethod(lambda path: _scene_model_with(point)))
+        scene = _scene_with_object_at(point)
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="stow_arm", route="STOW_FROM_SIDE",
+            end_posture="home", expected_start_posture="present"))
 
         assert ok is False
         assert "soda_can" in why

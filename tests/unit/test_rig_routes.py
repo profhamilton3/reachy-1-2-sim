@@ -391,9 +391,17 @@ class TestFootprintLegs:
         route name, rather than duplicated per ability."""
         assert R.FOOTPRINT_LEGS["RAISE_TO_SIDE"] == R.FOOTPRINT_LEGS["PLACE_ROUTE"]
 
-    def test_stow_route_and_stow_from_side_share_the_same_tail(self):
-        assert (R.FOOTPRINT_LEGS["STOW_FROM_SIDE"]
-                == R.FOOTPRINT_LEGS["STOW_ROUTE"])
+    def test_stow_route_and_stow_from_side_share_the_same_tail_not_head(self):
+        """Both are STOW_ROUTE's Waypoint objects, so both cross the identical
+        REST_SHUT -> HOVER corridor.  Their heads differ because they are
+        actually flown from different postures: STOW_ROUTE departs REST
+        (a gripper-only change onto REST_SHUT); STOW_FROM_SIDE departs
+        PRESENT (the real PRESENT -> REST_SHUT descent onto the board, #82)."""
+        assert (R.FOOTPRINT_LEGS["STOW_FROM_SIDE"][-2:]
+                == R.FOOTPRINT_LEGS["STOW_ROUTE"][-2:]
+                == (R.REST_SHUT, R.HOVER))
+        assert R.FOOTPRINT_LEGS["STOW_ROUTE"][0] == R.REST
+        assert R.FOOTPRINT_LEGS["STOW_FROM_SIDE"][0] == R.PRESENT
 
     def test_place_routes_tail_matches_its_own_last_three_waypoints(self):
         """The checked legs are not an approximation of PLACE_ROUTE's real
