@@ -26,3 +26,7 @@ runs/
 # Review probes regenerate their raw output next to themselves; the .txt
 # summaries are committed, the JSON is not.
 docs/reviews/probes-*/*.json
+
+# Local deployment configuration for docker compose, including any API key.
+# Never committed: the key is a credential and the rest is machine-specific.
+.env
