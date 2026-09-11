@@ -147,6 +147,13 @@ class MotionWorker:
     `goto` that never returned.  When it fires the arm is left where it
     stopped and reported that way: no auto-retreat, because the path from an
     arbitrary point is exactly what was never measured.
+
+    A CONSEQUENCE WORTH KNOWING WHILE DEVELOPING: because the child is kept,
+    it holds whatever `motion_worker.py` said when it was spawned.  Editing
+    that file under a running panel changes nothing until the child is
+    replaced — `supervisorctl restart camera-web-server` in the container.
+    Measured cost of not knowing that: a live run that answered "I have no
+    runner wired up for point_object" from a file that plainly had one.
     """
 
     def __init__(self, *, deadline_s: Optional[float] = None,
@@ -417,6 +424,23 @@ class SimulatorExecutor:
         # what has not been measured is objects INTERACTING — a reach that
         # clears the thing it is aimed at by threading past a second one.
         if proposal.task_type in ("point_cell", "point_object"):
+            # THE OBJECT HAS TO BE ON THE BOARD, checked here and not only in
+            # the planner.  The planner refuses a pool object when the plan is
+            # made and again when it is confirmed; this is the check that runs
+            # under the lease, against the scene as it is at the moment the arm
+            # is about to move.  An object can be lifted off the board between
+            # a confirmation and its execution, and the failure it would cause
+            # is a tabletop reach aimed at the floor.
+            if proposal.object_id:
+                obj = scene.objects.get(proposal.object_id)
+                if obj is None:
+                    return False, (f"{proposal.object_id} is not in this "
+                                   "scene any more")
+                if obj.on_board is not True:
+                    return False, (f"{proposal.object_id} is not on the board, "
+                                   "so there is nothing on the table for me to "
+                                   "point at")
+
             standing = sorted(oid for oid, o in scene.objects.items()
                               if o.on_board is True)
             if len(standing) > 1:
@@ -540,7 +564,11 @@ class SimulatorExecutor:
                  "scene": scene.name,
                  # Pointing plans against the board, so the board travels with
                  # the job: the motion process has no link to the simulator.
+                 # `object_id` is the scene's own id by the time it gets here
+                 # — the planner resolves "soda can" to `soda_can` and writes
+                 # it back — so the worker looks it up rather than guessing.
                  "cell": _cell_id(proposal.cell),
+                 "object_id": proposal.object_id or "",
                  "scene_file": self._scene_file,
                  "live": {oid: list(o.position)
                           for oid, o in scene.objects.items()
