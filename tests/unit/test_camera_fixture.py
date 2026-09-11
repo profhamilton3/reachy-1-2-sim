@@ -9,6 +9,7 @@ Exit gates covered:
 """
 
 import io
+import json
 import os
 import tempfile
 import threading
@@ -240,7 +241,8 @@ class TestFrameFileWriter:
         writer = threading.Thread(
             target=frame_file_writer,
             args=(f,),
-            kwargs={"left_path": left_path, "right_path": right_path},
+            kwargs={"left_path": left_path, "right_path": right_path,
+                    "meta_path": str(tmp_path / "meta.json")},
             daemon=True,
         )
         writer.start()
@@ -261,7 +263,8 @@ class TestFrameFileWriter:
         writer = threading.Thread(
             target=frame_file_writer,
             args=(f,),
-            kwargs={"left_path": left_path, "right_path": right_path},
+            kwargs={"left_path": left_path, "right_path": right_path,
+                    "meta_path": str(tmp_path / "meta.json")},
             daemon=True,
         )
         writer.start()
@@ -285,7 +288,8 @@ class TestFrameFileWriter:
         writer = threading.Thread(
             target=frame_file_writer,
             args=(f,),
-            kwargs={"left_path": left_path, "right_path": right_path},
+            kwargs={"left_path": left_path, "right_path": right_path,
+                    "meta_path": str(tmp_path / "meta.json")},
             daemon=True,
         )
         writer.start()
@@ -296,3 +300,32 @@ class TestFrameFileWriter:
         # Tmp files should be atomically renamed away
         assert not os.path.exists(left_path + ".tmp"), "tmp file leaked"
         assert not os.path.exists(right_path + ".tmp"), "tmp file leaked"
+
+    def test_writes_a_meta_sidecar_naming_itself(self, tmp_path):
+        """#40: /status must read who actually wrote the frame files rather
+        than assert a constant — the fixture writer names itself here."""
+        left_path = str(tmp_path / "left.jpg")
+        right_path = str(tmp_path / "right.jpg")
+        meta_path = str(tmp_path / "meta.json")
+
+        f = CameraFixture(fps=30.0, width=80, height=60)
+        f.start()
+
+        writer = threading.Thread(
+            target=frame_file_writer,
+            args=(f,),
+            kwargs={"left_path": left_path, "right_path": right_path,
+                    "meta_path": meta_path},
+            daemon=True,
+        )
+        writer.start()
+
+        time.sleep(0.3)
+        f.stop()
+
+        assert os.path.exists(meta_path), "meta.json not written"
+        assert not os.path.exists(meta_path + ".tmp"), "tmp file leaked"
+        with open(meta_path) as fh:
+            meta = json.load(fh)
+        assert meta["backend"] == "fixture"
+        assert meta["wall_time_ns"] > 0

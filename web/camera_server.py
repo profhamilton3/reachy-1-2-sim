@@ -40,6 +40,10 @@ class _ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 
 _LEFT_FILE = "/tmp/reachy_left.jpg"
 _RIGHT_FILE = "/tmp/reachy_right.jpg"
+# Written by whichever backend is actually producing _LEFT_FILE/_RIGHT_FILE
+# right now (camera_fixture.frame_file_writer / mujoco_remote_backend's
+# _ingest_camera_frame) — see _detect_backend() below and issue #40.
+_FRAME_META_FILE = "/tmp/reachy_frame_meta.json"
 
 _MJPEG_BOUNDARY = b"--reachyframe"
 _MJPEG_HEADER = (
@@ -695,6 +699,23 @@ def _frame_age_ms(path: str) -> int:
         return -1
 
 
+def _detect_backend() -> str:
+    """Which backend actually wrote the frames currently on disk.
+
+    Read from the sidecar the writer itself updates, rather than asserted —
+    see issue #40: a hardcoded value was right by accident in exactly one
+    case and would lie in the rest, including the one case (silent fixture
+    fallback) it most needs to catch.
+    """
+    try:
+        with open(_FRAME_META_FILE) as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        return "unknown"
+    backend = meta.get("backend")
+    return str(backend) if backend else "unknown"
+
+
 def _frame_seq(path: str) -> int:
     """Approximate sequence number from file mtime (not the actual fixture seq)."""
     try:
@@ -984,7 +1005,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _serve_status(self):
         payload = {
-            "backend": "fixture",
+            "backend": _detect_backend(),
             "left_age_ms": _frame_age_ms(_LEFT_FILE),
             "right_age_ms": _frame_age_ms(_RIGHT_FILE),
             "left_seq": _frame_seq(_LEFT_FILE),

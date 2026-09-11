@@ -540,3 +540,54 @@ class TestBackendLifecycle:
         # Thread should have joined (stop() joins with 3 s timeout).
         backend._thread.join(timeout=1.0)
         assert not backend._thread.is_alive(), "Backend thread did not stop cleanly"
+
+
+# ── #40: frame-source sidecar ───────────────────────────────────────────────────
+
+class TestCameraFrameMeta:
+    """A hardcoded backend: "fixture" in /status lied whenever the active
+    backend was mujoco-remote. _ingest_camera_frame must name itself in the
+    shared sidecar every time it actually writes a frame, the same contract
+    camera_fixture.frame_file_writer keeps for the fixture backend."""
+
+    def test_ingesting_a_frame_writes_the_meta_sidecar(self, tmp_path, monkeypatch):
+        import base64
+        import mujoco_remote_backend as mrb
+
+        left = tmp_path / "left.jpg"
+        right = tmp_path / "right.jpg"
+        meta = tmp_path / "meta.json"
+        monkeypatch.setattr(mrb, "_LEFT_JPG", left)
+        monkeypatch.setattr(mrb, "_RIGHT_JPG", right)
+        monkeypatch.setattr(mrb, "_FRAME_META", meta)
+
+        b = _make_remote_backend()
+        b._ingest_camera_frame({
+            "camera": "left_camera",
+            "jpeg_b64": base64.b64encode(b"fake-jpeg-bytes").decode(),
+        })
+
+        assert left.read_bytes() == b"fake-jpeg-bytes"
+        assert not meta.with_suffix(".tmp").exists(), "tmp file leaked"
+        recorded = json.loads(meta.read_text())
+        assert recorded["backend"] == "mujoco-remote"
+        assert recorded["wall_time_ns"] > 0
+
+    def test_an_unrecognised_camera_name_writes_no_meta(self, tmp_path, monkeypatch):
+        """A garbled or future camera name must not claim the backend is live
+        when nothing was actually written to either frame file."""
+        import base64
+        import mujoco_remote_backend as mrb
+
+        meta = tmp_path / "meta.json"
+        monkeypatch.setattr(mrb, "_LEFT_JPG", tmp_path / "left.jpg")
+        monkeypatch.setattr(mrb, "_RIGHT_JPG", tmp_path / "right.jpg")
+        monkeypatch.setattr(mrb, "_FRAME_META", meta)
+
+        b = _make_remote_backend()
+        b._ingest_camera_frame({
+            "camera": "rear_camera",
+            "jpeg_b64": base64.b64encode(b"fake").decode(),
+        })
+
+        assert not meta.exists()
