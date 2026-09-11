@@ -45,7 +45,8 @@ import panel_abilities as abilities
 from panel_abilities import AbilityRefusal
 from panel_scene import (NON_RECYCLABLE_TAG, RECYCLABLE_TAG, DestinationRef,
                          SceneView)
-from tasks import ConversationEvent, PlannerOutcome, PlannerRequest, Proposal
+from tasks import (ConversationEvent, IntentState, PlannerOutcome,
+                   PlannerRequest, Proposal)
 
 #: How far a tracked object may drift before a proposal built on its position
 #: stops describing the world.  Objects at rest in MuJoCo jitter by far less
@@ -226,7 +227,78 @@ class DeterministicPlanner:
         self._scene_provider = scene_provider
 
     def __call__(self, request: PlannerRequest) -> PlannerOutcome:
-        command, answers = _split_history(request.history, request.text)
+        held = self._aside_during_a_question(request)
+        if held is not None:
+            return held
+        state = _intent_for(request)
+        outcome = self._plan(state.command, list(state.answers))
+        return _record_intent(outcome, state)
+
+    def _aside_during_a_question(self,
+                                 request: PlannerRequest
+                                 ) -> Optional[PlannerOutcome]:
+        """Answer a greeting typed into an open question, and keep the question.
+
+        `submit()` sends a greeting through `aside` and never disturbs the
+        active task.  The browser does not use `submit()` here: anything typed
+        while a task is awaiting an answer is POSTed to `reply()`, which has no
+        aside hook.  So "Hello" arrived as the answer, `_is_a_command` agreed
+        it was a request in its own right, the intent was replaced, and the
+        task completed — destroying a question the operator was halfway
+        through answering.
+
+        THE QUESTION IS REPEATED FROM THE INTENT, NOT RE-DERIVED.  Planning
+        the stored intent again would produce the same question in the normal
+        case and something else entirely in three others: with the simulator
+        down it reads `scene.error` and fails the whole task — the one thing
+        #62 exists to prevent — and if the board has moved on it returns a
+        PROPOSAL, so "Hello" silently produces a plan card with no greeting
+        anywhere in it.  The question was already known when it was asked, so
+        it is kept and repeated verbatim.
+
+        Nothing here reads the scene.  That is the point: a greeting is
+        answerable with the simulator switched off, whether or not there is a
+        question open at the time.
+        """
+        prior = request.intent
+        if prior is None or not prior.command or not prior.open_slot:
+            return None
+        if not prior.open_question:
+            # A question was outstanding but its wording was not recorded — a
+            # task in flight across this change.  Falling through treats the
+            # greeting as the turn it looks like rather than inventing words
+            # to put in Reachy's mouth.
+            return None
+        try:
+            match = abilities.match(request.text)
+        except AbilityRefusal:
+            return None          # understood and refused: that is an answer
+        if match is None or match.ability is None:
+            return None
+        # The same test `aside` applies, plus the name.  Both, because the
+        # greeting wording below is `greet`'s: the next ability that needs
+        # neither scene nor motion would otherwise be swallowed mid-question
+        # and answered with somebody else's.
+        if match.name != "greet":
+            return None
+        if match.ability.needs_scene or match.ability.needs_motion:
+            return None          # a real request, and a real change of mind
+
+        state = prior.copy()
+        outcome = PlannerOutcome(
+            kind="clarification",
+            # Not the full GREETING: it recites what the panel can do, which
+            # is a strange thing to say to someone already mid-way through
+            # asking for one of those things.
+            message=f"Hello. {state.open_question}",
+            choices=list(state.open_choices),
+            slot=state.open_slot,
+        )
+        outcome.intent = state
+        return outcome
+
+    def _plan(self, command: str,
+              answers: List[Tuple[str, str]]) -> PlannerOutcome:
         if _JOINT_RE.search(command) or any(_JOINT_RE.search(a)
                                             for _, a in answers):
             return _unsupported(
@@ -234,14 +306,6 @@ class DeterministicPlanner:
                 "which object, and where it should go — and the motion layer "
                 "works out the angles."
             )
-
-        # A NEW COMMAND is not an answer.  "Which cell?" followed by "stow your
-        # arm" is a change of mind, and folding it into the open slot would
-        # store "stow your arm" as a cell name and then complain it is not one.
-        # Whichever the operator typed last wins, and the earlier answers go
-        # with the request they were answering.
-        if answers and _is_a_command(answers[-1][1]):
-            command, answers = answers[-1][1], []
 
         # Abilities are matched BEFORE the pick-and-place grammar, because two
         # of them open with a pick-and-place verb: "put your arm away" and
@@ -854,9 +918,105 @@ def _distance(a, b) -> float:
     return math.sqrt(sum((float(x) - float(y)) ** 2 for x, y in zip(a, b)))
 
 
+def _intent_for(request: PlannerRequest) -> IntentState:
+    """The canonical intent this turn is about.
+
+    Two sources, and which one is used is decided by the caller, not guessed.
+    A caller that keeps intent state — the coordinator does — hands back what
+    the last turn settled, and this turn's text is folded in as an answer to
+    whatever question was outstanding.  A caller that keeps none falls back to
+    reconstructing from the transcript, which is what the direct-planner tests
+    do and what any conversation stored before #87 has.
+
+    The fallback is the path with the bug in it: `_split_history` can only see
+    the turns still in the transcript, and the transcript is trimmed from the
+    front.  Keep it for compatibility; do not route new callers through it.
+
+    A NEW COMMAND is not an answer.  "Which cell?" followed by "stow your arm"
+    is a change of mind, and folding it into the open slot would store "stow
+    your arm" as a cell name and then complain it is not one.  Whichever the
+    operator typed last wins, and — because the earlier answers were given to
+    a request that no longer stands — they are dropped with it rather than
+    carried onto the new intent.
+    """
+    prior = request.intent
+    if prior is None or not prior.command:
+        command, answers = _split_history(request.history, request.text)
+        state = IntentState(command=command, answers=answers)
+    else:
+        state = prior.copy()
+        # The slot comes from the question that was asked, recorded when it
+        # was asked (#59).  An answer arriving with no question outstanding
+        # carries the empty slot and is placed by shape, as it always was.
+        # `remember` rather than `append`: re-asking a slot replaces its
+        # answer, which is what both readers already meant by it, and keeps
+        # this list from growing for as long as a client keeps replying.
+        state.remember(state.open_slot, request.text)
+
+    if state.answers and _is_a_command(state.answers[-1][1]):
+        state = IntentState(command=state.answers[-1][1])
+    return state
+
+
+def _record_intent(outcome: PlannerOutcome, state: IntentState) -> PlannerOutcome:
+    """Fold what this turn decided back into the intent, and attach it.
+
+    Attached to every outcome, including the ones that end the task: the
+    coordinator stores it before it branches, so a failed or completed task
+    still records what it was about.
+    """
+    if outcome.kind == "clarification":
+        state.open_slot = outcome.slot
+        # Kept so it can be repeated without being re-derived.  See
+        # `_aside_during_a_question`.
+        state.open_question = outcome.message
+        state.open_choices = list(outcome.choices)
+    else:
+        state.open_slot = ""
+        state.open_question = ""
+        state.open_choices = []
+
+    proposal = outcome.proposal
+    if proposal is not None:
+        # The resolved answer, which is the one worth keeping: `task_type` is
+        # the ability that will actually fly, after "rest" was settled and
+        # after "soda can" became `soda_can`.
+        state.kind = proposal.task_type
+        state.selected_target = (proposal.object_id or proposal.target_id
+                                 or state.selected_target)
+        state.plan_version = proposal.plan_version
+    elif not state.kind:
+        state.kind = _provisional_kind(state.command)
+
+    outcome.intent = state
+    return outcome
+
+
+def _provisional_kind(command: str) -> str:
+    """What the command looks like before any clarification is answered.
+
+    "" for a request that names two abilities equally well — `match` returns
+    an empty name for those on purpose, and copying a guess in here would be
+    the guess the rest/stow question exists to avoid.
+    """
+    try:
+        match = abilities.match(command)
+    except AbilityRefusal:
+        return ""
+    if match is not None and match.ability is not None:
+        return match.name
+    return "pick_place" if parse_intent(command) is not None else ""
+
+
 def _split_history(history: List[ConversationEvent], latest: str
                    ) -> Tuple[str, List[Tuple[str, str]]]:
     """Return the original command and every answer since, each with its slot.
+
+    The FALLBACK source of intent, for a caller that keeps no state — see
+    `_intent_for`.  It can only see the turns still in the transcript, and the
+    transcript is bounded, so a long enough clarification loses the command it
+    is reconstructing.  That is #87, and it is why the coordinator stopped
+    coming through here.
 
     `history` already contains `latest` as its last user turn, so the answers
     list is built from history alone and `latest` is only a fallback for the

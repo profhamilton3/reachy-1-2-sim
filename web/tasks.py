@@ -31,6 +31,15 @@ Confirm click that was rendered before some other change cannot be applied
 afterwards.  Two ids because they answer different questions: one is "is this
 worker's answer still wanted", the other is "is the button the human clicked
 still describing the world".
+
+WHY THE INTENT IS NOT THE TRANSCRIPT
+------------------------------------
+`Task.events` is what the operator reads, and it is bounded — trimmed from the
+front at `MAX_EVENTS`.  `Task.intent` is what the planner decides from, and it
+is not.  They were the same thing until #87, which meant a clarification long
+enough to hit the bound lost the request that started it and silently promoted
+an answer to be the command.  Anything a later turn needs belongs in
+`IntentState`; the transcript is a record, not a store.
 """
 
 from __future__ import annotations
@@ -55,6 +64,10 @@ MAX_TASKS = 200                # total tasks retained before oldest are dropped
 PLANNING_TIMEOUT_S = 20.0      # a planner slower than this is declared failed
 TASK_TTL_S = 30 * 60           # idle task lifetime before it expires
 MAX_QUEUED_JOBS = 8            # backpressure: refuse rather than pile up
+#: Answers that named no slot, retained per task.  One per slot is kept
+#: regardless — those are the intent — and this bounds only the pre-#59
+#: fallback, which places an answer by its shape and reads them in order.
+MAX_SLOTLESS_ANSWERS = 8
 
 
 class TaskState(str, Enum):
@@ -222,6 +235,92 @@ class Proposal:
 
 
 @dataclass
+class IntentState:
+    """What was asked, held apart from the transcript that carried it (#87).
+
+    The planner used to rebuild the request on every turn by taking the first
+    user turn still in `Task.events`.  That list is trimmed from the FRONT at
+    `MAX_EVENTS`, so a clarification long enough to reach the limit dropped
+    the opening command and promoted the oldest surviving *answer* — "r1c1",
+    "the soda can" — to be the request.  Holding the canonical intent here
+    means trimming the transcript changes what is displayed and nothing about
+    what is planned.
+
+    `command` is the original text verbatim.  Both grammars work from wording,
+    so a normalised or half-resolved copy would decide different things on
+    turn three than it did on turn one.
+    """
+
+    command: str = ""
+    #: The ability name, or "pick_place", once the intent resolves.  Empty
+    #: while it is still ambiguous — "rest" names two postures, and recording
+    #: a guess here would be the guess the clarification exists to avoid.
+    kind: str = ""
+    #: Every clarification answer, paired with the slot its question named.
+    #: An empty slot means the turn answered no question the planner asked;
+    #: it is placed by shape downstream, which is the pre-#59 fallback and is
+    #: kept for transcripts written before slots existed.
+    answers: List[Tuple[str, str]] = field(default_factory=list)
+    #: The slot the outstanding question is about; "" when none is pending.
+    open_slot: str = ""
+    #: The outstanding question, exactly as it was asked, and the choices that
+    #: went with it.  Kept so that re-asking never means re-deriving: deriving
+    #: it again meant planning again, and planning again reads the scene — so
+    #: a greeting typed during a clarification failed the whole task whenever
+    #: the simulator was down, which is the one thing #62 exists to prevent.
+    open_question: str = ""
+    open_choices: List[str] = field(default_factory=list)
+    #: The last target the operator explicitly settled on, as a scene id.
+    #: Evidence for what "it" refers to — never authorization to skip asking.
+    selected_target: str = ""
+    #: The plan version these answers belong to.
+    plan_version: int = 0
+
+    def remember(self, slot: str, text: str) -> None:
+        """Record one answer, keeping the list bounded.
+
+        `Task.events` is capped at MAX_EVENTS because an unbounded transcript
+        in a long-lived container is a slow leak nobody watches, and moving
+        the planner's source of truth here would have re-opened exactly that:
+        every `reply()` resets the task's deadline, so a client answering the
+        same question forever is never swept.
+
+        An answer for a slot REPLACES that slot's previous answer rather than
+        stacking on it, which is what re-asking a question already meant to
+        both readers — `_apply_answers` and the ability path each take the
+        last value for a slot.  Slotless answers keep their order, because the
+        fallback that places them by shape reads them in order, and they are
+        capped.
+        """
+        if slot:
+            self.answers = [(s, a) for s, a in self.answers if s != slot]
+        self.answers.append((slot, text))
+        slotless = [i for i, (s, _) in enumerate(self.answers) if not s]
+        for i in slotless[:max(0, len(slotless) - MAX_SLOTLESS_ANSWERS)]:
+            self.answers[i] = None          # type: ignore[call-overload]
+        self.answers = [a for a in self.answers if a is not None]
+
+    def filled_slots(self) -> Dict[str, str]:
+        """Slot -> the answer that filled it.  A later answer replaces an
+        earlier one for the same slot, which is what re-asking means."""
+        return {slot: text for slot, text in self.answers if slot}
+
+    def copy(self) -> "IntentState":
+        """A detached copy.  The planner runs on a worker thread and the
+        coordinator holds the original, so they must not share a list."""
+        return IntentState(
+            command=self.command,
+            kind=self.kind,
+            answers=list(self.answers),
+            open_slot=self.open_slot,
+            open_question=self.open_question,
+            open_choices=list(self.open_choices),
+            selected_target=self.selected_target,
+            plan_version=self.plan_version,
+        )
+
+
+@dataclass
 class PlannerOutcome:
     """What a planner may return.  Anything else is a programming error."""
 
@@ -233,12 +332,20 @@ class PlannerOutcome:
     #: transcript event so the next turn can fill that slot instead of
     #: guessing which one the answer was for.
     slot: str = ""
+    #: The intent state as this turn leaves it.  None from a planner that
+    #: keeps no state, in which case the coordinator leaves the task's own
+    #: state alone rather than clearing it.
+    intent: Optional[IntentState] = None
 
 
 @dataclass
 class PlannerRequest:
     text: str
     history: List[ConversationEvent]
+    #: What the previous turn settled, when the caller keeps it.  None means
+    #: "no state kept" and sends the planner back to reconstructing from
+    #: `history` — the path the direct-planner tests take.
+    intent: Optional[IntentState] = None
 
 
 Planner = Callable[[PlannerRequest], PlannerOutcome]
@@ -288,6 +395,10 @@ class Task:
     #: What the executor observed, when one ran.  Empty otherwise — it is
     #: evidence, so it exists only when something actually looked.
     execution_evidence: Dict[str, Any] = field(default_factory=dict)
+    #: The canonical request and its slots, which outlive the transcript that
+    #: carried them (#87).  `events` is for the operator to read; this is what
+    #: the planner decides from.
+    intent: IntentState = field(default_factory=IntentState)
     question_id: str = ""
     client_request_id: str = ""
     created_at: float = field(default_factory=time.time)
@@ -658,14 +769,22 @@ class TaskCoordinator:
     def _queue_locked(self, task: Task, text: str) -> None:
         gen = task.generation
         history = list(task.events)
+        # A copy, not the task's own: the worker thread may fold this turn's
+        # answer into it while the coordinator still holds the original, and
+        # the result is applied only if the generation still matches.
+        intent = task.intent.copy()
         self._queued += 1
-        self._pool.submit(self._run_planner, task.task_id, gen, text, history)
+        self._pool.submit(self._run_planner, task.task_id, gen, text, history,
+                          intent)
 
-    def _run_planner(self, task_id: str, gen: int, text: str, history: List[ConversationEvent]) -> None:
+    def _run_planner(self, task_id: str, gen: int, text: str,
+                     history: List[ConversationEvent],
+                     intent: Optional[IntentState] = None) -> None:
         """Worker thread.  Runs the planner off the request path, then applies
         the result only if it is still wanted."""
         try:
-            outcome = self._planner(PlannerRequest(text=text, history=history))
+            outcome = self._planner(
+                PlannerRequest(text=text, history=history, intent=intent))
         except Exception as exc:                     # a planner must not kill the pool
             outcome = PlannerOutcome(
                 kind="unsupported",
@@ -733,6 +852,12 @@ class TaskCoordinator:
             self._release_locked(task)
 
     def _apply_locked(self, task: Task, outcome: PlannerOutcome) -> None:
+        # Stored before the branch below, because every kind of outcome moves
+        # the intent on: a clarification opens a slot, a proposal closes them,
+        # and a new command mid-clarification replaces the lot.  A planner
+        # that keeps no state returns None and the task keeps what it had.
+        if outcome.intent is not None:
+            task.intent = outcome.intent
         if outcome.kind == "clarification":
             task.state = TaskState.needs_clarification
             task.question_id = f"{task.task_id}:{task.version}"
@@ -756,6 +881,11 @@ class TaskCoordinator:
         elif outcome.kind == "proposal" and outcome.proposal is not None:
             proposal = outcome.proposal
             proposal.plan_version = task.version
+            # The intent was stored above, before this stamp existed, so the
+            # version it copied off the proposal was the constructor's 0.
+            # Carried across here rather than moving the store below the
+            # branch: every other kind of outcome needs it stored first.
+            task.intent.plan_version = proposal.plan_version
             # Ask the executor about THIS plan, not the configured default.
             # It is the same question confirm() will ask, so the card cannot
             # promise motion that Confirm then declines to perform — or say
