@@ -256,9 +256,13 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
             return M.travel(a, posture, robot=robot, **kw)
         return _run
 
+    def point(a, **kw):
+        return _point_at_cell(job, robot, a, phase, **kw)
+
     runner = {"rest_forearm": go_to(R.POSTURE_REST),
               "stow_arm": go_to(R.POSTURE_HOME),
               "wave": lambda a, **kw: ["wave x%d" % M.wave(a, **kw)],
+              "point_cell": point,
               }.get(job.get("task_type"))
     if runner is None:
         return _fail(f"I have no runner wired up for {job.get('task_type')}")
@@ -273,6 +277,78 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
     return {"status": "moved",
             "flown": list(approach) + list(flown),
             "final_posture": R.posture_of(M.present_pose(arm))}
+
+
+def _point_at_cell(job, robot, arm, phase, *, should_abort=None, on_phase=None):
+    """Hover the pad over one grid cell, then come back to PRESENT.
+
+    THE HOVER IS DERIVED FROM THIS BOARD, not from a constant.  `hover_height`
+    takes the tallest thing actually standing on the grid, adds the air wanted
+    under the pad, and floors it — so an empty board answers 12 cm and a board
+    with a can on it answers 17.5 cm.  Reading it here rather than passing it
+    in the job is deliberate: the scene travelled with the job, and the number
+    should be computed from the same snapshot everything else is checked
+    against.
+
+    THE RETURN TO PRESENT IS UNGUARDED, on purpose and for the notebook's
+    reason: a refusal means "do not move", which is the wrong answer for a move
+    whose whole purpose is to leave a place. It is also what makes the next
+    request work — the hover is not a posture anything has a measured route out
+    of, and an arm parked there would refuse everything afterwards.
+    """
+    _ensure_paths()
+    from reachy_ai.motion import primitives as P
+    from reachy_ai.motion import rig_routes as R
+    from reachy_ai.motion.kinematics import CartesianPlanner, R_ARM_JOINTS
+    from reachy_ai.scene.awareness import SceneModel
+    from reachy_ai.tasks import rig_motion as M
+
+    model = SceneModel.from_yaml(job["scene_file"])
+    model.update_poses({oid: tuple(xyz) for oid, xyz in job["live"].items()})
+    planner = CartesianPlanner(arm, scene=model)
+
+    cell = job["cell"]
+    cx, cy, cz = model.cell_center(cell)
+    hover = M.hover_height(model)
+    phase(f"planning a hover {hover * 100:.0f} cm over {cell}")
+
+    def send(joints, secs):
+        pose = dict(zip(R_ARM_JOINTS, joints), r_gripper=R.SHUT)
+        M.sdk_move(arm, pose, secs)
+        M.sdk_move(arm, pose, 0.4)      # one re-stream, as the notebook does
+
+    def read():
+        return [getattr(arm, n).present_position for n in R_ARM_JOINTS]
+
+    out = M.point_at(planner, cell, (cx, cy), cz + hover, send=send, read=read,
+                     should_abort=should_abort, on_phase=on_phase)
+
+    # THE RETURN UNWINDS THE HAND, not just the arm.  The IK spends the arm's
+    # redundancy on clearance, so a pointing pose can leave `r_forearm_yaw`
+    # most of 100 degrees from home — and the gross joints alone do not wait
+    # for it.  Measured: a stow started straight after a point stopped at
+    # HOVER with the forearm yaw 92 degrees off, past even the loose
+    # tolerance.  It is a weak joint (kp=60), so it gets passes rather than a
+    # tight tolerance.
+    phase("back to the raised pose")
+    P.converge(arm, dict(R.PRESENT), 2.5, tol=10.0,
+               joints=list(R.GROSS_JOINTS), passes=6)
+    P.converge(arm, dict(R.PRESENT), 1.5, tol=20.0,
+               joints=("r_forearm_yaw", "r_wrist_pitch", "r_wrist_roll"),
+               passes=8)
+
+    if not out.reached:
+        raise M.RouteError(out.detail or f"I could not point at {cell}")
+    if out.disturbed_the_board:
+        names = ", ".join(f"{k} by {v * 100:.0f} cm"
+                          for k, v in out.drift.items())
+        raise M.RouteError(f"I reached {cell} but I moved something: {names}")
+    # Tagged, because the flown list also carries the approach out of the
+    # pocket and the operator asked about the point, not the twelve waypoints
+    # it took to get somewhere it could point from.
+    return [f"point: {cell} at a {hover * 100:.0f} cm hover",
+            f"point: missed by {out.miss_m * 100:.1f} cm",
+            f"point: lifted {out.lift_m * 100:.0f} cm"]
 
 
 def run_pick_place(job: Dict[str, Any], conn: Connection, *,

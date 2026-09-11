@@ -219,6 +219,7 @@ class StubPlanner:
         self._room_at = room_at or (lambda z: 0.10)
         self._unreachable_below = unreachable_below
         self.solved = []
+        self.paths = []
 
     def solve(self, xyz, seed=None, maximise_clearance=False, from_joints=None,
               gripper_deg=None, ids=None, include_static=False, **kw):
@@ -235,6 +236,19 @@ class StubPlanner:
 
     def clearance(self, joints, gripper_deg=None, **kw):
         return _Clear(self._room_at(joints[2]))
+
+    def clearances(self, joints, gripper_deg=None, ids=None, **kw):
+        """Per-object, because the target's margin is derived from ITS OWN
+        clearance at the destination — not from whatever else is nearby."""
+        room = _Clear(self._room_at(joints[2]))
+        return {o: room for o in (ids if ids is not None else ["obstacle"])}
+
+    def path_clearances(self, q_from, q_to, gripper_deg=None, **kw):
+        """THE PATH, NOT THE ENDPOINT.  A destination that clears everything
+        can still be reached by dragging the forearm through something
+        halfway along, which is the run that moved a can 0.189 m."""
+        self.paths.append((list(q_from), list(q_to)))
+        return {"obstacle": _Clear(self._room_at(q_to[2]))}
 
     def fk_world(self, joints):
         return (joints[0], joints[1], joints[2])
@@ -303,6 +317,8 @@ def test_the_target_keeps_a_margin_of_its_own_rather_than_being_excluded(monkeyp
     M.point_at(planner, "soda_can", (0.35, 0.0), 0.80, send=send, read=read,
                approaching="soda_can")
     assert "soda_can" in calls["margins"]
+    # And the lift gate looked at the PATH to get there, not just the pose.
+    assert planner.paths
     # Derived from the pose being flown to, less the slack: as close as it has
     # to be and no closer.
     assert calls["margins"]["soda_can"] == pytest.approx(

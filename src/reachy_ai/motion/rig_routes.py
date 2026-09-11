@@ -285,6 +285,30 @@ STOW_FROM_SIDE: Tuple["Waypoint", ...] = STOW_ROUTE
 #: wrecked the pointing it exists to demonstrate.
 POINT_CLEARANCE = 0.06
 
+#: The floor under the hover, and it is a floor rather than a target.
+#:
+#: The notebook derives the hover from the tallest thing on the board plus
+#: POINT_CLEARANCE, then takes the larger of that and this.  On an empty board
+#: the first term drops out entirely and this is the whole answer — which is
+#: the simple case worth getting right first, because every occupied case is
+#: this plus the height of what is standing there.
+#:
+#: Derived from the scene's own geometry, not guessed.  Object heights in
+#: FWDCenterLabSivaPool, and the hover each one implies when it is the only
+#: thing on the board:
+#:
+#:     empty board                    -            12.0 cm   (this floor)
+#:     pool_box_1..3               4.0 cm          12.0 cm   (floor binds)
+#:     foam_block                  5.0 cm          12.0 cm   (floor binds)
+#:     red_cube                    6.0 cm          12.0 cm   (floor binds)
+#:     pool_cyl_1..3               8.0 cm          14.0 cm
+#:     blue_cylinder              10.0 cm          16.0 cm
+#:     soda_can                   11.5 cm          17.5 cm
+#:
+#: Which is what the notebook means by "17 cm over the table is barely 6 cm
+#: over a can".
+POINT_HOVER_FLOOR = 0.12
+
 #: Where the base hover is not enough, the target is LIFTED rather than skipped.
 POINT_LIFT_STEP = 0.05
 POINT_LIFT_MAX = 0.25
@@ -469,6 +493,33 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
         "+9.79 cm counting the board. Board undisturbed. Two of the three ran; "
         "the third correctly refused because its approach had left the arm "
         "short of PRESENT.",
+    ),
+    RouteValidation(
+        "POINT", "FWDCenterLabSivaPool",
+        "2026-09-10: AN EMPTY BOARD ONLY, and the executor enforces that — "
+        "see `_ability_available`. All nine grid cells attempted from PRESENT "
+        "at the 12 cm hover an empty board derives; EIGHT flown, board "
+        "undisturbed on every one, and cell_r3c1 refused as out of reach, "
+        "which is the arm's own limit and the cell the notebook names as "
+        "unreachable at every height (Siva confirmed the same on the physical "
+        "robot). No cell needed a lift. Realised whole-arm clearance +10.4 to "
+        "+15.3 cm. Pad miss 2.2 to 8.8 cm, which is why this is described as "
+        "a HOVER POINTER and not a calibrated ray. "
+        "THEN ONE OBJECT AT A TIME, each alone on the centre cell, which is "
+        "the harshest single-object case because everything in the middle of "
+        "the grid is crossed by every reach. Every derived hover held, and "
+        "the board was undisturbed in all six runs: "
+        "pool_box_1 4.0 cm -> 12.0 cm hover, 8/9 cells, worst +3.1; "
+        "foam_block 5.0 -> 12.0, 5/9, +3.9; red_cube 6.0 -> 12.0, 7/9, +3.3; "
+        "pool_cyl_1 8.0 -> 14.0, 8/9, +3.0; blue_cylinder 10.0 -> 16.0, 5/9, "
+        "+3.5; soda_can 11.5 -> 17.5, 7/9, +4.8. Pointing AT the object "
+        "itself worked for five of the six (miss 1.2 to 4.6 cm, nothing "
+        "moved); red_cube was refused at 0.7 cm by the escort, which is the "
+        "guard costing coverage rather than safety. The refused CELLS are the "
+        "same: 'hand clears blue_cylinder by 3.6 cm on leg 6 of 6, under the "
+        "5.0 cm margin'. TWO OR MORE OBJECTS IS NOT COVERED — what has not "
+        "been flown is a reach threading past a second object — and "
+        "`_ability_available` enforces that.",
     ),
     # THE ONE THING THESE ROWS DO NOT COVER: AN OBJECT IN THE REST FOOTPRINT.
     #

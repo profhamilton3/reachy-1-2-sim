@@ -403,6 +403,31 @@ class SimulatorExecutor:
         if scene.error:
             return False, f"I cannot read the scene: {scene.error}"
 
+        # POINTING IS MEASURED UP TO ONE OBJECT ON THE BOARD.
+        #
+        # Empty, and every one of the six object types alone on the centre
+        # cell — which is the harshest single-object case, because everything
+        # standing in the middle of the grid is crossed by every reach.  All
+        # six left the board undisturbed.  Two or more has NOT been flown, and
+        # section 4.7 is a catalogue of what an occupied board does to this
+        # manoeuvre when it goes wrong: a can moved 0.189 m by an arm
+        # reporting +5.5 cm, a cylinder hovered to 1.6 cm and moved 0.123 m.
+        #
+        # The limit is the number of objects rather than which ones, because
+        # what has not been measured is objects INTERACTING — a reach that
+        # clears the thing it is aimed at by threading past a second one.
+        if proposal.task_type in ("point_cell", "point_object"):
+            standing = sorted(oid for oid, o in scene.objects.items()
+                              if o.on_board is True)
+            if len(standing) > 1:
+                return False, (
+                    "I have measured pointing over an empty board and over "
+                    "one object at a time, and there are "
+                    f"{len(standing)} on it: {', '.join(standing)}. What I "
+                    "have not flown is a reach threading past a second "
+                    "object, and that is how a can was moved 0.189 m in the "
+                    "runs this caution comes from.")
+
         # An ability is FOR a posture, not for one route.  "Store your arm"
         # means end in the pocket, and which measured routes get there depends
         # on where the arm is standing — from the presentation pose it is
@@ -513,6 +538,13 @@ class SimulatorExecutor:
                  "route": proposal.route,
                  "expected_start_posture": proposal.expected_start_posture,
                  "scene": scene.name,
+                 # Pointing plans against the board, so the board travels with
+                 # the job: the motion process has no link to the simulator.
+                 "cell": _cell_id(proposal.cell),
+                 "scene_file": self._scene_file,
+                 "live": {oid: list(o.position)
+                          for oid, o in scene.objects.items()
+                          if o.position is not None},
                  "sdk": {"host": self._sdk_host, "port": self._sdk_port}},
                 on_phase=phase, should_cancel=should_cancel)
             if out.get("status") != "moved":
@@ -578,6 +610,19 @@ class SimulatorExecutor:
                 status="failed",
                 detail=(f"I reached {end}, but I moved something on the way: "
                         f"{names}."),
+                evidence=evidence)
+        if proposal.task_type.startswith("point"):
+            # "The trajectory finished" is not "it pointed accurately", and the
+            # brief is explicit that this is a HOVER POINTER rather than a
+            # calibrated ray.  The miss is 2-9 cm over an empty board, so
+            # saying so is the difference between a claim and a measurement.
+            said = ", ".join(str(f)[len("point: "):] for f in flown
+                             if str(f).startswith("point: "))
+            return ExecutionResult(
+                status="completed",
+                detail=(f"I hovered over it — {said}. That is a hover, not a "
+                        "calibrated ray. My arm is back at "
+                        f"{end}, and the board is as it was."),
                 evidence=evidence)
         return ExecutionResult(
             status="completed",
@@ -747,6 +792,18 @@ class SimulatorExecutor:
 
 def _euclid(a, b) -> float:
     return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+
+
+def _cell_id(cell) -> str:
+    """The scene's own id for a cell the planner named, or "" for no cell.
+
+    The panel says `r2c2`; `SceneModel` calls it `cell_r2c2`.  One place that
+    conversion happens, rather than wherever it is next needed.
+    """
+    if not cell:
+        return ""
+    name = _ref_id(str(cell))
+    return name if name.startswith("cell_") else f"cell_{name}"
 
 
 def _ref_id(destination: str) -> str:

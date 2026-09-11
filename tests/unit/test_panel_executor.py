@@ -291,13 +291,15 @@ def test_a_left_arm_ability_refuses_with_the_geometry_reason(fake_sdk):
     assert "not symmetric" in why
 
 
-def test_pointing_is_refused_because_its_runs_moved_objects(fake_sdk):
+def test_pointing_is_refused_in_a_scene_it_was_not_flown_in(fake_sdk):
+    """It has a row for FWDCenterLabSivaPool now, and that row is about that
+    scene.  Endpoints matching does not mean the path between them is clear."""
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
     ok, why = ex.available(
         a_proposal(task_type="point_cell", target_id=None, destination=None,
                    destination_kind="", route="POINT", cell="r2c2"))
     assert ok is False
-    assert "0.189 m" in why
+    assert "TestScene" in why
 
 
 def test_an_object_off_the_board_refuses(fake_sdk):
@@ -1036,3 +1038,95 @@ def test_a_process_that_cannot_be_started_is_a_failed_task(child):
     out = worker.run({"kind": "ability"})
     assert out["status"] == "failed"
     assert out["evidence"].get("worker_died") is True
+
+
+def test_pointing_is_refused_with_more_than_one_object_on_the_board(monkeypatch,
+                                                                    fake_sdk):
+    """Measured empty, and with each object type alone on the centre cell.
+    What has NOT been flown is a reach threading past a second object, which
+    is how a can moved 0.189 m in the runs this caution comes from."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    for obj in list(scene.objects.values())[:2]:
+        obj.on_board = True
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+    ok, why = ex.available(_ability(task_type="point_cell", route="POINT",
+                                    cell="r2c2", end_posture="present",
+                                    expected_start_posture="present"))
+    assert ok is False
+    assert "one object at a time" in why
+    assert "0.189 m" in why
+
+
+def test_pointing_is_allowed_with_a_single_object(monkeypatch, fake_sdk):
+    """Six object types, each alone on the centre cell, board undisturbed in
+    every run — so one is measured and allowed."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    alone = sorted(scene.objects)[0]
+    for oid, obj in scene.objects.items():
+        obj.on_board = (oid == alone)
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+    ok, why = ex.available(_ability(task_type="point_cell", route="POINT",
+                                    cell="r2c2", end_posture="present",
+                                    expected_start_posture="present"))
+    assert ok, why
+
+
+def test_pointing_is_allowed_once_the_board_is_clear(monkeypatch, fake_sdk):
+    _validated(monkeypatch)
+    scene = live_scene()
+    for obj in scene.objects.values():
+        obj.on_board = False
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+    ok, why = ex.available(_ability(task_type="point_cell", route="POINT",
+                                    cell="r2c2", end_posture="present",
+                                    expected_start_posture="present"))
+    assert ok, why
+
+
+def test_the_point_job_names_the_cell_in_the_scenes_own_terms(monkeypatch,
+                                                              fake_sdk):
+    """The panel says r2c2; SceneModel calls it cell_r2c2, and the motion
+    process has no link to ask."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    for obj in scene.objects.values():
+        obj.on_board = False
+    worker = StubWorker({"status": "moved", "flown": ["cell_r2c2 hover 12 cm"],
+                         "final_posture": "present"})
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=worker)
+    ex.execute(_ability(task_type="point_cell", route="POINT", cell="r2c2",
+                        end_posture="present",
+                        expected_start_posture="present"))
+    job, = worker.jobs
+    assert job["cell"] == "cell_r2c2"
+    assert job["scene_file"] == "scene.yaml"
+    assert "soda_can" in job["live"]
+
+
+def test_a_point_reports_what_it_achieved_not_that_it_finished(monkeypatch,
+                                                               fake_sdk):
+    """The notebook measured 21 cm of pad miss on a move that completed, and
+    the brief requires this be labelled a hover pointer rather than a ray."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    for obj in scene.objects.values():
+        obj.on_board = False
+    worker = StubWorker({"status": "moved",
+                         "flown": ["GRIP_SHUT", "BACK",      # the approach
+                                   "point: cell_r2c2 at a 12 cm hover",
+                                   "point: missed by 2.6 cm",
+                                   "point: lifted 0 cm"],
+                         "final_posture": "present"})
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=worker)
+    out = ex.execute(_ability(task_type="point_cell", route="POINT",
+                              cell="r2c2", end_posture="present",
+                              expected_start_posture="present"))
+    assert out.status == "completed"
+    assert "missed by 2.6 cm" in out.detail
+    assert "not a calibrated ray" in out.detail
+    assert "GRIP_SHUT" not in out.detail        # the approach is evidence,
+    assert "GRIP_SHUT" in out.evidence["waypoints_flown"]   # not the answer

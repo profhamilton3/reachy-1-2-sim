@@ -324,6 +324,44 @@ class PointResult:
 POINT_DRIFT_TOLERANCE_M = 0.02
 
 
+def hover_height(scene) -> float:
+    """How far above the board the pad should sit, for THIS board.
+
+    The notebook's rule, with "manipulable" read as "actually on the board":
+    the tallest thing standing there, plus the air we want under the pad, and
+    never less than the floor.  In a scene with an off-board pool the
+    distinction matters — ten objects exist, and the ones parked on the floor
+    at y = +-0.75 say nothing about how high the arm has to fly over the grid.
+
+    An empty board therefore answers with the floor, and that is the honest
+    answer rather than a special case: there is nothing to clear.
+
+    This is about POINTING.  It is not what keeps the objects on the table —
+    the clearance guard is.  An earlier version added 10 cm of slop on top on
+    the reasoning that the arm does not fly the height it is given; that bought
+    nothing (a run at the taller hover still threw the blue cylinder 1.06 m,
+    because the object was hit by the FOREARM in transit and no pad height
+    addresses that) and wrecked the pointing it exists to demonstrate.
+    """
+    surface = scene.table_surface_z
+    tops = [scene.get(oid).top_z for oid in scene.manipulable_ids()
+            if _on_the_board(scene, oid)]
+    tallest = max(tops) if tops else surface
+    return max(R.POINT_HOVER_FLOOR, (tallest - surface) + R.POINT_CLEARANCE)
+
+
+def _on_the_board(scene, oid) -> bool:
+    """Is this object standing on the tabletop, rather than in the pool?
+
+    Judged on height above the surface, because that is what the hover has to
+    clear.  An object on the floor is not a short object on the board.
+    """
+    obj = scene.get(oid)
+    if obj is None or obj.center is None:
+        return False
+    return obj.top_z > scene.table_surface_z - 0.01
+
+
 def point_at(planner, label: str, xy: Tuple[float, float], base_z: float, *,
              send, read, approaching: Optional[str] = None,
              object_positions: Optional[Callable[[], Dict[str, tuple]]] = None,
@@ -355,7 +393,7 @@ def point_at(planner, label: str, xy: Tuple[float, float], base_z: float, *,
     middle of the grid, which with an open hand left 0.6-1.9 cm and refused
     nearly every cell.  Open the hand when you arrive, not before.
     """
-    from reachy_ai.motion.escort import escort
+    from reachy_ai.motion.escort import binding, escort
     from reachy_ai.motion.kinematics import UnreachableError
 
     before = dict(object_positions()) if object_positions else {}
@@ -366,6 +404,7 @@ def point_at(planner, label: str, xy: Tuple[float, float], base_z: float, *,
 
     lift = 0.0
     chosen = None
+    best = None
     reason = "no pose was found with room for the whole arm"
     while lift <= R.POINT_LIFT_MAX + 1e-9:
         if should_abort is not None and should_abort():
@@ -380,36 +419,61 @@ def point_at(planner, label: str, xy: Tuple[float, float], base_z: float, *,
                                      from_joints=seed, gripper_deg=R.SHUT,
                                      ids=solve_ids, include_static=True)
         except UnreachableError as exc:
-            reason = f"{label} is out of reach: {exc}"
+            if best is None:
+                reason = f"{label} is out of reach: {exc}"
             lift += R.POINT_LIFT_STEP
             continue
-        room = planner.clearance(solution, gripper_deg=R.SHUT,
-                                 ids=solve_ids, include_static=True)
-        if room is not None and _distance_of(room) >= R.POINT_MARGIN:
-            chosen = (solution, target, _distance_of(room))
+
+        # THE TARGET'S MARGIN COMES FROM THE POSE BEING FLOWN TO, and it is
+        # re-derived on every attempt because a lifted target is a different
+        # pose with a different answer.  Measure what the destination hover
+        # actually gives against that object, then require the way in not to
+        # fall APPROACH_SLACK below it: the approach may be exactly as close as
+        # it has to be and no closer.
+        margins = {}
+        if approaching is not None:
+            at_rest = planner.clearances(solution, R.SHUT, ids=[approaching],
+                                         include_static=True).get(approaching)
+            if at_rest is not None:
+                margins[approaching] = max(
+                    0.0, _distance_of(at_rest) - R.POINT_APPROACH_SLACK)
+
+        # THE PATH, NOT THE ENDPOINT.  A destination that clears everything can
+        # still be reached by dragging the forearm through something halfway
+        # along, and `binding` picks the object with the least slack against
+        # ITS OWN margin — so the target being deliberately near does not mask
+        # something else being wrongly near.
+        room, need = binding(
+            planner.path_clearances(seed, solution, gripper_deg=R.SHUT,
+                                    include_static=True),
+            R.POINT_MARGIN, margins)
+        if room is None:
+            reason = "there is no scene to check this against"
             break
-        reason = (f"the whole arm does not fit over {label} at that height "
-                  f"({_distance_of(room) * 100:.1f} cm, want "
-                  f"{R.POINT_MARGIN * 100:.0f})")
+
+        # Report the BEST attempt, not the last one tried: a refusal quoting
+        # whichever lift happened to be final says nothing about how close the
+        # target came to being reachable.
+        if best is None or _distance_of(room) > _distance_of(best):
+            best = room
+            reason = (f"the whole arm does not fit on the way in to {label}: "
+                      f"{room}, and it needs {need * 100:.0f} cm "
+                      f"(best of {lift * 100:.0f} cm of lift)")
+        if _distance_of(room) >= need:
+            chosen = (solution, target, margins)
+            break
         lift += R.POINT_LIFT_STEP
 
     if chosen is None:
-        return PointResult(False, label, (xy[0], xy[1], base_z), detail=reason)
-
-    solution, target, room = chosen
+        return PointResult(False, label, (xy[0], xy[1], base_z), lift_m=lift,
+                           detail=reason)
+    solution, target, margins = chosen
     if on_phase is not None:
         on_phase(f"approaching {label}")
 
-    # The target keeps its place in the guard, with a margin derived from the
-    # pose being flown to: the approach may be exactly as close as it has to be
-    # and no closer.  A flight that walks THROUGH the object still trips,
-    # because the far side of it is not on that path.
-    margins = ({approaching: max(0.0, room - R.POINT_APPROACH_SLACK)}
-               if approaching is not None else None)
-
     result = escort(
         planner, solution, send, read,
-        margin=R.POINT_MARGIN, margins=margins, legs=R.POINT_LEGS,
+        margin=R.POINT_MARGIN, margins=margins or None, legs=R.POINT_LEGS,
         duration=secs, gripper_deg=R.SHUT, refresh=refresh,
         include_static=True,
     )

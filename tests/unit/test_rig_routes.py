@@ -192,9 +192,9 @@ def test_the_panel_scene_is_validated_on_flights_through_the_flight(route):
 
 def test_a_rejected_route_says_it_was_flown_and_why_it_failed():
     """"Not listed" reads as "nobody has got to it yet", which invites a row
-    on the strength of one clean run.  POINT is the standing example: flown,
-    rejected, and the number travels with the refusal."""
-    _, why = R.check_route("POINT", "FWDCenterLabSivaPool")
+    on the strength of one clean run.  Pointing in the scene it was DESIGNED
+    for is the standing example: flown, rejected, and the number travels."""
+    _, why = R.check_route("POINT", "FWDCenterLabMCC")
     assert "rejected" in why
     assert "0.189 m" in why
 
@@ -231,15 +231,21 @@ def test_every_attempt_records_an_outcome_and_the_numbers():
         assert len(attempt.detail) > 40
 
 
-def test_pointing_is_not_a_validated_route_anywhere():
-    """Section 4.7 records runs that moved objects — a can shifted 0.189 m by
-    an arm reporting positive clearance.  The reason travels with the refusal
-    into scenes pointing was never tried in: a route rejected where it was
-    designed is not going to be better somewhere it was not."""
-    for scene in ("FWDCenterLabMCC", "FWDCenterLabSivaPool"):
-        ok, why = R.check_route("POINT", scene)
-        assert not ok
-        assert "0.189 m" in why
+def test_pointing_is_validated_over_an_empty_board_and_nowhere_else():
+    """Scoped on purpose.  The empty-board run had nothing to hit, so it says
+    nothing about section 4.7's catalogue of what an occupied board does — a
+    can moved 0.189 m by an arm reporting +5.5 cm of clearance.  The row says
+    "empty board only" and `_ability_available` is what enforces it."""
+    ok, why = R.check_route("POINT", "FWDCenterLabSivaPool")
+    assert ok, why
+    row = R.validation_for("POINT", "FWDCenterLabSivaPool")
+    assert "EMPTY BOARD ONLY" in row.evidence
+    assert "cell_r3c1" in row.evidence          # the arm's own limit, named
+
+    # And it is still refused where nobody has flown it.
+    ok, why = R.check_route("POINT", "FWDCenterLabMCC")
+    assert not ok
+    assert "0.189 m" in why
 
 
 def test_a_refusal_names_the_scene_not_the_arm():
