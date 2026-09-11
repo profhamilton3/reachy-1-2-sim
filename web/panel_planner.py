@@ -45,7 +45,8 @@ import panel_abilities as abilities
 from panel_abilities import AbilityRefusal
 from panel_scene import (NON_RECYCLABLE_TAG, RECYCLABLE_TAG, DestinationRef,
                          SceneView)
-from tasks import ConversationEvent, PlannerOutcome, PlannerRequest, Proposal
+from tasks import (ConversationEvent, IntentState, PlannerOutcome,
+                   PlannerRequest, Proposal)
 
 #: How far a tracked object may drift before a proposal built on its position
 #: stops describing the world.  Objects at rest in MuJoCo jitter by far less
@@ -226,7 +227,12 @@ class DeterministicPlanner:
         self._scene_provider = scene_provider
 
     def __call__(self, request: PlannerRequest) -> PlannerOutcome:
-        command, answers = _split_history(request.history, request.text)
+        state = _intent_for(request)
+        outcome = self._plan(state.command, list(state.answers))
+        return _record_intent(outcome, state)
+
+    def _plan(self, command: str,
+              answers: List[Tuple[str, str]]) -> PlannerOutcome:
         if _JOINT_RE.search(command) or any(_JOINT_RE.search(a)
                                             for _, a in answers):
             return _unsupported(
@@ -234,14 +240,6 @@ class DeterministicPlanner:
                 "which object, and where it should go — and the motion layer "
                 "works out the angles."
             )
-
-        # A NEW COMMAND is not an answer.  "Which cell?" followed by "stow your
-        # arm" is a change of mind, and folding it into the open slot would
-        # store "stow your arm" as a cell name and then complain it is not one.
-        # Whichever the operator typed last wins, and the earlier answers go
-        # with the request they were answering.
-        if answers and _is_a_command(answers[-1][1]):
-            command, answers = answers[-1][1], []
 
         # Abilities are matched BEFORE the pick-and-place grammar, because two
         # of them open with a pick-and-place verb: "put your arm away" and
@@ -854,9 +852,93 @@ def _distance(a, b) -> float:
     return math.sqrt(sum((float(x) - float(y)) ** 2 for x, y in zip(a, b)))
 
 
+def _intent_for(request: PlannerRequest) -> IntentState:
+    """The canonical intent this turn is about.
+
+    Two sources, and which one is used is decided by the caller, not guessed.
+    A caller that keeps intent state — the coordinator does — hands back what
+    the last turn settled, and this turn's text is folded in as an answer to
+    whatever question was outstanding.  A caller that keeps none falls back to
+    reconstructing from the transcript, which is what the direct-planner tests
+    do and what any conversation stored before #87 has.
+
+    The fallback is the path with the bug in it: `_split_history` can only see
+    the turns still in the transcript, and the transcript is trimmed from the
+    front.  Keep it for compatibility; do not route new callers through it.
+
+    A NEW COMMAND is not an answer.  "Which cell?" followed by "stow your arm"
+    is a change of mind, and folding it into the open slot would store "stow
+    your arm" as a cell name and then complain it is not one.  Whichever the
+    operator typed last wins, and — because the earlier answers were given to
+    a request that no longer stands — they are dropped with it rather than
+    carried onto the new intent.
+    """
+    prior = request.intent
+    if prior is None or not prior.command:
+        command, answers = _split_history(request.history, request.text)
+        state = IntentState(command=command, answers=answers)
+    else:
+        state = prior.copy()
+        # The slot comes from the question that was asked, recorded when it
+        # was asked (#59).  An answer arriving with no question outstanding
+        # carries the empty slot and is placed by shape, as it always was.
+        state.answers.append((state.open_slot, request.text))
+
+    if state.answers and _is_a_command(state.answers[-1][1]):
+        state = IntentState(command=state.answers[-1][1])
+    return state
+
+
+def _record_intent(outcome: PlannerOutcome, state: IntentState) -> PlannerOutcome:
+    """Fold what this turn decided back into the intent, and attach it.
+
+    Attached to every outcome, including the ones that end the task: the
+    coordinator stores it before it branches, so a failed or completed task
+    still records what it was about.
+    """
+    state.open_slot = outcome.slot if outcome.kind == "clarification" else ""
+
+    proposal = outcome.proposal
+    if proposal is not None:
+        # The resolved answer, which is the one worth keeping: `task_type` is
+        # the ability that will actually fly, after "rest" was settled and
+        # after "soda can" became `soda_can`.
+        state.kind = proposal.task_type
+        state.selected_target = (proposal.object_id or proposal.target_id
+                                 or state.selected_target)
+        state.plan_version = proposal.plan_version
+    elif not state.kind:
+        state.kind = _provisional_kind(state.command)
+
+    outcome.intent = state
+    return outcome
+
+
+def _provisional_kind(command: str) -> str:
+    """What the command looks like before any clarification is answered.
+
+    "" for a request that names two abilities equally well — `match` returns
+    an empty name for those on purpose, and copying a guess in here would be
+    the guess the rest/stow question exists to avoid.
+    """
+    try:
+        match = abilities.match(command)
+    except AbilityRefusal:
+        return ""
+    if match is not None and match.ability is not None:
+        return match.name
+    return "pick_place" if parse_intent(command) is not None else ""
+
+
 def _split_history(history: List[ConversationEvent], latest: str
                    ) -> Tuple[str, List[Tuple[str, str]]]:
     """Return the original command and every answer since, each with its slot.
+
+    The FALLBACK source of intent, for a caller that keeps no state — see
+    `_intent_for`.  It can only see the turns still in the transcript, and the
+    transcript is bounded, so a long enough clarification loses the command it
+    is reconstructing.  That is #87, and it is why the coordinator stopped
+    coming through here.
 
     `history` already contains `latest` as its last user turn, so the answers
     list is built from history alone and `latest` is only a fallback for the
