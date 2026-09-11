@@ -772,6 +772,40 @@ POSTURE_TRANSITIONS: Dict[Tuple[str, str], str] = {
 }
 
 
+#: The tabletop-adjacent portion of each route — the part #82 checks a swept
+#: capsule path against LIVE object poses before flying, because nothing below
+#: `primitives` has a scene and cannot know an object drifted into it.
+#:
+#: Deliberately NOT the whole route.  The rail corridor before HOVER (or after
+#: it, on the way back) never comes near an object on the board — that is what
+#: `SceneModel.obstacle_ids()`'s own measurements are about — so checking it
+#: here would cost real time for zero chance of catching anything.  Only the
+#: leg(s) that actually cross onto REST are worth the cost:
+#:
+#:   PLACE_ROUTE / RAISE_TO_SIDE   HOVER -> REST_SHUT -> REST  (arriving)
+#:   STOW_ROUTE / STOW_FROM_SIDE   REST -> REST_SHUT -> HOVER  (departing,
+#:                                 the identical corridor flown backwards)
+#:   LOWER_TO_REST                 PRESENT -> REST_SHUT -> REST
+#:
+#: WAVE, LIFT_TO_PRESENT and POINT are absent on purpose: none of them lands
+#: the arm on REST or departs from it, so none of them can catch an object in
+#: this footprint that its own named route did not already put there.
+#:
+#: THE DECISION #82 ASKS FOR: this gates every ability whose available() call
+#: resolves to one of these route names, not only `rest_forearm`.  A `wave` or
+#: `point_*` request flown from the rail pocket enters PRESENT by way of
+#: RAISE_TO_SIDE — the exact PLACE_ROUTE waypoints — and crosses the identical
+#: footprint on the way, so it is checked too.  `stow_arm` is checked the same
+#: way through STOW_ROUTE / STOW_FROM_SIDE.
+FOOTPRINT_LEGS: Dict[str, Tuple[Dict[str, float], ...]] = {
+    "PLACE_ROUTE": (HOVER, REST_SHUT, REST),
+    "RAISE_TO_SIDE": (HOVER, REST_SHUT, REST),
+    "STOW_ROUTE": (REST, REST_SHUT, HOVER),
+    "STOW_FROM_SIDE": (REST, REST_SHUT, HOVER),
+    "LOWER_TO_REST": (PRESENT, REST_SHUT, REST),
+}
+
+
 def posture_of(present: Dict[str, float], tol: float = 8.0) -> Optional[str]:
     """Which named posture the arm is standing at, or None.
 
