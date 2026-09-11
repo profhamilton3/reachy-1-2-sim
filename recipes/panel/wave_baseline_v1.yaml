@@ -1,0 +1,129 @@
+# The wave: bounded oscillation from PRESENT, ending back at PRESENT.
+#
+# THE BOUNDS ARE MEASUREMENTS, NOT PREFERENCES.  Three cycles and 1.8 s a swing
+# are what the notebook measured; at 0.9 s the three weak joints reversing
+# together finished tens of degrees short and tripped the tracking guard.  So
+# the search may go SLOWER than 1.8 s and may run FEWER than three cycles, and
+# `check_route_integrity` refuses faster or wider — a wave outside the envelope
+# is not a better wave, it is an unmeasured one.
+#
+# The amplitude is bounded the same way and for a different reason: WAVE_A and
+# WAVE_B are defined relative to PRESENT so the wave inherits PRESENT's
+# clearance argument (+8.9 cm worst whole-arm), and a wider swing leaves the
+# envelope that argument covers.
+#
+# The return to PRESENT is guarded on the gross joints and the wrists are
+# deliberately left wherever the last swing put them.
+
+recipe_id: wave_baseline_v1
+recipe_version: 1
+task_type: wave
+arm: right
+source: baseline
+parent_recipe_id: ""
+route: WAVE
+route_version: 1
+expected_start_posture: present
+
+bounded_parameters:
+  # A multiplier on every waypoint's measured duration.  One knob
+  # rather than one per waypoint: the corridor is flown as a whole and
+  # the tracking lag that a faster flight produces is a property of the
+  # whole flight.  Below 1.0 is faster than measured, which is allowed
+  # and is what the waypoint tolerances exist to catch.
+  segment_duration_scale:
+    value: 1.0
+    min: 0.8
+    max: 1.6
+    step: 0.2
+    unit: ratio
+    description: multiplier on each waypoint's measured seconds
+  # How long a settle pass is when a waypoint has not converged.  The
+  # live route runner re-streams progressively longer passes; this is
+  # the first one's length.
+  settle_pass_s:
+    value: 0.8
+    min: 0.4
+    max: 2.0
+    step: 0.4
+    unit: s
+    description: length of the first re-stream pass after a short waypoint
+  wave_cycles:
+    value: 3
+    min: 1
+    max: 3          # measured; more is unmeasured, not better
+    step: 1
+    unit: cycles
+    description: bounded oscillation count, capped at the measured three
+  wave_seconds:
+    value: 1.8
+    min: 1.8        # 0.9 s tripped the tracking guard
+    max: 3.0
+    step: 0.4
+    unit: s
+    description: seconds per swing; slower than measured only
+  wave_amplitude_deg:
+    value: 60.0
+    min: 25.0
+    max: 60.0       # PRESENT's clearance argument covers no wider
+    step: 10.0
+    unit: deg
+    description: forearm yaw either side of PRESENT
+
+joint_limits: {}
+velocity_limits: {}
+effort_limits: {}
+
+# THE ROUTE.  Generated from `reachy_ai.motion.rig_routes` — the module the
+# arm actually flies — and pinned to it by a test.  Editing a name, an order
+# or a tolerance here does not change what the robot does; it makes this file
+# disagree with the robot, which the integrity check then reports.
+primitive_sequence:
+  - primitive: wave_swing
+    parameters:
+      name: WAVE_1A
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: wave_swing
+    parameters:
+      name: WAVE_1B
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: wave_swing
+    parameters:
+      name: WAVE_2A
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: wave_swing
+    parameters:
+      name: WAVE_2B
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: wave_swing
+    parameters:
+      name: WAVE_3A
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: wave_swing
+    parameters:
+      name: WAVE_3B
+      seconds: 1.8
+      tol: 90.0
+      guard: null
+  - primitive: wave_return
+    parameters:
+      name: PRESENT
+      seconds: 1.8
+      tol: 8.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+
+# Ends at: present

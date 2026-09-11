@@ -72,6 +72,15 @@ class SearchConfig:
     # that stage becomes `best`.  Empty list = stage disabled (default).
     finalist_k: int = 3
     finalist_seeds: List[int] = dataclasses.field(default_factory=list)
+    #: Applied to each candidate the sampler produces, BEFORE it is stored and
+    #: before it is evaluated.
+    #:
+    #: Some bounded parameters are also facts about the primitive sequence — a
+    #: two-cycle wave has four swings in it — and a sampler varies only the
+    #: parameter.  Without this the recipe recorded against a trial declares
+    #: one thing and the step list beside it another, describing a motion that
+    #: was never flown; with it, what is stored is what ran.
+    recipe_normaliser: Optional[Callable[[TrajectoryRecipe], TrajectoryRecipe]] = None
 
 
 @dataclasses.dataclass
@@ -208,6 +217,8 @@ class SearchRunner:
 
             pt = points[0]
             recipe = _apply_point(self._config.baseline_recipe, pt)
+            if self._config.recipe_normaliser is not None:
+                recipe = self._config.recipe_normaliser(recipe)
 
             store_trial_id: Optional[str] = None
             if store is not None:

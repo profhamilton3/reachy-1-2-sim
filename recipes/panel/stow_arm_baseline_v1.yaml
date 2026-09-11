@@ -1,0 +1,179 @@
+# Stow into the rail pocket: the placement route run backwards, REST -> HOME.
+#
+# NOTHING MAY CUT ACROSS THIS.  A direct move from anywhere over the board to
+# HOME drives the upper arm through the board's near edge, so the corridor is
+# not a path among several — it is the only measured one.  The search varies
+# segment durations and may not touch the order, the poses, the tolerances or
+# the guarded joints.
+#
+# SWING_1 HAS NO CLEARANCE MARGIN IN FWDCenterLabSivaPool (#74).  A duration
+# search over this route in that scene is searching around a waypoint that is
+# already tight, and a clearance number derived in sim carries the ~1.5x object
+# oversize of #42 as well.  Both belong in the record of any study run here.
+
+recipe_id: stow_arm_baseline_v1
+recipe_version: 1
+task_type: stow_arm
+arm: right
+source: baseline
+parent_recipe_id: ""
+route: STOW_ROUTE
+route_version: 1
+expected_start_posture: rest
+
+bounded_parameters:
+  # A multiplier on every waypoint's measured duration.  One knob
+  # rather than one per waypoint: the corridor is flown as a whole and
+  # the tracking lag that a faster flight produces is a property of the
+  # whole flight.  Below 1.0 is faster than measured, which is allowed
+  # and is what the waypoint tolerances exist to catch.
+  segment_duration_scale:
+    value: 1.0
+    min: 0.8
+    max: 1.6
+    step: 0.2
+    unit: ratio
+    description: multiplier on each waypoint's measured seconds
+  # How long a settle pass is when a waypoint has not converged.  The
+  # live route runner re-streams progressively longer passes; this is
+  # the first one's length.
+  settle_pass_s:
+    value: 0.8
+    min: 0.4
+    max: 2.0
+    step: 0.4
+    unit: s
+    description: length of the first re-stream pass after a short waypoint
+
+joint_limits: {}
+velocity_limits: {}
+effort_limits: {}
+
+# THE ROUTE.  Generated from `reachy_ai.motion.rig_routes` — the module the
+# arm actually flies — and pinned to it by a test.  Editing a name, an order
+# or a tolerance here does not change what the robot does; it makes this file
+# disagree with the robot, which the integrity check then reports.
+primitive_sequence:
+  - primitive: waypoint
+    parameters:
+      name: REST_SHUT
+      seconds: 2.0
+      tol: 6.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: HOVER
+      seconds: 2.0
+      tol: 6.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: SWING_3
+      seconds: 2.5
+      tol: 6.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: SWING_2
+      seconds: 2.5
+      tol: 6.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: SWING_1
+      seconds: 2.0
+      tol: 6.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: TUCK
+      seconds: 3.0
+      tol: 6.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: CURL_HIGH
+      seconds: 2.0
+      tol: 6.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: CURL
+      seconds: 2.0
+      tol: 6.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: BACK
+      seconds: 3.0
+      tol: 6.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: GRIP_SHUT
+      seconds: 3.0
+      tol: 25.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+  - primitive: waypoint
+    parameters:
+      name: HOME
+      seconds: 2.5
+      tol: 25.0
+      guard:
+        - r_shoulder_pitch
+        - r_shoulder_roll
+        - r_arm_yaw
+        - r_elbow_pitch
+        - r_wrist_pitch
+
+# Ends at: home

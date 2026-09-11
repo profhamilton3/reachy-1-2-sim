@@ -42,6 +42,16 @@ if os.path.isdir(_NATIVE) and _NATIVE not in sys.path:
 
 from joint_map import JOINT_TABLE, by_name, NUM_JOINTS
 
+#: Seconds per simulation step, used to turn a waypoint's measured DURATION
+#: into a number of steps.
+#:
+#: One name rather than four literals, and it is a duplicate of two things this
+#: module deliberately cannot import: the MJCF's `option timestep` and
+#: `EpisodeConfig.fixed_timestep`.  `panel_offline` checks the loaded model
+#: against it, so a model whose timestep changed fails loudly instead of
+#: halving or doubling every duration a study ever searched.
+SIM_TIMESTEP_S = 0.002
+
 NUM_RIGHT_ARM = 8   # indices 0-7
 NUM_BOTH_ARMS = 16  # indices 0-15
 NUM_HEAD = 5        # indices 16-20
@@ -91,7 +101,27 @@ KNOWN_PICK_PLACE_PRIMITIVES = frozenset({
     "home", "ready", "transit_clear", "hover", "descend", "grasp",
     "settle_grasp", "lift", "carry", "place", "release", "retreat",
 })
-KNOWN_PRIMITIVES = KNOWN_CONTROL_PANEL_PRIMITIVES | KNOWN_PICK_PLACE_PRIMITIVES
+#: The measured rig routes the panel flies (#91).  `waypoint` is the corridor
+#: routes' one primitive, because a corridor IS a list of waypoints and giving
+#: each of them a name of its own would invite a recipe to use a different set.
+KNOWN_PANEL_ROUTE_PRIMITIVES = frozenset({
+    "waypoint", "wave_swing", "wave_return",
+    "point_approach", "point_hover", "point_return",
+})
+KNOWN_PRIMITIVES = (KNOWN_CONTROL_PANEL_PRIMITIVES
+                    | KNOWN_PICK_PLACE_PRIMITIVES
+                    | KNOWN_PANEL_ROUTE_PRIMITIVES)
+
+#: Which abilities this executor can build commands for, and which it cannot.
+#:
+#: POINTING IS NOT HERE ON PURPOSE.  Its hover pose is derived from the scene —
+#: the tallest thing on the board, the target cell's centre, the reachability
+#: of the approach — so building it needs a planner and a loaded scene, not a
+#: pose table.  Inventing a hover here so that "point" appeared to be
+#: searchable would produce trials about a motion the robot does not fly, which
+#: is worse than the honest refusal below.  The recipe, the evaluator and the
+#: integrity check for pointing all exist; only the offline driver is missing.
+PANEL_ROUTES_EXECUTABLE = frozenset({"PLACE_ROUTE", "STOW_ROUTE", "WAVE"})
 
 
 @dataclasses.dataclass
@@ -152,7 +182,101 @@ def _bp_value(recipe: TrajectoryRecipe, key: str, default: Any = None) -> Any:
     return spec
 
 
-class RecipeExecutor:
+# ---------------------------------------------------------------------------
+# Panel ability routes (#91)
+# ---------------------------------------------------------------------------
+
+def _route_pose(name: str) -> Optional[Dict[str, float]]:
+    """A waypoint's pose, looked up in `rig_routes` by the recipe's own name.
+
+    Looked up rather than copied.  A pose table here would be a second set of
+    waypoints, and the moment it disagreed with the module the arm flies, the
+    search would be optimising a motion nothing performs.
+    """
+    from reachy_ai.motion import rig_routes as R
+    return getattr(R, name, None) if isinstance(getattr(R, name, None), dict) else None
+
+
+class _PanelRouteMixin:
+    """Command building for the measured routes.  Mixed into RecipeExecutor."""
+
+    def _handle_panel_route(
+        self,
+        step: PrimitiveStep,
+        recipe: TrajectoryRecipe,
+        current: List[float],
+    ) -> Tuple[List[CommandSpec], List[float]]:
+        from reachy_ai.motion import rig_routes as R
+
+        p = step.primitive
+        if p.startswith("point_"):
+            raise RecipeExecutionError(
+                "pointing cannot be built offline from a recipe alone: the "
+                "hover pose is derived from the scene (the tallest object on "
+                "the board, the cell's centre, the reachability of the "
+                "approach), so it needs a planner and a loaded scene.  The "
+                "recipe, the evaluator and the integrity check for pointing "
+                "all exist; the offline driver does not, and inventing a "
+                "hover here would produce trials about a motion the robot "
+                "does not fly.")
+
+        scale = float(_bp_value(recipe, "segment_duration_scale", 1.0) or 1.0)
+        settle_s = float(_bp_value(recipe, "settle_pass_s", 0.8) or 0.8)
+        seconds = float(_param(step, "seconds", 1.0)) * scale
+        # The runner's timestep is the episode's, not the recipe's; 500 Hz is
+        # the configured default and the one the two existing recipe families
+        # already assume when they count steps.
+        n = max(1, int(round(seconds / SIM_TIMESTEP_S)))
+        settle_steps = max(1, int(round(settle_s / SIM_TIMESTEP_S)))
+
+        name = str(_param(step, "name", ""))
+
+        if p == "waypoint":
+            pose_deg = _route_pose(name)
+            if pose_deg is None:
+                raise RecipeExecutionError(
+                    f"'{name}' is not a waypoint in rig_routes, so there is no "
+                    "measured pose to fly to")
+            target = _pose_to_qpos(pose_deg, current)
+            cmds = _interpolate(current, target, n)
+            # RE-STREAMING IS NOT OPTIONAL, and the live route runner says so:
+            # the arm only moves while setpoints are streaming, and a fast
+            # segment finishes 10-20 degrees short with simply holding the
+            # goal doing nothing to close it.  Holding the final target for a
+            # settle pass is the offline stand-in for that.  It is NOT the
+            # closed-loop retry the live runner does — this one cannot see
+            # whether the arm arrived — and a duration searched here is
+            # therefore optimistic about the live path by however much that
+            # difference is worth.
+            cmds.append(CommandSpec(target_rad=list(target),
+                                    hold_steps=settle_steps))
+            return cmds, target
+
+        if p == "wave_swing":
+            amplitude = float(_bp_value(recipe, "wave_amplitude_deg",
+                                        abs(R.WAVE_A["r_forearm_yaw"])))
+            swing_s = float(_bp_value(recipe, "wave_seconds", R.WAVE_SECONDS))
+            n = max(1, int(round(swing_s * scale / SIM_TIMESTEP_S)))
+            side = name[-1].lower() if name else "a"
+            base = R.WAVE_A if side == "a" else R.WAVE_B
+            sign = -1.0 if side == "a" else 1.0
+            pose_deg = dict(base, r_forearm_yaw=sign * amplitude)
+            target = _pose_to_qpos(pose_deg, current)
+            return _interpolate(current, target, n), target
+
+        if p == "wave_return":
+            swing_s = float(_bp_value(recipe, "wave_seconds", R.WAVE_SECONDS))
+            n = max(1, int(round(swing_s * scale / SIM_TIMESTEP_S)))
+            target = _pose_to_qpos(R.PRESENT, current)
+            cmds = _interpolate(current, target, n)
+            cmds.append(CommandSpec(target_rad=list(target),
+                                    hold_steps=settle_steps))
+            return cmds, target
+
+        raise RecipeExecutionError(f"unknown panel-route primitive '{p}'")
+
+
+class RecipeExecutor(_PanelRouteMixin):
     """Converts a TrajectoryRecipe to a CommandSpec sequence for the simulation path."""
 
     def validate(self, recipe: TrajectoryRecipe) -> List[str]:
@@ -182,11 +306,24 @@ class RecipeExecutor:
                     pass  # non-numeric parameter (e.g. object_id)
         return errors
 
-    def build_commands(self, recipe: TrajectoryRecipe) -> List[CommandSpec]:
+    def build_commands(self, recipe: TrajectoryRecipe,
+                       start_qpos: Optional[List[float]] = None,
+                       ) -> List[CommandSpec]:
         """Convert recipe primitive_sequence to a CommandSpec list.
 
-        Starts from the home/zero position and linearly interpolates between
-        named joint targets for each primitive phase.
+        Linearly interpolates between named joint targets for each primitive
+        phase, beginning at `start_qpos`.
+
+        `start_qpos` IS NOT A COSMETIC DEFAULT.  It used to be the home/zero
+        position unconditionally, which is right for pick-and-place — home is
+        its start — and wrong for any route with a different precondition.
+        Placing the arm at REST and then building from home makes the FIRST
+        commanded target ~0 degrees: the arm is driven from over the board
+        straight back toward the pocket before the corridor's first waypoint,
+        which is the exact unmeasured transit the corridor exists to forbid.
+        Placing the arm and building from home are two halves of one thing, and
+        doing only the first is worse than doing neither, because it looks
+        fixed.
         """
         errors = self.validate(recipe)
         if errors:
@@ -195,15 +332,18 @@ class RecipeExecutor:
                 "\n".join(f"  - {e}" for e in errors)
             )
 
-        current = [0.0] * NUM_JOINTS  # home keyframe = all zeros
+        current = (list(start_qpos) if start_qpos is not None
+                   else [0.0] * NUM_JOINTS)   # home keyframe = all zeros
         commands: List[CommandSpec] = []
 
         # Dispatch to the appropriate handler family
-        handler = (
-            self._handle_pick_place
-            if recipe.task_type in ("pick_and_place", "pick_place")
-            else self._handle_control_panel
-        )
+        if any(s.primitive in KNOWN_PANEL_ROUTE_PRIMITIVES
+               for s in recipe.primitive_sequence):
+            handler = self._handle_panel_route
+        elif recipe.task_type in ("pick_and_place", "pick_place"):
+            handler = self._handle_pick_place
+        else:
+            handler = self._handle_control_panel
 
         for step in recipe.primitive_sequence:
             cmds, current = handler(step, recipe, current)
