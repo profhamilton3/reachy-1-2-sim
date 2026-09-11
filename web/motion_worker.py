@@ -280,6 +280,10 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
 
     return {"status": "moved",
             "flown": list(approach) + list(flown),
+            # Measured, before the approach was flown.  The proposal carries
+            # the posture the route EXPECTS; the two differ whenever an
+            # approach was needed, and an episode record wants both (#88).
+            "start_posture": start,
             "final_posture": R.posture_of(M.present_pose(arm))}
 
 

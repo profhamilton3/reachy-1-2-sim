@@ -78,7 +78,9 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from panel_episodes import build_recorder
 
 log = logging.getLogger("reachy12.panel.executor")
 
@@ -122,6 +124,35 @@ class ExecutionResult:
     status: str                       # completed | failed | cancelled
     detail: str = ""
     evidence: Dict[str, Any] = field(default_factory=dict)
+
+
+class _PhaseLog:
+    """Forwards each phase onward and remembers when it happened (#88).
+
+    The executor already announces its phases to the browser and then forgets
+    them.  An episode record wants the sequence and the timings — "the wave
+    spent nine seconds leaving the pocket" is the kind of fact a later
+    evaluator is built to notice — and capturing them here costs one tuple per
+    phase on a path that is already doing IPC.
+
+    Callable, because it stands exactly where the `on_phase` callback stood.
+    """
+
+    def __init__(self, on_phase: Optional[Callable[[str], None]] = None) -> None:
+        self._on_phase = on_phase
+        self._started = time.time()
+        self._entries: List[Tuple[str, float]] = []
+
+    def __call__(self, name: str) -> None:
+        self._entries.append((name, time.time() - self._started))
+        if self._on_phase is not None:
+            # Last, and not guarded: a browser callback that raises is a bug
+            # worth seeing, and it must not be able to lose the phase record
+            # by raising before it is kept.
+            self._on_phase(name)
+
+    def entries(self) -> List[Tuple[str, float]]:
+        return list(self._entries)
 
 
 #: The child that owns the SDK.  Beside this file, so a checkout and /opt both
@@ -311,7 +342,8 @@ class SimulatorExecutor:
 
     def __init__(self, link, scene_provider, scene_file: str,
                  *, sdk_host: str = SDK_HOST, sdk_port: int = SDK_PORT,
-                 worker: Optional[MotionWorker] = None) -> None:
+                 worker: Optional[MotionWorker] = None,
+                 recorder: Any = None) -> None:
         self._link = link
         self._scene_provider = scene_provider
         self._scene_file = scene_file
@@ -323,6 +355,12 @@ class SimulatorExecutor:
         # `motion_worker.py`: grpc.aio in this server's process wedges, and a
         # wedged blocking call in a thread cannot be reclaimed.
         self._worker = worker or MotionWorker()
+        # Writes one durable record per ability flown (#88), or None for no
+        # recording.  Supplied rather than built here, the same way live
+        # execution itself is: `build_executor` is where deployment policy
+        # lives, and a directly-constructed executor — every test does this —
+        # must not start writing to a database nobody asked it to open.
+        self._recorder = recorder
 
     # -- availability ------------------------------------------------------
 
@@ -492,10 +530,50 @@ class SimulatorExecutor:
                 status="failed",
                 detail="another task is already using the arm",
             )
+        phases = _PhaseLog(on_phase)
+        started = time.time()
         try:
-            return self._execute_locked(proposal, should_cancel, on_phase)
+            result = self._execute_locked(proposal, should_cancel, phases)
         finally:
             self._motion_lock.release()
+
+        # AFTER BOTH LOCKS.  The lease is released in the inner `finally` and
+        # the motion mutex just above, so a slow or broken disk delays nobody's
+        # next movement — and a refusal taken after the lease was granted is
+        # still an episode that happened, so it is recorded like any other.
+        self._record_episode(proposal, result, phases, started)
+        return result
+
+    def _record_episode(self, proposal, result, phases, started) -> None:
+        """Hand the episode to the recorder.  Abilities only, for now.
+
+        Pick-and-place has its own offline task runner and its own recipe in
+        `recipes/pick_place/`; what it does not have is a definition of
+        success measured the way this path measures one.  Recording it here
+        would put two different judgements under one task_type.  One line to
+        add once #91 settles that.
+        """
+        if self._recorder is None or proposal.task_type == "pick_place":
+            return
+        try:
+            # INSIDE THE WALL.  `record` swallows its own failures, but the
+            # scene read that feeds it is this method's, and the scene
+            # provider raises on a scene that will not load.  Recording must
+            # not be able to fail a movement that already succeeded.
+            scene = self._scene_provider()
+            self._recorder.record(
+                proposal, result,
+                phases=phases.entries(),
+                started_at=started,
+                ended_at=time.time(),
+                scene_name=getattr(scene, "name", "") or proposal.scene_name,
+                # The revision moves when the board is edited; the name does
+                # not.  The record wants the one that moves.
+                scene_revision=getattr(scene, "scene_revision", ""),
+            )
+        except Exception:
+            log.exception("could not record the episode for plan %s",
+                          proposal.plan_id)
 
     def _execute_locked(self, proposal, should_cancel, on_phase) -> ExecutionResult:
         if proposal.task_type != "pick_place":
@@ -584,7 +662,8 @@ class SimulatorExecutor:
                     evidence=out.get("evidence") or {})
 
             return self._verify_posture(proposal, out.get("flown") or [],
-                                        out.get("final_posture"), before)
+                                        out.get("final_posture"), before,
+                                        out.get("start_posture") or "")
 
         except Exception as exc:
             log.exception("ability execution failed")
@@ -594,7 +673,8 @@ class SimulatorExecutor:
         finally:
             self._link.release_control()
 
-    def _verify_posture(self, proposal, flown, posture, before) -> ExecutionResult:
+    def _verify_posture(self, proposal, flown, posture, before,
+                        start_posture="") -> ExecutionResult:
         """Judge where the arm ended up, and check the board is where it was.
 
         Both, because they fail independently: the arm can arrive at HOME
@@ -625,6 +705,7 @@ class SimulatorExecutor:
                     drift[oid] = round(moved, 4)
 
         evidence = {"route": wanted, "waypoints_flown": list(flown),
+                    "start_posture": start_posture,
                     "final_posture": posture, "object_drift": drift}
         if posture != end:
             return ExecutionResult(
@@ -859,4 +940,5 @@ def build_executor(link, scene_provider, scene_file: str):
             "live execution is switched off on this server "
             "(set REACHY_PANEL_EXECUTOR=1 to enable it)"
         )
-    return SimulatorExecutor(link, scene_provider, scene_file)
+    return SimulatorExecutor(link, scene_provider, scene_file,
+                            recorder=build_recorder(scene_file))

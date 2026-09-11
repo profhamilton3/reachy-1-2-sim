@@ -19,3 +19,6 @@ __pycache__/
 # Generated artifacts (keep the directory, ignore content)
 artifacts/*
 !artifacts/.gitkeep
+
+# Search studies and panel episode records (see web/panel_episodes.py)
+runs/
