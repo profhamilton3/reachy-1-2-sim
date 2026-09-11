@@ -39,13 +39,12 @@ BOUNDS THIS ACCEPTS
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import logging
 import os
-import pathlib
-import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import panel_provenance as _P
 
 log = logging.getLogger("panel.episodes")
 
@@ -66,6 +65,11 @@ DEFAULT_KEEP = 2000
 #: exists so these rows are trivially separable from a real study's.
 STUDY_ID = "panel-live"
 
+#: Where the live episode log lives.  Named so it can be compared with
+#: `panel_recipes.DEFAULT_DB`, which must NOT be this file: every row here is
+#: live-interactive, and retrieval excludes those by construction.
+DEFAULT_DB = "panel_episodes.db"
+
 #: Objects that moved less than this are the physics engine's own jitter, not
 #: something the arm did.  The same number the executor judges drift by —
 #: `panel_executor._verify_posture` — because two thresholds for one question
@@ -73,31 +77,13 @@ STUDY_ID = "panel-live"
 DRIFT_TOLERANCE_M = 0.02
 
 
-def _repo_root() -> pathlib.Path:
-    return pathlib.Path(__file__).resolve().parent.parent
-
-
-def _ensure_paths() -> None:
-    """Same two candidates as panel_executor: a checkout, or /opt in the image."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    for candidate in (os.path.join(here, "..", "src"), "/opt/src"):
-        if os.path.isdir(candidate) and candidate not in sys.path:
-            sys.path.insert(0, candidate)
-
-
-def _relative(path: str) -> str:
-    """A repo-relative path, or the bare filename if it is outside the repo.
-
-    Absolute paths from a developer's machine are provenance nobody else can
-    use and a small leak of where this ran.  The scene file's identity is its
-    hash, which `build_simulator_identity` records; the path is a label.
-    """
-    if not path:
-        return ""
-    try:
-        return str(pathlib.Path(path).resolve().relative_to(_repo_root()))
-    except (ValueError, OSError):
-        return os.path.basename(path)
+#: One copy of each of these, in `panel_provenance`.  The recorder and the
+#: recipe library must resolve the same model file and read the same board or
+#: nothing either of them writes will ever match what the other asks for.
+_robot_model = _P.robot_model
+_repo_root = _P.repo_root
+_ensure_paths = _P.ensure_paths
+_relative = _P.relative
 
 
 class EpisodeRecorder:
@@ -106,12 +92,11 @@ class EpisodeRecorder:
     def __init__(self, scene_file: str = "", *, db_path: str = "",
                  keep: int = DEFAULT_KEEP) -> None:
         self._scene_file = scene_file
-        self._db_path = db_path or str(_repo_root() / "runs" / "panel_episodes.db")
+        self._db_path = db_path or str(_repo_root() / "runs" / DEFAULT_DB)
         self._keep = keep
         #: Built from git and a file hash, so it is rebuilt only when the
         #: scene file changes rather than once per movement.
-        self._identity = None
-        self._identity_key: Optional[Tuple[Any, ...]] = None
+        self._identity = _P.IdentityCache(scene_file, label_paths=True)
 
     # -- the one public call ------------------------------------------------
 
@@ -273,6 +258,15 @@ class EpisodeRecorder:
             "waypoints_flown": [str(w) for w in (evidence.get("waypoints_flown") or [])],
             "phases": [{"name": str(n), "at_s": round(float(t), 3)}
                        for n, t in phases],
+            # WHERE THE MOTION'S PARAMETERS CAME FROM, when they came from
+            # anywhere but the registry (#90).  All four are empty for every
+            # episode flown from an ability's own measured route, which is
+            # every episode today; recorded all the same, because the first
+            # one that is not empty is the one somebody will need to trace.
+            "recipe_trial_id": getattr(proposal, "recipe_trial_id", ""),
+            "recipe_id": getattr(proposal, "recipe_id", ""),
+            "recipe_version": getattr(proposal, "recipe_version", 0),
+            "recipe_policy_version": getattr(proposal, "recipe_policy_version", 0),
             "recovery_needed": bool(evidence.get("recovery_needed", False)),
             "scene_changed": bool(evidence.get("scene_changed", False)),
         }
@@ -288,32 +282,7 @@ class EpisodeRecorder:
         scene_source_path with no scene_sha256 — the degenerate identity
         `assert_research_context` exists to refuse.
         """
-        from reachy_ai.experience.identity import build_simulator_identity
-
-        absolute = os.path.abspath(self._scene_file) if self._scene_file else ""
-        try:
-            stat = os.stat(absolute) if absolute else None
-        except OSError:
-            stat = None
-        key = (absolute, stat.st_mtime_ns if stat else 0,
-               stat.st_size if stat else 0)
-        if self._identity is None or self._identity_key != key:
-            # `build_simulator_identity` shells out to git twice.  Off the
-            # motion path, and cached on the scene file, so a session of twenty
-            # waves pays for it once.
-            identity = build_simulator_identity(
-                scene_path=absolute,
-                backend_name="sdk_bridge",
-            )
-            self._identity = dataclasses.replace(
-                identity, scene_source_path=_relative(self._scene_file))
-            self._identity_key = key
-
-        # The revision is the cheap half and the half that moves: it changes
-        # every time the board is edited, and rebuilding the whole identity
-        # (two git subprocesses) for it would be paying a lot for one string.
-        return dataclasses.replace(self._identity,
-                                   scene_revision=scene_revision)
+        return self._identity.for_scene(scene_revision)
 
 
 def build_recorder(scene_file: str = "") -> Optional[EpisodeRecorder]:

@@ -86,6 +86,13 @@ class Ability:
     arm_specific: bool = True
     route: str = ""
     route_version: int = 1
+    #: Parameter names this ability knows how to apply, and therefore the only
+    #: ones a retrieved recipe may vary (#90).  EMPTY EVERYWHERE TODAY: the
+    #: routes are fixed sequences of measured waypoints, so "the search found
+    #: a better segment duration" means nothing until something can act on it.
+    #: A recipe varying anything not listed here is refused rather than
+    #: applied by hope.
+    tunable: Tuple[str, ...] = ()
     start_postures: Tuple[str, ...] = ()
     end_posture: str = ""
     requires_confirmation: bool = True

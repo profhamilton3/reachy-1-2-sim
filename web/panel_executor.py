@@ -80,6 +80,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import panel_provenance as _P
 from panel_episodes import build_recorder
 
 log = logging.getLogger("reachy12.panel.executor")
@@ -439,6 +440,16 @@ class SimulatorExecutor:
         if not proposal.route:
             return False, (f"I have no motion for {proposal.task_type} — it is "
                            "recognised, planned and not yet built")
+        if proposal.recipe_parameters:
+            # THE LAST LINE AGAINST A SILENT SUBSTITUTION (#90).  The planner
+            # only accepts a recipe whose parameters the ability declares it
+            # can apply, and no ability declares any yet — so a plan reaching
+            # here with parameters on it means something applied them without
+            # a way to fly them.  Refuse rather than fly the default route
+            # while the card claims a promoted recipe.
+            varies = ", ".join(sorted(proposal.recipe_parameters))
+            return False, (f"the plan names a recipe that varies {varies}, "
+                           f"and I have no way to apply that to {proposal.route}")
         if proposal.arm != "right":
             return False, ("I can only do that with my right arm; the route "
                            "was measured for that arm through a rig that is "
@@ -907,20 +918,10 @@ class SimulatorExecutor:
         )
 
 
-def _observed_board(scene) -> Optional[List[str]]:
-    """Which objects were on the board, or None if that was not observed.
-
-    None is a real answer and the conservative one.  `on_board is True` and
-    not merely truthy, because it is None until a snapshot has been applied
-    and unknown is not absent — the same test `SceneView.on_board_tagged`
-    makes for the same reason.
-    """
-    if scene is None or getattr(scene, "error", ""):
-        return None
-    objects = getattr(scene, "objects", None) or {}
-    if any(o.on_board is None for o in objects.values()):
-        return None
-    return sorted(oid for oid, o in objects.items() if o.on_board is True)
+#: Which objects were on the board, or None if that was not observed.  One
+#: implementation, in `panel_provenance`, shared with the planner — the gate
+#: compares the two for exact set equality, so they cannot be two functions.
+_observed_board = _P.observed_board
 
 
 def _euclid(a, b) -> float:

@@ -813,7 +813,8 @@ def _panel():
         # Off unless REACHY_PANEL_EXECUTOR says so, so upgrading the page can
         # never quietly change what pressing Confirm does to the world.
         executor = build_executor(_SIM_LINK, _scene_view, _SCENE_FILE)
-        _PANEL = PanelRoutes(_scene_view, link=_SIM_LINK, executor=executor)
+        _PANEL = PanelRoutes(_scene_view, link=_SIM_LINK, executor=executor,
+                             scene_file=_SCENE_FILE)
     return _PANEL
 
 
