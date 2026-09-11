@@ -22,3 +22,7 @@ artifacts/*
 
 # Search studies and panel episode records (see web/panel_episodes.py)
 runs/
+
+# Local deployment configuration for docker compose, including any API key.
+# Never committed: the key is a credential and the rest is machine-specific.
+.env
