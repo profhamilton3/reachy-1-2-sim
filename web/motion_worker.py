@@ -323,9 +323,19 @@ def _point_at_cell(job, robot, arm, phase, *, should_abort=None, on_phase=None):
     out = M.point_at(planner, cell, (cx, cy), cz + hover, send=send, read=read,
                      should_abort=should_abort, on_phase=on_phase)
 
+    # THE RETURN UNWINDS THE HAND, not just the arm.  The IK spends the arm's
+    # redundancy on clearance, so a pointing pose can leave `r_forearm_yaw`
+    # most of 100 degrees from home — and the gross joints alone do not wait
+    # for it.  Measured: a stow started straight after a point stopped at
+    # HOVER with the forearm yaw 92 degrees off, past even the loose
+    # tolerance.  It is a weak joint (kp=60), so it gets passes rather than a
+    # tight tolerance.
     phase("back to the raised pose")
     P.converge(arm, dict(R.PRESENT), 2.5, tol=10.0,
                joints=list(R.GROSS_JOINTS), passes=6)
+    P.converge(arm, dict(R.PRESENT), 1.5, tol=20.0,
+               joints=("r_forearm_yaw", "r_wrist_pitch", "r_wrist_roll"),
+               passes=8)
 
     if not out.reached:
         raise M.RouteError(out.detail or f"I could not point at {cell}")

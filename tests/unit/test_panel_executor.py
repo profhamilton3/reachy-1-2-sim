@@ -291,13 +291,15 @@ def test_a_left_arm_ability_refuses_with_the_geometry_reason(fake_sdk):
     assert "not symmetric" in why
 
 
-def test_pointing_is_refused_because_its_runs_moved_objects(fake_sdk):
+def test_pointing_is_refused_in_a_scene_it_was_not_flown_in(fake_sdk):
+    """It has a row for FWDCenterLabSivaPool now, and that row is about that
+    scene.  Endpoints matching does not mean the path between them is clear."""
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
     ok, why = ex.available(
         a_proposal(task_type="point_cell", target_id=None, destination=None,
                    destination_kind="", route="POINT", cell="r2c2"))
     assert ok is False
-    assert "0.189 m" in why
+    assert "TestScene" in why
 
 
 def test_an_object_off_the_board_refuses(fake_sdk):
@@ -1038,18 +1040,37 @@ def test_a_process_that_cannot_be_started_is_a_failed_task(child):
     assert out["evidence"].get("worker_died") is True
 
 
-def test_pointing_is_refused_while_anything_is_on_the_board(fake_sdk):
-    """Measured over an empty board and nowhere else yet.  The empty-board run
-    had nothing to hit, so it says nothing about section 4.7's catalogue — a
-    can moved 0.189 m by an arm reporting +5.5 cm of clearance."""
-    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
+def test_pointing_is_refused_with_more_than_one_object_on_the_board(monkeypatch,
+                                                                    fake_sdk):
+    """Measured empty, and with each object type alone on the centre cell.
+    What has NOT been flown is a reach threading past a second object, which
+    is how a can moved 0.189 m in the runs this caution comes from."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    for obj in list(scene.objects.values())[:2]:
+        obj.on_board = True
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
     ok, why = ex.available(_ability(task_type="point_cell", route="POINT",
                                     cell="r2c2", end_posture="present",
                                     expected_start_posture="present"))
     assert ok is False
-    assert "empty board" in why
-    assert "soda_can" in why
+    assert "one object at a time" in why
     assert "0.189 m" in why
+
+
+def test_pointing_is_allowed_with_a_single_object(monkeypatch, fake_sdk):
+    """Six object types, each alone on the centre cell, board undisturbed in
+    every run — so one is measured and allowed."""
+    _validated(monkeypatch)
+    scene = live_scene()
+    alone = sorted(scene.objects)[0]
+    for oid, obj in scene.objects.items():
+        obj.on_board = (oid == alone)
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+    ok, why = ex.available(_ability(task_type="point_cell", route="POINT",
+                                    cell="r2c2", end_posture="present",
+                                    expected_start_posture="present"))
+    assert ok, why
 
 
 def test_pointing_is_allowed_once_the_board_is_clear(monkeypatch, fake_sdk):

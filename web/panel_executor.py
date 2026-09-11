@@ -403,24 +403,30 @@ class SimulatorExecutor:
         if scene.error:
             return False, f"I cannot read the scene: {scene.error}"
 
-        # POINTING IS MEASURED OVER AN EMPTY BOARD AND NOWHERE ELSE YET.
+        # POINTING IS MEASURED UP TO ONE OBJECT ON THE BOARD.
         #
-        # The route's row says so and this is what enforces it.  Section 4.7
-        # of the notebook is a catalogue of what an occupied board does to
-        # this manoeuvre — a can moved 0.189 m by an arm reporting +5.5 cm, a
-        # cylinder hovered to 1.6 cm and moved 0.123 m — and none of that is
-        # fixed by the empty-board run, which simply had nothing to hit.  The
-        # per-object hover heights are derived (see POINT_HOVER_FLOOR); they
-        # have not been flown, and "derived" is not "measured".
+        # Empty, and every one of the six object types alone on the centre
+        # cell — which is the harshest single-object case, because everything
+        # standing in the middle of the grid is crossed by every reach.  All
+        # six left the board undisturbed.  Two or more has NOT been flown, and
+        # section 4.7 is a catalogue of what an occupied board does to this
+        # manoeuvre when it goes wrong: a can moved 0.189 m by an arm
+        # reporting +5.5 cm, a cylinder hovered to 1.6 cm and moved 0.123 m.
+        #
+        # The limit is the number of objects rather than which ones, because
+        # what has not been measured is objects INTERACTING — a reach that
+        # clears the thing it is aimed at by threading past a second one.
         if proposal.task_type in ("point_cell", "point_object"):
             standing = sorted(oid for oid, o in scene.objects.items()
                               if o.on_board is True)
-            if standing:
+            if len(standing) > 1:
                 return False, (
-                    "I have only measured pointing over an empty board, and "
-                    f"{', '.join(standing)} {'is' if len(standing) == 1 else 'are'} "
-                    "on it. Pointing across an occupied board is what moved a "
-                    "can 0.189 m in the runs this refusal comes from.")
+                    "I have measured pointing over an empty board and over "
+                    "one object at a time, and there are "
+                    f"{len(standing)} on it: {', '.join(standing)}. What I "
+                    "have not flown is a reach threading past a second "
+                    "object, and that is how a can was moved 0.189 m in the "
+                    "runs this caution comes from.")
 
         # An ability is FOR a posture, not for one route.  "Store your arm"
         # means end in the pocket, and which measured routes get there depends
