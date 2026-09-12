@@ -621,3 +621,109 @@ class TestBroadcastFanOut:
     def test_no_clients_is_not_an_error(self):
         srv = self._server()
         self._run(srv._broadcast({}, "frame"))
+
+
+class TestResetAckTwoClientRouting:
+    """#43/#84 follow-up: TestResetAckRouting above only checks that
+    apply_pending() NAMES the right connection; nothing exercised the actual
+    delivery with two connections' queues live at once — the #84 reproduction
+    (`tally {'nobody': 3, 'asker': 3}`) needed a live multi-client server and
+    had no automated counterpart. `_deliver_reset_ack` is the delivery
+    primitive `_sim_thread` calls (extracted the same way `_broadcast` was,
+    for the same reason: untestable inline), so it is exercised directly here
+    exactly as TestBroadcastFanOut exercises `_broadcast`.
+    """
+
+    @staticmethod
+    def _run(coro):
+        import asyncio
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    def _server(self):
+        from server import ReachyMujocoServer
+        return ReachyMujocoServer.__new__(ReachyMujocoServer)
+
+    def test_the_bystander_connections_queue_stays_empty(self):
+        """Two clients connected, one resets: the ack lands only on the
+        asker's queue, never the bystander's."""
+        import asyncio
+        from protocol import ResetAck
+        srv = self._server()
+        srv._reset_ack_qs = {"asker": asyncio.Queue(maxsize=4),
+                             "bystander": asyncio.Queue(maxsize=4)}
+        ack = ResetAck(request_id="r1", sim_step=10, scene_revision="rev-1")
+        self._run(srv._deliver_reset_ack("asker", ack))
+        assert srv._reset_ack_qs["asker"].get_nowait() is ack
+        assert srv._reset_ack_qs["bystander"].empty()
+
+    def test_a_disconnected_askers_ack_is_dropped_not_misrouted(self):
+        """The asker's connection is gone by the time the reset lands. The
+        ack must be dropped — never handed to some other connection just
+        because its queue happens to exist."""
+        import asyncio
+        from protocol import ResetAck
+        srv = self._server()
+        srv._reset_ack_qs = {"bystander": asyncio.Queue(maxsize=4)}
+        ack = ResetAck(request_id="r1", sim_step=10, scene_revision="rev-1")
+        self._run(srv._deliver_reset_ack("gone", ack))  # not a live conn_id
+        assert srv._reset_ack_qs["bystander"].empty()
+
+    def test_two_askers_each_get_only_their_own_ack(self):
+        """The general two-client case: neither connection ever sees the
+        other's receipt, in either order."""
+        import asyncio
+        from protocol import ResetAck
+        srv = self._server()
+        srv._reset_ack_qs = {"a": asyncio.Queue(maxsize=4),
+                             "b": asyncio.Queue(maxsize=4)}
+        ack_a = ResetAck(request_id="ra", sim_step=1, scene_revision="rev-1")
+        ack_b = ResetAck(request_id="rb", sim_step=2, scene_revision="rev-1")
+        self._run(srv._deliver_reset_ack("a", ack_a))
+        self._run(srv._deliver_reset_ack("b", ack_b))
+        assert srv._reset_ack_qs["a"].get_nowait() is ack_a
+        assert srv._reset_ack_qs["a"].empty()
+        assert srv._reset_ack_qs["b"].get_nowait() is ack_b
+        assert srv._reset_ack_qs["b"].empty()
+
+
+class TestConcurrentResetCoalescing:
+    """#43/#84 follow-up (A5): reproduces, without fixing, the gap #43's
+    "steps to check" did not cover.
+
+    submit_reset() is a single slot (see its docstring in server.py for the
+    two candidate contracts this would need before changing): two clients
+    resetting within one sim tick means the earlier submission is silently
+    overwritten, and its asker never gets a ResetAck for a reset that
+    nonetheless happened. The routing fix (this file's TestResetAckRouting
+    and TestResetAckTwoClientRouting) makes this deterministic where it used
+    to be a coin flip against one shared queue — it did not create the loss,
+    and does not fix it either.
+
+    These tests document today's actual behaviour. They are expected to keep
+    passing until a decision is made and implemented; a change to
+    submit_reset's contract should update them deliberately, not have them
+    fail as a side effect.
+    """
+
+    @pytest.fixture
+    def sim_state(self, scene_xml, pool_doc):
+        from server import SimState
+        model = mujoco.MjModel.from_xml_string(scene_xml)
+        return SimState(model, scene_doc=pool_doc)
+
+    def test_two_resets_before_one_apply_pending_coalesce(self, sim_state):
+        sim_state.submit_reset({"request_id": "r1", "_conn_id": 7})
+        sim_state.submit_reset({"request_id": "r2", "_conn_id": 9})
+        info = sim_state.apply_pending()
+        # Only the second submission survives.
+        assert info == {"request_id": "r2", "_conn_id": 9}
+
+    def test_the_coalesced_askers_receipt_is_simply_gone(self, sim_state):
+        """Conn 7's ask is not queued behind conn 9's — it is not anywhere.
+        The next apply_pending() (the following sim tick, with nothing new
+        submitted) reports no reset at all, confirming conn 7 has nothing
+        outstanding to eventually receive."""
+        sim_state.submit_reset({"request_id": "r1", "_conn_id": 7})
+        sim_state.submit_reset({"request_id": "r2", "_conn_id": 9})
+        sim_state.apply_pending()
+        assert sim_state.apply_pending() is None
