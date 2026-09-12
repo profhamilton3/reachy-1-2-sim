@@ -662,8 +662,14 @@ _INDEX_HTML = b"""\
       try {
         var d = await (await fetch('/status')).json();
         var cls = d.left_age_ms < 500 ? 'ok' : 'warn';
+        // backend (last claimed SOURCE) and frames_stale (actual FRESHNESS)
+        // are shown as two separate labels on purpose - #40/A6: a dead
+        // writer leaves "backend" reading whatever it last was forever, so
+        // this page must never let that name stand in for "frames are live".
         document.getElementById('status').innerHTML =
-          'frames <span class="' + cls + '">' + d.left_age_ms + ' ms</span> old' +
+          'backend: <span class="' + (d.frames_stale ? 'bad' : 'ok') + '">' +
+          d.backend + (d.frames_stale ? ' (stale)' : '') + '</span>' +
+          ' &nbsp;|&nbsp; frames <span class="' + cls + '">' + d.left_age_ms + ' ms</span> old' +
           ' &nbsp;|&nbsp; seq: ' + d.left_seq + ' / ' + d.right_seq +
           ' &nbsp;|&nbsp; sim link: ' +
           (ws && ws.readyState === 1
@@ -700,12 +706,19 @@ def _frame_age_ms(path: str) -> int:
 
 
 def _detect_backend() -> str:
-    """Which backend actually wrote the frames currently on disk.
+    """Which backend last claimed to write the frames on disk.
 
     Read from the sidecar the writer itself updates, rather than asserted —
     see issue #40: a hardcoded value was right by accident in exactly one
     case and would lie in the rest, including the one case (silent fixture
     fallback) it most needs to catch.
+
+    This names a SOURCE, not a liveness guarantee: a dead writer leaves this
+    file exactly as it was, so this keeps answering with the last backend
+    that was running, forever, once nothing rewrites it. Pair with
+    `_frames_stale()`, which answers a different question (are frames
+    actually still arriving) from a signal this function ignores — the frame
+    files' own mtimes, not this sidecar.
     """
     try:
         with open(_FRAME_META_FILE) as f:
@@ -714,6 +727,31 @@ def _detect_backend() -> str:
         return "unknown"
     backend = meta.get("backend")
     return str(backend) if backend else "unknown"
+
+
+#: How stale a camera frame file may be before /status calls it stale rather
+#: than merely aging.  At 15 Hz (camera_fixture.py, mujoco_remote_backend.py)
+#: a live writer refreshes every ~67 ms; ten missed periods is long enough
+#: that ordinary scheduling jitter cannot explain it, short enough that an
+#: operator finds out in well under a second.
+#:
+#: Deliberately NOT derived from the sidecar's own `wall_time_ns`: the
+#: fixture writer re-stamps that file every tick regardless of whether it
+#: wrote a new frame (camera_fixture.py's `frame_file_writer`), so a stalled
+#: capture loop that is still merely running would read as fresh forever.
+#: The frame JPEGs' own mtimes are only touched when a frame is actually
+#: written, which is the thing "stale" needs to mean.
+_STALE_THRESHOLD_MS = 10 * (1000.0 / 15.0)
+
+
+def _frames_stale(left_age_ms: int, right_age_ms: int) -> bool:
+    """Whether either camera's frame file is missing or too old to trust.
+
+    `_frame_age_ms` returns -1 for a missing file, which must count as stale
+    rather than as a suspiciously-perfect zero.
+    """
+    return any(age < 0 or age > _STALE_THRESHOLD_MS
+               for age in (left_age_ms, right_age_ms))
 
 
 def _frame_seq(path: str) -> int:
@@ -1004,10 +1042,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_status(self):
+        left_age_ms = _frame_age_ms(_LEFT_FILE)
+        right_age_ms = _frame_age_ms(_RIGHT_FILE)
         payload = {
+            # Last claimed SOURCE (sidecar) and actual frame FRESHNESS (file
+            # mtimes) are deliberately separate fields: the sidecar can go
+            # stale without ever saying so (issue #40/A6), so a reader must
+            # not infer freshness from the backend name alone.
             "backend": _detect_backend(),
-            "left_age_ms": _frame_age_ms(_LEFT_FILE),
-            "right_age_ms": _frame_age_ms(_RIGHT_FILE),
+            "frames_stale": _frames_stale(left_age_ms, right_age_ms),
+            "left_age_ms": left_age_ms,
+            "right_age_ms": right_age_ms,
             "left_seq": _frame_seq(_LEFT_FILE),
             "right_seq": _frame_seq(_RIGHT_FILE),
         }
