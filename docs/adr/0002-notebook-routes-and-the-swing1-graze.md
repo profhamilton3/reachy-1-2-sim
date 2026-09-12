@@ -139,10 +139,16 @@ sit outside this check entirely.
 
 That model disagrees with the eighteen-leg evidence table above. Recomputed
 against this ADR's own certified board (`soda_can` at r1c1, `foam_block` at
-r2c3) with the aperture correction applied, every guarded leg still reads
-**−1.7 cm** on `foam_block` at zero margin — better than the −2.6 cm an
-always-open hand read before the aperture fix, but still a refusal of the
-exact board eighteen physics flights left undisturbed. The eighteen flights
+r2c3) with the aperture correction applied, every guarded route still reads
+**−1.7 cm** on `foam_block` at zero margin (the OPEN-hand legs; the
+SHUT-only legs — HOVER → REST_SHUT and REST_SHUT → HOVER — read +0.5 cm,
+per route the worst is −1.7 cm) — better than the −2.6 cm an always-open
+hand read before the aperture fix, but still a refusal of the exact board
+eighteen physics flights left undisturbed. The disagreement itself is
+resolved in the 2026-09-12 review (R1/§3.2): the forearm and upper-arm
+capsules match the MJCF exactly, and every documented disagreement — this
+board included — is the single isotropic hand tube reading up to 9 cm more
+conservative than the MJCF's own hand shells. The eighteen flights
 are not in question; the capsule model and those flights disagree at r2c3,
 and which one to trust — and at what margin — is #56/#74's decision, not
 settled by anything in this ADR or by the aperture fix. Until it is, the

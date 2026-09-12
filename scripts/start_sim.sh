@@ -7,7 +7,10 @@
 #
 # Result: real physics arm dynamics + stereo camera render (port 8080), with the
 # scene object poses mirrored into RViz (port 6080).  If the native server is not
-# running, the container falls back to the kinematic fixture automatically.
+# running, the container does NOT fall back to the kinematic fixture: it picks
+# REACHY_SIM_BACKEND=mujoco-remote at startup and never switches, so with no
+# native server it reconnects forever in DEGRADED and writes no frames
+# (fake_reachy_server.py; review 2026-09-12, R6).
 #
 # Usage — pick the scene by short name (default: tabletop_demo); the SAME scene
 # drives both the physics (camera :8080) and the noVNC/RViz view (:6080):

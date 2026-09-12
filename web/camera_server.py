@@ -661,7 +661,11 @@ _INDEX_HTML = b"""\
     async function poll() {
       try {
         var d = await (await fetch('/status')).json();
-        var cls = d.left_age_ms < 500 ? 'ok' : 'warn';
+        // One threshold, not two (review 2026-09-12, R6): frames_stale is
+        // /status's own answer to "are frames still arriving", already
+        // computed against _STALE_THRESHOLD_MS -- this page no longer keeps
+        // a second, different number (500 ms) for the same question.
+        var cls = d.frames_stale ? 'warn' : 'ok';
         // backend (last claimed SOURCE) and frames_stale (actual FRESHNESS)
         // are shown as two separate labels on purpose - #40/A6: a dead
         // writer leaves "backend" reading whatever it last was forever, so
