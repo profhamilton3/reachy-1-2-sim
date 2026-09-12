@@ -810,10 +810,25 @@ POSTURE_TRANSITIONS: Dict[Tuple[str, str], str] = {
 #:                                 the latter here left that descent unchecked
 #:                                 (#82 incident, corrected here).)
 #:   LOWER_TO_REST                 PRESENT -> REST_SHUT -> REST
+#:   LIFT_TO_PRESENT                REST -> PRESENT  (arriving on PRESENT;
+#:                                 the single joint-space line LIFT_TO_PRESENT
+#:                                 flies IS LOWER_TO_REST's PRESENT ->
+#:                                 REST_SHUT descent swept backwards, so it
+#:                                 crosses the identical footprint LOWER_TO_REST
+#:                                 is already checked against — see the
+#:                                 2026-09-12 review, R1: a wave or point_*
+#:                                 requested from REST resolves this route
+#:                                 (`web/motion_worker.py`), so leaving it out
+#:                                 left that lift unguarded on a live path.)
 #:
-#: WAVE, LIFT_TO_PRESENT and POINT are absent on purpose: none of them lands
-#: the arm on REST or departs from it, so none of them can catch an object in
-#: this footprint that its own named route did not already put there.
+#: WAVE and POINT are absent on purpose: neither lands the arm on REST or
+#: departs from it, so neither can catch an object in this footprint that its
+#: own named route did not already put there. WAVE's exclusion is a measured
+#: number, not an assertion: its two joint-space legs (PRESENT -> WAVE_A,
+#: PRESENT -> WAVE_B) read worst +1.6 cm (tube hand, fully open) against a
+#: 12 cm block anywhere on the board (x=0.23, y=-0.32 — the same near-right
+#: corner strip LIFT_TO_PRESENT and LOWER_TO_REST are worst on), positive on
+#: both models (`outputs/probes-2026-09-12/probe_wave_legs.txt`).
 #:
 #: THE DECISION #82 ASKS FOR: this gates every ability whose available() call
 #: resolves to one of these route names, not only `rest_forearm`.  A `wave` or
@@ -827,6 +842,7 @@ FOOTPRINT_LEGS: Dict[str, Tuple[Dict[str, float], ...]] = {
     "STOW_ROUTE": (REST, REST_SHUT, HOVER),
     "STOW_FROM_SIDE": (PRESENT, REST_SHUT, HOVER),
     "LOWER_TO_REST": (PRESENT, REST_SHUT, REST),
+    "LIFT_TO_PRESENT": (REST, PRESENT),
 }
 
 

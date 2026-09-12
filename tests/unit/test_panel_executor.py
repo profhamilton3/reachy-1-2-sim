@@ -1460,3 +1460,132 @@ class TestFootprintCheck:
 
         assert ok is False
         assert "soda_can" in why
+
+
+def _board_height_fixture():
+    """A 6x6x12 cm box standing on the REAL FWDCenterLabSivaPool table, at
+    (0.23, -0.32) -- the near-right corner strip #82/A3's own sweep (review
+    2026-09-12, R1) reads worst on: lift/descent -2.8 cm, the already-checked
+    STOW_ROUTE/PLACE_ROUTE rail tail +1.0 cm, in both the capsule and MJCF
+    shell models.
+
+    Built by loading the real scene (real table height, grid, static
+    obstacles) via `SceneModel.from_yaml` and substituting `soda_can`'s shape
+    for the probe box, rather than the minimal `_scene_model_with` stub every
+    other footprint test here uses -- this fixture exercises the guard
+    against the scene the panel actually flies against.
+    """
+    from dataclasses import replace
+    from reachy_ai.scene.awareness import SceneModel
+    real = SceneModel.from_yaml("scenes/FWDCenterLabSivaPool.yaml")
+    table_z = real.table_surface_z
+    point = (0.23, -0.32, table_z + 0.061)
+    objects = []
+    for oid, obj in real.objects.items():
+        if oid == "soda_can":
+            obj = replace(obj, kind="box", center=point, size=(0.06, 0.06, 0.12))
+        objects.append(obj)
+    model = SceneModel(real.frame_id, objects, real._table_id)
+    return model, point
+
+
+class TestLiftToPresentFootprint:
+    """#82/A3 (review 2026-09-12, R1): LIFT_TO_PRESENT (REST -> PRESENT) flies
+    the identical joint-space line as LOWER_TO_REST's PRESENT -> REST_SHUT
+    descent, reversed -- REST and REST_SHUT differ only in `r_gripper`.  A
+    wave or point_* requested from REST resolves this route
+    (`web/motion_worker.py`) through the SAME footprint-guard superset check
+    every other ability in this file exercises, so leaving it out of
+    `FOOTPRINT_LEGS` left that lift unguarded on a live path.
+    """
+
+    def test_wave_from_rest_is_refused(self, monkeypatch):
+        """Fails on the parent commit (61fc1be): with LIFT_TO_PRESENT absent
+        from FOOTPRINT_LEGS, `available()`'s end_posture="present" superset
+        checks only RAISE_TO_SIDE and WAVE, both of which clear this point
+        (+1.0 cm / positive), so the pre-fix guard allows it.
+
+        Builds the real-scene fixture (a genuine `SceneModel.from_yaml` call)
+        before applying any of `fake_sdk`'s patches -- `fake_sdk` stubs
+        `SceneModel.from_yaml` to an object-free model, and doing that first
+        would make `_board_height_fixture()` load nothing."""
+        model, point = _board_height_fixture()
+        _validated(monkeypatch)
+        monkeypatch.setitem(sys.modules, "reachy_sdk",
+                            types.SimpleNamespace(ReachySDK=object))
+        monkeypatch.setenv("REACHY_SIM_BACKEND", "mujoco-remote")
+        from reachy_ai.scene.awareness import SceneModel
+        monkeypatch.setattr(SceneModel, "from_yaml",
+                            staticmethod(lambda path: model))
+        scene = _scene_with_object_at(point)
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="wave", route="WAVE", end_posture="present",
+            expected_start_posture="rest"))
+
+        assert ok is False
+        assert "soda_can" in why
+
+    def test_stow_arm_from_present_is_refused(self, monkeypatch):
+        """Unaffected by A3 (STOW_FROM_SIDE already starts at PRESENT since
+        A1), pinned here on the same fixture as the wave case above so both
+        abilities are checked against the identical board."""
+        model, point = _board_height_fixture()
+        _validated(monkeypatch)
+        monkeypatch.setitem(sys.modules, "reachy_sdk",
+                            types.SimpleNamespace(ReachySDK=object))
+        monkeypatch.setenv("REACHY_SIM_BACKEND", "mujoco-remote")
+        from reachy_ai.scene.awareness import SceneModel
+        monkeypatch.setattr(SceneModel, "from_yaml",
+                            staticmethod(lambda path: model))
+        scene = _scene_with_object_at(point)
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="stow_arm", route="STOW_FROM_SIDE",
+            end_posture="home", expected_start_posture="present"))
+
+        assert ok is False
+        assert "soda_can" in why
+
+    def test_rest_forearm_from_home_is_also_refused_via_lower_to_rest(
+            self, monkeypatch):
+        """DISCREPANCY from the 2026-09-12 assignment (Part 1c), reported for
+        Opus rather than forced to pass: the assignment expected rest_forearm
+        from HOME to be ALLOWED at this point, reasoning that the "checked
+        tail" (the already-guarded STOW_ROUTE/PLACE_ROUTE REST_SHUT<->HOVER
+        corridor) reads +1.0 cm here.  That tail does clear.  But
+        `rest_forearm`'s ability always sets `end_posture=POSTURE_REST`
+        (panel_abilities.py), so `available()` takes the union branch over
+        *every* route reaching "rest" -- PLACE_ROUTE **and** LOWER_TO_REST --
+        not just the one PLACE_ROUTE flies from HOME.  LOWER_TO_REST's own
+        FOOTPRINT_LEGS entry, (PRESENT, REST_SHUT, REST), already contains the
+        PRESENT -> REST_SHUT descent leg -- the same arm-joint line
+        LIFT_TO_PRESENT reverses, since REST and REST_SHUT share every ARM7
+        joint but r_gripper.  That descent leg was fixed under A1, is
+        unrelated to A3, and already reads negative at this exact point,
+        independent of whether LIFT_TO_PRESENT is in FOOTPRINT_LEGS at all
+        (verified against the parent commit 61fc1be: also refused there).
+        So no point exists where LIFT_TO_PRESENT's reversed-descent leg reads
+        negative (needed for the wave-from-rest case above) while
+        rest_forearm-from-HOME's union check reads clear -- the two legs are
+        the same measurement.  This test pins the actual, current behaviour
+        (refused) rather than the assignment's expected one (allowed)."""
+        model, point = _board_height_fixture()
+        _validated(monkeypatch)
+        monkeypatch.setitem(sys.modules, "reachy_sdk",
+                            types.SimpleNamespace(ReachySDK=object))
+        monkeypatch.setenv("REACHY_SIM_BACKEND", "mujoco-remote")
+        from reachy_ai.scene.awareness import SceneModel
+        monkeypatch.setattr(SceneModel, "from_yaml",
+                            staticmethod(lambda path: model))
+        scene = _scene_with_object_at(point)
+        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+
+        ok, why = ex.available(_ability(
+            task_type="rest_forearm", route="PLACE_ROUTE",
+            end_posture="rest", expected_start_posture="home"))
+
+        assert ok is False
+        assert "soda_can" in why

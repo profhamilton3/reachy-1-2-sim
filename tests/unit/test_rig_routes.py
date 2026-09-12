@@ -422,8 +422,34 @@ class TestFootprintLegs:
         assert R.FOOTPRINT_LEGS["LOWER_TO_REST"][0] == R.PRESENT
         assert R.FOOTPRINT_LEGS["LOWER_TO_REST"][-2:] == (R.REST_SHUT, R.REST)
 
-    def test_wave_and_lift_to_present_are_absent_on_purpose(self):
-        """Neither route lands the arm on REST or departs from it, so neither
-        can catch an object its own named route did not already put there."""
+    def test_wave_is_absent_on_purpose(self):
+        """WAVE never lands the arm on REST or departs from it, so it cannot
+        catch an object its own named route did not already put there — and
+        that is a measured number, not just an assertion: WAVE's two legs
+        (PRESENT -> WAVE_A, PRESENT -> WAVE_B) read worst +1.6 cm (tube hand,
+        fully open) against a 12 cm block anywhere on the board (x=0.23,
+        y=-0.32), positive in both models
+        (outputs/probes-2026-09-12/probe_wave_legs.txt)."""
         assert "WAVE" not in R.FOOTPRINT_LEGS
-        assert "LIFT_TO_PRESENT" not in R.FOOTPRINT_LEGS
+
+    def test_lift_to_present_is_present_and_reverses_the_descent(self):
+        """LIFT_TO_PRESENT (#82/A3) is REST -> PRESENT, one joint-space line.
+        REST and REST_SHUT differ only in r_gripper (rig_routes.py: REST =
+        dict(REST_SHUT, r_gripper=OPEN)), so that line is the same arm sweep
+        as LOWER_TO_REST's first leg (PRESENT -> REST_SHUT) flown backwards —
+        the lift is the descent reversed, and is checked against the same
+        footprint for that reason."""
+        assert "LIFT_TO_PRESENT" in R.FOOTPRINT_LEGS
+        assert R.FOOTPRINT_LEGS["LIFT_TO_PRESENT"] == (R.REST, R.PRESENT)
+
+        arm_joints = [j for j in R.ARM7 if j != "r_gripper"]
+        for j in arm_joints:
+            assert R.REST[j] == R.REST_SHUT[j], j
+
+        descent_first_leg = R.FOOTPRINT_LEGS["LOWER_TO_REST"][:2]
+        assert descent_first_leg == (R.PRESENT, R.REST_SHUT)
+        reversed_descent = tuple(reversed(descent_first_leg))
+        lift = R.FOOTPRINT_LEGS["LIFT_TO_PRESENT"]
+        for a, b in zip(lift, reversed_descent):
+            for j in arm_joints:
+                assert a[j] == b[j], j
