@@ -139,6 +139,37 @@ _FINGER_HALF = (0.012, 0.010)
 _THUMB_RADIUS = math.hypot(0.025, 0.046)      # fixed shell, gripper-independent
 _GRIPPER_OPEN_LIMIT_DEG = -68.8               # MJCF range lower bound, -1.2 rad
 
+# ── Per-shell hand geometry ("shells" hand mode, review 2026-09-12 / #56/#74) ─
+#
+# The tube above is one isotropic capsule around BOTH pads, sized from the
+# aperture alone.  It is what every consumer flies against today and stays
+# the default.  "shells" is a second, opt-in `link_capsules` mode: one
+# capsule per MJCF visual shell (upper_arm and forearm are unchanged; the
+# hand becomes three capsules instead of one), built from the same frames
+# MuJoCo itself places these bodies at (native_mujoco/model/reachy_1_2.xml),
+# not measured or eyeballed independently — `test_arm_geometry_mjcf.py`
+# checks the two agree to 2 mm.
+#
+# r_wrist2hand -> r_gripper_thumb -> r_gripper_finger, exactly as the MJCF
+# nests them: the thumb hangs a fixed offset below the wrist, WRIST_ROLL
+# rotates the thumb (and everything under it) about the wrist's own local X,
+# and r_gripper then rotates the finger about the THUMB's local X -- so the
+# finger frame depends on both joints, not just the gripper angle alone.
+_THUMB_ORIGIN_OFFSET = np.array([0.0, 0.0, -0.0325])
+_FINGER_HINGE_OFFSET = np.array([0.0, -0.037, -0.03998])
+
+# Visual shell boxes (geom pos/size, MJCF): capsule axis along each body's
+# local Z through the box centre; radius is the box's XY half-diagonal (the
+# cross-section perpendicular to that axis).
+_THUMB_BOX_CENTER = np.array([0.0, -0.018, -0.022])
+_THUMB_BOX_HALF_Z = 0.038
+_THUMB_SHELL_RADIUS = math.hypot(0.025, 0.028)
+_FINGER_BOX_CENTER = np.array([0.0, 0.0, -0.038])
+_FINGER_BOX_HALF_Z = 0.038
+_FINGER_SHELL_RADIUS = math.hypot(0.012, 0.010)
+
+_WRIST_BALL_RADIUS = 0.028
+
 Capsule = Tuple[str, XYZ, XYZ, float]
 
 
@@ -237,27 +268,88 @@ def within_limits(joints: Sequence[float], side: str = "right",
 
 
 def link_capsules(joints: Sequence[float], side: str = "right",
-                  gripper_deg: Optional[float] = None) -> List[Capsule]:
+                  gripper_deg: Optional[float] = None,
+                  hand: str = "tube") -> List[Capsule]:
     """The arm's collision volume as (name, end, end, radius) world capsules.
 
-    Feed straight to ``SceneModel.clearance``.  Only the three moving links are
-    modelled: the torso and head do not move here, and the shoulder ball is
-    inside the upper-arm capsule already.
+    Feed straight to ``SceneModel.clearance``.  The torso and head do not move
+    here, and the shoulder ball is inside the upper-arm capsule already.
 
-    ``gripper_deg`` sizes the hand capsule to the actual aperture; omitting it
-    assumes the hand is wide open, which is the safe assumption and costs about
-    3.5 cm of reported clearance against a closed hand.
+    ``gripper_deg`` sizes the hand to the actual aperture; omitting it assumes
+    the hand is wide open, which is the safe assumption and costs about 3.5 cm
+    of reported clearance against a closed hand.
+
+    ``hand`` selects the hand model. ``"tube"`` (default, unchanged, and every
+    consumer's current behaviour) is one isotropic capsule around both pads.
+    ``"shells"`` is five capsules instead of three: ``upper_arm`` and
+    ``forearm`` unchanged, plus ``thumb``, ``finger`` and ``wrist_ball`` in
+    place of ``hand`` -- one capsule per MJCF visual shell, at the frames
+    MuJoCo itself places them at.  See the module-level comment above
+    ``_THUMB_ORIGIN_OFFSET``.  No consumer passes this yet; it exists to be
+    validated against the compiled MJCF (`test_arm_geometry_mjcf.py`) ahead of
+    #56/#74's decision to use it.
     """
     shoulder, elbow, wrist, R = link_frames(joints, side)
-    tip = wrist + R @ np.array([0.0, 0.0, -_HAND_LEN])
 
     def xyz(v) -> XYZ:
         return (float(v[0]), float(v[1]), float(v[2]))
 
-    return [
+    arm = [
         ("upper_arm", xyz(shoulder), xyz(elbow), _UPPER_ARM_RADIUS),
         ("forearm", xyz(elbow), xyz(wrist), _FOREARM_RADIUS),
-        ("hand", xyz(wrist), xyz(tip), hand_radius(gripper_deg)),
+    ]
+
+    if hand == "tube":
+        tip = wrist + R @ np.array([0.0, 0.0, -_HAND_LEN])
+        return arm + [("hand", xyz(wrist), xyz(tip), hand_radius(gripper_deg))]
+
+    if hand != "shells":
+        raise ValueError(f"hand must be 'tube' or 'shells', got {hand!r}")
+
+    gripper_deg_eff = _GRIPPER_OPEN_LIMIT_DEG if gripper_deg is None else gripper_deg
+    return arm + _shells_hand_capsules(wrist, gripper_deg_eff, joints, side)
+
+
+def _shells_hand_capsules(wrist: np.ndarray, gripper_deg: float,
+                          joints: Sequence[float], side: str) -> List[Capsule]:
+    """thumb / finger / wrist_ball capsules for `link_capsules(hand="shells")`.
+
+    Rebuilds the chain up to wrist_pitch (the frame the thumb offset is
+    actually expressed in, before wrist_roll rotates the thumb -- and
+    everything under it -- about the wrist's own local X) directly from
+    `joints`, term for term the same way `link_frames` composes it.
+    """
+    q = np.radians(np.asarray(list(joints)[:7], dtype=float))
+    sign = 1.0 if side == "right" else -1.0
+    # Rebuild the pitch-only orientation the thumb offset is expressed in
+    # (everything up to and including wrist_pitch, i.e. `R_final` with the
+    # wrist_roll term removed) directly from the joint angles, matching
+    # `link_frames`'s own composition order term for term.
+    R = _roty(q[0]) @ _rotx(sign * q[1]) @ _rotz(q[2])
+    R = R @ _roty(q[3]) @ _rotz(q[4])
+    R_pitch_only = R @ _roty(q[5])
+    R_thumb = R_pitch_only @ _rotx(q[6])
+
+    def xyz(v) -> XYZ:
+        return (float(v[0]), float(v[1]), float(v[2]))
+
+    thumb_origin = wrist + R_pitch_only @ _THUMB_ORIGIN_OFFSET
+    thumb_a = thumb_origin + R_thumb @ (
+        _THUMB_BOX_CENTER + np.array([0.0, 0.0, -_THUMB_BOX_HALF_Z]))
+    thumb_b = thumb_origin + R_thumb @ (
+        _THUMB_BOX_CENTER + np.array([0.0, 0.0, _THUMB_BOX_HALF_Z]))
+
+    R_finger = R_thumb @ _rotx(math.radians(gripper_deg))
+    finger_origin = thumb_origin + R_thumb @ _FINGER_HINGE_OFFSET
+    finger_a = finger_origin + R_finger @ (
+        _FINGER_BOX_CENTER + np.array([0.0, 0.0, -_FINGER_BOX_HALF_Z]))
+    finger_b = finger_origin + R_finger @ (
+        _FINGER_BOX_CENTER + np.array([0.0, 0.0, _FINGER_BOX_HALF_Z]))
+
+    return [
+        ("thumb", xyz(thumb_a), xyz(thumb_b), _THUMB_SHELL_RADIUS),
+        ("finger", xyz(finger_a), xyz(finger_b), _FINGER_SHELL_RADIUS),
+        ("wrist_ball", xyz(wrist), xyz(wrist), _WRIST_BALL_RADIUS),
     ]
 
 
