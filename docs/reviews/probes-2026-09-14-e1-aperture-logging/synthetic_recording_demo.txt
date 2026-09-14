@@ -1,0 +1,108 @@
+=== schema sample (first and last) ===
+{
+  "t": 0.0,
+  "joints": {
+    "r_shoulder_pitch": -70.0,
+    "r_shoulder_roll": -25.0,
+    "r_arm_yaw": 0.0,
+    "r_elbow_pitch": -80.0,
+    "r_forearm_yaw": 0.0,
+    "r_wrist_pitch": 0.0,
+    "r_wrist_roll": 0.0,
+    "r_gripper": -45.0
+  }
+}
+{
+  "t": 0.95,
+  "joints": {
+    "r_shoulder_pitch": -40.0,
+    "r_shoulder_roll": -10.0,
+    "r_arm_yaw": 0.0,
+    "r_elbow_pitch": -45.0,
+    "r_forearm_yaw": 0.0,
+    "r_wrist_pitch": -10.0,
+    "r_wrist_roll": 30.0,
+    "r_gripper": -45.0
+  }
+}
+
+=== validated_samples: 20 samples, strict (default) ===
+all valid: assumed=[] (expect [])
+
+=== report(): realised vs planned, both hand models ===
+{
+  "route": "LOWER_TO_REST",
+  "scene": "scenes/FWDCenterLabSivaPool.yaml",
+  "n_samples": 20,
+  "realised": {
+    "tube": {
+      "red_cube": 1.2726757904479509,
+      "blue_cylinder": 1.210463497167953,
+      "soda_can": 1.1881171345708417,
+      "foam_block": 0.88095411830474,
+      "pool_box_1": 1.1377778474261628,
+      "pool_box_2": 1.090310850821304,
+      "pool_box_3": 1.0749772450451227,
+      "pool_cyl_1": 0.756784199026922,
+      "pool_cyl_2": 0.7173710081253459,
+      "pool_cyl_3": 0.7232146417241443
+    },
+    "shells": {
+      "red_cube": 1.3337600288366345,
+      "blue_cylinder": 1.3193305411459646,
+      "soda_can": 1.3143135428700141,
+      "foam_block": 0.9519968333330618,
+      "pool_box_1": 1.189308384345165,
+      "pool_box_2": 1.1987796655466867,
+      "pool_box_3": 1.1995108519536686,
+      "pool_cyl_1": 0.8278533380183508,
+      "pool_cyl_2": 0.7877499831738577,
+      "pool_cyl_3": 0.7879078443412554
+    }
+  },
+  "realised_aperture_assumed_samples": [],
+  "planned": {
+    "tube": {
+      "red_cube": 1.2726757904479509,
+      "blue_cylinder": 1.210463497167953,
+      "soda_can": 1.1881171345708417,
+      "foam_block": 0.88095411830474,
+      "pool_box_1": 1.1377778474261628,
+      "pool_box_2": 1.090310850821304,
+      "pool_box_3": 1.0749772450451227,
+      "pool_cyl_1": 0.756784199026922,
+      "pool_cyl_2": 0.7173710081253459,
+      "pool_cyl_3": 0.7232146417241443
+    },
+    "shells": {
+      "red_cube": 1.3337600288366345,
+      "blue_cylinder": 1.3193305411459646,
+      "soda_can": 1.3165346519173238,
+      "foam_block": 0.9519968333330618,
+      "pool_box_1": 1.189308384345165,
+      "pool_box_2": 1.1987796655466867,
+      "pool_box_3": 1.199619961998882,
+      "pool_cyl_1": 0.8278533380183508,
+      "pool_cyl_2": 0.7877499831738577,
+      "pool_cyl_3": 0.7879078443412554
+    }
+  }
+}
+
+=== compare against the OLD (pre-aperture) behaviour: assumed-open on every sample ===
+assumed_samples: 20 of 20 (the whole log, as expected for a schema-1-shaped input)
+
+=== the difference this makes: realised tube clearance, old (assumed-open) vs new (actual aperture) ===
+  red_cube       new(actual aperture)=+127.27 cm  old(assumed open)=+125.91 cm  delta= +1.36 cm
+  blue_cylinder  new(actual aperture)=+121.05 cm  old(assumed open)=+119.69 cm  delta= +1.36 cm
+  soda_can       new(actual aperture)=+118.81 cm  old(assumed open)=+117.45 cm  delta= +1.36 cm
+  foam_block     new(actual aperture)= +88.10 cm  old(assumed open)= +86.74 cm  delta= +1.36 cm
+  pool_box_1     new(actual aperture)=+113.78 cm  old(assumed open)=+112.42 cm  delta= +1.36 cm
+  pool_box_2     new(actual aperture)=+109.03 cm  old(assumed open)=+107.67 cm  delta= +1.36 cm
+  pool_box_3     new(actual aperture)=+107.50 cm  old(assumed open)=+106.14 cm  delta= +1.36 cm
+  pool_cyl_1     new(actual aperture)= +75.68 cm  old(assumed open)= +74.32 cm  delta= +1.36 cm
+  pool_cyl_2     new(actual aperture)= +71.74 cm  old(assumed open)= +70.38 cm  delta= +1.36 cm
+  pool_cyl_3     new(actual aperture)= +72.32 cm  old(assumed open)= +70.96 cm  delta= +1.36 cm
+
+=== missing-data guard: a corrupted sample is refused, not silently open ===
+raised as expected: sample 5 (t=0.25): r_gripper=nan is not finite
