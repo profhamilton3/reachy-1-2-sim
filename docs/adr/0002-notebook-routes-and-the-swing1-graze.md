@@ -112,20 +112,50 @@ are, and an empty board proves nothing about disturbance.
 
 ### What is explicitly not covered
 
-**An object in the rest footprint will be hit — RESOLVED by #82.** These routes
-end on the board; the forearm lands on the near-right cells. Observed on a run
-where `foam_block` had slid 7 cm off r2c3 into that footprint: `LOWER_TO_REST`
-moved it 5.3 cm and the `STOW_ROUTE` after it pushed the total to 17 cm.
+**An object in the rest footprint will be hit — a guard exists (#82), and it
+does not yet certify this ADR's own board.** These routes end on the board;
+the forearm lands on the near-right cells. Observed on a run where
+`foam_block` had slid 7 cm off r2c3 into that footprint: `LOWER_TO_REST` moved
+it 5.3 cm and the `STOW_ROUTE` after it pushed the total to 17 cm.
 `primitives` has no scene and cannot see this, which is why the check sits
-above it, in `web/panel_executor.py::_ability_available` — it sweeps
+above it, in `web/panel_executor.py::_footprint_refusal` — it sweeps
 `reachy_ai.motion.rig_routes.FOOTPRINT_LEGS` (the HOVER/PRESENT → REST_SHUT →
-REST tail or head of every route that lands on, or departs from, REST) against
-live object poses and refuses the whole ability rather than commanding a move
-that would hit something. It gates `rest_forearm`, `stow_arm`, and any `wave`
-or `point_*` request flown from the pocket by way of `RAISE_TO_SIDE`, which
-crosses the identical corridor. These rows now certify the tabletop as well as
-the corridor — for the REST-adjacent leg specifically; guarding the rest of the
-rig corridor (`SWING_1` and #74) is still open.
+REST tail or head of every route that lands on, or departs from, REST)
+against live object poses and refuses the whole ability rather than
+commanding a move that would hit something. It gates `rest_forearm`,
+`stow_arm` (both from REST and, since #82's follow-up review, the real
+PRESENT → REST_SHUT descent `stow_arm` flies as `STOW_FROM_SIDE`), and any
+`wave` or `point_*` request flown from the pocket by way of `RAISE_TO_SIDE`,
+which crosses the identical corridor.
+
+What the guard actually models, currently: the three-link capsule geometry
+(`kinematics.link_capsules`), 13 joint-space samples per leg, the hand sized
+to the leg's own commanded gripper aperture (the wider of its two waypoint
+endpoints, converted through `hand_radius` rather than compared as raw
+degrees), a **zero** clearance margin (`rig_routes.FOOTPRINT_MARGIN`, named
+but not validated — see below), and only the objects the scene tracks live as
+placeable/manipulable — not the rails, board or pedestal themselves, which
+sit outside this check entirely.
+
+That model disagrees with the eighteen-leg evidence table above. Recomputed
+against this ADR's own certified board (`soda_can` at r1c1, `foam_block` at
+r2c3) with the aperture correction applied, every guarded route still reads
+**−1.7 cm** on `foam_block` at zero margin (the OPEN-hand legs; the
+SHUT-only legs — HOVER → REST_SHUT and REST_SHUT → HOVER — read +0.5 cm,
+per route the worst is −1.7 cm) — better than the −2.6 cm an always-open
+hand read before the aperture fix, but still a refusal of the exact board
+eighteen physics flights left undisturbed. The disagreement itself is
+resolved in the 2026-09-12 review (R1/§3.2): the forearm and upper-arm
+capsules match the MJCF exactly, and every documented disagreement — this
+board included — is the single isotropic hand tube reading up to 9 cm more
+conservative than the MJCF's own hand shells. The eighteen flights
+are not in question; the capsule model and those flights disagree at r2c3,
+and which one to trust — and at what margin — is #56/#74's decision, not
+settled by anything in this ADR or by the aperture fix. Until it is, the
+guard is a stricter obstacle than the flown evidence supports, in the
+conservative direction (it refuses more than the physics shows is needed,
+not less). Guarding the rest of the rig corridor (`SWING_1` and #74) is also
+still open.
 
 **Recovery from mid-corridor is still narrow.** `rig_motion.stranded_at` only
 recognises the four pocket waypoints. An arm left at `SWING_2` is reported, not
@@ -140,4 +170,7 @@ Revisit this ADR when:
 - the rig geometry or the scene's rail placement changes;
 - a measured shortcut from `SWING_3` to `PRESENT` is flown — modelled at +3.8 cm,
   it would remove the touch-down at `REST` on the way out, and it is currently
-  unmeasured and therefore not used.
+  unmeasured and therefore not used;
+- the forearm-footprint check's margin and capsule-vs-physics trust question
+  (#56/#74) is settled — at that point, re-run the −1.7 cm `foam_block`@r2c3
+  probe above and either drop this note or record the new disagreement.

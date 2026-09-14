@@ -391,9 +391,17 @@ class TestFootprintLegs:
         route name, rather than duplicated per ability."""
         assert R.FOOTPRINT_LEGS["RAISE_TO_SIDE"] == R.FOOTPRINT_LEGS["PLACE_ROUTE"]
 
-    def test_stow_route_and_stow_from_side_share_the_same_tail(self):
-        assert (R.FOOTPRINT_LEGS["STOW_FROM_SIDE"]
-                == R.FOOTPRINT_LEGS["STOW_ROUTE"])
+    def test_stow_route_and_stow_from_side_share_the_same_tail_not_head(self):
+        """Both are STOW_ROUTE's Waypoint objects, so both cross the identical
+        REST_SHUT -> HOVER corridor.  Their heads differ because they are
+        actually flown from different postures: STOW_ROUTE departs REST
+        (a gripper-only change onto REST_SHUT); STOW_FROM_SIDE departs
+        PRESENT (the real PRESENT -> REST_SHUT descent onto the board, #82)."""
+        assert (R.FOOTPRINT_LEGS["STOW_FROM_SIDE"][-2:]
+                == R.FOOTPRINT_LEGS["STOW_ROUTE"][-2:]
+                == (R.REST_SHUT, R.HOVER))
+        assert R.FOOTPRINT_LEGS["STOW_ROUTE"][0] == R.REST
+        assert R.FOOTPRINT_LEGS["STOW_FROM_SIDE"][0] == R.PRESENT
 
     def test_place_routes_tail_matches_its_own_last_three_waypoints(self):
         """The checked legs are not an approximation of PLACE_ROUTE's real
@@ -414,8 +422,34 @@ class TestFootprintLegs:
         assert R.FOOTPRINT_LEGS["LOWER_TO_REST"][0] == R.PRESENT
         assert R.FOOTPRINT_LEGS["LOWER_TO_REST"][-2:] == (R.REST_SHUT, R.REST)
 
-    def test_wave_and_lift_to_present_are_absent_on_purpose(self):
-        """Neither route lands the arm on REST or departs from it, so neither
-        can catch an object its own named route did not already put there."""
+    def test_wave_is_absent_on_purpose(self):
+        """WAVE never lands the arm on REST or departs from it, so it cannot
+        catch an object its own named route did not already put there — and
+        that is a measured number, not just an assertion: WAVE's two legs
+        (PRESENT -> WAVE_A, PRESENT -> WAVE_B) read worst +1.6 cm (tube hand,
+        fully open) against a 12 cm block anywhere on the board (x=0.23,
+        y=-0.32), positive in both models
+        (docs/reviews/probes-2026-09-12/probe_wave_legs.txt)."""
         assert "WAVE" not in R.FOOTPRINT_LEGS
-        assert "LIFT_TO_PRESENT" not in R.FOOTPRINT_LEGS
+
+    def test_lift_to_present_is_present_and_reverses_the_descent(self):
+        """LIFT_TO_PRESENT (#82/A3) is REST -> PRESENT, one joint-space line.
+        REST and REST_SHUT differ only in r_gripper (rig_routes.py: REST =
+        dict(REST_SHUT, r_gripper=OPEN)), so that line is the same arm sweep
+        as LOWER_TO_REST's first leg (PRESENT -> REST_SHUT) flown backwards —
+        the lift is the descent reversed, and is checked against the same
+        footprint for that reason."""
+        assert "LIFT_TO_PRESENT" in R.FOOTPRINT_LEGS
+        assert R.FOOTPRINT_LEGS["LIFT_TO_PRESENT"] == (R.REST, R.PRESENT)
+
+        arm_joints = [j for j in R.ARM7 if j != "r_gripper"]
+        for j in arm_joints:
+            assert R.REST[j] == R.REST_SHUT[j], j
+
+        descent_first_leg = R.FOOTPRINT_LEGS["LOWER_TO_REST"][:2]
+        assert descent_first_leg == (R.PRESENT, R.REST_SHUT)
+        reversed_descent = tuple(reversed(descent_first_leg))
+        lift = R.FOOTPRINT_LEGS["LIFT_TO_PRESENT"]
+        for a, b in zip(lift, reversed_descent):
+            for j in arm_joints:
+                assert a[j] == b[j], j

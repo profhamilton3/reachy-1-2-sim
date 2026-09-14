@@ -1,0 +1,21 @@
+[6cm] descent PRESENT->REST_SHUT (A1)          positions=224  capsule<0:  58  shell<0:  36  sign-disagree:  22
+[6cm] lift REST->PRESENT (A3, unguarded)       positions=224  capsule<0:  58  shell<0:  35  sign-disagree:  23
+[6cm] tail REST->REST_SHUT->HOVER (checked)    positions=224  capsule<0:  53  shell<0:  36  sign-disagree:  17
+[12cm] descent PRESENT->REST_SHUT (A1)          positions=224  capsule<0:  61  shell<0:  39  sign-disagree:  22
+[12cm] lift REST->PRESENT (A3, unguarded)       positions=224  capsule<0:  61  shell<0:  37  sign-disagree:  24
+[12cm] tail REST->REST_SHUT->HOVER (checked)    positions=224  capsule<0:  53  shell<0:  37  sign-disagree:  16
+[6cm] descent PRESENT->REST_SHUT (A1): negative here but clear on the checked tail -> capsule 5, shell 2
+        shell-negative region x 0.27..0.31  y -0.32..-0.32
+        capsule-negative region x 0.27..0.67  y -0.32..-0.20
+[6cm] lift REST->PRESENT (A3, unguarded): negative here but clear on the checked tail -> capsule 5, shell 2
+        shell-negative region x 0.27..0.31  y -0.32..-0.32
+        capsule-negative region x 0.27..0.67  y -0.32..-0.20
+[12cm] descent PRESENT->REST_SHUT (A1): negative here but clear on the checked tail -> capsule 8, shell 4
+        shell-negative region x 0.19..0.31  y -0.32..-0.32
+        capsule-negative region x 0.19..0.67  y -0.32..-0.20
+[12cm] lift REST->PRESENT (A3, unguarded): negative here but clear on the checked tail -> capsule 8, shell 4
+        shell-negative region x 0.19..0.31  y -0.32..-0.32
+        capsule-negative region x 0.19..0.67  y -0.32..-0.20
+
+--- arm-only shell (torso excluded) vs capsule, 6 cm cube, descent leg, positions where capsule read > shell+5mm ---
+checked 224 positions; capsule reads >2 mm MORE clearance than the arm-only shell model at 0 of them

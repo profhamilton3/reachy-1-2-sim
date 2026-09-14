@@ -549,7 +549,7 @@ class SimulatorExecutor:
         """
         _ensure_paths()
         from reachy_ai.motion import rig_routes as R
-        from reachy_ai.motion.kinematics import CartesianPlanner
+        from reachy_ai.motion.kinematics import CartesianPlanner, hand_radius
         from reachy_ai.scene.awareness import SceneModel
 
         legs = [R.FOOTPRINT_LEGS[r] for r in route_names if r in R.FOOTPRINT_LEGS]
@@ -569,11 +569,24 @@ class SimulatorExecutor:
             for a, b in zip(waypoints, waypoints[1:]):
                 qa = [a[j] for j in R.ARM7]
                 qb = [b[j] for j in R.ARM7]
-                for oid, c in planner.path_clearances(qa, qb).items():
+                # The waypoints carry the commanded gripper for each end of
+                # this leg.  Which one is "wider" is a question about the
+                # capsule radius `hand_radius` actually produces, not about
+                # the raw commanded degrees: the encoding is inverted (#82/A2
+                # — SHUT = +20 is a NARROWER hand than OPEN = -45), so
+                # comparing the degrees directly picks the wrong endpoint.
+                # Using the wider of the two for the whole leg is the
+                # conservative choice already documented in FOOTPRINT_LEGS —
+                # never narrower than either commanded end.
+                gripper_deg = max(a["r_gripper"], b["r_gripper"],
+                                   key=hand_radius)
+                for oid, c in planner.path_clearances(
+                        qa, qb, gripper_deg=gripper_deg).items():
                     if oid not in worst or c.distance < worst[oid]:
                         worst[oid] = c.distance
 
-        blocking = sorted((d, oid) for oid, d in worst.items() if d < 0.0)
+        blocking = sorted((d, oid) for oid, d in worst.items()
+                          if d < R.FOOTPRINT_MARGIN)
         if not blocking:
             return None
         d, oid = blocking[0]

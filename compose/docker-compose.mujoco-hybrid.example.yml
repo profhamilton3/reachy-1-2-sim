@@ -25,7 +25,6 @@ services:
       REACHY_SIM_CAMERA_WIDTH: "640"
       REACHY_SIM_CAMERA_HEIGHT: "480"
       REACHY_SIM_REMOTE_DEADLINE_MS: "1000"
-      REACHY_SIM_ALLOW_FIXTURE_FALLBACK: "false"
     # Docker Desktop provides host.docker.internal. This entry also helps some
     # Linux Docker setups; verify behavior before relying on it cross-platform.
     extra_hosts:

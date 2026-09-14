@@ -163,6 +163,36 @@ class SimState:
             self._pending_cmd = msg
 
     def submit_reset(self, msg: Dict[str, Any]) -> None:
+        # KNOWN GAP, NOT FIXED HERE (#43/#84 follow-up review, A5) — a single
+        # slot: two clients calling submit_reset() within the same sim tick
+        # mean the earlier msg is silently overwritten, and apply_pending()
+        # can only report ONE _conn_id.  The physical reset happens once
+        # either way; what is lost is the FIRST asker's receipt — their
+        # request_id never gets a ResetAck, though the world did reset.  For
+        # the Docker bridge that is a 5 s RESETTING -> ABORTED timeout while
+        # it holds every joint command (mujoco_remote_backend.py).
+        #
+        # See tests.unit.test_placement.TestConcurrentResetCoalescing for the
+        # reproduction. NOT implementing a fix here because it is an
+        # acknowledgement-semantics decision, not a routing bug: the routing
+        # (which connection an ack goes to) is correct and tested; the
+        # question is what should happen when two askers coalesce into one
+        # physical reset. Two candidate contracts, for review before either
+        # is built:
+        #   (a) queue resets like placements (a list, not a slot) and apply
+        #       every one queued — changes what "reset" means physically
+        #       (N resets in one tick instead of one), and is wasteful when
+        #       the asks were redundant (two clients resetting to the same
+        #       seed);
+        #   (b) keep one physical reset per tick, but accumulate every
+        #       coalesced _conn_id and ack ALL of them with the same
+        #       ResetAck (same request_id it names, sim_step, scene_revision)
+        #       — "your reset happened, as part of this one" — which needs
+        #       ResetAck (or the ack path) to carry a request_id per asker
+        #       rather than the single one it names today.
+        # Neither is implemented; do not build either without reconciling it
+        # against #43's original acceptance and place_ack's contract, which
+        # this deliberately still mirrors.
         with self._lock:
             self._pending_reset = msg
 
@@ -631,20 +661,14 @@ class ReachyMujocoServer:
 
             # Reset ack — routed to the connection that asked, not broadcast.
             if reset_info is not None and self._loop:
-                queue = self._reset_ack_qs.get(reset_info.get("_conn_id"))
-                if queue is None:
-                    # The client disconnected between asking and landing.  The
-                    # reset still happened — it is a world change, not a reply
-                    # — so this only drops the receipt (same call place_ack
-                    # already makes, and for the same reason).
-                    pass
-                else:
-                    ack = ResetAck(
-                        request_id=reset_info["request_id"],
-                        sim_step=self._sim.step,
-                        scene_revision=self._sim.scene_revision,
-                    )
-                    asyncio.run_coroutine_threadsafe(queue.put(ack), self._loop)
+                ack = ResetAck(
+                    request_id=reset_info["request_id"],
+                    sim_step=self._sim.step,
+                    scene_revision=self._sim.scene_revision,
+                )
+                asyncio.run_coroutine_threadsafe(
+                    self._deliver_reset_ack(reset_info.get("_conn_id"), ack),
+                    self._loop)
 
             # Placement acks (R12-607).  Carry the sim step so a client can line
             # the next camera frame up with a placement whose pose it knows.
@@ -691,6 +715,24 @@ class ReachyMujocoServer:
                 q.put_nowait(msg)
             except asyncio.QueueFull:
                 pass
+
+    async def _deliver_reset_ack(self, conn_id, ack) -> None:
+        """Deliver a reset's ack to the one connection that asked for it.
+
+        Extracted out of `_sim_thread` so the routing decision is
+        unit-testable without a live websocket (#43/#84's own routing bug):
+        `apply_pending()` names the connection that submitted the reset, and
+        this is where that name turns into "put it on THIS queue, not every
+        queue" — the counterpart to `_broadcast`, which puts on every queue
+        on purpose because state/camera frames are for everyone.
+
+        A missing queue means the client disconnected between asking and the
+        reset landing. The reset still happened — it is a world change, not
+        a reply — so this only drops the receipt, mirroring place_ack (#84).
+        """
+        queue = self._reset_ack_qs.get(conn_id)
+        if queue is not None:
+            await queue.put(ack)
 
     def _build_state(self) -> State:
         self._seq += 1

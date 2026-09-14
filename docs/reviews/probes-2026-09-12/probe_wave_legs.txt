@@ -1,0 +1,2 @@
+WAVE legs vs 12 cm block, tube hand fully open, worst over the board: +1.6 cm at x=0.23 y=-0.32
+WAVE_A: {'r_shoulder_pitch': -70.0, 'r_shoulder_roll': -25.0, 'r_elbow_pitch': -80.0, 'r_forearm_yaw': -60.0, 'r_wrist_pitch': 25.0, 'r_wrist_roll': -30.0, 'r_gripper': -45.0}  WAVE_B: {'r_shoulder_pitch': -70.0, 'r_shoulder_roll': -25.0, 'r_elbow_pitch': -80.0, 'r_forearm_yaw': 60.0, 'r_wrist_pitch': -25.0, 'r_wrist_roll': 30.0, 'r_gripper': -45.0}

@@ -122,8 +122,10 @@ class TestLinkCapsules:
     def test_three_links_with_the_mjcf_collision_radii(self):
         caps = link_capsules(PRESENT)
         assert [c[0] for c in caps] == ["upper_arm", "forearm", "hand"]
+        # the hand is sized for the pose's own wrist roll (PRESENT: 0) and,
+        # with no aperture given, the wide-open gripper
         assert [c[3] for c in caps] == [
-            _UPPER_ARM_RADIUS, _FOREARM_RADIUS, hand_radius(None)]
+            _UPPER_ARM_RADIUS, _FOREARM_RADIUS, hand_radius(None, PRESENT[6])]
 
     def test_capsules_are_chained_end_to_end(self):
         caps = link_capsules(PRESENT)
@@ -156,9 +158,21 @@ class TestHandRadius:
         assert hand_radius(-45.0) < hand_radius(-68.8)
 
     def test_the_working_open_position_exceeds_the_old_fixed_radius(self):
-        """The bug, as an assertion: 5 cm did not bound an open hand."""
-        assert hand_radius(-45.0) > 0.05
-        assert hand_radius(-45.0) == pytest.approx(0.075, abs=0.002)
+        """Two bugs, as assertions.  5 cm did not bound an open hand; and
+        the 7.5 cm that replaced it (finger box CENTRE swung, roll ignored)
+        did not either -- the finger's far end at -45 deg is 9.85 cm from
+        the axis with the wrist level, 12.1 cm at the roll limit
+        (docs/adr/0003, "Correcting the tube")."""
+        assert hand_radius(-45.0, 0.0) > 0.075 > 0.05
+        assert hand_radius(-45.0, 0.0) == pytest.approx(0.0985, abs=0.002)
+        assert hand_radius(-45.0) == pytest.approx(0.1214, abs=0.002)   # roll unknown
+
+    def test_wrist_roll_moves_the_hand_off_the_tube_axis(self):
+        """The hand pivots 3.25 cm below the wrist frame the tube is drawn
+        from, so rolling the wrist moves it 0.0325*sin(roll) off axis."""
+        assert hand_radius(-68.8, 30.0) - hand_radius(-68.8, 0.0) == pytest.approx(
+            0.0325 * math.sin(math.radians(30.0)), abs=0.0005)
+        assert hand_radius(0.0, 30.0) > hand_radius(0.0, 0.0)
 
     def test_a_closed_hand_is_bounded_by_the_fixed_thumb_shell(self):
         assert hand_radius(20.0) == pytest.approx(hand_radius(0.0))
@@ -172,7 +186,7 @@ class TestHandRadius:
         wide = link_capsules(PRESENT)[2][3]
         shut = link_capsules(PRESENT, gripper_deg=20.0)[2][3]
         assert shut < wide
-        assert wide == pytest.approx(hand_radius(None))
+        assert wide == pytest.approx(hand_radius(None, PRESENT[6]))
 
     def test_a_wider_hand_can_only_reduce_clearance(self, scene):
         shut = scene.clearance(link_capsules(PRESENT, gripper_deg=20.0))
@@ -331,7 +345,20 @@ class TestSceneClearance:
                  r_elbow_pitch=-45.0, r_wrist_pitch=-10.0, r_wrist_roll=30.0)
         caps = link_capsules(rest)
         assert scene.clearance(caps, ids=["table_top"]).distance < 0
-        assert scene.clearance(caps, include_static=True).distance > 0.02
+        # the rig fixtures alone (what include_static adds, minus the objects)
+        fixtures = [i for i in scene.obstacle_ids(include_static=True)
+                    if i not in scene.obstacle_ids()]
+        assert "table_top" not in fixtures and fixtures
+        assert scene.clearance(caps, ids=fixtures).distance > 0.02
+        # The manipulable objects are a separate question.  At this pose,
+        # hand wide open (the default) and rolled 30 deg, the corrected tube
+        # passes 1.6 cm from red_cube's YAML position -- the legacy tube read
+        # 3.5 cm, limited by the forearm, because it was too small for the
+        # finger to be the nearest link.  Positive, so not a refusal; recorded
+        # here because it is the one place the correction moved a number in
+        # this file's scene (docs/adr/0003, "Correcting the tube").
+        near = scene.clearance(caps)
+        assert near.link == "hand" and near.distance == pytest.approx(0.016, abs=0.003)
 
     # The placement route, with the gripper angle each waypoint actually
     # commands.  PLACE_ROUTE holds the hand SHUT for the whole trip through the

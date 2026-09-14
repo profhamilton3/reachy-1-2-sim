@@ -1,0 +1,42 @@
+== coverage: worst (corner dist - radius) over roll x gripper grid, HOVER base ==
+max excess (must be <=0): 2.08e-16 m; tightness: min(radius - farthest corner) = -2.08e-16 at (-10, 0)
+== demonstrated misses, now (margin cm, + = inside) ==
+  HOVER      -68.8 r_finger_col   margin   0.70
+  HOVER      -68.8 r_finger_body  margin  -0.00
+  HOVER      -45.0 r_finger_col   margin   0.60
+  HOVER      -45.0 r_finger_body  margin  -0.00
+  REST       -68.8 r_finger_col   margin   0.70
+  REST       -68.8 r_finger_body  margin   0.00
+  REST       -45.0 r_finger_col   margin   0.61
+  REST       -45.0 r_finger_body  margin  -0.00
+  REST         0.0 r_finger_col   margin   0.43
+  REST         0.0 r_finger_body  margin   0.27
+  REST_SHUT  -68.8 r_finger_col   margin   0.70
+  PRESENT    -68.8 r_finger_col   margin   0.70
+  HOME       -68.8 r_finger_col   margin   0.70
+== tube radius - shells capsule axis-distance (surface / centreline), cm ==
+  REST       -68.8 surface  -1.14  centreline   0.42
+  REST       -45.0 surface  -0.79  centreline   0.77
+  REST         0.0 surface  -0.47  centreline   1.38
+  REST        20.0 surface  -0.47  centreline   1.38
+  REST_SHUT  -68.8 surface  -1.14  centreline   0.42
+  REST_SHUT  -45.0 surface  -0.79  centreline   0.77
+  REST_SHUT    0.0 surface  -0.47  centreline   1.38
+  REST_SHUT   20.0 surface  -0.47  centreline   1.38
+  HOVER      -68.8 surface  -1.14  centreline   0.43
+  HOVER      -45.0 surface  -0.78  centreline   0.78
+  HOVER        0.0 surface  -0.32  centreline   1.54
+  HOVER       20.0 surface  -0.32  centreline   1.54
+  PRESENT    -68.8 surface  -1.14  centreline   0.43
+  PRESENT    -45.0 surface  -0.78  centreline   0.78
+  PRESENT      0.0 surface  -0.32  centreline   1.54
+  PRESENT     20.0 surface  -0.32  centreline   1.54
+  HOME       -68.8 surface  -1.14  centreline   0.43
+  HOME       -45.0 surface  -0.78  centreline   0.78
+  HOME         0.0 surface  -0.32  centreline   1.54
+  HOME        20.0 surface  -0.32  centreline   1.54
+== fixture table (tube new / tube legacy / shells), cm ==
+  evidence   tube_new  -5.70  tube_legacy  -1.71  shells   4.48
+  incident   tube_new -11.94  tube_legacy  -7.96  shells  -2.41
+  foam_r3c3  tube_new  -9.37  tube_legacy  -5.38  shells   3.42
+  soda_r2c3  tube_new  -4.38  tube_legacy  -0.39  shells   4.54

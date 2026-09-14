@@ -12,8 +12,9 @@ Responsibilities
 * Consume camera_frame messages and write /tmp/reachy_{left,right}.jpg so the
   existing gRPC CameraService and ROS publisher keep working unchanged.
 * Expose a `latest_snapshot()` compatible with the existing backend interface.
-* On disconnect: emit DEGRADED status, optionally fall back to KinematicBackend
-  if REACHY_SIM_ALLOW_FIXTURE_FALLBACK=true.
+* On disconnect: emit DEGRADED status. There is no live fallback to
+  KinematicBackend — fake_reachy_server.py picks one writer per process at
+  startup (REACHY_SIM_BACKEND), and nothing here switches that mid-session.
 
 This file is imported inside the Docker container (Python 3.8, no mujoco).
 It must not import mujoco or any native-server module.
@@ -41,7 +42,6 @@ log = logging.getLogger(__name__)
 _DEFAULT_URL = "ws://host.docker.internal:8765"
 _RECONNECT_DELAY = 2.0     # seconds between reconnect attempts
 _DEADLINE_MS = int(os.environ.get("REACHY_SIM_REMOTE_DEADLINE_MS", "1000"))
-_ALLOW_FALLBACK = os.environ.get("REACHY_SIM_ALLOW_FIXTURE_FALLBACK", "false").lower() == "true"
 _MUJOCO_URL = os.environ.get("REACHY_SIM_MUJOCO_URL", _DEFAULT_URL)
 
 _LEFT_JPG  = pathlib.Path("/tmp/reachy_left.jpg")
