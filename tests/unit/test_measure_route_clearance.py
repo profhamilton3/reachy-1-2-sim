@@ -26,6 +26,7 @@ from reachy_ai.motion.kinematics import (  # noqa: E402
     _GRIPPER_OPEN_LIMIT_DEG,
     _GRIPPER_SHUT_LIMIT_DEG,
     hand_radius,
+    joint_path,
     link_capsules,
 )
 from reachy_ai.scene.awareness import SceneModel  # noqa: E402
@@ -157,12 +158,13 @@ class TestRecordingIncludesTheAperture:
         expected = duration * hz
         assert abs(len(samples) - expected) <= max(2, 0.5 * expected)
 
-    def test_main_validates_the_recording_before_saving_or_reporting(
+    def test_main_validates_the_recording_before_saving_a_normal_log(
             self, monkeypatch, mrc, tmp_path, capsys):
         """A bad recording (here: r_gripper reads NaN, as a disconnected
-        joint might) must stop main() before anything is written to
-        `runs/` or printed as a report -- not just be caught later by
-        someone reading the saved file."""
+        joint might) must stop main() before anything is written under a
+        NORMAL (`save_log`) filename or printed as a report -- not just be
+        caught later by someone reading the saved file. It is not thrown
+        away, though -- see test_main_preserves_a_failed_recording below."""
         monkeypatch.setenv("REACHY_SIM_RECORD_CLEARANCE", "1")
         monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
 
@@ -182,7 +184,55 @@ class TestRecordingIncludesTheAperture:
         assert exc.value.code != 0
         out = capsys.readouterr().out
         assert "not finite" in out or "FAIL" in out
-        assert list(tmp_path.iterdir()) == []  # nothing saved
+        saved = list(tmp_path.iterdir())
+        assert all("_INVALID" in p.name for p in saved), (
+            "only the marked-invalid diagnostic file may exist -- never a "
+            "file save_log's own naming scheme would produce")
+
+    def test_main_preserves_a_failed_recording_as_invalid_diagnostic(
+            self, monkeypatch, mrc, tmp_path, capsys):
+        """The samples that WERE recorded before the bad reading are not
+        lost: main() saves them, marked unambiguously invalid, so the
+        flight can be diagnosed instead of re-flown blind (finding 2)."""
+        monkeypatch.setenv("REACHY_SIM_RECORD_CLEARANCE", "1")
+        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+
+        class _BadArm(_StubArm):
+            def __init__(self, pose):
+                super().__init__(pose)
+                self.r_gripper = _StubJoint(float("nan"))
+
+        monkeypatch.setattr(mrc, "ReachySDK",
+                            lambda host, sdk_port: types.SimpleNamespace(
+                                r_arm=_BadArm(R.REST)))
+        monkeypatch.setattr(sys, "argv",
+                            ["measure_route_clearance.py", "--route",
+                             "LOWER_TO_REST", "--duration", "0.05"])
+        with pytest.raises(SystemExit):
+            mrc.main()
+
+        saved = list(tmp_path.iterdir())
+        assert len(saved) == 1
+        path = saved[0]
+        assert path.name.endswith("_INVALID.json")
+        with open(path) as f:
+            doc = json.load(f)
+        assert doc["valid"] is False
+        assert "not finite" in doc["error"]
+        assert doc["route"] == "LOWER_TO_REST"
+        assert len(doc["samples"]) >= 1
+        # every sample the (short) recording actually produced is kept,
+        # NaN aperture included -- nothing here silently drops it
+        assert any(
+            isinstance(s["joints"]["r_gripper"], float)
+            and math.isnan(s["joints"]["r_gripper"])
+            for s in doc["samples"])
+        # and it can never pass for valid E1 data if read back the normal
+        # (schema-aware) way -- refused outright, not merely re-raising
+        with pytest.raises(mrc.UnsupportedSchemaVersionError):
+            mrc.validated_samples(
+                doc["samples"], schema_version=mrc.schema_version_of(doc),
+                allow_missing_aperture=True)
 
 
 class TestApertureValidation:
@@ -202,10 +252,14 @@ class TestApertureValidation:
         assert "sample 0" in str(exc.value)
         assert "t=0.0" in str(exc.value) or "t=0" in str(exc.value)
 
-    def test_missing_aperture_can_be_explicitly_allowed(self, mrc):
+    def test_missing_aperture_can_be_explicitly_allowed_for_a_legacy_schema(
+            self, mrc):
+        """The rescue applies only to a log DECLARED as a supported legacy
+        schema (schema_version=1 here) -- see TestSchemaAwareLoading for
+        what happens when the same missing key is declared current."""
         log = _synthetic_log(R.REST, n=3, omit_gripper=True)
         q7_and_gripper, assumed = mrc.validated_samples(
-            log, allow_missing_aperture=True)
+            log, schema_version=1, allow_missing_aperture=True)
         assert assumed == [0, 1, 2]
         assert all(g is None for _q7, g in q7_and_gripper)
 
@@ -240,6 +294,95 @@ class TestApertureValidation:
         q7_and_gripper, assumed = mrc.validated_samples(log)
         assert assumed == []
         assert q7_and_gripper[0][1] == pytest.approx(in_range)
+
+
+class TestSchemaAwareLoading:
+    """`schema_version` -- not just per-sample key presence -- gates
+    whether `allow_missing_aperture` may rescue a missing reading.
+    Confirms the two review requirements directly: a CURRENT-schema log
+    with a missing aperture always fails, and an UNKNOWN schema_version is
+    refused outright rather than guessed at."""
+
+    def test_current_schema_missing_aperture_always_raises(self, mrc):
+        """schema_version == LOG_SCHEMA_VERSION (2) with a missing
+        r_gripper key must raise even with the flag -- a gap in the
+        CURRENT schema is a dropped field or a bad recording, never an
+        old log format."""
+        log = _synthetic_log(R.REST, n=2, omit_gripper=True)
+        with pytest.raises(mrc.ApertureDataError):
+            mrc.validated_samples(
+                log, schema_version=mrc.LOG_SCHEMA_VERSION,
+                allow_missing_aperture=False)
+        with pytest.raises(mrc.ApertureDataError):
+            mrc.validated_samples(
+                log, schema_version=mrc.LOG_SCHEMA_VERSION,
+                allow_missing_aperture=True)
+
+    def test_default_schema_version_is_current_so_the_flag_alone_never_rescues(
+            self, mrc):
+        """Calling validated_samples/report without specifying
+        schema_version (the ordinary case for a fresh recording) must
+        behave as schema_version==LOG_SCHEMA_VERSION -- allow_missing_aperture
+        by itself must not be enough."""
+        log = _synthetic_log(R.REST, n=2, omit_gripper=True)
+        with pytest.raises(mrc.ApertureDataError):
+            mrc.validated_samples(log, allow_missing_aperture=True)
+        with pytest.raises(mrc.ApertureDataError):
+            mrc.report(log, "LOWER_TO_REST", _SCENE_PATH,
+                       allow_missing_aperture=True)
+
+    def test_legacy_schema_missing_aperture_still_requires_the_flag(self, mrc):
+        """schema_version==1 alone is not enough either -- the flag is
+        still required, only now it is actually able to work."""
+        log = _synthetic_log(R.REST, n=2, omit_gripper=True)
+        with pytest.raises(mrc.ApertureDataError):
+            mrc.validated_samples(log, schema_version=1,
+                                  allow_missing_aperture=False)
+
+    @pytest.mark.parametrize("bad_version", [0, 3, -1, 1.5, "2"])
+    def test_unrecognised_schema_version_is_rejected_outright(
+            self, mrc, bad_version):
+        """Neither the current schema nor a version this module has
+        explicit legacy fallback logic for -- refused before any
+        per-sample check, regardless of the flag, and with a distinct
+        exception type from a data problem."""
+        log = _synthetic_log(R.REST, n=2)  # samples are otherwise fine
+        for allow in (False, True):
+            with pytest.raises(mrc.UnsupportedSchemaVersionError):
+                mrc.validated_samples(
+                    log, schema_version=bad_version,
+                    allow_missing_aperture=allow)
+        assert not issubclass(
+            mrc.UnsupportedSchemaVersionError, mrc.ApertureDataError)
+        assert not issubclass(
+            mrc.ApertureDataError, mrc.UnsupportedSchemaVersionError)
+
+    def test_invalid_log_schema_version_sentinel_is_itself_unrecognised(
+            self, mrc):
+        """save_invalid_log's own sentinel must be a value this rejection
+        path actually rejects -- otherwise a diagnostic file could be
+        mistaken for a real schema."""
+        assert mrc._INVALID_LOG_SCHEMA_VERSION not in (
+            (mrc.LOG_SCHEMA_VERSION,) + mrc._SUPPORTED_LEGACY_SCHEMA_VERSIONS)
+
+    def test_load_log_round_trips_a_saved_log_and_its_schema_version(
+            self, mrc, tmp_path, monkeypatch):
+        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+        log = _synthetic_log(R.REST, n=3)
+        path = mrc.save_log(log, "LOWER_TO_REST", _SCENE_PATH)
+        loaded = mrc.load_log(path)
+        assert mrc.schema_version_of(loaded) == mrc.LOG_SCHEMA_VERSION == 2
+        assert loaded["samples"] == log
+        # and reading it the schema-aware way works end to end
+        result = mrc.report(loaded["samples"], loaded["route"],
+                           loaded["scene"],
+                           schema_version=mrc.schema_version_of(loaded))
+        assert result["realised_aperture_assumed_samples"] == []
+
+    def test_schema_version_of_treats_an_absent_field_as_legacy_1(self, mrc):
+        legacy_shaped = {"route": "LOWER_TO_REST", "samples": []}
+        assert mrc.schema_version_of(legacy_shaped) == 1
+        assert 1 in mrc._SUPPORTED_LEGACY_SCHEMA_VERSIONS
 
 
 class TestAperturePropagatesIntoClearance:
@@ -364,21 +507,76 @@ class TestReportingOnASyntheticLog:
 
     def test_report_with_missing_aperture_allowed_names_the_assumed_samples(
             self, mrc):
+        """A log DECLARED schema_version=1 (a mixed/partially-migrated
+        legacy log, one sample missing the key) is rescued sample-by
+        sample; see TestSchemaAwareLoading for the schema_version==2
+        case, which never rescues."""
         pose = R.REST
         log = _synthetic_log(pose, n=2)  # both valid, posture's own aperture
         log.append({"t": 2 / 20.0,
                    "joints": {j: pose[j] for j in R.ARM7}})  # missing r_gripper
         result = mrc.report(log, "LOWER_TO_REST", _SCENE_PATH,
-                           allow_missing_aperture=True)
+                           schema_version=1, allow_missing_aperture=True)
         assert result["realised_aperture_assumed_samples"] == [2]
         assert result["n_samples"] == 3
+
+    def test_report_includes_aperture_provenance_strings(self, mrc):
+        """Finding 3: report() must say, in the result itself, where each
+        half's aperture came from -- not only in a docstring."""
+        log = _synthetic_log(R.REST, n=3)
+        result = mrc.report(log, "LOWER_TO_REST", _SCENE_PATH)
+        assert result["realised_aperture_source"] == mrc.REALISED_APERTURE_SOURCE
+        assert result["planned_aperture_policy"] == mrc.PLANNED_APERTURE_POLICY
+        assert "measured" in result["realised_aperture_source"]
+        assert "per-sample" in result["realised_aperture_source"]
+        assert "ENDPOINT" in result["planned_aperture_policy"]
+        assert "worst-case" in result["planned_aperture_policy"]
+
+    def test_planned_aperture_policy_matches_the_actual_endpoint_selection(
+            self, mrc):
+        """Ties the `planned_aperture_policy` string's claim -- worst-case
+        of the two commanded LEG-ENDPOINT apertures, applied to every
+        interpolated sample on that leg -- to real numbers, computed
+        independently of `planned_clearance` itself (a link_capsules call
+        per leg-endpoint choice, not a call into the function under test)."""
+        route = "LOWER_TO_REST"
+        scene = SceneModel.from_yaml(_SCENE_PATH)
+        waypoints = R.FOOTPRINT_LEGS[route]
+        assert len(waypoints) >= 2  # otherwise this route can't show the policy
+
+        out = {hand: {} for hand in mrc.HAND_MODES}
+        for a, b in zip(waypoints, waypoints[1:]):
+            qa = [a[j] for j in R.ARM7]
+            qb = [b[j] for j in R.ARM7]
+            # independently reproduce "worst-case of the two ENDPOINTS":
+            # whichever endpoint's own aperture yields the larger
+            # hand_radius, used for every point on this leg.
+            a_r = hand_radius(a["r_gripper"], a["r_wrist_roll"])
+            b_r = hand_radius(b["r_gripper"], b["r_wrist_roll"])
+            worst_gripper = a["r_gripper"] if a_r >= b_r else b["r_gripper"]
+            for q in joint_path(qa, qb, steps=13):
+                for hand in mrc.HAND_MODES:
+                    caps = link_capsules(q, "right", worst_gripper, hand=hand)
+                    for oid, c in scene.clearances(caps).items():
+                        worst = out[hand].get(oid)
+                        if worst is None or c.distance < worst:
+                            out[hand][oid] = c.distance
+
+        actual = mrc.planned_clearance(route, 13, scene)
+        for hand in mrc.HAND_MODES:
+            for oid in out[hand]:
+                assert actual[hand][oid] == pytest.approx(out[hand][oid]), (
+                    f"planned_aperture_policy's claim doesn't match "
+                    f"planned_clearance's real behaviour for {hand}/{oid}")
 
 
 class TestBackwardCompatibilityWithSchemaVersion1Logs:
     """A log recorded before this commit -- no `r_gripper` key on any
-    sample, no `schema_version` field -- must still be readable, but only
-    when the caller explicitly says so, and only ever as the old
-    assumed-open behaviour, visibly reported rather than silently revived."""
+    sample, no `schema_version` field on disk (schema_version_of treats
+    that as 1) -- must still be readable, but only when the caller
+    explicitly declares `schema_version=1` AND passes
+    `allow_missing_aperture=True`, and only ever as the old assumed-open
+    behaviour, visibly reported rather than silently revived."""
 
     def test_old_schema_log_reproduces_the_old_assumed_open_report(self, mrc):
         pose = R.REST
@@ -390,16 +588,53 @@ class TestBackwardCompatibilityWithSchemaVersion1Logs:
         expected_open = scene.clearances(link_capsules(q7, "right", None))
 
         result = mrc.report(old_style_log, "LOWER_TO_REST", _SCENE_PATH,
-                           allow_missing_aperture=True)
+                           schema_version=1, allow_missing_aperture=True)
         assert result["realised_aperture_assumed_samples"] == [0, 1, 2, 3]
         for oid, c in expected_open.items():
             assert result["realised"]["tube"][oid] == pytest.approx(c.distance)
 
     def test_old_schema_log_refused_without_the_explicit_flag(self, mrc):
+        """schema_version=1 alone is not enough -- allow_missing_aperture
+        is still required even for a genuinely legacy-declared log."""
         pose = R.REST
         old_style_log = [{"t": 0.0, "joints": {j: pose[j] for j in R.ARM7}}]
         with pytest.raises(mrc.ApertureDataError, match="schema_version"):
-            mrc.report(old_style_log, "LOWER_TO_REST", _SCENE_PATH)
+            mrc.report(old_style_log, "LOWER_TO_REST", _SCENE_PATH,
+                       schema_version=1)
+
+    def test_old_schema_log_refused_by_default_schema_version_even_with_the_flag(
+            self, mrc):
+        """The exact scenario finding 1 is about: calling report() the
+        ordinary way (no schema_version override) on a log missing
+        r_gripper must raise even WITH allow_missing_aperture=True,
+        because the default schema_version is the CURRENT one, and a
+        current-schema log has no excuse for a missing aperture."""
+        pose = R.REST
+        old_style_log = [{"t": 0.0, "joints": {j: pose[j] for j in R.ARM7}}]
+        with pytest.raises(mrc.ApertureDataError):
+            mrc.report(old_style_log, "LOWER_TO_REST", _SCENE_PATH,
+                       allow_missing_aperture=True)
+
+    def test_old_schema_log_from_disk_round_trips_through_load_log(
+            self, mrc, tmp_path):
+        """The realistic path: a genuine schema-1 file on disk (as written
+        before this module existed), loaded and read via
+        schema_version_of -- not a hand-typed schema_version kwarg."""
+        pose = R.REST
+        on_disk = {"route": "LOWER_TO_REST", "scene": _SCENE_PATH,
+                  "sample_hz": 20.0,
+                  "samples": [{"t": 0.0, "joints": {j: pose[j] for j in R.ARM7}}]}
+                  # no "schema_version" key at all -- a real pre-existing file
+        path = tmp_path / "old.json"
+        with open(path, "w") as f:
+            json.dump(on_disk, f)
+
+        loaded = mrc.load_log(path)
+        version = mrc.schema_version_of(loaded)
+        assert version == 1
+        result = mrc.report(loaded["samples"], loaded["route"], loaded["scene"],
+                           schema_version=version, allow_missing_aperture=True)
+        assert result["realised_aperture_assumed_samples"] == [0]
 
 
 class TestSaveLog:
@@ -425,3 +660,61 @@ class TestSaveLog:
         for sample in saved["samples"]:
             assert "r_gripper" in sample["joints"]
             assert isinstance(sample["joints"]["r_gripper"], (int, float))
+
+
+class TestSaveInvalidLog:
+    """`save_invalid_log` in isolation (finding 2) -- exercised directly,
+    not only through `main()`'s one failure path, so its contract is
+    pinned regardless of what triggers it."""
+
+    def test_writes_a_distinctly_named_file_with_reason_and_samples(
+            self, mrc, tmp_path, monkeypatch):
+        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+        log = _synthetic_log(R.REST, n=3, omit_gripper=True)
+        path = mrc.save_invalid_log(log, "LOWER_TO_REST", _SCENE_PATH,
+                                    "sample 1: something went wrong")
+        assert path.name.endswith("_INVALID.json")
+        with open(path) as f:
+            doc = json.load(f)
+        assert doc["valid"] is False
+        assert doc["error"] == "sample 1: something went wrong"
+        assert doc["route"] == "LOWER_TO_REST"
+        assert len(doc["samples"]) == 3  # every recorded sample kept
+
+    def test_never_collides_with_a_normal_save_log_filename(
+            self, mrc, tmp_path, monkeypatch):
+        """save_log and save_invalid_log must never be able to produce the
+        same filename for the same route/timestamp -- the suffix is what
+        keeps a normal analysis path from ever opening an invalid log by
+        accident."""
+        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+        log = _synthetic_log(R.REST, n=2)
+        good = mrc.save_log(log, "LOWER_TO_REST", _SCENE_PATH)
+        bad = mrc.save_invalid_log(log, "LOWER_TO_REST", _SCENE_PATH, "boom")
+        assert good != bad
+        assert "_INVALID" not in good.name
+        assert "_INVALID" in bad.name
+
+    def test_schema_version_is_never_a_recognised_one(self, mrc, tmp_path,
+                                                       monkeypatch):
+        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+        log = _synthetic_log(R.REST, n=1)
+        path = mrc.save_invalid_log(log, "LOWER_TO_REST", _SCENE_PATH, "boom")
+        doc = mrc.load_log(path)
+        version = mrc.schema_version_of(doc)
+        assert version not in (
+            (mrc.LOG_SCHEMA_VERSION,) + mrc._SUPPORTED_LEGACY_SCHEMA_VERSIONS)
+        with pytest.raises(mrc.UnsupportedSchemaVersionError):
+            mrc.validated_samples(doc["samples"], schema_version=version,
+                                  allow_missing_aperture=True)
+
+    def test_preserves_the_offending_sample_itself(self, mrc, tmp_path,
+                                                    monkeypatch):
+        """The sample that failed validation is not stripped out before
+        saving -- it is exactly what a diagnosis needs to see."""
+        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+        log = _synthetic_log(R.REST, n=2, gripper_deg=float("nan"))
+        path = mrc.save_invalid_log(log, "LOWER_TO_REST", _SCENE_PATH,
+                                    "sample 0: r_gripper=nan is not finite")
+        doc = mrc.load_log(path)
+        assert all(math.isnan(s["joints"]["r_gripper"]) for s in doc["samples"])

@@ -13,7 +13,9 @@ Run from the repo root:
 """
 import json
 import os
+import pathlib
 import sys
+import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, "../../../scripts"))
@@ -62,12 +64,31 @@ def main():
     result = mrc.report(samples, "LOWER_TO_REST", SCENE_PATH)
     print(json.dumps(result, indent=2))
 
-    print("\n=== compare against the OLD (pre-aperture) behaviour: "
-          "assumed-open on every sample ===")
+    print("\n=== schema-aware loading (2026-09-14 follow-up): a log missing "
+          "r_gripper is rescued ONLY when declared a supported legacy "
+          "schema, never under the current one ===")
     old_style = [{"t": s["t"], "joints": {j: s["joints"][j] for j in R.ARM7}}
                 for s in samples]
+    try:
+        mrc.report(old_style, "LOWER_TO_REST", SCENE_PATH,
+                  allow_missing_aperture=True)  # schema_version defaults to CURRENT
+        print("FAIL: should have raised -- default schema_version is current")
+    except mrc.ApertureDataError as exc:
+        print(f"declared schema_version omitted (defaults to current, "
+             f"{mrc.LOG_SCHEMA_VERSION}) + allow_missing_aperture=True: "
+             f"still raised, as required -- {exc}")
+    try:
+        mrc.report(old_style, "LOWER_TO_REST", SCENE_PATH, schema_version=3,
+                  allow_missing_aperture=True)
+        print("FAIL: should have raised -- schema_version=3 is unrecognised")
+    except mrc.UnsupportedSchemaVersionError as exc:
+        print(f"declared schema_version=3 (unrecognised): refused outright "
+             f"-- {exc}")
+
+    print("\n=== compare against the OLD (pre-aperture) behaviour: "
+          "assumed-open on every sample, log correctly DECLARED schema_version=1 ===")
     old_result = mrc.report(old_style, "LOWER_TO_REST", SCENE_PATH,
-                           allow_missing_aperture=True)
+                           schema_version=1, allow_missing_aperture=True)
     print(f"assumed_samples: {len(old_result['realised_aperture_assumed_samples'])} "
          f"of {old_result['n_samples']} (the whole log, as expected for a "
          "schema-1-shaped input)")
@@ -85,11 +106,33 @@ def main():
     corrupted = [dict(s) for s in samples]
     corrupted[5] = {"t": corrupted[5]["t"],
                     "joints": {**corrupted[5]["joints"], "r_gripper": float("nan")}}
+    corruption_reason = None
     try:
         mrc.report(corrupted, "LOWER_TO_REST", SCENE_PATH)
         print("FAIL: should have raised ApertureDataError")
     except mrc.ApertureDataError as exc:
-        print(f"raised as expected: {exc}")
+        corruption_reason = str(exc)
+        print(f"raised as expected: {corruption_reason}")
+
+    print("\n=== a failed recording is preserved, marked invalid, never "
+          "accepted as valid E1 data (2026-09-14 follow-up) ===")
+    with tempfile.TemporaryDirectory() as tmp:
+        mrc.RUNS_DIR = pathlib.Path(tmp)
+        invalid_path = mrc.save_invalid_log(
+            corrupted, "LOWER_TO_REST", SCENE_PATH, corruption_reason)
+        print(f"preserved {len(corrupted)} samples (including the NaN one) "
+             f"to {invalid_path.name}")
+        with open(invalid_path) as f:
+            doc = json.load(f)
+        print(f"  valid={doc['valid']}  error={doc['error']!r}")
+        try:
+            mrc.validated_samples(
+                doc["samples"], schema_version=mrc.schema_version_of(doc),
+                allow_missing_aperture=True)
+            print("FAIL: should have raised UnsupportedSchemaVersionError")
+        except mrc.UnsupportedSchemaVersionError as exc2:
+            print(f"read back the normal (schema-aware) way: refused "
+                 f"outright, not treated as valid data -- {exc2}")
 
 
 if __name__ == "__main__":

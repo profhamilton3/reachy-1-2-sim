@@ -63,18 +63,52 @@ tube"). A sample whose `r_gripper` reading cannot be trusted is not a
 sample with a known-safe default -- it is a sample with NO clearance
 answer, and this module never manufactures one silently:
 
-  * A sample missing the `r_gripper` key (schema_version 1 logs, or a
-    dropped field) raises `ApertureDataError` by default. Pass
-    `allow_missing_aperture=True` to `realised_clearance`/`report`
-    explicitly to fall back to the safe (wide-open, `gripper_deg=None`)
-    assumption for those samples specifically -- and the fallback is
-    reported, not hidden: `report()`'s result names every sample index it
-    happened to.
+  * A sample missing the `r_gripper` key raises `ApertureDataError` by
+    default. `allow_missing_aperture=True` only ever rescues this for a
+    log DECLARED as a supported legacy schema (today: `schema_version ==
+    1`, or absent, which meant 1 before this schema existed) -- passed
+    explicitly to `validated_samples`/`realised_clearance`/`report` via
+    their `schema_version` argument. **A `schema_version == 2` log with a
+    missing `r_gripper` key always raises, `allow_missing_aperture`
+    notwithstanding**: 2 is this module's own current schema, so a gap in
+    one is a dropped field or a bad recording, never an old log format,
+    and the flag exists for the latter only. An unrecognised
+    `schema_version` (anything but 2 or a version in
+    `_SUPPORTED_LEGACY_SCHEMA_VERSIONS`) raises `UnsupportedSchemaVersionError`
+    immediately, before any per-sample check -- this module never guesses
+    what an unfamiliar shape means. When the flag does apply, the fallback
+    (wide-open, `gripper_deg=None`) is reported, not hidden: `report()`'s
+    result names every sample index it happened to.
   * A sample whose `r_gripper` is present but not a finite number in the
     MJCF's commanded range (`None`, NaN, a string, or a value outside
     roughly [-68.8, 20.05] deg) ALWAYS raises `ApertureDataError`, with or
-    without `allow_missing_aperture` -- a corrupt reading is a different
-    problem than an old log format, and is never worth guessing past.
+    without `allow_missing_aperture` or which `schema_version` was
+    declared -- a corrupt reading is a different problem than an old log
+    format, and is never worth guessing past.
+
+## Failed recordings are preserved, marked invalid
+
+If a fresh recording fails this validation, `main()` never discards it: it
+is saved via `save_invalid_log` under a name ending `_INVALID.json`, with
+the samples as actually recorded (including the offending one) and the
+failure reason, so a bad flight can be diagnosed instead of re-flown
+blind. The file cannot be mistaken for a normal E1 log: its top level
+carries `"valid": false`, an `"error"` string, and a `"schema_version"`
+this module never recognises (neither current nor a supported legacy
+schema) -- so reading it back the normal way (`schema_version_of(log)`
+fed into `validated_samples`/`report`) raises `UnsupportedSchemaVersionError`
+outright, and it can never be accepted as usable E1 data.
+
+## Aperture provenance in `report()`
+
+`report()`'s result names, in plain text, where each half's aperture
+actually came from: `realised_aperture_source` (the measured, per-sample
+`r_gripper` reading -- see `realised_aperture_assumed_samples` for any
+indices that instead used the assumed-open fallback) and
+`planned_aperture_policy` (the per-leg worst-case commanded ENDPOINT
+aperture applied uniformly along that leg's interpolated samples, per
+`planned_clearance` below -- not a per-sample commanded value, since the
+guard itself only ever checks leg endpoints).
 
 Usage (operator flies the route by hand during --duration):
     export REACHY_SIM_RECORD_CLEARANCE=1
@@ -126,20 +160,63 @@ GRIPPER_JOINT = "r_gripper"
 #: logging (was 1 implicitly).  Bump this if the schema changes again.
 LOG_SCHEMA_VERSION = 2
 
+#: schema_version values this module knows how to fall back for under
+#: `allow_missing_aperture=True` -- today, only the one pre-aperture shape
+#: that ever existed.  `LOG_SCHEMA_VERSION` itself (the CURRENT schema) is
+#: deliberately never in this set: a gap in a schema-2 log is a dropped
+#: field or a bad recording, not an old log format, and is never eligible
+#: for the fallback.  Extend this set only when a *new* current schema
+#: makes today's schema_version 2 a legacy one in turn.
+_SUPPORTED_LEGACY_SCHEMA_VERSIONS = (1,)
+
+#: schema_version stamped on a diagnostic log by `save_invalid_log`.
+#: Deliberately not 1, not `LOG_SCHEMA_VERSION`, and never added to
+#: `_SUPPORTED_LEGACY_SCHEMA_VERSIONS` -- an invalid log fed back through
+#: `validated_samples` (via `schema_version_of`) must always raise
+#: `UnsupportedSchemaVersionError`, never quietly qualify for the legacy
+#: fallback the way an *absent* schema_version (real schema-1 logs) does.
+_INVALID_LOG_SCHEMA_VERSION = 0
+
 #: Tolerance added to the MJCF's own commanded range when validating a
 #: recorded aperture, matching `kinematics.within_limits`'s own tolerance:
 #: a reading sitting exactly on a joint stop is real, not corrupt.
 _GRIPPER_RANGE_TOL_DEG = 0.5
 
+#: `report()`'s explanation of where its "realised" aperture comes from --
+#: see the module docstring's "Aperture provenance in report()" section.
+REALISED_APERTURE_SOURCE = (
+    "measured per-sample r_gripper.present_position, validated; see "
+    "realised_aperture_assumed_samples for any indices that instead used "
+    "the safe wide-open assumption under allow_missing_aperture"
+)
+
+#: `report()`'s explanation of where its "planned" aperture comes from --
+#: the same policy `planned_clearance` implements, in one sentence.
+PLANNED_APERTURE_POLICY = (
+    "per FOOTPRINT_LEGS leg, the worst-case (largest-hand_radius) of that "
+    "leg's two commanded ENDPOINT apertures, applied to every interpolated "
+    "sample along the leg -- not a per-sample commanded value"
+)
+
 
 class ApertureDataError(ValueError):
     """A recorded sample's gripper aperture cannot be trusted: missing (and
-    not explicitly allowed to be), non-numeric, non-finite, or outside the
-    MJCF's commanded range. Raised by `realised_clearance`/`report` rather
-    than treated as an assumed-open hand -- see the module docstring's
-    "Missing or invalid aperture" section. The message names the offending
-    sample's index and recorded time so a bad log can be traced back to
-    where the flight (or the telemetry) went wrong.
+    not explicitly allowed to be, for its declared schema_version),
+    non-numeric, non-finite, or outside the MJCF's commanded range. Raised
+    by `realised_clearance`/`report` rather than treated as an
+    assumed-open hand -- see the module docstring's "Missing or invalid
+    aperture" section. The message names the offending sample's index and
+    recorded time so a bad log can be traced back to where the flight (or
+    the telemetry) went wrong.
+    """
+
+
+class UnsupportedSchemaVersionError(ValueError):
+    """`schema_version` is neither `LOG_SCHEMA_VERSION` (the current
+    schema) nor a value in `_SUPPORTED_LEGACY_SCHEMA_VERSIONS` (a schema
+    this module has explicit, understood fallback logic for). Raised
+    immediately, before any per-sample check -- an unfamiliar shape is
+    never guessed at, only a recognised one is ever read.
     """
 
 
@@ -188,6 +265,53 @@ def save_log(samples: List[Dict], route: str, scene_path: str) -> pathlib.Path:
     return path
 
 
+def load_log(path) -> Dict:
+    """Read a log exactly as `save_log`/`save_invalid_log` wrote it (or an
+    older schema-1 log with no "schema_version" key at all). Returns the
+    raw dict -- a caller wanting validated samples should pass this dict's
+    "samples" and its `schema_version_of(...)` to
+    `validated_samples`/`realised_clearance`/`report`, rather than assume
+    the current schema."""
+    with open(path) as f:
+        return json.load(f)
+
+
+def schema_version_of(log: Dict) -> int:
+    """The schema_version a loaded log dict declares -- absent means 1, the
+    only schema that ever predated this field."""
+    return log.get("schema_version", 1)
+
+
+def save_invalid_log(samples: List[Dict], route: str, scene_path: str,
+                     reason: str) -> pathlib.Path:
+    """Persist a recording that failed aperture validation -- never
+    silently discarded, so a bad flight can be diagnosed rather than
+    re-flown blind. Every sample actually recorded is kept, including the
+    offending one, alongside the failure `reason`.
+
+    Marked so it can never pass for a normal, valid E1 log: the filename
+    ends `_INVALID.json` (`save_log`'s never does), the JSON body carries
+    `"valid": false` and `"error"`, and its `"schema_version"` is
+    `_INVALID_LOG_SCHEMA_VERSION` -- a value never in
+    `_SUPPORTED_LEGACY_SCHEMA_VERSIONS` and never `LOG_SCHEMA_VERSION`, so
+    feeding its own declared schema_version back into
+    `validated_samples`/`report` (via `schema_version_of`) raises
+    `UnsupportedSchemaVersionError` immediately: it is refused outright,
+    not merely re-raising the original `ApertureDataError`, and can never
+    be mistaken for a schema-1 log eligible for `allow_missing_aperture`.
+    """
+    RUNS_DIR.mkdir(exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    path = RUNS_DIR / f"route_clearance_{route}_{stamp}_INVALID.json"
+    with open(path, "w") as f:
+        json.dump({"valid": False, "error": reason, "route": route,
+                  "scene": scene_path, "sample_hz": SAMPLE_HZ,
+                  "schema_version": _INVALID_LOG_SCHEMA_VERSION,
+                  "samples": samples},
+                 f, indent=1)
+    return path
+
+
 # ── Aperture validation (offline -- the same rules for a live or synthetic log) ─
 
 def _validated_gripper_deg(value, index: int, t) -> float:
@@ -215,34 +339,67 @@ def _validated_gripper_deg(value, index: int, t) -> float:
 
 
 def validated_samples(
-    samples: Sequence[Dict], *, allow_missing_aperture: bool = False,
+    samples: Sequence[Dict], *, schema_version: int = LOG_SCHEMA_VERSION,
+    allow_missing_aperture: bool = False,
 ) -> Tuple[List[Tuple[List[float], float]], List[int]]:
     """[(q7, gripper_deg), ...] for every sample, plus the indices where the
     aperture was ASSUMED rather than measured.
 
+    `schema_version` is the schema `samples` is DECLARED to be shaped as
+    (default: the current schema -- the right default for a fresh
+    recording, which is always current). Pass the value a loaded log
+    itself carries (`schema_version_of(log)`) when reading one from disk.
+    Unrecognised versions -- anything but `LOG_SCHEMA_VERSION` or a value
+    in `_SUPPORTED_LEGACY_SCHEMA_VERSIONS` -- raise
+    `UnsupportedSchemaVersionError` immediately, before any per-sample
+    check.
+
     Raises `ApertureDataError` naming the sample if any reading cannot be
-    trusted -- missing (unless `allow_missing_aperture=True`), or present
-    but non-numeric / non-finite / out of range (always, regardless of
-    `allow_missing_aperture`). Never silently substitutes an assumption:
-    the only path to one is the explicit flag, and even then every sample
-    it was used for is returned in the second list so the caller can report
-    it rather than lose it.
+    trusted -- missing, or present but non-numeric / non-finite / out of
+    range (this last group always, regardless of `allow_missing_aperture`
+    or `schema_version`). A missing reading is rescued by
+    `allow_missing_aperture=True` ONLY when `schema_version` is one this
+    module recognises as a supported legacy schema: a missing key in a
+    `schema_version == LOG_SCHEMA_VERSION` (current) log always raises,
+    the flag notwithstanding, because the current schema has no excuse for
+    a gap. Never silently substitutes an assumption: the only path to one
+    is the explicit flag on a recognised legacy schema, and even then
+    every sample it was used for is returned in the second list so the
+    caller can report it rather than lose it.
     """
+    if (schema_version != LOG_SCHEMA_VERSION
+            and schema_version not in _SUPPORTED_LEGACY_SCHEMA_VERSIONS):
+        raise UnsupportedSchemaVersionError(
+            f"schema_version={schema_version!r} is not the current schema "
+            f"({LOG_SCHEMA_VERSION}) or a supported legacy schema "
+            f"({_SUPPORTED_LEGACY_SCHEMA_VERSIONS}) -- refusing to guess "
+            "what this log's shape means.")
+    missing_is_legacy = schema_version in _SUPPORTED_LEGACY_SCHEMA_VERSIONS
+
     out: List[Tuple[List[float], float]] = []
     assumed: List[int] = []
     for i, sample in enumerate(samples):
         joints = sample["joints"]
         q7 = [joints[j] for j in R.ARM7]
         if GRIPPER_JOINT not in joints:
-            if not allow_missing_aperture:
+            if not (allow_missing_aperture and missing_is_legacy):
+                where = sample.get('t')
+                if missing_is_legacy:
+                    detail = (
+                        "This sample has no usable clearance answer; pass "
+                        "allow_missing_aperture=True to fall back to the "
+                        "safe (wide-open) assumption for it explicitly, or "
+                        "drop it from the log.")
+                else:
+                    detail = (
+                        f"schema_version={schema_version} is this module's "
+                        "CURRENT schema, which always includes r_gripper; "
+                        "a missing key here is a dropped field or a bad "
+                        "recording, not an old log format -- "
+                        "allow_missing_aperture does not apply to it.")
                 raise ApertureDataError(
-                    f"sample {i} (t={sample.get('t')}): missing "
-                    f"'{GRIPPER_JOINT}' -- this log predates aperture "
-                    f"logging (schema_version < {LOG_SCHEMA_VERSION}) or "
-                    "the field was dropped. This sample has no usable "
-                    "clearance answer; pass allow_missing_aperture=True to "
-                    "fall back to the safe (wide-open) assumption for it "
-                    "explicitly, or drop it from the log.")
+                    f"sample {i} (t={where}): missing '{GRIPPER_JOINT}' "
+                    f"(schema_version={schema_version!r}). {detail}")
             assumed.append(i)
             out.append((q7, None))
             continue
@@ -271,7 +428,9 @@ def _worst_clearance_over_samples(
 
 
 def realised_clearance(
-    samples: List[Dict], scene: SceneModel, *, allow_missing_aperture: bool = False,
+    samples: List[Dict], scene: SceneModel, *,
+    schema_version: int = LOG_SCHEMA_VERSION,
+    allow_missing_aperture: bool = False,
 ) -> Dict[str, Dict[str, float]]:
     """Worst per-link clearance actually reached, from a recorded log, AT
     EACH SAMPLE'S OWN MEASURED APERTURE (`r_gripper.present_position`,
@@ -279,14 +438,17 @@ def realised_clearance(
     the variable that decides whether the hand is inside the tube at all
     (docs/adr/0003).
 
-    Raises `ApertureDataError` if any sample's aperture cannot be trusted;
-    see `validated_samples` and the module docstring's "Missing or invalid
-    aperture" section. Use `report()` if you also want to know which
-    samples (if any) fell back to the assumed-open case under
+    `schema_version` is `samples`'s declared schema -- see
+    `validated_samples` for what it gates. Raises `ApertureDataError` or
+    `UnsupportedSchemaVersionError` if any sample's aperture cannot be
+    trusted; see `validated_samples` and the module docstring's "Missing
+    or invalid aperture" section. Use `report()` if you also want to know
+    which samples (if any) fell back to the assumed-open case under
     `allow_missing_aperture=True`.
     """
     q7_and_gripper, _assumed = validated_samples(
-        samples, allow_missing_aperture=allow_missing_aperture)
+        samples, schema_version=schema_version,
+        allow_missing_aperture=allow_missing_aperture)
     return _worst_clearance_over_samples(q7_and_gripper, scene)
 
 
@@ -317,6 +479,7 @@ def planned_clearance(
 
 def report(
     samples: List[Dict], route: str, scene_path: str, *,
+    schema_version: int = LOG_SCHEMA_VERSION,
     allow_missing_aperture: bool = False,
 ) -> Dict:
     """The full report: realised vs planned, both hand models, for `route`
@@ -324,24 +487,34 @@ def report(
     live scene link, only the SDK's joint telemetry; a re-flight that needs
     live object poses should record them separately).
 
-    `realised` is computed at each sample's own measured aperture. Raises
-    `ApertureDataError` (see the module docstring) unless
-    `allow_missing_aperture=True` is passed for a log that predates
-    aperture logging -- in which case `realised_aperture_assumed_samples`
-    names every sample index that fell back to the wide-open assumption,
-    so the fallback is visible in the report rather than silent. An empty
-    list there means every sample's aperture was actually measured.
+    `schema_version` is `samples`'s declared schema (default: current --
+    right for a fresh recording; pass a loaded log's own
+    `schema_version_of(log)` when reading one from disk). `realised` is
+    computed at each sample's own measured aperture. Raises
+    `ApertureDataError` or `UnsupportedSchemaVersionError` (see the module
+    docstring) unless `allow_missing_aperture=True` is passed for a log
+    declared as a supported legacy schema -- in which case
+    `realised_aperture_assumed_samples` names every sample index that fell
+    back to the wide-open assumption, so the fallback is visible in the
+    report rather than silent. An empty list there means every sample's
+    aperture was actually measured. `realised_aperture_source` and
+    `planned_aperture_policy` name, in plain text, where each half's
+    aperture actually comes from -- see the module docstring's "Aperture
+    provenance" section.
     """
     scene = SceneModel.from_yaml(scene_path)
     q7_and_gripper, assumed = validated_samples(
-        samples, allow_missing_aperture=allow_missing_aperture)
+        samples, schema_version=schema_version,
+        allow_missing_aperture=allow_missing_aperture)
     return {
         "route": route,
         "scene": scene_path,
         "n_samples": len(samples),
         "realised": _worst_clearance_over_samples(q7_and_gripper, scene),
         "realised_aperture_assumed_samples": assumed,
+        "realised_aperture_source": REALISED_APERTURE_SOURCE,
         "planned": planned_clearance(route, len(samples), scene),
+        "planned_aperture_policy": PLANNED_APERTURE_POLICY,
     }
 
 
@@ -374,17 +547,23 @@ def main() -> None:
          "-- fly the route now. This only reads present_position.")
     samples = record_joint_log(reachy.r_arm, args.duration)
 
-    # Fail fast, before saving or reporting, if the recording itself came
-    # back with an untrustworthy aperture on any sample (a disconnected
-    # joint, a stale SDK read) -- proving the log actually meets E1's
-    # requirement rather than trusting that record_joint_log worked.
+    # Fail fast, before saving as a normal log or reporting, if the
+    # recording itself came back with an untrustworthy aperture on any
+    # sample (a disconnected joint, a stale SDK read) -- proving the log
+    # actually meets E1's requirement rather than trusting that
+    # record_joint_log worked. The recording is not thrown away: it is
+    # preserved as a marked-invalid diagnostic artifact (see
+    # save_invalid_log) so the flight can be inspected instead of re-flown
+    # blind, and it can never be picked up as valid E1 data.
     try:
         validated_samples(samples, allow_missing_aperture=False)
     except ApertureDataError as exc:
+        invalid_path = save_invalid_log(samples, args.route, args.scene, str(exc))
         print(f"FAIL: recorded log has an unusable gripper aperture: {exc}\n"
-              "Not saving or reporting -- E1 needs every sample's real "
-              "aperture, not an assumption. Check the SDK connection to "
-              "r_gripper and re-fly.")
+              f"Saved {len(samples)} samples as INVALID to {invalid_path} "
+              "for diagnosis -- not a usable E1 log. E1 needs every "
+              "sample's real aperture, not an assumption. Check the SDK "
+              "connection to r_gripper and re-fly.")
         sys.exit(1)
 
     path = save_log(samples, args.route, args.scene)

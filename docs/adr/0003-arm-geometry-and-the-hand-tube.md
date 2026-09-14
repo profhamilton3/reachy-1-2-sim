@@ -344,16 +344,36 @@ about the robot.
   each sample's own `t`, never assume uniform `1/sample_hz`).
 
   A recorded sample's aperture is validated, not trusted blindly: missing
-  (a schema-1 log, or a dropped field) raises `ApertureDataError` unless
-  the caller passes `allow_missing_aperture=True` explicitly, and even then
-  every such sample is named in the report
+  raises `ApertureDataError` unless the caller passes
+  `allow_missing_aperture=True` **and** declares the log's `schema_version`
+  as one this module has explicit legacy fallback logic for (today: only
+  `1`, real schema-1 logs) — a `schema_version` claimed to be the current
+  one (`2`) with a missing aperture always raises, the flag
+  notwithstanding, because the current schema has no excuse for a gap. An
+  unrecognised `schema_version` (neither current nor a supported legacy
+  one) raises `UnsupportedSchemaVersionError` outright, before any
+  per-sample check. Every such fallback sample is named in the report
   (`realised_aperture_assumed_samples`) rather than silently treated as
   open; a present-but-invalid reading (non-numeric, non-finite, or outside
-  the MJCF's commanded range) always raises, regardless of that flag —
-  `main()` itself now validates a fresh recording before saving or
-  reporting it, so a bad SDK read is caught at record time. `hand_radius`
-  and the tube are untouched by this; only the recorder's own schema and
-  reporting math changed.
+  the MJCF's commanded range) always raises, regardless of the flag or
+  declared schema — `main()` itself now validates a fresh recording before
+  saving or reporting it, so a bad SDK read is caught at record time.
+
+  A recording that fails this validation is not discarded: `main()` saves
+  it via `save_invalid_log` (filename ending `_INVALID.json`, body carrying
+  `"valid": false`, the failure reason, and every sample actually
+  recorded, offending one included) so the flight can be diagnosed instead
+  of re-flown blind — and the file is stamped with a `schema_version` this
+  module never recognises, so reading it back the normal way always
+  refuses it rather than risking it pass for real E1 data.
+  `report()`'s result also now names, in plain text, where each half's
+  aperture came from (`realised_aperture_source`,
+  `planned_aperture_policy` — the latter being the per-leg worst-case
+  commanded *endpoint* aperture, applied uniformly along that leg, not a
+  per-sample commanded value). `hand_radius` and the tube are untouched by
+  this; only the recorder's own schema, validation, and reporting math
+  changed (2026-09-14, follow-up to Opus's review of the first version of
+  this PR).
 
   What is **not** done by this: no flight has been made. E1 is blocked on
   an operator and a live arm, not on the recorder any more.

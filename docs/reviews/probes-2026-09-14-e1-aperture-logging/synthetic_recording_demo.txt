@@ -61,6 +61,7 @@ all valid: assumed=[] (expect [])
     }
   },
   "realised_aperture_assumed_samples": [],
+  "realised_aperture_source": "measured per-sample r_gripper.present_position, validated; see realised_aperture_assumed_samples for any indices that instead used the safe wide-open assumption under allow_missing_aperture",
   "planned": {
     "tube": {
       "red_cube": 1.2726757904479509,
@@ -86,10 +87,15 @@ all valid: assumed=[] (expect [])
       "pool_cyl_2": 0.7877499831738577,
       "pool_cyl_3": 0.7879078443412554
     }
-  }
+  },
+  "planned_aperture_policy": "per FOOTPRINT_LEGS leg, the worst-case (largest-hand_radius) of that leg's two commanded ENDPOINT apertures, applied to every interpolated sample along the leg -- not a per-sample commanded value"
 }
 
-=== compare against the OLD (pre-aperture) behaviour: assumed-open on every sample ===
+=== schema-aware loading (2026-09-14 follow-up): a log missing r_gripper is rescued ONLY when declared a supported legacy schema, never under the current one ===
+declared schema_version omitted (defaults to current, 2) + allow_missing_aperture=True: still raised, as required -- sample 0 (t=0.0): missing 'r_gripper' (schema_version=2). schema_version=2 is this module's CURRENT schema, which always includes r_gripper; a missing key here is a dropped field or a bad recording, not an old log format -- allow_missing_aperture does not apply to it.
+declared schema_version=3 (unrecognised): refused outright -- schema_version=3 is not the current schema (2) or a supported legacy schema ((1,)) -- refusing to guess what this log's shape means.
+
+=== compare against the OLD (pre-aperture) behaviour: assumed-open on every sample, log correctly DECLARED schema_version=1 ===
 assumed_samples: 20 of 20 (the whole log, as expected for a schema-1-shaped input)
 
 === the difference this makes: realised tube clearance, old (assumed-open) vs new (actual aperture) ===
@@ -106,3 +112,8 @@ assumed_samples: 20 of 20 (the whole log, as expected for a schema-1-shaped inpu
 
 === missing-data guard: a corrupted sample is refused, not silently open ===
 raised as expected: sample 5 (t=0.25): r_gripper=nan is not finite
+
+=== a failed recording is preserved, marked invalid, never accepted as valid E1 data (2026-09-14 follow-up) ===
+preserved 20 samples (including the NaN one) to route_clearance_LOWER_TO_REST_20260914T223013Z_INVALID.json
+  valid=False  error='sample 5 (t=0.25): r_gripper=nan is not finite'
+read back the normal (schema-aware) way: refused outright, not treated as valid data -- schema_version=0 is not the current schema (2) or a supported legacy schema ((1,)) -- refusing to guess what this log's shape means.
