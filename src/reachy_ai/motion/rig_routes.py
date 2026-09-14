@@ -828,7 +828,7 @@ POSTURE_TRANSITIONS: Dict[Tuple[str, str], str] = {
 #: PRESENT -> WAVE_B) read worst +1.6 cm (tube hand, fully open) against a
 #: 12 cm block anywhere on the board (x=0.23, y=-0.32 — the same near-right
 #: corner strip LIFT_TO_PRESENT and LOWER_TO_REST are worst on), positive on
-#: both models (`outputs/probes-2026-09-12/probe_wave_legs.txt`).
+#: both models (`docs/reviews/probes-2026-09-12/probe_wave_legs.txt`).
 #:
 #: THE DECISION #82 ASKS FOR: this gates every ability whose available() call
 #: resolves to one of these route names, not only `rest_forearm`.  A `wave` or

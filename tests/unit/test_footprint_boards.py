@@ -155,7 +155,7 @@ def _surface_points(m, d, g, n=41):
 
 def _point_to_geom(m, d, pts, g):
     """Closed-form signed distance from world points to primitive geom g.
-    `outputs/probes-2026-09-12/geomdist.py`'s method verbatim (box, sphere,
+    `docs/reviews/probes-2026-09-12/geomdist.py`'s method verbatim (box, sphere,
     capsule -- the arm geoms this sweep's reference uses)."""
     t = int(m.geom_type[g])
     h = np.asarray(m.geom_size[g], dtype=float)
@@ -179,7 +179,7 @@ def _point_to_geom(m, d, pts, g):
 
 def _mjcf_distance(m, d, arm_geom, target_geom, n=41):
     """Min distance from arm primitive to sampled target-box surface (m).
-    `outputs/probes-2026-09-12/geomdist.py`'s `distance()`, copied in."""
+    `docs/reviews/probes-2026-09-12/geomdist.py`'s `distance()`, copied in."""
     best = float(_point_to_geom(
         m, d, _surface_points(m, d, target_geom, n), arm_geom).min())
     if int(m.geom_type[arm_geom]) == _BOX:

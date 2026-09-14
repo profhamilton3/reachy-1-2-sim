@@ -1,0 +1,57 @@
+mj_geomDistance disagreed with sampled distance (>2 mm) at 18 of the geom-pair evaluations
+board: {'soda_can': (0.2794, 0.1524, 0.7995), 'foam_block': (0.4318, -0.1524, 0.767)}
+leg                                        grip obj          caps(open) caps(guard)  caps(cmd)   physics    shell   torso   [13 samples | 101 samples]
+PLACE_ROUTE[0]                             20.0 soda_can     +32.0| +32.0  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+PLACE_ROUTE[0]                             20.0 foam_block    -2.6|  -2.6   +0.5|  +0.5   +0.5|  +0.5   +4.5|  +4.5   +4.5|  +4.5  +34.7| +34.7
+PLACE_ROUTE[1]                            -45.0 soda_can     +32.8| +32.8  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+PLACE_ROUTE[1]                            -45.0 foam_block    -2.6|  -2.6   -1.7|  -1.7   -1.7|  -1.7   +4.8|  +4.8   +4.8|  +4.8  +34.7| +34.7
+RAISE_TO_SIDE[0]                           20.0 soda_can     +32.0| +32.0  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+RAISE_TO_SIDE[0]                           20.0 foam_block    -2.6|  -2.6   +0.5|  +0.5   +0.5|  +0.5   +4.5|  +4.5   +4.5|  +4.5  +34.7| +34.7
+RAISE_TO_SIDE[1]                          -45.0 soda_can     +32.8| +32.8  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+RAISE_TO_SIDE[1]                          -45.0 foam_block    -2.6|  -2.6   -1.7|  -1.7   -1.7|  -1.7   +4.8|  +4.8   +4.8|  +4.8  +34.7| +34.7
+STOW_ROUTE[0]                             -45.0 soda_can     +32.8| +32.8  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+STOW_ROUTE[0]                             -45.0 foam_block    -2.6|  -2.6   -1.7|  -1.7   -1.7|  -1.7   +4.8|  +4.8   +4.8|  +4.8  +34.7| +34.7
+STOW_ROUTE[1]                              20.0 soda_can     +32.0| +32.0  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+STOW_ROUTE[1]                              20.0 foam_block    -2.6|  -2.6   +0.5|  +0.5   +0.5|  +0.5   +4.5|  +4.5   +4.5|  +4.5  +34.7| +34.7
+STOW_FROM_SIDE[0]                         -45.0 soda_can     +32.8| +32.8  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+STOW_FROM_SIDE[0]                         -45.0 foam_block    -2.6|  -2.6   -1.7|  -1.7   +0.5|  +0.5   +4.8|  +4.8   +4.8|  +4.8  +34.7| +34.7
+STOW_FROM_SIDE[1]                          20.0 soda_can     +32.0| +32.0  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+STOW_FROM_SIDE[1]                          20.0 foam_block    -2.6|  -2.6   +0.5|  +0.5   +0.5|  +0.5   +4.5|  +4.5   +4.5|  +4.5  +34.7| +34.7
+LOWER_TO_REST[0]                          -45.0 soda_can     +32.8| +32.8  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+LOWER_TO_REST[0]                          -45.0 foam_block    -2.6|  -2.6   -1.7|  -1.7   +0.5|  +0.5   +4.8|  +4.8   +4.8|  +4.8  +34.7| +34.7
+LOWER_TO_REST[1]                          -45.0 soda_can     +32.8| +32.8  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+LOWER_TO_REST[1]                          -45.0 foam_block    -2.6|  -2.6   -1.7|  -1.7   -1.7|  -1.7   +4.8|  +4.8   +4.8|  +4.8  +34.7| +34.7
+LIFT_TO_PRESENT[0] (unguarded, A3)        -45.0 soda_can     +32.8| +32.8  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +33.6| +33.6  +19.9| +19.9
+LIFT_TO_PRESENT[0] (unguarded, A3)        -45.0 foam_block    -2.6|  -2.6   -1.7|  -1.7   -1.7|  -1.7   +4.8|  +4.8   +4.8|  +4.8  +34.7| +34.7
+SWING_2->SWING_1 (rail, #74)               20.0 soda_can     +24.0| +24.0  +27.1| +27.1  +27.1| +27.1  +31.5| +31.5  +32.7| +32.7  +19.9| +19.9
+SWING_2->SWING_1 (rail, #74)               20.0 foam_block   +11.1| +11.1  +14.2| +14.2  +14.2| +14.2  +18.1| +18.1  +18.3| +18.3  +34.7| +34.7
+SWING_1->TUCK (rail, #74)                  20.0 soda_can     +24.4| +24.4  +27.5| +27.5  +27.5| +27.5  +32.2| +32.2  +33.2| +33.2  +19.9| +19.9
+SWING_1->TUCK (rail, #74)                  20.0 foam_block   +12.4| +12.4  +15.5| +15.5  +15.5| +15.5  +19.7| +19.7  +19.4| +19.4  +34.7| +34.7
+
+rails (cm), worst over 101 samples:
+  PLACE_ROUTE[0]                           rig_rail_outer_right   physics   +6.7  shell   +6.7
+  PLACE_ROUTE[0]                           rig_rail_inner_right   physics  +14.6  shell  +14.6
+  PLACE_ROUTE[1]                           rig_rail_outer_right   physics   +6.7  shell   +6.7
+  PLACE_ROUTE[1]                           rig_rail_inner_right   physics  +14.6  shell  +14.6
+  RAISE_TO_SIDE[0]                         rig_rail_outer_right   physics   +6.7  shell   +6.7
+  RAISE_TO_SIDE[0]                         rig_rail_inner_right   physics  +14.6  shell  +14.6
+  RAISE_TO_SIDE[1]                         rig_rail_outer_right   physics   +6.7  shell   +6.7
+  RAISE_TO_SIDE[1]                         rig_rail_inner_right   physics  +14.6  shell  +14.6
+  STOW_ROUTE[0]                            rig_rail_outer_right   physics   +6.7  shell   +6.7
+  STOW_ROUTE[0]                            rig_rail_inner_right   physics  +14.6  shell  +14.6
+  STOW_ROUTE[1]                            rig_rail_outer_right   physics   +6.7  shell   +6.7
+  STOW_ROUTE[1]                            rig_rail_inner_right   physics  +14.6  shell  +14.6
+  STOW_FROM_SIDE[0]                        rig_rail_outer_right   physics   +6.7  shell   +6.7
+  STOW_FROM_SIDE[0]                        rig_rail_inner_right   physics  +14.6  shell  +14.6
+  STOW_FROM_SIDE[1]                        rig_rail_outer_right   physics   +6.7  shell   +6.7
+  STOW_FROM_SIDE[1]                        rig_rail_inner_right   physics  +14.6  shell  +14.6
+  LOWER_TO_REST[0]                         rig_rail_outer_right   physics   +6.7  shell   +6.7
+  LOWER_TO_REST[0]                         rig_rail_inner_right   physics  +14.6  shell  +14.6
+  LOWER_TO_REST[1]                         rig_rail_outer_right   physics   +6.7  shell   +6.7
+  LOWER_TO_REST[1]                         rig_rail_inner_right   physics  +14.6  shell  +14.6
+  LIFT_TO_PRESENT[0] (unguarded, A3)       rig_rail_outer_right   physics   +6.7  shell   +6.7
+  LIFT_TO_PRESENT[0] (unguarded, A3)       rig_rail_inner_right   physics  +14.6  shell  +14.6
+  SWING_2->SWING_1 (rail, #74)             rig_rail_outer_right   physics   +2.9  shell   +2.9
+  SWING_2->SWING_1 (rail, #74)             rig_rail_inner_right   physics  +15.9  shell  +16.2
+  SWING_1->TUCK (rail, #74)                rig_rail_outer_right   physics   +2.7  shell   +2.7
+  SWING_1->TUCK (rail, #74)                rig_rail_inner_right   physics   +8.8  shell   +8.8

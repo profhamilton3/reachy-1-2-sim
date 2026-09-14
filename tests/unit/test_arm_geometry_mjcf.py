@@ -79,7 +79,7 @@ def _set_arm(m, d, jq, q7, gripper_deg):
 def _box_endpoints(m, d, gname):
     """World endpoints of the capsule that bounds box geom `gname`, along its
     own local Z through its centre -- the same convention `link_capsules`
-    uses for "shells", and the one `outputs/probes-2026-09-12/
+    uses for "shells", and the one `docs/reviews/probes-2026-09-12/
     probe_hand_candidates.py` validated this construction against."""
     g = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, gname)
     h = m.geom_size[g]

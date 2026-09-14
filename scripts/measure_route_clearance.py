@@ -1,5 +1,15 @@
-"""Read-only route-clearance recorder (review 2026-09-12, E1: outputs/
-probes-2026-09-12/, section 5).
+"""Read-only route-clearance recorder (review 2026-09-12, E1:
+docs/reviews/2026-09-12-repair-review-and-56-74-design.md, section 5).
+
+NOT YET FIT TO FLY E1 -- prerequisite recorded in docs/adr/0003 ("What is
+still open", E1): this recorder streams the seven ARM7 joints only, so the
+realised-clearance report assumes the gripper fully open (`gripper_deg=None`)
+at every sample. The aperture is the variable that decides whether the hand
+is inside the tube at all (ADR-0003's discrepancy section), so a log without
+`r_gripper.present_position` cannot say what clearance the hand actually had.
+Add `r_gripper` to the recorded joints (same `r_arm` object, same read-only
+access) and thread the per-sample aperture into `realised_clearance` before
+the first operator flight; the synthetic-log tests need the same.
 
 No through-the-move data exist for the tabletop legs (PRESENT/HOVER <->
 REST) -- the rail rows are the only realised-clearance numbers on record,

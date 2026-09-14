@@ -22,3 +22,7 @@ artifacts/*
 
 # Search studies and panel episode records (see web/panel_episodes.py)
 runs/
+
+# Review probes regenerate their raw output next to themselves; the .txt
+# summaries are committed, the JSON is not.
+docs/reviews/probes-*/*.json

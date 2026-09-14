@@ -12,8 +12,9 @@ ADR-0002 accepted the SWING_1 graze on the evidence that eighteen flown legs,
 with objects on the board, left it undisturbed — and flagged that the
 forearm-footprint guard's own capsule model disagrees with that evidence at
 r2c3, in a way neither this repo nor #73/#74 had explained. The 2026-09-12
-review (`outputs/review-2026-09-12-opus-repair-review-and-56-74-design.md`,
-§3.2) resolves it:
+review (`docs/reviews/2026-09-12-repair-review-and-56-74-design.md`, §3.2;
+its probe scripts and summaries under `docs/reviews/probes-2026-09-12/`)
+resolves it:
 
 - `kinematics.link_capsules`'s `upper_arm` and `forearm` capsules are copied
   directly from the MJCF's own `r_upper_arm_col` / `r_forearm_col` capsules —
@@ -178,6 +179,20 @@ contradicted inequality is a finding, not a test to make pass.
   reporting half unit-tested; the recording half needs an operator and a
   live arm). Resolves: the tabletop margin: whether `"shells"` (or a margin
   on `"tube"`) should ever become the guard's default.
+  **Prerequisite before E1 is flown: the recorder must log the actual
+  gripper aperture.** As committed it streams the seven `ARM7` joints only
+  and reports realised clearance with `gripper_deg=None` (assumed fully
+  open). The discrepancy section above shows the aperture is the variable
+  that decides whether the hand is inside the tube at all, and both models'
+  finger placement depends on it — so an E1 run without `r_gripper`'s
+  `present_position` in the log cannot say what clearance the hand actually
+  had, only what it would have had wide open. `r_gripper` is on the same
+  `r_arm` object and reads the same way; recording it is a small,
+  read-only change to the script plus its synthetic-log tests, and is the
+  first step of E1, not an optional refinement. The planned-vs-realised
+  comparison should then use the recorded aperture per sample on the
+  realised side and the guard's per-leg worst-case aperture (`rig_routes`
+  A2) on the planned side, and say which is which.
 - **E2** — the same instrumentation on the SWING_1 rail crossing.
 - **E3** — real gripper envelope vs. the MJCF shells (tape measure on the
   physical Reachy 1.2): whether `"shells"` is a bound on the *real* hand,

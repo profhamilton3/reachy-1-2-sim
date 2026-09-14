@@ -429,7 +429,7 @@ class TestFootprintLegs:
         (PRESENT -> WAVE_A, PRESENT -> WAVE_B) read worst +1.6 cm (tube hand,
         fully open) against a 12 cm block anywhere on the board (x=0.23,
         y=-0.32), positive in both models
-        (outputs/probes-2026-09-12/probe_wave_legs.txt)."""
+        (docs/reviews/probes-2026-09-12/probe_wave_legs.txt)."""
         assert "WAVE" not in R.FOOTPRINT_LEGS
 
     def test_lift_to_present_is_present_and_reverses_the_descent(self):

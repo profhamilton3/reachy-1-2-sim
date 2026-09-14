@@ -1,0 +1,25 @@
+board                                  leg                                      obj            tube  two-caps  shells
+evidence (soda r1c1, foam r2c3)        PLACE_ROUTE tail HOVER->REST_SHUT->REST  soda_can      +33.6     +33.6   +33.6
+evidence (soda r1c1, foam r2c3)        PLACE_ROUTE tail HOVER->REST_SHUT->REST  foam_block     -1.7      +4.5    +4.5
+evidence (soda r1c1, foam r2c3)        LOWER_TO_REST PRESENT->REST_SHUT->REST   soda_can      +33.6     +33.6   +33.6
+evidence (soda r1c1, foam r2c3)        LOWER_TO_REST PRESENT->REST_SHUT->REST   foam_block     -1.7      +4.8    +4.8
+evidence (soda r1c1, foam r2c3)        LIFT REST->PRESENT (A3)                  soda_can      +33.6     +33.6   +33.6
+evidence (soda r1c1, foam r2c3)        LIFT REST->PRESENT (A3)                  foam_block     -1.7      +4.8    +4.8
+incident (foam 7 cm right of r2c3)     PLACE_ROUTE tail HOVER->REST_SHUT->REST  foam_block     -8.0      -2.4    -2.4
+incident (foam 7 cm right of r2c3)     LOWER_TO_REST PRESENT->REST_SHUT->REST   foam_block     -8.0      -2.2    -2.2
+incident (foam 7 cm right of r2c3)     LIFT REST->PRESENT (A3)                  foam_block     -8.0      -2.2    -2.2
+foam on r3c3                           PLACE_ROUTE tail HOVER->REST_SHUT->REST  foam_block     -5.2      +3.4    +4.1
+foam on r3c3                           LOWER_TO_REST PRESENT->REST_SHUT->REST   foam_block     -5.2      +3.4    +4.1
+foam on r3c3                           LIFT REST->PRESENT (A3)                  foam_block     -5.2      +4.5    +6.5
+foam on r1c3                           PLACE_ROUTE tail HOVER->REST_SHUT->REST  foam_block     +2.8      +2.8    +2.8
+foam on r1c3                           LOWER_TO_REST PRESENT->REST_SHUT->REST   foam_block     +2.9      +2.9    +2.9
+foam on r1c3                           LIFT REST->PRESENT (A3)                  foam_block     +2.9      +2.9    +2.9
+soda_can on r2c3                       PLACE_ROUTE tail HOVER->REST_SHUT->REST  soda_can       -0.4      +4.5    +4.5
+soda_can on r2c3                       LOWER_TO_REST PRESENT->REST_SHUT->REST   soda_can       -0.4      +5.4    +5.4
+soda_can on r2c3                       LIFT REST->PRESENT (A3)                  soda_can       -0.4      +5.4    +5.4
+
+sweep, 6 cm cube, PLACE_ROUTE tail, 224 positions:
+  tube<0: 53   two-caps<0: 38   shells<0: 36
+  two-caps less conservative than shells by >2 mm: 0 positions
+  sign disagreements two-caps vs shells: 2   tube vs shells: 17
+  max over-conservatism (shells - model): tube +9.3 cm, two-caps +3.5 cm
