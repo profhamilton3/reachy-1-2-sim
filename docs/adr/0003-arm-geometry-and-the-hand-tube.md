@@ -329,28 +329,54 @@ about the robot.
 
 - **E1** — re-fly the tabletop legs with 20 Hz joint logging, reporting
   per-link realised clearance under both hand models
-  (`scripts/measure_route_clearance.py`, committed this slice, offline
-  reporting half unit-tested; the recording half needs an operator and a
-  live arm). Resolves: the tabletop margin: whether `"shells"` (or a margin
-  on `"tube"`) should ever become the guard's default.
-  **Prerequisite before E1 is flown: the recorder must log the actual
-  gripper aperture.** As of 2026-09-14 the script enforces this itself —
-  `main()` refuses to record while `APERTURE_LOGGED` is `False`, whatever
-  the environment says — and `test_e1_is_blocked_until_the_aperture_is_logged`
-  pins the block; both are to be rewritten, not removed, by the commit that
-  implements the logging. As committed it streams the seven `ARM7` joints only
-  and reports realised clearance with `gripper_deg=None` (assumed fully
-  open). The discrepancy section above shows the aperture is the variable
-  that decides whether the hand is inside the tube at all, and both models'
-  finger placement depends on it — so an E1 run without `r_gripper`'s
-  `present_position` in the log cannot say what clearance the hand actually
-  had, only what it would have had wide open. `r_gripper` is on the same
-  `r_arm` object and reads the same way; recording it is a small,
-  read-only change to the script plus its synthetic-log tests, and is the
-  first step of E1, not an optional refinement. The planned-vs-realised
-  comparison should then use the recorded aperture per sample on the
-  realised side and the guard's per-leg worst-case aperture (`rig_routes`
-  A2) on the planned side, and say which is which.
+  (`scripts/measure_route_clearance.py`). Resolves: the tabletop margin:
+  whether `"shells"` (or a margin on `"tube"`) should ever become the
+  guard's default. **Still open** — this needs an operator and a live arm,
+  neither of which this repo can provide; nothing here changes that.
+
+  **The prerequisite this ADR previously recorded — the recorder must log
+  the actual gripper aperture — is now implemented** (2026-09-14,
+  aperture-logging PR, no live motion): `record_joint_log` streams all
+  eight `rig_routes.R_JOINTS` (`ARM7` plus `r_gripper`), the same read-only
+  `getattr(...).present_position` access as the other seven, at the same
+  instant. The log schema is `schema_version: 2`; every value is degrees;
+  `t` is elapsed seconds from `time.monotonic()`, spacing best-effort (read
+  each sample's own `t`, never assume uniform `1/sample_hz`).
+
+  A recorded sample's aperture is validated, not trusted blindly: missing
+  raises `ApertureDataError` unless the caller passes
+  `allow_missing_aperture=True` **and** declares the log's `schema_version`
+  as one this module has explicit legacy fallback logic for (today: only
+  `1`, real schema-1 logs) — a `schema_version` claimed to be the current
+  one (`2`) with a missing aperture always raises, the flag
+  notwithstanding, because the current schema has no excuse for a gap. An
+  unrecognised `schema_version` (neither current nor a supported legacy
+  one) raises `UnsupportedSchemaVersionError` outright, before any
+  per-sample check. Every such fallback sample is named in the report
+  (`realised_aperture_assumed_samples`) rather than silently treated as
+  open; a present-but-invalid reading (non-numeric, non-finite, or outside
+  the MJCF's commanded range) always raises, regardless of the flag or
+  declared schema — `main()` itself now validates a fresh recording before
+  saving or reporting it, so a bad SDK read is caught at record time.
+
+  A recording that fails this validation is not discarded: `main()` saves
+  it via `save_invalid_log` (filename ending `_INVALID.json`, body carrying
+  `"valid": false`, the failure reason, and every sample actually
+  recorded, offending one included) so the flight can be diagnosed instead
+  of re-flown blind — and the file is stamped with a `schema_version` this
+  module never recognises, so reading it back the normal way always
+  refuses it rather than risking it pass for real E1 data.
+  `report()`'s result also now names, in plain text, where each half's
+  aperture came from (`realised_aperture_source`,
+  `planned_aperture_policy` — the latter being the per-leg worst-case
+  commanded *endpoint* aperture, applied uniformly along that leg, not a
+  per-sample commanded value). `hand_radius` and the tube are untouched by
+  this; only the recorder's own schema, validation, and reporting math
+  changed (2026-09-14, follow-up to Opus's review of the first version of
+  this PR).
+
+  What is **not** done by this: no flight has been made. E1 is blocked on
+  an operator and a live arm, not on the recorder any more.
 - **E2** — the same instrumentation on the SWING_1 rail crossing.
 - **E3** — real gripper envelope vs. the MJCF shells (tape measure on the
   physical Reachy 1.2): whether `"shells"` is a bound on the *real* hand,
