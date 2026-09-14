@@ -61,6 +61,13 @@ SAMPLE_HZ = 20.0
 RUNS_DIR = _HERE.parent / "runs"
 HAND_MODES = ("tube", "shells")
 
+#: E1 is BLOCKED until the recorder logs the actual gripper aperture
+#: (docs/adr/0003, "What is still open", E1).  `main()` refuses to record
+#: while this is False, whatever the environment says.  Flip it only in the
+#: commit that adds `r_gripper` to the recorded joints, threads the per-sample
+#: aperture into `realised_clearance`, and tests both on a synthetic log.
+APERTURE_LOGGED = False
+
 
 # ── Recording (needs a live arm) ─────────────────────────────────────────────
 
@@ -169,6 +176,14 @@ def report(samples: List[Dict], route: str, scene_path: str) -> Dict:
 # ── Entry point ───────────────────────────────────────────────────────────
 
 def main() -> None:
+    if not APERTURE_LOGGED:
+        print("Refusing to run: E1 is blocked until this recorder logs the "
+              "actual gripper aperture (r_gripper.present_position).\n"
+              "As written it streams the seven ARM7 joints only and would "
+              "report realised clearance as if the hand were wide open at "
+              "every sample -- which cannot say what clearance the hand "
+              "actually had.  See docs/adr/0003, 'What is still open', E1.")
+        sys.exit(1)
     if os.environ.get("REACHY_SIM_RECORD_CLEARANCE") != "1":
         print("Refusing to run: set REACHY_SIM_RECORD_CLEARANCE=1 to record.\n"
               "This script only STREAMS present_position -- it never "

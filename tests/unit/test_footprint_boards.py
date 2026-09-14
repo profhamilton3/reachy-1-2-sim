@@ -1,27 +1,26 @@
 """Issue #56/#74 (review 2026-09-12, Part 3, section 4): the fixture table
 that motivated the "shells" hand mode, computed here with
 `SceneModel.clearance` for both hand modes rather than quoted from the
-review's own scratch probes.
-
-Two things are checked, and (as in test_arm_geometry_mjcf.py) they are not
-both simply confirmations of the assignment's expectations:
+review's own scratch probes -- re-run 2026-09-14 after the tube's coverage
+correction (docs/adr/0003, "Correcting the tube").
 
   * TestNamedBoards -- the four named boards in the review's table, worst
     clearance over ANY guarded route (every `FOOTPRINT_LEGS` leg), for both
-    hand="tube" (today's default, unchanged) and hand="shells" (new,
-    opt-in). Matches the review's recorded numbers to +/- 0.3 cm.
+    hand="tube" (today's default) and hand="shells" (opt-in). The tube
+    column changed with the correction; the legacy numbers are recorded in
+    the class docstring.
+
+  * TestCorrectionNewlyRefuses -- every scene object on every grid cell,
+    every guarded route: which boards the corrected tube refuses that the
+    legacy tube allowed. Exactly two, both the 4 cm pool objects on r2c3.
 
   * TestSweepOrdering -- a 224-position, 6 cm cube sweep on the PLACE_ROUTE
     tail, comparing tube, shells, and the MJCF reference (geomdist.py's
-    method, copied in below) at each position, all three at the same
-    aperture. The assignment asked for a universal ordering ("shells never
-    reads more than tube and never less than the MJCF shell distance"). The
-    second half holds everywhere, as the capsule bound predicts. The first
-    half inverts at 3 positions -- pinned here rather than asserted away,
-    and explained in the class docstring. It is the same underlying cause
-    as TestTubeVsShellsAxisDistance in test_arm_geometry_mjcf.py:
-    `hand_radius()` swings the finger box's centre, not its far end, so the
-    open finger reaches outside the tube.
+    method, copied in below; ALL hand geoms including the collision pads) at
+    each position, all three at the same aperture. The tube never reads more
+    clearance than the MJCF geometry (its coverage, on real objects).
+    "shells" does, at 62/224 -- the thumb-pad gap pinned in
+    test_arm_geometry_mjcf.py::TestShellsMissThumbPad.
 
 Offline throughout: MuJoCo is used only to `mj_forward` a compiled model and
 read back geom frames, never `mj_step`, and no server is started.
@@ -93,33 +92,124 @@ def _cell_xy(cell_id):
 
 
 class TestNamedBoards:
-    """The review's fixture table (section 4): "flyable by geometry" rows
-    read positive under "shells" despite reading negative under "tube" --
-    which is the case for #56/#74 that a shared, better hand model changes
-    an outcome, not just a number. The guard itself keeps hand="tube" and
-    FOOTPRINT_MARGIN=0.0 regardless (this slice changes no default)."""
+    """The review's fixture table (section 4), re-run under the corrected
+    tube.  Legacy tube column (aperture-only, centre-swung radius, as the
+    review measured it): evidence -1.7, incident -8.0, foam@r3c3 -5.2,
+    soda@r2c3 -0.4 cm.  All four were already refused; the correction makes
+    each ~4 cm more negative (the REST leg's tube radius at -45 deg went
+    7.5 -> 11.5 cm).  "shells" rows read positive but are statements about
+    the VISUAL shells only -- see TestShellsMissThumbPad.  The guard keeps
+    hand="tube" and FOOTPRINT_MARGIN=0.0 (this slice changes no default)."""
 
     @pytest.mark.parametrize("objects,oid,expected_tube_cm,expected_shells_cm", [
         pytest.param(
             {"soda_can": _cell_xy("cell_r1c1"), "foam_block": _cell_xy("cell_r2c3")},
-            "foam_block", -1.7, +4.5, id="evidence_board"),
+            "foam_block", -5.7, +4.5, id="evidence_board"),
         pytest.param(
             {"foam_block": (_cell_xy("cell_r2c3")[0], _cell_xy("cell_r2c3")[1] - 0.07)},
-            "foam_block", -8.0, -2.4, id="incident_board"),
+            "foam_block", -11.9, -2.4, id="incident_board"),
         pytest.param(
             {"foam_block": _cell_xy("cell_r3c3")},
-            "foam_block", -5.2, +3.4, id="foam_on_r3c3"),
+            "foam_block", -9.4, +3.4, id="foam_on_r3c3"),
         pytest.param(
             {"soda_can": _cell_xy("cell_r2c3")},
-            "soda_can", -0.4, +4.5, id="soda_can_on_r2c3"),
+            "soda_can", -4.4, +4.5, id="soda_can_on_r2c3"),
     ])
-    def test_worst_clearance_matches_the_review(
+    def test_worst_clearance_under_the_corrected_tube(
             self, objects, oid, expected_tube_cm, expected_shells_cm):
         model = _board(objects)
         tube = _worst_over_any_guarded_route(model, oid, "tube")
         shells = _worst_over_any_guarded_route(model, oid, "shells")
         assert tube == pytest.approx(expected_tube_cm / 100.0, abs=0.003)
         assert shells == pytest.approx(expected_shells_cm / 100.0, abs=0.003)
+
+
+# ---------------------------------------------------------------------------
+# TestCorrectionNewlyRefuses -- legacy vs corrected tube, per board, per route
+# ---------------------------------------------------------------------------
+
+def _legacy_hand_radius(gripper_deg):
+    """The aperture-only, centre-swung radius the guard flew before the
+    2026-09-14 correction -- kept here, and only here, to measure what the
+    correction changed.  Not a model of anything."""
+    if gripper_deg is None:
+        gripper_deg = -68.8
+    y = -0.037 + 0.038 * math.sin(math.radians(gripper_deg))
+    return max(math.hypot(0.025, 0.046), math.hypot(0.012, abs(y) + 0.010))
+
+
+def _worst_per_route(model, oid, legacy):
+    """{route: worst clearance} for `oid` under the tube, optionally with the
+    legacy radius swapped in on the hand capsule."""
+    out = {}
+    for route, waypoints in R.FOOTPRINT_LEGS.items():
+        worst = None
+        for a, b in zip(waypoints, waypoints[1:]):
+            qa = [a[j] for j in R.ARM7]
+            qb = [b[j] for j in R.ARM7]
+            gripper_deg = max(a["r_gripper"], b["r_gripper"], key=hand_radius)
+            for q in joint_path(qa, qb, steps=13):
+                caps = link_capsules(q, "right", gripper_deg)
+                if legacy:
+                    caps = [(n, p0, p1, _legacy_hand_radius(gripper_deg))
+                            if n == "hand" else (n, p0, p1, r)
+                            for n, p0, p1, r in caps]
+                c = model.clearance(caps, ids=[oid])
+                if c is not None and (worst is None or c.distance < worst):
+                    worst = c.distance
+        out[route] = worst
+    return out
+
+
+class TestCorrectionNewlyRefuses:
+    """Every newly refused board, named.  Six scene objects (the four named
+    ones and one of each 4 cm pool shape) on each of the nine grid cells,
+    every guarded route: legacy tube >= 0 and corrected tube < 0.
+
+    Exactly two boards flip -- the 4 cm pool box and pool cylinder on r2c3
+    -- on every guarded route (they all share the REST tail).  Both were
+    marginal under the legacy tube (+0.3 / +0.9 cm) and are 3-4 cm inside
+    the corrected one; the visual-shells clearance at the same positions is
+    +5.9 / +6.3 cm, i.e. the refusal is the isotropic tube's
+    over-conservatism around an asymmetric hand, not a predicted contact.
+    Everything larger on r2c3 and everything on r3c3 was already refused.
+
+    Recorded, not loosened: the tube is now a correct bound and a loose one;
+    recovering these boards is Slice 2's job ("shells", once it covers the
+    collision pads and E1 has flown), not this radius's.
+    """
+
+    OBJECTS = ("red_cube", "blue_cylinder", "soda_can", "foam_block",
+               "pool_box_1", "pool_cyl_1")
+    CELLS = tuple(f"cell_r{r}c{c}" for r in (1, 2, 3) for c in (1, 2, 3))
+
+    def test_exactly_the_two_pool_objects_on_r2c3_flip(self):
+        flips = {}
+        already = set()
+        for oid in self.OBJECTS:
+            for cell in self.CELLS:
+                model = _board({oid: _cell_xy(cell)})
+                legacy = _worst_per_route(model, oid, legacy=True)
+                new = _worst_per_route(model, oid, legacy=False)
+                for route in R.FOOTPRINT_LEGS:
+                    if legacy[route] < 0:
+                        already.add((oid, cell))
+                    if legacy[route] >= 0 and new[route] < 0:
+                        flips[(oid, cell, route)] = (legacy[route], new[route])
+        assert {(o, c) for o, c, _r in flips} == {
+            ("pool_box_1", "cell_r2c3"), ("pool_cyl_1", "cell_r2c3")}
+        assert {r for _o, _c, r in flips} == set(R.FOOTPRINT_LEGS)
+        for (oid, cell, route), (lo, nw) in flips.items():
+            if oid == "pool_box_1":
+                assert lo == pytest.approx(0.003, abs=0.002) and nw == pytest.approx(-0.037, abs=0.003)
+            else:
+                assert lo == pytest.approx(0.009, abs=0.002) and nw == pytest.approx(-0.031, abs=0.003)
+        # and nothing that was refused stops being refused
+        for oid in self.OBJECTS:
+            for cell in self.CELLS:
+                if (oid, cell) in already:
+                    model = _board({oid: _cell_xy(cell)})
+                    assert min(_worst_per_route(model, oid, legacy=False).values()) < 0
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +303,11 @@ def _run_sweep(sweep_model):
     oadr = int(m.jnt_qposadr[int(m.body_jntadr[ob])])
     jq = {n: int(m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, n)])
           for n in R.R_JOINTS}
+    # every arm geom MuJoCo can report contact on or draw: the collision
+    # capsules, both visual shells, BOTH collision pads, the wrist ball
     arm_geom_names = ("r_upper_arm_col", "r_forearm_col",
-                     "r_thumb_body", "r_finger_body", "r_wrist_ball")
+                     "r_thumb_body", "r_finger_body",
+                     "r_thumb_col", "r_finger_col", "r_wrist_ball")
     arm_geoms = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, n)
                 for n in arm_geom_names]
 
@@ -247,6 +340,7 @@ def _run_sweep(sweep_model):
 
     ts_gaps = []   # tube - shells (positive: tube reads MORE clearance)
     sr_gaps = []   # shells - reference (positive: shells reads MORE clearance)
+    tr_gaps = []   # tube - reference (positive: tube reads MORE clearance)
     top_z = scene.table_surface_z
     for x in xs:
         for y in ys:
@@ -271,70 +365,62 @@ def _run_sweep(sweep_model):
                 ref_worst = ref if ref_worst is None else min(ref_worst, ref)
             ts_gaps.append(tube_worst - shells_worst)
             sr_gaps.append(shells_worst - ref_worst)
-    return len(xs) * len(ys), ts_gaps, sr_gaps
+            tr_gaps.append(tube_worst - ref_worst)
+    return len(xs) * len(ys), ts_gaps, sr_gaps, tr_gaps
 
 
 class TestSweepOrdering:
-    """DISCREPANCY (partial) from the 2026-09-12 assignment, reported for
-    Opus rather than forced to pass: the assignment asked this sweep to
-    assert "shells" never reads more clearance than "tube" and never less
-    than the MJCF reference, as a universal ordering. Measured here at the
-    review's own resolution (4 cm grid, 224 positions, 13 samples/leg, n=41
-    surface sampling), tube, shells and reference all at the leg's guarded
-    aperture:
+    """The 2026-09-12 assignment's sweep ordering, re-measured under the
+    corrected tube at the review's resolution (4 cm grid, 224 positions, 13
+    samples/leg, n=41 surface sampling), tube / shells / reference all at
+    the leg's guarded aperture, reference over ALL MJCF hand geoms
+    including the collision pads:
 
-      * shells <= reference (shells never less cautious than the true MJCF
-        shell geometry) at 224/224 -- the capsule-around-box bound holds, as
-        it must. An earlier draft read 2/224 inversions here; that was the
-        reference being evaluated at a different aperture than the capsules
-        (see `_run_sweep`), not geometry.
-      * tube > shells (tube less cautious than shells) at 3/224 positions,
-        by up to 2.8 cm. THIS is the real finding.
+      * tube <= reference at 224/224: the tube never reads more clearance
+        than the true MJCF geometry.  This is the coverage claim on real
+        objects, and the thing the 2026-09-14 correction exists for (before
+        it: tube > shells at 3/224, by up to 2.8 cm).
+      * tube <= shells at 224/224: nothing left of the finger poking out.
+      * shells > reference at 62/224 (by more than 2 mm; up to 1.0 cm): the "shells" model
+        does not contain r_thumb_col (TestShellsMissThumbPad).  Pinned, not
+        asserted away; when "shells" gains a thumb-pad capsule this count
+        should go to 0 and the pin be re-derived.
+      * shells tighter than tube by > 1 cm at 189/224 (was 158): the
+        corrected tube is a correct bound and a looser one -- up to 13 cm
+        of over-conservatism against the true geometry on this sweep.
 
-    Same cause as TestTubeVsShellsAxisDistance in test_arm_geometry_mjcf.py:
-    `hand_radius()` swings the finger box's centre (3.8 cm below the hinge)
-    rather than its far end (7.6 cm), so at the -45 deg aperture the
-    PLACE_ROUTE tail is guarded at, the finger shell reaches ~2.4 cm outside
-    the tube in its swing direction (the MJCF collision pad `r_finger_col`
-    ~1.8 cm). REST/REST_SHUT's r_wrist_roll=30 adds a further 1.6 cm of
-    offset. All three violating positions are within the last two columns
-    of the sweep grid (the near-right corner strip PLACE_ROUTE's tail is
-    already worst on -- review R1), and the magnitudes are small relative to
-    the up-to-9.3 cm of over-conservatism "tube" carries against the true
-    reference everywhere else on the board.
-
-    NOT evidence the guard is unsafe against any board it has been flown
-    over: it still flies "tube" only, at the margin it always has. It IS a
-    directional under-conservatism in the model consumers fly today; the
-    `hand_radius` lever arm is the first open item in docs/adr/0003 and is
-    deliberately not corrected in this slice (it changes which boards the
-    guard refuses, so it needs the fixture table re-run alongside).
+    NOT evidence the guard is adequate: it says the tube contains the model
+    hand.  E3 (the real gripper vs the MJCF) and E1 (through-the-move) are
+    still open.
     """
 
-    def test_ordering_mostly_holds_with_pinned_exceptions(self, sweep_model):
-        n, ts_gaps, sr_gaps = _run_sweep(sweep_model)
+    def test_tube_covers_reference_and_the_shells_gap_is_pinned(self, sweep_model):
+        n, ts_gaps, sr_gaps, tr_gaps = _run_sweep(sweep_model)
         assert n == 224
 
         tol = 0.002  # 2 mm: sampling/rounding noise, not a real violation
+        tr_violations = sum(1 for g in tr_gaps if g > tol)
         ts_violations = sum(1 for g in ts_gaps if g > tol)
         sr_violations = sum(1 for g in sr_gaps if g > tol)
 
-        # The bound that must hold: a capsule that contains each shell box
-        # can never read MORE clearance than the box itself at the same
-        # aperture.
-        assert sr_violations == 0, (
-            f"shells read more clearance than the MJCF reference at "
-            f"{sr_violations} positions (max gap {max(sr_gaps) * 100:.2f} cm) "
-            "-- the capsule bound is broken, or the reference is being "
-            "evaluated at a different aperture than the capsules again")
-
-        assert ts_violations == 3, (
+        # Coverage on real objects: the tube never reads more clearance than
+        # the MJCF hand geometry.  A single violation here is a hole in the
+        # guard's model.
+        assert tr_violations == 0, (
+            f"tube read more clearance than the MJCF reference at "
+            f"{tr_violations} positions (max {max(tr_gaps) * 100:.2f} cm)")
+        assert ts_violations == 0, (
             f"tube read more clearance than shells at {ts_violations} "
-            "positions (measured and pinned at 3 -- see class docstring; "
-            "if this changed, re-derive the numbers rather than the count)")
-        assert max(ts_gaps) == pytest.approx(0.0275, abs=0.001)
+            f"positions (max {max(ts_gaps) * 100:.2f} cm)")
 
-        # The property that actually matters for #56/#74: shells is a much
-        # tighter (and still safe-in-practice) bound than tube at most board
-        # positions (158/224 measured), not just occasionally.
-        assert sum(1 for g in ts_gaps if g < -0.01) == 158
+        # The shells thumb-pad gap, pinned (see class docstring).
+        assert sr_violations == 62, (
+            f"shells read more clearance than the MJCF reference at "
+            f"{sr_violations} positions (pinned at 62 -- the r_thumb_col gap; "
+            "re-derive rather than edit the count)")
+        assert max(sr_gaps) == pytest.approx(0.0102, abs=0.001)
+
+        # shells is a much tighter bound than the corrected tube at most of
+        # the board -- the over-conservatism Slice 2 is meant to recover.
+        assert sum(1 for g in ts_gaps if g < -0.01) == 189
+        assert max(-g for g in tr_gaps) == pytest.approx(0.1296, abs=0.003)

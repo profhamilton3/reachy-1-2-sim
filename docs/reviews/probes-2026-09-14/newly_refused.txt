@@ -1,0 +1,42 @@
+== A. scene objects on grid cells: legacy>=0 and new<0 (per route) ==
+boards x routes checked: 54 x 6; flips: 12
+  pool_box_1     cell_r2c3  PLACE_ROUTE      legacy +0.3  new -3.7  shells +6.3
+  pool_box_1     cell_r2c3  RAISE_TO_SIDE    legacy +0.3  new -3.7  shells +6.3
+  pool_box_1     cell_r2c3  STOW_ROUTE       legacy +0.3  new -3.7  shells +6.3
+  pool_box_1     cell_r2c3  STOW_FROM_SIDE   legacy +0.3  new -3.7  shells +6.3
+  pool_box_1     cell_r2c3  LOWER_TO_REST    legacy +0.3  new -3.7  shells +6.5
+  pool_box_1     cell_r2c3  LIFT_TO_PRESENT  legacy +0.3  new -3.7  shells +6.5
+  pool_cyl_1     cell_r2c3  PLACE_ROUTE      legacy +0.9  new -3.1  shells +5.9
+  pool_cyl_1     cell_r2c3  RAISE_TO_SIDE    legacy +0.9  new -3.1  shells +5.9
+  pool_cyl_1     cell_r2c3  STOW_ROUTE       legacy +0.9  new -3.1  shells +5.9
+  pool_cyl_1     cell_r2c3  STOW_FROM_SIDE   legacy +0.9  new -3.1  shells +5.9
+  pool_cyl_1     cell_r2c3  LOWER_TO_REST    legacy +0.9  new -3.1  shells +6.7
+  pool_cyl_1     cell_r2c3  LIFT_TO_PRESENT  legacy +0.9  new -3.1  shells +6.7
+already refused under legacy (any route), for context:
+  red_cube       cell_r2c3  legacy -1.1
+  red_cube       cell_r3c3  legacy -4.9
+  blue_cylinder  cell_r2c3  legacy -0.6
+  blue_cylinder  cell_r3c3  legacy -4.9
+  soda_can       cell_r2c3  legacy -0.4
+  soda_can       cell_r3c3  legacy -4.7
+  foam_block     cell_r2c3  legacy -1.7
+  foam_block     cell_r3c3  legacy -5.4
+  pool_box_1     cell_r3c3  legacy -3.9
+  pool_cyl_1     cell_r3c3  legacy -3.4
+== B. 6 cm cube on the 4 cm grid, worst over any guarded route ==
+positions 224: refused legacy 59, new 74, newly refused 15
+  x=0.35 y=-0.16  legacy +1.7  new -2.3  shells +3.3  MJCF ref +3.3
+  x=0.39 y=-0.16  legacy +0.0  new -4.0  shells +3.7  MJCF ref +3.7
+  x=0.39 y=-0.12  legacy +3.7  new -0.3  shells +7.7  MJCF ref +7.7
+  x=0.43 y=-0.12  legacy +2.0  new -1.9  shells +8.1  MJCF ref +8.1
+  x=0.47 y=-0.12  legacy +0.4  new -3.6  shells +7.9  MJCF ref +8.0
+  x=0.51 y=-0.08  legacy +2.7  new -1.3  shells +11.4  MJCF ref +10.6
+  x=0.55 y=-0.08  legacy +2.4  new -1.6  shells +11.2  MJCF ref +10.6
+  x=0.59 y=-0.08  legacy +2.4  new -1.6  shells +11.2  MJCF ref +10.7
+  x=0.63 y=-0.08  legacy +3.1  new -0.8  shells +11.8  MJCF ref +11.8
+  x=0.67 y=-0.32  legacy +2.0  new -1.8  shells +4.6  MJCF ref +5.5
+  x=0.67 y=-0.16  legacy +0.2  new -3.7  shells +7.5  MJCF ref +8.9
+  x=0.67 y=-0.12  legacy +2.3  new -1.6  shells +10.1  MJCF ref +11.3
+  x=0.71 y=-0.28  legacy +3.6  new -0.2  shells +8.6  MJCF ref +9.5
+  x=0.71 y=-0.24  legacy +3.3  new -0.5  shells +9.6  MJCF ref +10.5
+  x=0.71 y=-0.20  legacy +3.3  new -0.5  shells +10.0  MJCF ref +10.9

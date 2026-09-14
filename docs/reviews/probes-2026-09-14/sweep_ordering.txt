@@ -1,0 +1,9 @@
+gripper per leg (cmd endpoints -> gg): [(20.0, 20.0, 20.0), (20.0, -45.0, -45.0)]
+positions 224
+tube>shells: 0  max 0.00 cm
+shells>ref (ref @ gcmd, as committed): 76  max 1.02 cm
+shells>ref (ref @ gg, same aperture): 72  max 1.02 cm
+tube>shells (>2mm): 0  max 0.00 cm
+tube>ref   (>2mm): 0  max 0.00 cm
+shells tighter than tube by >1cm: 189
+tube over-conservatism vs ref: max 12.96 cm

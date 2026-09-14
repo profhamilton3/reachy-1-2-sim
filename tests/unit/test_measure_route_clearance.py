@@ -42,6 +42,7 @@ def _synthetic_log(pose, n=5):
 class TestRefusesWithoutTheEnvVar:
     def test_main_refuses_without_record_clearance(self, monkeypatch, mrc,
                                                     capsys):
+        monkeypatch.setattr(mrc, "APERTURE_LOGGED", True)   # past the E1 block
         monkeypatch.delenv("REACHY_SIM_RECORD_CLEARANCE", raising=False)
         with pytest.raises(SystemExit) as exc:
             mrc.main()
@@ -50,10 +51,25 @@ class TestRefusesWithoutTheEnvVar:
 
     def test_main_refuses_even_with_the_var_set_to_something_else(
             self, monkeypatch, mrc, capsys):
+        monkeypatch.setattr(mrc, "APERTURE_LOGGED", True)
         monkeypatch.setenv("REACHY_SIM_RECORD_CLEARANCE", "true")
         with pytest.raises(SystemExit):
             mrc.main()
         assert "REACHY_SIM_RECORD_CLEARANCE" in capsys.readouterr().out
+
+    def test_e1_is_blocked_until_the_aperture_is_logged(self, monkeypatch, mrc,
+                                                        capsys):
+        """The opt-in variable is not enough: until the recorder logs
+        r_gripper, main() refuses before it even looks at the environment
+        (docs/adr/0003, E1 prerequisite).  This test must be rewritten, not
+        deleted, in the commit that implements the logging."""
+        assert mrc.APERTURE_LOGGED is False
+        monkeypatch.setenv("REACHY_SIM_RECORD_CLEARANCE", "1")
+        with pytest.raises(SystemExit) as exc:
+            mrc.main()
+        assert exc.value.code != 0
+        out = capsys.readouterr().out
+        assert "aperture" in out and "blocked" in out
 
 
 class TestReportingOnASyntheticLog:
