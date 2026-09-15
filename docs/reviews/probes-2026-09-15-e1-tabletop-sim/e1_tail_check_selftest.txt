@@ -1,0 +1,12 @@
+[ok ] parked at REST, judged REST: judged REST -> yes (expected yes)
+[ok ] parked at REST_SHUT, judged REST: judged REST -> NO (expected NO)
+[ok ] parked at REST, judged REST_SHUT: judged REST_SHUT -> NO (expected NO)
+[ok ] parked at REST_SHUT, judged REST_SHUT: judged REST_SHUT -> yes (expected yes)
+[ok ] parked at PRESENT, judged PRESENT: judged PRESENT -> yes (expected yes)
+[ok ] parked at PRESENT, judged REST: judged REST -> NO (expected NO)
+[ok ] parked at HOME, judged PRESENT: judged PRESENT -> NO (expected NO)
+[ok ] moving at the end, judged REST: judged REST -> NO (expected NO)
+[ok ] REST arm joints, gripper half-open (-20): judged REST -> NO (expected NO)
+[ok ] REST, gripper -47 (within 3): judged REST -> yes (expected yes)
+[ok ] REST, wrist_pitch drooped 18 deg (info only): judged REST -> yes (expected yes)
+selftest: 11/11 passed
