@@ -89,6 +89,24 @@ class TestEncodeDecodeRoundtrip:
         assert d["seq"] == 7
         assert d["sim_time_s"] == pytest.approx(0.7)
 
+    def test_state_without_contacts_decodes_with_an_empty_list(self):
+        """E1 readiness (assignment 2026-09-14, work item 4): `contacts`
+        defaults to [] so PROTOCOL_VERSION stays 1 -- a State built the
+        way every pre-existing caller already builds one (no `contacts`
+        kwarg) decodes exactly as before."""
+        s = State(seq=1, sim_step=1, sim_time_s=0.0)
+        d = decode(s.encode())
+        assert d["contacts"] == []
+
+    def test_state_with_contacts_round_trips(self):
+        pair = {"arm_geom": "r_finger_col", "object_id": "foam_block",
+               "steps": 3, "max_normal_force_n": 1.5, "min_dist_m": -0.002,
+               "first_sim_step": 100, "last_sim_step": 102,
+               "pos_at_max_force": [0.1, 0.2, 0.3]}
+        s = State(seq=1, sim_step=1, sim_time_s=0.0, contacts=[pair])
+        d = decode(s.encode())
+        assert d["contacts"] == [pair]
+
     def test_camera_frame(self):
         cf = CameraFrame(camera="left_camera", seq=3, width=640, height=480,
                          jpeg_b64="abc123", render_us=1500)

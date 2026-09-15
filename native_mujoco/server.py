@@ -36,6 +36,7 @@ import websockets.exceptions
 from actuator import ActuatorController
 from gripper import GripperModel
 from joint_map import JOINT_TABLE, NUM_JOINTS
+from contact_accumulator import ContactAccumulator
 from objects import ObjectTracker
 from protocol import (
     PROTOCOL_VERSION,
@@ -406,6 +407,12 @@ class ReachyMujocoServer:
         self._enable_seg = enable_seg
         self._effects = effects or EffectConfig()
         self._record_dir = record_dir
+        # E1 readiness (assignment 2026-09-14, work item 4): contacts are
+        # only ever accumulated for a recorded run -- the default sim path
+        # is untouched in cost and shape (see contact_accumulator.py and
+        # _sim_thread's state-push block below).
+        self._record_contacts = bool(record_dir)
+        self._contact_acc = ContactAccumulator()
         self._model_path = model_path        # actual path used — not _DEFAULT_MODEL
         self._scene_path = scene_path        # actual scene path (or None)
 
@@ -596,6 +603,19 @@ class ReachyMujocoServer:
                 self._sim.control_step(dt)   # R12-501 actuator/compliance model
                 mujoco.mj_step(self._model, self._sim.data)
                 self._sim.step += 1
+                if self._record_contacts:
+                    # E1 readiness work item 4: fold this step's contacts
+                    # into the window since the last state push. Gated
+                    # behind --record so the default (unrecorded) sim path
+                    # pays nothing extra. add_step_from_data (not
+                    # simulation_core.contact_records) -- see
+                    # contact_accumulator.py's module docstring for why:
+                    # measured ~40% of the 500 Hz step budget otherwise,
+                    # from self-contacts this scene has regardless of the
+                    # arm's pose.
+                    self._contact_acc.add_step_from_data(
+                        self._model, self._sim.data, self._sim.step,
+                        self._sim.objects.object_ids)
 
             # State push
             if self._sim.step % state_every == 0 and self._loop:
@@ -737,7 +757,7 @@ class ReachyMujocoServer:
     def _build_state(self) -> State:
         self._seq += 1
         grippers, force_sensors = self._sim.snapshot_grippers()
-        return State(
+        kwargs = dict(
             seq=self._seq,
             sim_step=self._sim.step,
             sim_time_s=float(self._sim.data.time),
@@ -749,6 +769,12 @@ class ReachyMujocoServer:
             force_sensors=force_sensors,
             interactive=self._sim.snapshot_interactive(),
         )
+        if self._record_contacts:
+            # E1 readiness work item 4. Omitted entirely when not
+            # recording, so an unrecorded state is byte-identical to
+            # before this field existed (State.contacts defaults to []).
+            kwargs["contacts"] = self._contact_acc.drain()
+        return State(**kwargs)
 
     # ── WebSocket handler ────────────────────────────────────────────────────
 

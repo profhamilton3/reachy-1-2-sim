@@ -342,6 +342,14 @@ class State:
     # R12-504: interactive control on/off states ({id, type, on, value}).
     interactive: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    # E1 readiness (assignment 2026-09-14, work item 4): arm-link/object
+    # contact pairs accumulated since the last state push -- see
+    # native_mujoco/contact_accumulator.py for the shape of each dict and
+    # what "steps" measures. Empty and only ever populated when the server
+    # is started with --record (native_mujoco/server.py's `SimState`);
+    # defaults to [] so PROTOCOL_VERSION stays 1 and a state from a server
+    # without this field decodes exactly as it always has.
+    contacts: List[Dict[str, Any]] = field(default_factory=list)
 
     def encode(self) -> str:
         return encode(asdict(self))
