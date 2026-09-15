@@ -7,4 +7,4 @@
 - `control/` — every gate's stdout (`recorder_*.log`, `linker_*.txt`, `tailcheck_*.txt`), reset verification, settle output, notebook markers, `stop`, and `tools/` (the exact scripts run).
 - `e1_stage1_S1a.ipynb` / `.executed.ipynb` — the cycle notebook as written and as run. `S1b`/`S1c` notebooks were generated but never executed.
 - `board/` — B4 YAML as flown + sha256. `native_server.log`, `start_sim.log`, `status_stage0.json`.
-- Defect: compliance command lost to the server's single-slot command coalescing — see `REPORT.md` §3 and the linked issue.
+- Defect: compliance command lost to the server's single-slot command coalescing — see `REPORT.md` §3 and issue #116.

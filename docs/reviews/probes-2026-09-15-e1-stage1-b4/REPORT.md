@@ -69,7 +69,7 @@ read 0/None because the server was stopped with SIGTERM (known deferred item).
 This is a tooling fault in the simulator server, not a property of the route,
 the board, or the arm model. It is timing-dependent and could recur on any
 `turn_on` — including the pilot's — so it must be fixed and tested before
-Stage 1 is re-attempted. Filed as an issue in `reachy-1-2-sim` (see README).
+Stage 1 is re-attempted. Filed as `reachy-1-2-sim` issue #116.
 
 ## 4. What is and is not usable
 
