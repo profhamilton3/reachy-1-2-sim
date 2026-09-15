@@ -247,6 +247,8 @@ def verify_simulator_identity(
     wall_clock_ns: Callable[[], int] = time.time_ns,
     http_get: Callable[[str], dict] = _default_http_get,
     sleep: Callable[[float], None] = time.sleep,
+    in_container: Callable[[], bool] = lambda: pathlib.Path(
+        "/.dockerenv").exists(),
     max_joint_deg: float = 1.0,
     max_state_age_s: float = 1.0,
     max_round_age_s: float = 0.2,
@@ -269,6 +271,12 @@ def verify_simulator_identity(
             run_dir="", manifest={}, scene_chain_sha256={},
             joint_agreement_deg={}, status={},
             checked_at_wall_ns=wall_clock_ns())
+
+    if in_container():
+        reasons.append(
+            "running inside a container; the recorder shares the host "
+            "monotonic clock with the native server and must run from a "
+            "host shell")
 
     scene_p = pathlib.Path(scene_path).resolve()
     chain = _extends_chain(scene_p)
@@ -309,6 +317,13 @@ def verify_simulator_identity(
                 manifest = json.loads(manifest_path.read_text())
             except (OSError, json.JSONDecodeError) as exc:
                 reasons.append(f"{run_dir}/manifest.json unreadable: {exc}")
+
+        contacts_tracked = manifest.get("contacts_tracked")
+        if contacts_tracked is not True:
+            reasons.append(
+                f"manifest.contacts_tracked is {contacts_tracked!r}; the "
+                "server is not tracking arm-object contacts -- refusing "
+                "to record")
 
         prev_sim_step: Optional[int] = None
         for round_i in range(min_reads):

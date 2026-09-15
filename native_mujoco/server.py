@@ -1102,6 +1102,7 @@ class ReachyMujocoServer:
             ),
             "depth_enabled": self._enable_depth,
             "seg_enabled": self._enable_seg,
+            "contacts_tracked": bool(self._record_contacts),
             "effects": {
                 "blur_sigma": self._effects.blur_sigma,
                 "noise_std": self._effects.noise_std,
