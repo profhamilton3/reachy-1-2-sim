@@ -1,0 +1,2433 @@
+{
+  "log": "route_clearance_LOWER_TO_REST_20260915T211124Z.json",
+  "identity": {
+    "ok": true,
+    "reasons": [],
+    "run_dir": "/Users/terrancehamilton/reachy-1-2-sim-stage1/docs/reviews/probes-2026-09-15-e1-stage1-b4/e1_server_runs/run_20260915_211004",
+    "manifest": {
+      "format_version": 1,
+      "started_at": "2026-09-15T21:10:04.862240+00:00",
+      "model_path": "/Users/terrancehamilton/reachy-1-2-sim-stage1/native_mujoco/model/reachy_1_2.xml",
+      "model_sha256": "618ef2499f6207d5e9e72f8b9a4e538b0521008afc1a80f3ecfbab22ab35abb4",
+      "scene_path": "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+      "scene_sha256": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+      "scene_revision": "initial",
+      "mujoco_version": "3.11.0",
+      "python_version": "3.14.0 (v3.14.0:ebf955df7a8, Oct  7 2025, 08:20:14) [Clang 16.0.0 (clang-1600.0.26.6)]",
+      "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "protocol_version": 1,
+      "calibration_provenance": "measured_2026_08_27",
+      "depth_enabled": false,
+      "seg_enabled": false,
+      "contacts_tracked": true,
+      "effects": {
+        "blur_sigma": 0.0,
+        "noise_std": 0.0,
+        "drop_probability": 0.0,
+        "latency_ms": 0.0
+      },
+      "seeds": [],
+      "total_steps": null,
+      "total_duration_s": null,
+      "state_count": 0,
+      "command_count": 0
+    },
+    "scene_chain_sha256": {
+      "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/e1_boards/B4_pool_box_1_r2c3.yaml": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+      "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/FWDCenterLabSivaPool.yaml": "8666d92b22d9809b26accedd964a9c90714355e34537d413c2fce990fa547c5e",
+      "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/FWDCenterLabSiva.yaml": "6c2a758c8c3f6f5aef8a29b68f53f7e5e6ab68a54f62574335af1a0a988c59bd",
+      "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/FWDCenterLabMCC.yaml": "0a1a6d6053dda1fdc3154afeaf9115b314d3c2621904d29dabfeaeac679b108a"
+    },
+    "joint_agreement_deg": {
+      "r_shoulder_pitch": 7.159318374043261e-17,
+      "r_shoulder_roll": 0.0010145253030072348,
+      "r_arm_yaw": 1.4401931743807446e-17,
+      "r_elbow_pitch": 1.6720701821010714e-17,
+      "r_forearm_yaw": 2.4189633964084915e-17,
+      "r_wrist_pitch": 3.7649873962312913e-16,
+      "r_wrist_roll": 0.003411207562763252,
+      "r_gripper": 0.0040908181690682
+    },
+    "status": {
+      "backend": "mujoco-remote",
+      "frames_stale": false,
+      "left_age_ms": 14,
+      "right_age_ms": 10,
+      "left_seq": 229,
+      "right_seq": 229
+    },
+    "checked_at_wall_ns": 1789506681978681000
+  },
+  "server_run_dir": "/Users/terrancehamilton/reachy-1-2-sim-stage1/docs/reviews/probes-2026-09-15-e1-stage1-b4/e1_server_runs/run_20260915_211004",
+  "manifest": {
+    "format_version": 1,
+    "started_at": "2026-09-15T21:10:04.862240+00:00",
+    "model_path": "/Users/terrancehamilton/reachy-1-2-sim-stage1/native_mujoco/model/reachy_1_2.xml",
+    "model_sha256": "618ef2499f6207d5e9e72f8b9a4e538b0521008afc1a80f3ecfbab22ab35abb4",
+    "scene_path": "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+    "scene_sha256": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+    "scene_revision": "initial",
+    "mujoco_version": "3.11.0",
+    "python_version": "3.14.0 (v3.14.0:ebf955df7a8, Oct  7 2025, 08:20:14) [Clang 16.0.0 (clang-1600.0.26.6)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "protocol_version": 1,
+    "calibration_provenance": "measured_2026_08_27",
+    "depth_enabled": false,
+    "seg_enabled": false,
+    "contacts_tracked": true,
+    "effects": {
+      "blur_sigma": 0.0,
+      "noise_std": 0.0,
+      "drop_probability": 0.0,
+      "latency_ms": 0.0
+    },
+    "seeds": [],
+    "total_steps": null,
+    "total_duration_s": null,
+    "state_count": 0,
+    "command_count": 0
+  },
+  "scene": {
+    "path": "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+    "chain_sha256": {
+      "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/e1_boards/B4_pool_box_1_r2c3.yaml": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+      "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/FWDCenterLabSivaPool.yaml": "8666d92b22d9809b26accedd964a9c90714355e34537d413c2fce990fa547c5e",
+      "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/FWDCenterLabSiva.yaml": "6c2a758c8c3f6f5aef8a29b68f53f7e5e6ab68a54f62574335af1a0a988c59bd",
+      "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/FWDCenterLabMCC.yaml": "0a1a6d6053dda1fdc3154afeaf9115b314d3c2621904d29dabfeaeac679b108a"
+    },
+    "board_object_ids": [
+      "pool_box_1"
+    ]
+  },
+  "objects_at_first_sample": {
+    "red_cube": {
+      "pos_xyz": [
+        0.14999999109642634,
+        0.9500000031145419,
+        0.029938798431985388
+      ],
+      "quat_wxyz": [
+        1.0,
+        1.7069133414209063e-11,
+        4.8801812471244673e-11,
+        3.146927865611818e-16
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    },
+    "blue_cylinder": {
+      "pos_xyz": [
+        0.3500000061881309,
+        0.9499999935106336,
+        0.04991868449378224
+      ],
+      "quat_wxyz": [
+        1.0,
+        7.285838922694757e-09,
+        6.947607802779144e-09,
+        5.2746393810062103e-17
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    },
+    "soda_can": {
+      "pos_xyz": [
+        0.54999999712799,
+        0.9500000086058404,
+        0.05741868449378224
+      ],
+      "quat_wxyz": [
+        1.0,
+        -7.103687163639041e-09,
+        -2.3707094025893886e-09,
+        1.2604043904904097e-16
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    },
+    "foam_block": {
+      "pos_xyz": [
+        0.14999999317354779,
+        -0.9500000077258239,
+        0.024938798431985397
+      ],
+      "quat_wxyz": [
+        1.0,
+        -5.274024774600723e-11,
+        4.6596816144150164e-11,
+        4.020689499317939e-16
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    },
+    "pool_box_1": {
+      "pos_xyz": [
+        0.43180000519824185,
+        -0.15240000882756505,
+        0.7599550413200046
+      ],
+      "quat_wxyz": [
+        1.0,
+        -7.390365435350888e-11,
+        -4.3559393992046415e-11,
+        1.5075200710615191e-15
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    },
+    "pool_box_2": {
+      "pos_xyz": [
+        0.34999999946265636,
+        0.7499999905702929,
+        0.019938798431985406
+      ],
+      "quat_wxyz": [
+        1.0,
+        -7.502541102139546e-11,
+        4.265997644389588e-12,
+        -6.847533883206773e-16
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    },
+    "pool_box_3": {
+      "pos_xyz": [
+        0.5499999940681021,
+        0.7499999926370804,
+        0.01993879843198539
+      ],
+      "quat_wxyz": [
+        1.0,
+        -7.123401235157231e-11,
+        5.738539336779015e-11,
+        -2.391253092632606e-17
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    },
+    "pool_cyl_1": {
+      "pos_xyz": [
+        0.1499999913529794,
+        -0.7500000030326983,
+        0.03991868449378221
+      ],
+      "quat_wxyz": [
+        1.0,
+        2.5124541105989535e-09,
+        -7.16364337657101e-09,
+        -1.3418670694246335e-16
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    },
+    "pool_cyl_2": {
+      "pos_xyz": [
+        0.34999999450951563,
+        -0.74999999255654,
+        0.03991868449378223
+      ],
+      "quat_wxyz": [
+        1.0,
+        -7.3514153981651e-09,
+        -5.422574811652932e-09,
+        2.4742246827713127e-16
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    },
+    "pool_cyl_3": {
+      "pos_xyz": [
+        0.5499999945783499,
+        -0.7499999925873312,
+        0.03991868449378223
+      ],
+      "quat_wxyz": [
+        1.0,
+        -7.306407581284354e-09,
+        -5.343956732889647e-09,
+        7.461010424324575e-17
+      ],
+      "sim_step": 38550,
+      "wall_time_ns": 157024568507791
+    }
+  },
+  "objects_at_last_sample": {
+    "red_cube": {
+      "pos_xyz": [
+        0.14999999075325765,
+        0.9500000032345642,
+        0.029938798431985388
+      ],
+      "quat_wxyz": [
+        1.0,
+        1.7344952664094362e-11,
+        4.959346181802626e-11,
+        2.591440309564305e-16
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    },
+    "blue_cylinder": {
+      "pos_xyz": [
+        0.3500000064324668,
+        0.9499999932544047,
+        0.04991868449378224
+      ],
+      "quat_wxyz": [
+        1.0,
+        7.241378395296013e-09,
+        6.905211725332242e-09,
+        4.1973541418765615e-17
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    },
+    "soda_can": {
+      "pos_xyz": [
+        0.5499999970155344,
+        0.9500000089428077,
+        0.05741868449378224
+      ],
+      "quat_wxyz": [
+        1.0,
+        -7.038022584854134e-09,
+        -2.348795840455711e-09,
+        1.2778919473402393e-16
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    },
+    "foam_block": {
+      "pos_xyz": [
+        0.1499999929128021,
+        -0.9500000080209492,
+        0.024938798431985397
+      ],
+      "quat_wxyz": [
+        1.0,
+        -4.9861665098001097e-11,
+        4.405236170255667e-11,
+        3.7172571809592e-16
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    },
+    "pool_box_1": {
+      "pos_xyz": [
+        0.4318000053992117,
+        -0.15240000916853508,
+        0.7599550413200046
+      ],
+      "quat_wxyz": [
+        1.0,
+        -8.017428505119103e-11,
+        -4.725539114696436e-11,
+        1.5052540400782463e-15
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    },
+    "pool_box_2": {
+      "pos_xyz": [
+        0.3499999994419765,
+        0.7499999902066586,
+        0.019938798431985406
+      ],
+      "quat_wxyz": [
+        1.0,
+        -8.251045167191911e-11,
+        4.693776810495263e-12,
+        -6.674238531022076e-16
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    },
+    "pool_box_3": {
+      "pos_xyz": [
+        0.549999993840032,
+        0.7499999923539602,
+        0.01993879843198539
+      ],
+      "quat_wxyz": [
+        1.0,
+        -6.37167800694015e-11,
+        5.1328126244268674e-11,
+        3.999273581942468e-17
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    },
+    "pool_cyl_1": {
+      "pos_xyz": [
+        0.14999999101678593,
+        -0.7500000031506094,
+        0.03991868449378221
+      ],
+      "quat_wxyz": [
+        1.0,
+        2.51521780798367e-09,
+        -7.1715217057547784e-09,
+        -1.4814334688834086e-16
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    },
+    "pool_cyl_2": {
+      "pos_xyz": [
+        0.3499999942948703,
+        -0.7499999922655446,
+        0.03991868449378223
+      ],
+      "quat_wxyz": [
+        1.0,
+        -7.389815646606433e-09,
+        -5.45089978806341e-09,
+        2.5451234639739623e-16
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    },
+    "pool_cyl_3": {
+      "pos_xyz": [
+        0.5499999943685439,
+        -0.7499999923004775,
+        0.03991868449378223
+      ],
+      "quat_wxyz": [
+        1.0,
+        -7.302150522598137e-09,
+        -5.340843002673348e-09,
+        6.360208329928989e-17
+      ],
+      "sim_step": 40020,
+      "wall_time_ns": 157027507553000
+    }
+  },
+  "settled_pose_check": {
+    "pool_box_1": {
+      "yaml_xyz": [
+        0.4318,
+        -0.1524,
+        0.76
+      ],
+      "stream_xyz": [
+        0.43180000519824185,
+        -0.15240000882756505,
+        0.7599550413200046
+      ],
+      "dxy_m": 1.0244394698184741e-08,
+      "dz_m": 4.495867999543268e-05,
+      "ok": true
+    }
+  },
+  "displacement_m": {
+    "pool_box_1": 3.957896445226891e-10,
+    "pool_box_2": 3.642217896797793e-10,
+    "foam_block": 3.938111536144829e-10,
+    "pool_box_3": 3.6355607972930643e-10,
+    "pool_cyl_3": 3.553921792029999e-10,
+    "soda_can": 3.5523679064771615e-10,
+    "pool_cyl_2": 3.615950514002241e-10,
+    "pool_cyl_1": 3.562710728292981e-10,
+    "blue_cylinder": 3.5405270055404905e-10,
+    "red_cube": 3.635520691174672e-10
+  },
+  "no_reshape_asserted": true,
+  "alignment": [
+    {
+      "sample_index": 0,
+      "server_seq": 3855,
+      "server_sim_step": 38550,
+      "wall_offset_s": -0.015039667,
+      "joint_residual_deg": 0.0026142911449421064
+    },
+    {
+      "sample_index": 1,
+      "server_seq": 3856,
+      "server_sim_step": 38560,
+      "wall_offset_s": -0.051362708,
+      "joint_residual_deg": 0.003843288962395818
+    },
+    {
+      "sample_index": 2,
+      "server_seq": 3859,
+      "server_sim_step": 38590,
+      "wall_offset_s": -0.038657958,
+      "joint_residual_deg": 0.004161389696837303
+    },
+    {
+      "sample_index": 3,
+      "server_seq": 3865,
+      "server_sim_step": 38650,
+      "wall_offset_s": 0.028445417,
+      "joint_residual_deg": 0.00425643739262666
+    },
+    {
+      "sample_index": 4,
+      "server_seq": 3865,
+      "server_sim_step": 38650,
+      "wall_offset_s": -0.02156175,
+      "joint_residual_deg": 0.00425643739262666
+    },
+    {
+      "sample_index": 5,
+      "server_seq": 3866,
+      "server_sim_step": 38660,
+      "wall_offset_s": -0.049537584,
+      "joint_residual_deg": 0.0047730509326239755
+    },
+    {
+      "sample_index": 6,
+      "server_seq": 3870,
+      "server_sim_step": 38700,
+      "wall_offset_s": -0.017079625,
+      "joint_residual_deg": 0.002654754910548823
+    },
+    {
+      "sample_index": 7,
+      "server_seq": 3870,
+      "server_sim_step": 38700,
+      "wall_offset_s": -0.068981833,
+      "joint_residual_deg": 0.002654754910548823
+    },
+    {
+      "sample_index": 8,
+      "server_seq": 3875,
+      "server_sim_step": 38750,
+      "wall_offset_s": -0.014422042,
+      "joint_residual_deg": 0.001502817268348098
+    },
+    {
+      "sample_index": 9,
+      "server_seq": 3879,
+      "server_sim_step": 38790,
+      "wall_offset_s": 0.008605667,
+      "joint_residual_deg": 0.001642220739465499
+    },
+    {
+      "sample_index": 10,
+      "server_seq": 3879,
+      "server_sim_step": 38790,
+      "wall_offset_s": -0.039433333,
+      "joint_residual_deg": 0.001642220739465499
+    },
+    {
+      "sample_index": 11,
+      "server_seq": 3884,
+      "server_sim_step": 38840,
+      "wall_offset_s": 0.013380792,
+      "joint_residual_deg": 0.0029929051793929234
+    },
+    {
+      "sample_index": 12,
+      "server_seq": 3884,
+      "server_sim_step": 38840,
+      "wall_offset_s": -0.03885975,
+      "joint_residual_deg": 0.0029929051793929234
+    },
+    {
+      "sample_index": 13,
+      "server_seq": 3889,
+      "server_sim_step": 38890,
+      "wall_offset_s": 0.010441917,
+      "joint_residual_deg": 0.0046287726831155005
+    },
+    {
+      "sample_index": 14,
+      "server_seq": 3889,
+      "server_sim_step": 38890,
+      "wall_offset_s": -0.039386166,
+      "joint_residual_deg": 0.0046287726831155005
+    },
+    {
+      "sample_index": 15,
+      "server_seq": 3895,
+      "server_sim_step": 38950,
+      "wall_offset_s": 0.03666175,
+      "joint_residual_deg": 0.003740939323438162
+    },
+    {
+      "sample_index": 16,
+      "server_seq": 3895,
+      "server_sim_step": 38950,
+      "wall_offset_s": -0.016171041,
+      "joint_residual_deg": 0.003740939323438162
+    },
+    {
+      "sample_index": 17,
+      "server_seq": 3896,
+      "server_sim_step": 38960,
+      "wall_offset_s": -0.047837792,
+      "joint_residual_deg": 0.004401466529197368
+    },
+    {
+      "sample_index": 18,
+      "server_seq": 3900,
+      "server_sim_step": 39000,
+      "wall_offset_s": -0.019365875,
+      "joint_residual_deg": 0.002166868055466958
+    },
+    {
+      "sample_index": 19,
+      "server_seq": 3905,
+      "server_sim_step": 39050,
+      "wall_offset_s": 0.032501791,
+      "joint_residual_deg": 0.0011897460283528086
+    },
+    {
+      "sample_index": 20,
+      "server_seq": 3905,
+      "server_sim_step": 39050,
+      "wall_offset_s": -0.020650292,
+      "joint_residual_deg": 0.0011897460283528086
+    },
+    {
+      "sample_index": 21,
+      "server_seq": 3910,
+      "server_sim_step": 39100,
+      "wall_offset_s": 0.03064775,
+      "joint_residual_deg": 0.0020298723478641475
+    },
+    {
+      "sample_index": 22,
+      "server_seq": 3910,
+      "server_sim_step": 39100,
+      "wall_offset_s": -0.020635,
+      "joint_residual_deg": 0.0020298723478641475
+    },
+    {
+      "sample_index": 23,
+      "server_seq": 3915,
+      "server_sim_step": 39150,
+      "wall_offset_s": 0.030923292,
+      "joint_residual_deg": 0.003575429020795882
+    },
+    {
+      "sample_index": 24,
+      "server_seq": 3915,
+      "server_sim_step": 39150,
+      "wall_offset_s": -0.015993375,
+      "joint_residual_deg": 0.003575429020795882
+    },
+    {
+      "sample_index": 25,
+      "server_seq": 3916,
+      "server_sim_step": 39160,
+      "wall_offset_s": -0.047164375,
+      "joint_residual_deg": 0.00449544137630485
+    },
+    {
+      "sample_index": 26,
+      "server_seq": 3920,
+      "server_sim_step": 39200,
+      "wall_offset_s": -0.017998042,
+      "joint_residual_deg": 0.0049479158950428885
+    },
+    {
+      "sample_index": 27,
+      "server_seq": 3925,
+      "server_sim_step": 39250,
+      "wall_offset_s": 0.0313125,
+      "joint_residual_deg": 0.003298332450920391
+    },
+    {
+      "sample_index": 28,
+      "server_seq": 3925,
+      "server_sim_step": 39250,
+      "wall_offset_s": -0.019195542,
+      "joint_residual_deg": 0.003298332450920391
+    },
+    {
+      "sample_index": 29,
+      "server_seq": 3926,
+      "server_sim_step": 39260,
+      "wall_offset_s": -0.047649375,
+      "joint_residual_deg": 0.0034083149169158796
+    },
+    {
+      "sample_index": 30,
+      "server_seq": 3930,
+      "server_sim_step": 39300,
+      "wall_offset_s": -0.019181291,
+      "joint_residual_deg": 0.0018255577508045368
+    },
+    {
+      "sample_index": 31,
+      "server_seq": 3935,
+      "server_sim_step": 39350,
+      "wall_offset_s": 0.031939708,
+      "joint_residual_deg": 0.0013598056615401043
+    },
+    {
+      "sample_index": 32,
+      "server_seq": 3935,
+      "server_sim_step": 39350,
+      "wall_offset_s": -0.019134792,
+      "joint_residual_deg": 0.0013598056615401043
+    },
+    {
+      "sample_index": 33,
+      "server_seq": 3936,
+      "server_sim_step": 39360,
+      "wall_offset_s": -0.047353542,
+      "joint_residual_deg": 0.0014784918845350008
+    },
+    {
+      "sample_index": 34,
+      "server_seq": 3941,
+      "server_sim_step": 39410,
+      "wall_offset_s": 0.00207825,
+      "joint_residual_deg": 0.0025235192538952647
+    },
+    {
+      "sample_index": 35,
+      "server_seq": 3941,
+      "server_sim_step": 39410,
+      "wall_offset_s": -0.048862708,
+      "joint_residual_deg": 0.0025235192538952647
+    },
+    {
+      "sample_index": 36,
+      "server_seq": 3946,
+      "server_sim_step": 39460,
+      "wall_offset_s": 0.001833792,
+      "joint_residual_deg": 0.004063457316731105
+    },
+    {
+      "sample_index": 37,
+      "server_seq": 3946,
+      "server_sim_step": 39460,
+      "wall_offset_s": -0.046353333,
+      "joint_residual_deg": 0.004063457316731105
+    },
+    {
+      "sample_index": 38,
+      "server_seq": 3952,
+      "server_sim_step": 39520,
+      "wall_offset_s": 0.022616166,
+      "joint_residual_deg": 0.004425400431017657
+    },
+    {
+      "sample_index": 39,
+      "server_seq": 3952,
+      "server_sim_step": 39520,
+      "wall_offset_s": -0.031605792,
+      "joint_residual_deg": 0.004425400431017657
+    },
+    {
+      "sample_index": 40,
+      "server_seq": 3954,
+      "server_sim_step": 39540,
+      "wall_offset_s": 0.005597042,
+      "joint_residual_deg": 0.0063866671769360174
+    },
+    {
+      "sample_index": 41,
+      "server_seq": 3957,
+      "server_sim_step": 39570,
+      "wall_offset_s": -0.0066605,
+      "joint_residual_deg": 0.0027473974883220373
+    },
+    {
+      "sample_index": 42,
+      "server_seq": 3962,
+      "server_sim_step": 39620,
+      "wall_offset_s": 0.02093725,
+      "joint_residual_deg": 0.0012591052500894027
+    },
+    {
+      "sample_index": 43,
+      "server_seq": 3962,
+      "server_sim_step": 39620,
+      "wall_offset_s": -0.030101458,
+      "joint_residual_deg": 0.0012591052500894027
+    },
+    {
+      "sample_index": 44,
+      "server_seq": 3967,
+      "server_sim_step": 39670,
+      "wall_offset_s": 0.034112292,
+      "joint_residual_deg": 0.0013235808544552919
+    },
+    {
+      "sample_index": 45,
+      "server_seq": 3967,
+      "server_sim_step": 39670,
+      "wall_offset_s": -0.018231,
+      "joint_residual_deg": 0.0013235808544552919
+    },
+    {
+      "sample_index": 46,
+      "server_seq": 3969,
+      "server_sim_step": 39690,
+      "wall_offset_s": -0.041530916,
+      "joint_residual_deg": 0.004074231238797168
+    },
+    {
+      "sample_index": 47,
+      "server_seq": 3972,
+      "server_sim_step": 39720,
+      "wall_offset_s": -0.028162,
+      "joint_residual_deg": 0.002848044744294198
+    },
+    {
+      "sample_index": 48,
+      "server_seq": 3973,
+      "server_sim_step": 39730,
+      "wall_offset_s": -0.05860625,
+      "joint_residual_deg": 0.0032585850271434503
+    },
+    {
+      "sample_index": 49,
+      "server_seq": 3977,
+      "server_sim_step": 39770,
+      "wall_offset_s": -0.016848417,
+      "joint_residual_deg": 0.004553537364840355
+    },
+    {
+      "sample_index": 50,
+      "server_seq": 3979,
+      "server_sim_step": 39790,
+      "wall_offset_s": -0.037397708,
+      "joint_residual_deg": 0.005483918464838012
+    },
+    {
+      "sample_index": 51,
+      "server_seq": 3983,
+      "server_sim_step": 39830,
+      "wall_offset_s": -0.006682958,
+      "joint_residual_deg": 0.003921674865045423
+    },
+    {
+      "sample_index": 52,
+      "server_seq": 3983,
+      "server_sim_step": 39830,
+      "wall_offset_s": -0.058858125,
+      "joint_residual_deg": 0.003921674865045423
+    },
+    {
+      "sample_index": 53,
+      "server_seq": 3989,
+      "server_sim_step": 39890,
+      "wall_offset_s": 0.010913125,
+      "joint_residual_deg": 0.002234507443678918
+    },
+    {
+      "sample_index": 54,
+      "server_seq": 3989,
+      "server_sim_step": 39890,
+      "wall_offset_s": -0.039877833,
+      "joint_residual_deg": 0.002234507443678918
+    },
+    {
+      "sample_index": 55,
+      "server_seq": 3994,
+      "server_sim_step": 39940,
+      "wall_offset_s": 0.0091305,
+      "joint_residual_deg": 0.0009363166074758229
+    },
+    {
+      "sample_index": 56,
+      "server_seq": 3994,
+      "server_sim_step": 39940,
+      "wall_offset_s": -0.04115825,
+      "joint_residual_deg": 0.0009363166074758229
+    },
+    {
+      "sample_index": 57,
+      "server_seq": 3999,
+      "server_sim_step": 39990,
+      "wall_offset_s": 0.0087735,
+      "joint_residual_deg": 0.001807153834585784
+    },
+    {
+      "sample_index": 58,
+      "server_seq": 3999,
+      "server_sim_step": 39990,
+      "wall_offset_s": -0.03902725,
+      "joint_residual_deg": 0.001807153834585784
+    },
+    {
+      "sample_index": 59,
+      "server_seq": 4002,
+      "server_sim_step": 40020,
+      "wall_offset_s": -0.031093208,
+      "joint_residual_deg": 0.00538469798275518
+    }
+  ],
+  "server_side_clearance": [
+    {
+      "tube": {
+        "red_cube": 0.9504152713056616,
+        "blue_cylinder": 0.9837711236076264,
+        "soda_can": 1.0594467641539258,
+        "foam_block": 0.7332187496289405,
+        "pool_box_1": 0.3771757390831544,
+        "pool_box_2": 0.8293953806572462,
+        "pool_box_3": 0.9166571829821405,
+        "pool_cyl_1": 0.5697034987830027,
+        "pool_cyl_2": 0.6372828380079011,
+        "pool_cyl_3": 0.7460975149248115
+      },
+      "shells": {
+        "red_cube": 1.0703829035976435,
+        "blue_cylinder": 1.102832834301725,
+        "soda_can": 1.1771019860032943,
+        "foam_block": 0.761722026903351,
+        "pool_box_1": 0.3771757390831544,
+        "pool_box_2": 0.9477508224361119,
+        "pool_box_3": 1.033187481516157,
+        "pool_cyl_1": 0.5879947529432928,
+        "pool_cyl_2": 0.6633861876743166,
+        "pool_cyl_3": 0.7818437516569562
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9504126765665432,
+        "blue_cylinder": 0.9837685248097267,
+        "soda_can": 1.0594441888511192,
+        "foam_block": 0.7332166650695949,
+        "pool_box_1": 0.37717573922783254,
+        "pool_box_2": 0.8293928764853672,
+        "pool_box_3": 0.9166547148906786,
+        "pool_cyl_1": 0.569701414670682,
+        "pool_cyl_2": 0.6372807543672993,
+        "pool_cyl_3": 0.7460954318966267
+      },
+      "shells": {
+        "red_cube": 1.0703825618064842,
+        "blue_cylinder": 1.1028324877199336,
+        "soda_can": 1.1771016537217842,
+        "foam_block": 0.7617202223898326,
+        "pool_box_1": 0.37717573922783254,
+        "pool_box_2": 0.9477505426078674,
+        "pool_box_3": 1.033187224471981,
+        "pool_cyl_1": 0.5879930139459998,
+        "pool_cyl_2": 0.6633846350291924,
+        "pool_cyl_3": 0.7818424230996353
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9504049044053497,
+        "blue_cylinder": 0.9837607404882569,
+        "soda_can": 1.059436474907841,
+        "foam_block": 0.7332104211356952,
+        "pool_box_1": 0.3771757396612244,
+        "pool_box_2": 0.8293853756219662,
+        "pool_box_3": 0.9166473221046856,
+        "pool_cyl_1": 0.5696951720758711,
+        "pool_cyl_2": 0.6372745131855491,
+        "pool_cyl_3": 0.7460891925494072
+      },
+      "shells": {
+        "red_cube": 1.0703815379832824,
+        "blue_cylinder": 1.1028314495448355,
+        "soda_can": 1.1771006583821515,
+        "foam_block": 0.7617148170605111,
+        "pool_box_1": 0.3771757396612244,
+        "pool_box_2": 0.9477497043967684,
+        "pool_box_3": 1.033186454509456,
+        "pool_cyl_1": 0.5879878048936124,
+        "pool_cyl_2": 0.6633799841871162,
+        "pool_cyl_3": 0.7818384435013506
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503894141915039,
+        "blue_cylinder": 0.9837452260260244,
+        "soda_can": 1.0594211007213297,
+        "foam_block": 0.7331979769987148,
+        "pool_box_1": 0.3771757405251235,
+        "pool_box_2": 0.8293704261905058,
+        "pool_box_3": 0.9166325880926172,
+        "pool_cyl_1": 0.5696827306081532,
+        "pool_cyl_2": 0.6372620745345454,
+        "pool_cyl_3": 0.7460767575552509
+      },
+      "shells": {
+        "red_cube": 1.0703794972953924,
+        "blue_cylinder": 1.1028293802429627,
+        "soda_can": 1.1770986744577643,
+        "foam_block": 0.7617040432578309,
+        "pool_box_1": 0.3771757405251235,
+        "pool_box_2": 0.9477480336912635,
+        "pool_box_3": 1.0331849198359482,
+        "pool_cyl_1": 0.5879774224245166,
+        "pool_cyl_2": 0.6633707143404676,
+        "pool_cyl_3": 0.7818305115657446
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503894141915039,
+        "blue_cylinder": 0.9837452260260244,
+        "soda_can": 1.0594211007213297,
+        "foam_block": 0.7331979769987148,
+        "pool_box_1": 0.3771757405251235,
+        "pool_box_2": 0.8293704261905058,
+        "pool_box_3": 0.9166325880926172,
+        "pool_cyl_1": 0.5696827306081532,
+        "pool_cyl_2": 0.6372620745345454,
+        "pool_cyl_3": 0.7460767575552509
+      },
+      "shells": {
+        "red_cube": 1.0703794972953924,
+        "blue_cylinder": 1.1028293802429627,
+        "soda_can": 1.1770986744577643,
+        "foam_block": 0.7617040432578309,
+        "pool_box_1": 0.3771757405251235,
+        "pool_box_2": 0.9477480336912635,
+        "pool_box_3": 1.0331849198359482,
+        "pool_cyl_1": 0.5879774224245166,
+        "pool_cyl_2": 0.6633707143404676,
+        "pool_cyl_3": 0.7818305115657446
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503868394846177,
+        "blue_cylinder": 0.9837426472870786,
+        "soda_can": 1.0594185452995222,
+        "foam_block": 0.7331959086294603,
+        "pool_box_1": 0.3771757406687336,
+        "pool_box_2": 0.8293679413795509,
+        "pool_box_3": 0.9166301390898045,
+        "pool_cyl_1": 0.569680662682623,
+        "pool_cyl_2": 0.6372600070772511,
+        "pool_cyl_3": 0.7460746907058516
+      },
+      "shells": {
+        "red_cube": 1.0703791580804805,
+        "blue_cylinder": 1.102829036270671,
+        "soda_can": 1.1770983446771124,
+        "foam_block": 0.7617022523894407,
+        "pool_box_1": 0.3771757406687336,
+        "pool_box_2": 0.9477477559795024,
+        "pool_box_3": 1.0331846647360434,
+        "pool_cyl_1": 0.5879756966205364,
+        "pool_cyl_2": 0.6633691734824614,
+        "pool_cyl_3": 0.7818291931011754
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503765605855556,
+        "blue_cylinder": 0.9837323522864023,
+        "soda_can": 1.059408343390335,
+        "foam_block": 0.7331876512577795,
+        "pool_box_1": 0.3771757412421113,
+        "pool_box_2": 0.829358021396121,
+        "pool_box_3": 0.9166203620680198,
+        "pool_cyl_1": 0.5696724070825545,
+        "pool_cyl_2": 0.6372517533466592,
+        "pool_cyl_3": 0.74606643940234
+      },
+      "shells": {
+        "red_cube": 1.0703778037843212,
+        "blue_cylinder": 1.1028276629781075,
+        "soda_can": 1.1770970280430137,
+        "foam_block": 0.7616951024929325,
+        "pool_box_1": 0.3771757412421113,
+        "pool_box_2": 0.9477466472383898,
+        "pool_box_3": 1.0331836462710011,
+        "pool_cyl_1": 0.5879688065316955,
+        "pool_cyl_2": 0.6633630217783054,
+        "pool_cyl_3": 0.7818239292848517
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503765605855556,
+        "blue_cylinder": 0.9837323522864023,
+        "soda_can": 1.059408343390335,
+        "foam_block": 0.7331876512577795,
+        "pool_box_1": 0.3771757412421113,
+        "pool_box_2": 0.829358021396121,
+        "pool_box_3": 0.9166203620680198,
+        "pool_cyl_1": 0.5696724070825545,
+        "pool_cyl_2": 0.6372517533466592,
+        "pool_cyl_3": 0.74606643940234
+      },
+      "shells": {
+        "red_cube": 1.0703778037843212,
+        "blue_cylinder": 1.1028276629781075,
+        "soda_can": 1.1770970280430137,
+        "foam_block": 0.7616951024929325,
+        "pool_box_1": 0.3771757412421113,
+        "pool_box_2": 0.9477466472383898,
+        "pool_box_3": 1.0331836462710011,
+        "pool_cyl_1": 0.5879688065316955,
+        "pool_cyl_2": 0.6633630217783054,
+        "pool_cyl_3": 0.7818239292848517
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503637566816794,
+        "blue_cylinder": 0.9837195283153064,
+        "soda_can": 1.059395635386225,
+        "foam_block": 0.7331773656828764,
+        "pool_box_1": 0.37717574195644754,
+        "pool_box_2": 0.8293456646372728,
+        "pool_box_3": 0.9166081834032023,
+        "pool_cyl_1": 0.5696621237147936,
+        "pool_cyl_2": 0.6372414723079631,
+        "pool_cyl_3": 0.7460561613873922
+      },
+      "shells": {
+        "red_cube": 1.0703761166673147,
+        "blue_cylinder": 1.1028259521899462,
+        "soda_can": 1.1770953878353465,
+        "foam_block": 0.7616861955924753,
+        "pool_box_1": 0.37717574195644754,
+        "pool_box_2": 0.9477452660382252,
+        "pool_box_3": 1.0331823775313609,
+        "pool_cyl_1": 0.5879602233805022,
+        "pool_cyl_2": 0.6633553584677683,
+        "pool_cyl_3": 0.7818173720504982
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503535492110039,
+        "blue_cylinder": 0.9837093048385791,
+        "soda_can": 1.0593855043662461,
+        "foam_block": 0.7331691660338105,
+        "pool_box_1": 0.37717574252601394,
+        "pool_box_2": 0.8293358136868437,
+        "pool_box_3": 0.9165984744431867,
+        "pool_cyl_1": 0.5696539258255615,
+        "pool_cyl_2": 0.6372332762757779,
+        "pool_cyl_3": 0.7460479677661498
+      },
+      "shells": {
+        "red_cube": 1.0703747715610619,
+        "blue_cylinder": 1.1028245882060859,
+        "soda_can": 1.1770940801224625,
+        "foam_block": 0.7616790943671566,
+        "pool_box_1": 0.37717574252601394,
+        "pool_box_2": 0.947744164846504,
+        "pool_box_3": 1.03318136600143,
+        "pool_cyl_1": 0.5879533803485397,
+        "pool_cyl_2": 0.6633492488044916,
+        "pool_cyl_3": 0.7818121442313494
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503535492110039,
+        "blue_cylinder": 0.9837093048385791,
+        "soda_can": 1.0593855043662461,
+        "foam_block": 0.7331691660338105,
+        "pool_box_1": 0.37717574252601394,
+        "pool_box_2": 0.8293358136868437,
+        "pool_box_3": 0.9165984744431867,
+        "pool_cyl_1": 0.5696539258255615,
+        "pool_cyl_2": 0.6372332762757779,
+        "pool_cyl_3": 0.7460479677661498
+      },
+      "shells": {
+        "red_cube": 1.0703747715610619,
+        "blue_cylinder": 1.1028245882060859,
+        "soda_can": 1.1770940801224625,
+        "foam_block": 0.7616790943671566,
+        "pool_box_1": 0.37717574252601394,
+        "pool_box_2": 0.947744164846504,
+        "pool_box_3": 1.03318136600143,
+        "pool_cyl_1": 0.5879533803485397,
+        "pool_cyl_2": 0.6633492488044916,
+        "pool_cyl_3": 0.7818121442313494
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503408342725197,
+        "blue_cylinder": 0.9836965699520324,
+        "soda_can": 1.0593728846560044,
+        "foam_block": 0.7331589523507392,
+        "pool_box_1": 0.37717574323560166,
+        "pool_box_2": 0.8293235429090913,
+        "pool_box_3": 0.9165863805495975,
+        "pool_cyl_1": 0.5696437143349574,
+        "pool_cyl_2": 0.6372230670987524,
+        "pool_cyl_3": 0.7460377615927674
+      },
+      "shells": {
+        "red_cube": 1.0703730958920445,
+        "blue_cylinder": 1.1028228890139844,
+        "soda_can": 1.1770924510281808,
+        "foam_block": 0.7616702480955362,
+        "pool_box_1": 0.37717574323560166,
+        "pool_box_2": 0.947742793050504,
+        "pool_box_3": 1.0331801059007515,
+        "pool_cyl_1": 0.587944855814002,
+        "pool_cyl_2": 0.663341637862175,
+        "pool_cyl_3": 0.7818056318366711
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503408342725197,
+        "blue_cylinder": 0.9836965699520324,
+        "soda_can": 1.0593728846560044,
+        "foam_block": 0.7331589523507392,
+        "pool_box_1": 0.37717574323560166,
+        "pool_box_2": 0.8293235429090913,
+        "pool_box_3": 0.9165863805495975,
+        "pool_cyl_1": 0.5696437143349574,
+        "pool_cyl_2": 0.6372230670987524,
+        "pool_cyl_3": 0.7460377615927674
+      },
+      "shells": {
+        "red_cube": 1.0703730958920445,
+        "blue_cylinder": 1.1028228890139844,
+        "soda_can": 1.1770924510281808,
+        "foam_block": 0.7616702480955362,
+        "pool_box_1": 0.37717574323560166,
+        "pool_box_2": 0.947742793050504,
+        "pool_box_3": 1.0331801059007515,
+        "pool_cyl_1": 0.587944855814002,
+        "pool_cyl_2": 0.663341637862175,
+        "pool_cyl_3": 0.7818056318366711
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503281684838627,
+        "blue_cylinder": 0.983683884281255,
+        "soda_can": 1.0593603137246288,
+        "foam_block": 0.7331487783826653,
+        "pool_box_1": 0.3771757439425648,
+        "pool_box_2": 0.8293113196317767,
+        "pool_box_3": 0.9165743334878886,
+        "pool_cyl_1": 0.5696335425512398,
+        "pool_cyl_2": 0.6372128976200535,
+        "pool_cyl_3": 0.7460275951065984
+      },
+      "shells": {
+        "red_cube": 1.070371426549117,
+        "blue_cylinder": 1.1028211962298673,
+        "soda_can": 1.1770908280751822,
+        "foam_block": 0.7616614353257516,
+        "pool_box_1": 0.3771757439425648,
+        "pool_box_2": 0.9477414264510061,
+        "pool_box_3": 1.0331788505737405,
+        "pool_cyl_1": 0.587936363668342,
+        "pool_cyl_2": 0.6633340558559414,
+        "pool_cyl_3": 0.7817991442179988
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503281684838627,
+        "blue_cylinder": 0.983683884281255,
+        "soda_can": 1.0593603137246288,
+        "foam_block": 0.7331487783826653,
+        "pool_box_1": 0.3771757439425648,
+        "pool_box_2": 0.8293113196317767,
+        "pool_box_3": 0.9165743334878886,
+        "pool_cyl_1": 0.5696335425512398,
+        "pool_cyl_2": 0.6372128976200535,
+        "pool_cyl_3": 0.7460275951065984
+      },
+      "shells": {
+        "red_cube": 1.070371426549117,
+        "blue_cylinder": 1.1028211962298673,
+        "soda_can": 1.1770908280751822,
+        "foam_block": 0.7616614353257516,
+        "pool_box_1": 0.3771757439425648,
+        "pool_box_2": 0.9477414264510061,
+        "pool_box_3": 1.0331788505737405,
+        "pool_cyl_1": 0.587936363668342,
+        "pool_cyl_2": 0.6633340558559414,
+        "pool_cyl_3": 0.7817991442179988
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503130341398027,
+        "blue_cylinder": 0.9836687261654373,
+        "soda_can": 1.0593452927217446,
+        "foam_block": 0.7331366218198422,
+        "pool_box_1": 0.3771757447874695,
+        "pool_box_2": 0.8292967141326955,
+        "pool_box_3": 0.9165599385686305,
+        "pool_cyl_1": 0.5696213885989787,
+        "pool_cyl_2": 0.6372007464225604,
+        "pool_cyl_3": 0.7460154474855294
+      },
+      "shells": {
+        "red_cube": 1.0703694316541188,
+        "blue_cylinder": 1.1028191733131747,
+        "soda_can": 1.1770888886052366,
+        "foam_block": 0.7616509040434869,
+        "pool_box_1": 0.3771757447874695,
+        "pool_box_2": 0.9477397933629426,
+        "pool_box_3": 1.0331773504567987,
+        "pool_cyl_1": 0.5879262156708549,
+        "pool_cyl_2": 0.6633249954866463,
+        "pool_cyl_3": 0.7817913916449363
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503130341398027,
+        "blue_cylinder": 0.9836687261654373,
+        "soda_can": 1.0593452927217446,
+        "foam_block": 0.7331366218198422,
+        "pool_box_1": 0.3771757447874695,
+        "pool_box_2": 0.8292967141326955,
+        "pool_box_3": 0.9165599385686305,
+        "pool_cyl_1": 0.5696213885989787,
+        "pool_cyl_2": 0.6372007464225604,
+        "pool_cyl_3": 0.7460154474855294
+      },
+      "shells": {
+        "red_cube": 1.0703694316541188,
+        "blue_cylinder": 1.1028191733131747,
+        "soda_can": 1.1770888886052366,
+        "foam_block": 0.7616509040434869,
+        "pool_box_1": 0.3771757447874695,
+        "pool_box_2": 0.9477397933629426,
+        "pool_box_3": 1.0331773504567987,
+        "pool_cyl_1": 0.5879262156708549,
+        "pool_cyl_2": 0.6633249954866463,
+        "pool_cyl_3": 0.7817913916449363
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503105185790555,
+        "blue_cylinder": 0.9836662066519151,
+        "soda_can": 1.0593427959996493,
+        "foam_block": 0.733134601244454,
+        "pool_box_1": 0.37717574492792194,
+        "pool_box_2": 0.8292942864834507,
+        "pool_box_3": 0.9165575459230908,
+        "pool_cyl_1": 0.5696193684575565,
+        "pool_cyl_2": 0.6371987267390758,
+        "pool_cyl_3": 0.7460134283965704
+      },
+      "shells": {
+        "red_cube": 1.0703691000509838,
+        "blue_cylinder": 1.1028188370511545,
+        "soda_can": 1.1770885662139383,
+        "foam_block": 0.7616491534864964,
+        "pool_box_1": 0.37717574492792194,
+        "pool_box_2": 0.9477395219039103,
+        "pool_box_3": 1.033177101100846,
+        "pool_cyl_1": 0.5879245288397612,
+        "pool_cyl_2": 0.6633234894469684,
+        "pool_cyl_3": 0.7817901029930491
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9503004757931618,
+        "blue_cylinder": 0.9836561480811074,
+        "soda_can": 1.0593328284215306,
+        "foam_block": 0.7331265346632707,
+        "pool_box_1": 0.37717574548869204,
+        "pool_box_2": 0.8292845946901175,
+        "pool_box_3": 0.916547993879801,
+        "pool_cyl_1": 0.5696113036090227,
+        "pool_cyl_2": 0.6371906637189017,
+        "pool_cyl_3": 0.7460053677500947
+      },
+      "shells": {
+        "red_cube": 1.070367776143893,
+        "blue_cylinder": 1.102817494541009,
+        "soda_can": 1.1770872790810694,
+        "foam_block": 0.7616421645259961,
+        "pool_box_1": 0.37717574548869204,
+        "pool_box_2": 0.9477384381257228,
+        "pool_box_3": 1.0331761055675204,
+        "pool_cyl_1": 0.5879177943413028,
+        "pool_cyl_2": 0.6633174767467317,
+        "pool_cyl_3": 0.7817849581964877
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502879659730777,
+        "blue_cylinder": 0.9836436185886935,
+        "soda_can": 1.05932041228168,
+        "foam_block": 0.7331164867127649,
+        "pool_box_1": 0.3771757461873203,
+        "pool_box_2": 0.8292725221440909,
+        "pool_box_3": 0.9165360954270975,
+        "pool_cyl_1": 0.5696012578171153,
+        "pool_cyl_2": 0.637180620204831,
+        "pool_cyl_3": 0.7459953271932646
+      },
+      "shells": {
+        "red_cube": 1.070366126882968,
+        "blue_cylinder": 1.102815822099205,
+        "soda_can": 1.1770856756238477,
+        "foam_block": 0.7616334581007899,
+        "pool_box_1": 0.3771757461873203,
+        "pool_box_2": 0.9477370880215182,
+        "pool_box_3": 1.033174865393582,
+        "pool_cyl_1": 0.5879094050022604,
+        "pool_cyl_2": 0.6633099865865625,
+        "pool_cyl_3": 0.7817785492185446
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502879659730777,
+        "blue_cylinder": 0.9836436185886935,
+        "soda_can": 1.05932041228168,
+        "foam_block": 0.7331164867127649,
+        "pool_box_1": 0.3771757461873203,
+        "pool_box_2": 0.8292725221440909,
+        "pool_box_3": 0.9165360954270975,
+        "pool_cyl_1": 0.5696012578171153,
+        "pool_cyl_2": 0.637180620204831,
+        "pool_cyl_3": 0.7459953271932646
+      },
+      "shells": {
+        "red_cube": 1.070366126882968,
+        "blue_cylinder": 1.102815822099205,
+        "soda_can": 1.1770856756238477,
+        "foam_block": 0.7616334581007899,
+        "pool_box_1": 0.3771757461873203,
+        "pool_box_2": 0.9477370880215182,
+        "pool_box_3": 1.033174865393582,
+        "pool_cyl_1": 0.5879094050022604,
+        "pool_cyl_2": 0.6633099865865625,
+        "pool_cyl_3": 0.7817785492185446
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502755044864808,
+        "blue_cylinder": 0.9836311374949442,
+        "soda_can": 1.0593080441106,
+        "foam_block": 0.7331064778106984,
+        "pool_box_1": 0.37717574688336386,
+        "pool_box_2": 0.8292604963075576,
+        "pool_box_3": 0.916524243025983,
+        "pool_cyl_1": 0.5695912510656594,
+        "pool_cyl_2": 0.6371706157227824,
+        "pool_cyl_3": 0.7459853256575124
+      },
+      "shells": {
+        "red_cube": 1.0703644838475412,
+        "blue_cylinder": 1.1028141559637012,
+        "soda_can": 1.1770840782105276,
+        "foam_block": 0.7616247846409354,
+        "pool_box_1": 0.37717574688336386,
+        "pool_box_2": 0.9477357430306518,
+        "pool_box_3": 1.0331736299169052,
+        "pool_cyl_1": 0.587901047530273,
+        "pool_cyl_2": 0.6633025248957108,
+        "pool_cyl_3": 0.7817721646164347
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502755044864808,
+        "blue_cylinder": 0.9836311374949442,
+        "soda_can": 1.0593080441106,
+        "foam_block": 0.7331064778106984,
+        "pool_box_1": 0.37717574688336386,
+        "pool_box_2": 0.8292604963075576,
+        "pool_box_3": 0.916524243025983,
+        "pool_cyl_1": 0.5695912510656594,
+        "pool_cyl_2": 0.6371706157227824,
+        "pool_cyl_3": 0.7459853256575124
+      },
+      "shells": {
+        "red_cube": 1.0703644838475412,
+        "blue_cylinder": 1.1028141559637012,
+        "soda_can": 1.1770840782105276,
+        "foam_block": 0.7616247846409354,
+        "pool_box_1": 0.37717574688336386,
+        "pool_box_2": 0.9477357430306518,
+        "pool_box_3": 1.0331736299169052,
+        "pool_cyl_1": 0.587901047530273,
+        "pool_cyl_2": 0.6633025248957108,
+        "pool_cyl_3": 0.7817721646164347
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502630911411072,
+        "blue_cylinder": 0.9836187046074141,
+        "soda_can": 1.0592957237174971,
+        "foam_block": 0.7330965078001134,
+        "pool_box_1": 0.37717574757683214,
+        "pool_box_2": 0.8292485169942432,
+        "pool_box_3": 0.916512436492694,
+        "pool_cyl_1": 0.5695812831977264,
+        "pool_cyl_2": 0.6371606501158579,
+        "pool_cyl_3": 0.7459753629859804
+      },
+      "shells": {
+        "red_cube": 1.0703628470139017,
+        "blue_cylinder": 1.1028124961105281,
+        "soda_can": 1.1770824868181544,
+        "foam_block": 0.7616161440199973,
+        "pool_box_1": 0.37717574757683214,
+        "pool_box_2": 0.947734403133523,
+        "pool_box_3": 1.0331723991194828,
+        "pool_cyl_1": 0.5878927218023738,
+        "pool_cyl_2": 0.6632950915641874,
+        "pool_cyl_3": 0.7817658042958633
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502630911411072,
+        "blue_cylinder": 0.9836187046074141,
+        "soda_can": 1.0592957237174971,
+        "foam_block": 0.7330965078001134,
+        "pool_box_1": 0.37717574757683214,
+        "pool_box_2": 0.8292485169942432,
+        "pool_box_3": 0.916512436492694,
+        "pool_cyl_1": 0.5695812831977264,
+        "pool_cyl_2": 0.6371606501158579,
+        "pool_cyl_3": 0.7459753629859804
+      },
+      "shells": {
+        "red_cube": 1.0703628470139017,
+        "blue_cylinder": 1.1028124961105281,
+        "soda_can": 1.1770824868181544,
+        "foam_block": 0.7616161440199973,
+        "pool_box_1": 0.37717574757683214,
+        "pool_box_2": 0.947734403133523,
+        "pool_box_3": 1.0331723991194828,
+        "pool_cyl_1": 0.5878927218023738,
+        "pool_cyl_2": 0.6632950915641874,
+        "pool_cyl_3": 0.7817658042958633
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502606142321163,
+        "blue_cylinder": 0.9836162237977756,
+        "soda_can": 1.0592932653554996,
+        "foam_block": 0.7330945184512087,
+        "pool_box_1": 0.37717574771521756,
+        "pool_box_2": 0.8292461266980294,
+        "pool_box_3": 0.9165100806740584,
+        "pool_cyl_1": 0.5695792942763995,
+        "pool_cyl_2": 0.6371586616457277,
+        "pool_cyl_3": 0.7459733751016238
+      },
+      "shells": {
+        "red_cube": 1.0703625203893083,
+        "blue_cylinder": 1.1028121648916707,
+        "soda_can": 1.1770821692601794,
+        "foam_block": 0.7616144198253882,
+        "pool_box_1": 0.37717574771521756,
+        "pool_box_2": 0.9477341357636263,
+        "pool_box_3": 1.0331721535199292,
+        "pool_cyl_1": 0.5878910604552979,
+        "pool_cyl_2": 0.6632936082913538,
+        "pool_cyl_3": 0.7817645351372622
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502507257454929,
+        "blue_cylinder": 0.983606319734458,
+        "soda_can": 1.0592834509123714,
+        "foam_block": 0.733086576524717,
+        "pool_box_1": 0.3771757482677345,
+        "pool_box_2": 0.8292365840186522,
+        "pool_box_3": 0.9165006756442364,
+        "pool_cyl_1": 0.569571354057052,
+        "pool_cyl_2": 0.637150723227824,
+        "pool_cyl_3": 0.745965439022475
+      },
+      "shells": {
+        "red_cube": 1.0703612163584306,
+        "blue_cylinder": 1.102810842515809,
+        "soda_can": 1.1770809014238603,
+        "foam_block": 0.7616075361120357,
+        "pool_box_1": 0.3771757482677345,
+        "pool_box_2": 0.947733068310608,
+        "pool_box_3": 1.0331711729833775,
+        "pool_cyl_1": 0.5878844276960842,
+        "pool_cyl_2": 0.6632876864824394,
+        "pool_cyl_3": 0.7817594681629108
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502384081089722,
+        "blue_cylinder": 0.9835939826852288,
+        "soda_can": 1.0592712255060155,
+        "foam_block": 0.733076683828879,
+        "pool_box_1": 0.3771757489560802,
+        "pool_box_2": 0.8292246971960653,
+        "pool_box_3": 0.9164889602983822,
+        "pool_cyl_1": 0.5695614634880355,
+        "pool_cyl_2": 0.6371408349031101,
+        "pool_cyl_3": 0.745955553611465
+      },
+      "shells": {
+        "red_cube": 1.070359591857599,
+        "blue_cylinder": 1.1028091951557575,
+        "soda_can": 1.1770793220048665,
+        "foam_block": 0.7615989607916042,
+        "pool_box_1": 0.3771757489560802,
+        "pool_box_2": 0.9477317385424592,
+        "pool_box_3": 1.033169951490722,
+        "pool_cyl_1": 0.5878761650894104,
+        "pool_cyl_2": 0.6632803095413496,
+        "pool_cyl_3": 0.7817531561240315
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502384081089722,
+        "blue_cylinder": 0.9835939826852288,
+        "soda_can": 1.0592712255060155,
+        "foam_block": 0.733076683828879,
+        "pool_box_1": 0.3771757489560802,
+        "pool_box_2": 0.8292246971960653,
+        "pool_box_3": 0.9164889602983822,
+        "pool_cyl_1": 0.5695614634880355,
+        "pool_cyl_2": 0.6371408349031101,
+        "pool_cyl_3": 0.745955553611465
+      },
+      "shells": {
+        "red_cube": 1.070359591857599,
+        "blue_cylinder": 1.1028091951557575,
+        "soda_can": 1.1770793220048665,
+        "foam_block": 0.7615989607916042,
+        "pool_box_1": 0.3771757489560802,
+        "pool_box_2": 0.9477317385424592,
+        "pool_box_3": 1.033169951490722,
+        "pool_cyl_1": 0.5878761650894104,
+        "pool_cyl_2": 0.6632803095413496,
+        "pool_cyl_3": 0.7817531561240315
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502359502960365,
+        "blue_cylinder": 0.9835915209974913,
+        "soda_can": 1.0592687860960017,
+        "foam_block": 0.7330747099056095,
+        "pool_box_1": 0.3771757490934433,
+        "pool_box_2": 0.8292223253537074,
+        "pool_box_3": 0.9164866226735415,
+        "pool_cyl_1": 0.5695594899891846,
+        "pool_cyl_2": 0.637138861852122,
+        "pool_cyl_3": 0.7459535811419222
+      },
+      "shells": {
+        "red_cube": 1.0703592676939255,
+        "blue_cylinder": 1.1028088664298208,
+        "soda_can": 1.1770790068361052,
+        "foam_block": 0.7615972496270169,
+        "pool_box_1": 0.3771757490934433,
+        "pool_box_2": 0.9477314731936953,
+        "pool_box_3": 1.0331697077478375,
+        "pool_cyl_1": 0.5878745163373282,
+        "pool_cyl_2": 0.6632788375204389,
+        "pool_cyl_3": 0.7817518965993387
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502261380416732,
+        "blue_cylinder": 0.9835816932696737,
+        "soda_can": 1.0592590473100088,
+        "foam_block": 0.7330668295576286,
+        "pool_box_1": 0.3771757496418786,
+        "pool_box_2": 0.8292128563425354,
+        "pool_box_3": 0.9164772902736664,
+        "pool_cyl_1": 0.5695516113357344,
+        "pool_cyl_2": 0.6371309849868044,
+        "pool_cyl_3": 0.7459457065980781
+      },
+      "shells": {
+        "red_cube": 1.0703579734879698,
+        "blue_cylinder": 1.1028075540066802,
+        "soda_can": 1.1770777485384802,
+        "foam_block": 0.7615904179337477,
+        "pool_box_1": 0.3771757496418786,
+        "pool_box_2": 0.9477304138097044,
+        "pool_box_3": 1.0331687346237188,
+        "pool_cyl_1": 0.5878679338608418,
+        "pool_cyl_2": 0.6632729606322333,
+        "pool_cyl_3": 0.7817468680860519
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.950213915354515,
+        "blue_cylinder": 0.9835694512985309,
+        "soda_can": 1.0592469161367157,
+        "foam_block": 0.7330570135566508,
+        "pool_box_1": 0.37717575032513906,
+        "pool_box_2": 0.8292010612748846,
+        "pool_box_3": 0.9164656653893839,
+        "pool_cyl_1": 0.5695417974458628,
+        "pool_cyl_2": 0.6371211733246511,
+        "pool_cyl_3": 0.7459358978280977
+      },
+      "shells": {
+        "red_cube": 1.070356361226196,
+        "blue_cylinder": 1.1028059190449737,
+        "soda_can": 1.177076181002097,
+        "foam_block": 0.7615819074140006,
+        "pool_box_1": 0.37717575032513906,
+        "pool_box_2": 0.9477290940930477,
+        "pool_box_3": 1.03316752236464,
+        "pool_cyl_1": 0.5878597338893486,
+        "pool_cyl_2": 0.6632656396468374,
+        "pool_cyl_3": 0.7817406039561687
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.950213915354515,
+        "blue_cylinder": 0.9835694512985309,
+        "soda_can": 1.0592469161367157,
+        "foam_block": 0.7330570135566508,
+        "pool_box_1": 0.37717575032513906,
+        "pool_box_2": 0.8292010612748846,
+        "pool_box_3": 0.9164656653893839,
+        "pool_cyl_1": 0.5695417974458628,
+        "pool_cyl_2": 0.6371211733246511,
+        "pool_cyl_3": 0.7459358978280977
+      },
+      "shells": {
+        "red_cube": 1.070356361226196,
+        "blue_cylinder": 1.1028059190449737,
+        "soda_can": 1.177076181002097,
+        "foam_block": 0.7615819074140006,
+        "pool_box_1": 0.37717575032513906,
+        "pool_box_2": 0.9477290940930477,
+        "pool_box_3": 1.03316752236464,
+        "pool_cyl_1": 0.5878597338893486,
+        "pool_cyl_2": 0.6632656396468374,
+        "pool_cyl_3": 0.7817406039561687
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9502114764861163,
+        "blue_cylinder": 0.983567008581032,
+        "soda_can": 1.0592444955283258,
+        "foam_block": 0.7330550549353542,
+        "pool_box_1": 0.3771757504614873,
+        "pool_box_2": 0.8291987077395943,
+        "pool_box_3": 0.9164633458135303,
+        "pool_cyl_1": 0.5695398392458487,
+        "pool_cyl_2": 0.6371192155691903,
+        "pool_cyl_3": 0.7459339406497854
+      },
+      "shells": {
+        "red_cube": 1.0703560395047356,
+        "blue_cylinder": 1.1028055927930462,
+        "soda_can": 1.1770758682044375,
+        "foam_block": 0.7615802091797056,
+        "pool_box_1": 0.3771757504614873,
+        "pool_box_2": 0.9477288307499554,
+        "pool_box_3": 1.03316728046422,
+        "pool_cyl_1": 0.5878580976352822,
+        "pool_cyl_2": 0.6632641787911087,
+        "pool_cyl_3": 0.781739353991023
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501993104066467,
+        "blue_cylinder": 0.9835548232944659,
+        "soda_can": 1.059232420535709,
+        "foam_block": 0.733045284655928,
+        "pool_box_1": 0.3771757511417144,
+        "pool_box_2": 0.8291869673742813,
+        "pool_box_3": 0.9164517748603004,
+        "pool_cyl_1": 0.5695300710681543,
+        "pool_cyl_2": 0.6371094496093218,
+        "pool_cyl_3": 0.7459241775692467
+      },
+      "shells": {
+        "red_cube": 1.0703544345416962,
+        "blue_cylinder": 1.1028039652251564,
+        "soda_can": 1.1770743077543413,
+        "foam_block": 0.7615717373020812,
+        "pool_box_1": 0.3771757511417144,
+        "pool_box_2": 0.9477275170272512,
+        "pool_box_3": 1.0331660737113468,
+        "pool_cyl_1": 0.5878499350131952,
+        "pool_cyl_2": 0.6632568911718876,
+        "pool_cyl_3": 0.7817331184288758
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501993104066467,
+        "blue_cylinder": 0.9835548232944659,
+        "soda_can": 1.059232420535709,
+        "foam_block": 0.733045284655928,
+        "pool_box_1": 0.3771757511417144,
+        "pool_box_2": 0.8291869673742813,
+        "pool_box_3": 0.9164517748603004,
+        "pool_cyl_1": 0.5695300710681543,
+        "pool_cyl_2": 0.6371094496093218,
+        "pool_cyl_3": 0.7459241775692467
+      },
+      "shells": {
+        "red_cube": 1.0703544345416962,
+        "blue_cylinder": 1.1028039652251564,
+        "soda_can": 1.1770743077543413,
+        "foam_block": 0.7615717373020812,
+        "pool_box_1": 0.3771757511417144,
+        "pool_box_2": 0.9477275170272512,
+        "pool_box_3": 1.0331660737113468,
+        "pool_cyl_1": 0.5878499350131952,
+        "pool_cyl_2": 0.6632568911718876,
+        "pool_cyl_3": 0.7817331184288758
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501871912941037,
+        "blue_cylinder": 0.9835426850387011,
+        "soda_can": 1.0592203921557501,
+        "foam_block": 0.7330355523095776,
+        "pool_box_1": 0.37717575181942375,
+        "pool_box_2": 0.8291752723945462,
+        "pool_box_3": 0.9164402486526074,
+        "pool_cyl_1": 0.5695203408157552,
+        "pool_cyl_2": 0.6370997215665378,
+        "pool_cyl_3": 0.7459144523951328
+      },
+      "shells": {
+        "red_cube": 1.0703528356354648,
+        "blue_cylinder": 1.102802343793029,
+        "soda_can": 1.1770727531848217,
+        "foam_block": 0.761563297490455,
+        "pool_box_1": 0.37717575181942375,
+        "pool_box_2": 0.9477262082784581,
+        "pool_box_3": 1.0331648715276394,
+        "pool_cyl_1": 0.5878418033836028,
+        "pool_cyl_2": 0.6632496312397398,
+        "pool_cyl_3": 0.7817269065719561
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501871912941037,
+        "blue_cylinder": 0.9835426850387011,
+        "soda_can": 1.0592203921557501,
+        "foam_block": 0.7330355523095776,
+        "pool_box_1": 0.37717575181942375,
+        "pool_box_2": 0.8291752723945462,
+        "pool_box_3": 0.9164402486526074,
+        "pool_cyl_1": 0.5695203408157552,
+        "pool_cyl_2": 0.6370997215665378,
+        "pool_cyl_3": 0.7459144523951328
+      },
+      "shells": {
+        "red_cube": 1.0703528356354648,
+        "blue_cylinder": 1.102802343793029,
+        "soda_can": 1.1770727531848217,
+        "foam_block": 0.761563297490455,
+        "pool_box_1": 0.37717575181942375,
+        "pool_box_2": 0.9477262082784581,
+        "pool_box_3": 1.0331648715276394,
+        "pool_cyl_1": 0.5878418033836028,
+        "pool_cyl_2": 0.6632496312397398,
+        "pool_cyl_3": 0.7817269065719561
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501727100927515,
+        "blue_cylinder": 0.9835281809495449,
+        "soda_can": 1.0592060193678732,
+        "foam_block": 0.7330239233513165,
+        "pool_box_1": 0.37717575262936465,
+        "pool_box_2": 0.829161298073398,
+        "pool_box_3": 0.9164264760164937,
+        "pool_cyl_1": 0.5695087143600053,
+        "pool_cyl_2": 0.6370880977515303,
+        "pool_cyl_3": 0.7459028320085128
+      },
+      "shells": {
+        "red_cube": 1.070350924910511,
+        "blue_cylinder": 1.1028004061408632,
+        "soda_can": 1.1770708954323266,
+        "foam_block": 0.761553211870594,
+        "pool_box_1": 0.37717575262936465,
+        "pool_box_2": 0.9477246443186427,
+        "pool_box_3": 1.0331634349138437,
+        "pool_cyl_1": 0.5878320861699579,
+        "pool_cyl_2": 0.663240955717635,
+        "pool_cyl_3": 0.7817194835055677
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501727100927515,
+        "blue_cylinder": 0.9835281809495449,
+        "soda_can": 1.0592060193678732,
+        "foam_block": 0.7330239233513165,
+        "pool_box_1": 0.37717575262936465,
+        "pool_box_2": 0.829161298073398,
+        "pool_box_3": 0.9164264760164937,
+        "pool_cyl_1": 0.5695087143600053,
+        "pool_cyl_2": 0.6370880977515303,
+        "pool_cyl_3": 0.7459028320085128
+      },
+      "shells": {
+        "red_cube": 1.070350924910511,
+        "blue_cylinder": 1.1028004061408632,
+        "soda_can": 1.1770708954323266,
+        "foam_block": 0.761553211870594,
+        "pool_box_1": 0.37717575262936465,
+        "pool_box_2": 0.9477246443186427,
+        "pool_box_3": 1.0331634349138437,
+        "pool_cyl_1": 0.5878320861699579,
+        "pool_cyl_2": 0.663240955717635,
+        "pool_cyl_3": 0.7817194835055677
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501678979398408,
+        "blue_cylinder": 0.9835233611876949,
+        "soda_can": 1.059201243240302,
+        "foam_block": 0.7330200590764788,
+        "pool_box_1": 0.3771757528985449,
+        "pool_box_2": 0.8291566543781277,
+        "pool_box_3": 0.9164218993462635,
+        "pool_cyl_1": 0.569504850916866,
+        "pool_cyl_2": 0.6370842351860293,
+        "pool_cyl_3": 0.7458989705824207
+      },
+      "shells": {
+        "red_cube": 1.0703502899261297,
+        "blue_cylinder": 1.1027997622058534,
+        "soda_can": 1.1770702780494893,
+        "foam_block": 0.7615498601825196,
+        "pool_box_1": 0.3771757528985449,
+        "pool_box_2": 0.947724124578587,
+        "pool_box_3": 1.0331629574938996,
+        "pool_cyl_1": 0.5878288569425413,
+        "pool_cyl_2": 0.6632380726707897,
+        "pool_cyl_3": 0.7817170166791935
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501606936517943,
+        "blue_cylinder": 0.9835161455052581,
+        "soda_can": 1.0591940928851213,
+        "foam_block": 0.7330142739227741,
+        "pool_box_1": 0.3771757533015674,
+        "pool_box_2": 0.829149702306792,
+        "pool_box_3": 0.9164150476224229,
+        "pool_cyl_1": 0.5694990670083969,
+        "pool_cyl_2": 0.6370784525915787,
+        "pool_cyl_3": 0.7458931896939166
+      },
+      "shells": {
+        "red_cube": 1.0703493392482097,
+        "blue_cylinder": 1.102798798125474,
+        "soda_can": 1.1770693537215988,
+        "foam_block": 0.7615448421721888,
+        "pool_box_1": 0.3771757533015674,
+        "pool_box_2": 0.94772334644548,
+        "pool_box_3": 1.033162242720771,
+        "pool_cyl_1": 0.5878240223038684,
+        "pool_cyl_2": 0.6632337563214105,
+        "pool_cyl_3": 0.7817133234781345
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501487235834487,
+        "blue_cylinder": 0.9835041564968823,
+        "soda_can": 1.0591822124252548,
+        "foam_block": 0.7330046619424193,
+        "pool_box_1": 0.37717575397128167,
+        "pool_box_2": 0.8291381513500475,
+        "pool_box_3": 0.9164036634059538,
+        "pool_cyl_1": 0.5694894570972862,
+        "pool_cyl_2": 0.6370688448640094,
+        "pool_cyl_3": 0.7458835848011667
+      },
+      "shells": {
+        "red_cube": 1.0703477595692357,
+        "blue_cylinder": 1.1027971961715566,
+        "soda_can": 1.1770678178202965,
+        "foam_block": 0.7615365041481527,
+        "pool_box_1": 0.37717575397128167,
+        "pool_box_2": 0.947722053485509,
+        "pool_box_3": 1.03316105504108,
+        "pool_cyl_1": 0.5878159890495258,
+        "pool_cyl_2": 0.6632265842717179,
+        "pool_cyl_3": 0.7817071868640026
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501487235834487,
+        "blue_cylinder": 0.9835041564968823,
+        "soda_can": 1.0591822124252548,
+        "foam_block": 0.7330046619424193,
+        "pool_box_1": 0.37717575397128167,
+        "pool_box_2": 0.8291381513500475,
+        "pool_box_3": 0.9164036634059538,
+        "pool_cyl_1": 0.5694894570972862,
+        "pool_cyl_2": 0.6370688448640094,
+        "pool_cyl_3": 0.7458835848011667
+      },
+      "shells": {
+        "red_cube": 1.0703477595692357,
+        "blue_cylinder": 1.1027971961715566,
+        "soda_can": 1.1770678178202965,
+        "foam_block": 0.7615365041481527,
+        "pool_box_1": 0.37717575397128167,
+        "pool_box_2": 0.947722053485509,
+        "pool_box_3": 1.03316105504108,
+        "pool_cyl_1": 0.5878159890495258,
+        "pool_cyl_2": 0.6632265842717179,
+        "pool_cyl_3": 0.7817071868640026
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501367997036103,
+        "blue_cylinder": 0.9834922137401347,
+        "soda_can": 1.0591703778055759,
+        "foam_block": 0.732995087260068,
+        "pool_box_1": 0.3771757546385166,
+        "pool_box_2": 0.8291266450248281,
+        "pool_box_3": 0.9163923231911615,
+        "pool_cyl_1": 0.5694798844765168,
+        "pool_cyl_2": 0.6370592744186961,
+        "pool_cyl_3": 0.7458740171801754
+      },
+      "shells": {
+        "red_cube": 1.0703461858508123,
+        "blue_cylinder": 1.1027956002560824,
+        "soda_can": 1.1770662877063645,
+        "foam_block": 0.7615281976771056,
+        "pool_box_1": 0.3771757546385166,
+        "pool_box_2": 0.9477207654199105,
+        "pool_box_3": 1.0331598718574804,
+        "pool_cyl_1": 0.5878079862889329,
+        "pool_cyl_2": 0.6632194394630223,
+        "pool_cyl_3": 0.7817010735727051
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501367997036103,
+        "blue_cylinder": 0.9834922137401347,
+        "soda_can": 1.0591703778055759,
+        "foam_block": 0.732995087260068,
+        "pool_box_1": 0.3771757546385166,
+        "pool_box_2": 0.8291266450248281,
+        "pool_box_3": 0.9163923231911615,
+        "pool_cyl_1": 0.5694798844765168,
+        "pool_cyl_2": 0.6370592744186961,
+        "pool_cyl_3": 0.7458740171801754
+      },
+      "shells": {
+        "red_cube": 1.0703461858508123,
+        "blue_cylinder": 1.1027956002560824,
+        "soda_can": 1.1770662877063645,
+        "foam_block": 0.7615281976771056,
+        "pool_box_1": 0.3771757546385166,
+        "pool_box_2": 0.9477207654199105,
+        "pool_box_3": 1.0331598718574804,
+        "pool_cyl_1": 0.5878079862889329,
+        "pool_cyl_2": 0.6632194394630223,
+        "pool_cyl_3": 0.7817010735727051
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501320430433632,
+        "blue_cylinder": 0.9834874495467577,
+        "soda_can": 1.0591656567521772,
+        "foam_block": 0.7329912677970478,
+        "pool_box_1": 0.37717575490471844,
+        "pool_box_2": 0.8291220549517615,
+        "pool_box_3": 0.916387799386447,
+        "pool_cyl_1": 0.5694760658359903,
+        "pool_cyl_2": 0.6370554566460946,
+        "pool_cyl_3": 0.7458702005343723
+      },
+      "shells": {
+        "red_cube": 1.0703455580273116,
+        "blue_cylinder": 1.1027949635755152,
+        "soda_can": 1.1770656772763308,
+        "foam_block": 0.7615248838964251,
+        "pool_box_1": 0.37717575490471844,
+        "pool_box_2": 0.9477202515598937,
+        "pool_box_3": 1.0331593998390862,
+        "pool_cyl_1": 0.5878047936966034,
+        "pool_cyl_2": 0.6632165891434635,
+        "pool_cyl_3": 0.7816986347663839
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501249218289396,
+        "blue_cylinder": 0.9834803170514965,
+        "soda_can": 1.0591585888441457,
+        "foam_block": 0.7329855497261701,
+        "pool_box_1": 0.3771757553032813,
+        "pool_box_2": 0.8291151831535412,
+        "pool_box_3": 0.9163810268028565,
+        "pool_cyl_1": 0.5694703489965669,
+        "pool_cyl_2": 0.6370497411061461,
+        "pool_cyl_3": 0.7458644866814886
+      },
+      "shells": {
+        "red_cube": 1.0703446180702498,
+        "blue_cylinder": 1.1027940103561107,
+        "soda_can": 1.177064763357831,
+        "foam_block": 0.7615199226381434,
+        "pool_box_1": 0.3771757553032813,
+        "pool_box_2": 0.9477194822299382,
+        "pool_box_3": 1.0331586931527503,
+        "pool_cyl_1": 0.5878000139045604,
+        "pool_cyl_2": 0.6632123217902086,
+        "pool_cyl_3": 0.7816949835141354
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501225517585452,
+        "blue_cylinder": 0.983477943225846,
+        "soda_can": 1.059156236514892,
+        "foam_block": 0.7329836466640893,
+        "pool_box_1": 0.3771757554359385,
+        "pool_box_2": 0.8291128960981797,
+        "pool_box_3": 0.9163787727690087,
+        "pool_cyl_1": 0.5694684463443618,
+        "pool_cyl_2": 0.6370478388864569,
+        "pool_cyl_3": 0.7458625850233203
+      },
+      "shells": {
+        "red_cube": 1.0703443052246904,
+        "blue_cylinder": 1.102793693095964,
+        "soda_can": 1.1770644591780446,
+        "foam_block": 0.7615182713915948,
+        "pool_box_1": 0.3771757554359385,
+        "pool_box_2": 0.9477192261753745,
+        "pool_box_3": 1.0331584579477577,
+        "pool_cyl_1": 0.5877984230625224,
+        "pool_cyl_2": 0.6632109015027308,
+        "pool_cyl_3": 0.7816937682824444
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501130897768584,
+        "blue_cylinder": 0.9834684662482107,
+        "soda_can": 1.0591468453597808,
+        "foam_block": 0.7329760491918078,
+        "pool_box_1": 0.3771757559655846,
+        "pool_box_2": 0.8291037655593345,
+        "pool_box_3": 0.9163697740665795,
+        "pool_cyl_1": 0.5694608505085461,
+        "pool_cyl_2": 0.6370402447774988,
+        "pool_cyl_3": 0.7458549931562832
+      },
+      "shells": {
+        "red_cube": 1.070343056204947,
+        "blue_cylinder": 1.1027924264487892,
+        "soda_can": 1.1770632447528093,
+        "foam_block": 0.7615116789108345,
+        "pool_box_1": 0.3771757559655846,
+        "pool_box_2": 0.9477182038969193,
+        "pool_box_3": 1.033157518909734,
+        "pool_cyl_1": 0.5877920717793428,
+        "pool_cyl_2": 0.6632052311485768,
+        "pool_cyl_3": 0.7816889165985438
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9501083697455979,
+        "blue_cylinder": 0.9834637387340022,
+        "soda_can": 1.0591421606591715,
+        "foam_block": 0.7329722593046949,
+        "pool_box_1": 0.3771757562298188,
+        "pool_box_2": 0.8290992108797601,
+        "pool_box_3": 0.9163652851556965,
+        "pool_cyl_1": 0.5694570614378466,
+        "pool_cyl_2": 0.6370364565683074,
+        "pool_cyl_3": 0.7458512060655598
+      },
+      "shells": {
+        "red_cube": 1.070342433110052,
+        "blue_cylinder": 1.1027917945587005,
+        "soda_can": 1.177062638914097,
+        "foam_block": 0.761508390160287,
+        "pool_box_1": 0.3771757562298188,
+        "pool_box_2": 0.9477176939194896,
+        "pool_box_3": 1.0331570504579772,
+        "pool_cyl_1": 0.5877889033756847,
+        "pool_cyl_2": 0.6632024024372816,
+        "pool_cyl_3": 0.781686496292305
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9500989515442296,
+        "blue_cylinder": 0.9834543055967323,
+        "soda_can": 1.0591328129542754,
+        "foam_block": 0.7329646971812125,
+        "pool_box_1": 0.37717575675711246,
+        "pool_box_2": 0.8290901226441154,
+        "pool_box_3": 0.9163563281591623,
+        "pool_cyl_1": 0.5694495009435601,
+        "pool_cyl_2": 0.6370288977932065,
+        "pool_cyl_3": 0.7458436495224199
+      },
+      "shells": {
+        "red_cube": 1.070341189743031,
+        "blue_cylinder": 1.102790533638255,
+        "soda_can": 1.1770614299775257,
+        "foam_block": 0.7615018276005753,
+        "pool_box_1": 0.37717575675711246,
+        "pool_box_2": 0.9477166762822906,
+        "pool_box_3": 1.033156115683521,
+        "pool_cyl_1": 0.5877825810070229,
+        "pool_cyl_2": 0.6631967579129757,
+        "pool_cyl_3": 0.7816816667227251
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9500989515442296,
+        "blue_cylinder": 0.9834543055967323,
+        "soda_can": 1.0591328129542754,
+        "foam_block": 0.7329646971812125,
+        "pool_box_1": 0.37717575675711246,
+        "pool_box_2": 0.8290901226441154,
+        "pool_box_3": 0.9163563281591623,
+        "pool_cyl_1": 0.5694495009435601,
+        "pool_cyl_2": 0.6370288977932065,
+        "pool_cyl_3": 0.7458436495224199
+      },
+      "shells": {
+        "red_cube": 1.070341189743031,
+        "blue_cylinder": 1.102790533638255,
+        "soda_can": 1.1770614299775257,
+        "foam_block": 0.7615018276005753,
+        "pool_box_1": 0.37717575675711246,
+        "pool_box_2": 0.9477166762822906,
+        "pool_box_3": 1.033156115683521,
+        "pool_cyl_1": 0.5877825810070229,
+        "pool_cyl_2": 0.6631967579129757,
+        "pool_cyl_3": 0.7816816667227251
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9500848787215987,
+        "blue_cylinder": 0.9834402104450655,
+        "soda_can": 1.0591188454656006,
+        "foam_block": 0.73295339798139,
+        "pool_box_1": 0.37717575754512445,
+        "pool_box_2": 0.8290765429313951,
+        "pool_box_3": 0.9163429445617031,
+        "pool_cyl_1": 0.5694382041784816,
+        "pool_cyl_2": 0.637017603597356,
+        "pool_cyl_3": 0.7458323586621125
+      },
+      "shells": {
+        "red_cube": 1.0703393317279317,
+        "blue_cylinder": 1.1027886493851897,
+        "soda_can": 1.17705962340399,
+        "foam_block": 0.761492020999979,
+        "pool_box_1": 0.37717575754512445,
+        "pool_box_2": 0.9477151556028911,
+        "pool_box_3": 1.0331547188281702,
+        "pool_cyl_1": 0.5877731334393906,
+        "pool_cyl_2": 0.6631883232727107,
+        "pool_cyl_3": 0.7816744498902922
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9500848787215987,
+        "blue_cylinder": 0.9834402104450655,
+        "soda_can": 1.0591188454656006,
+        "foam_block": 0.73295339798139,
+        "pool_box_1": 0.37717575754512445,
+        "pool_box_2": 0.8290765429313951,
+        "pool_box_3": 0.9163429445617031,
+        "pool_cyl_1": 0.5694382041784816,
+        "pool_cyl_2": 0.637017603597356,
+        "pool_cyl_3": 0.7458323586621125
+      },
+      "shells": {
+        "red_cube": 1.0703393317279317,
+        "blue_cylinder": 1.1027886493851897,
+        "soda_can": 1.17705962340399,
+        "foam_block": 0.761492020999979,
+        "pool_box_1": 0.37717575754512445,
+        "pool_box_2": 0.9477151556028911,
+        "pool_box_3": 1.0331547188281702,
+        "pool_cyl_1": 0.5877731334393906,
+        "pool_cyl_2": 0.6631883232727107,
+        "pool_cyl_3": 0.7816744498902922
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9500732011108187,
+        "blue_cylinder": 0.9834285142951414,
+        "soda_can": 1.0591072552581084,
+        "foam_block": 0.732944022139984,
+        "pool_box_1": 0.3771757581991264,
+        "pool_box_2": 0.829065274566312,
+        "pool_box_3": 0.9163318389471479,
+        "pool_cyl_1": 0.5694288303577637,
+        "pool_cyl_2": 0.6370082319089393,
+        "pool_cyl_3": 0.745822989741991
+      },
+      "shells": {
+        "red_cube": 1.0703377898066193,
+        "blue_cylinder": 1.1027870856831221,
+        "soda_can": 1.177058124164321,
+        "foam_block": 0.761483882837793,
+        "pool_box_1": 0.3771757581991264,
+        "pool_box_2": 0.9477138936448168,
+        "pool_box_3": 1.0331535596275578,
+        "pool_cyl_1": 0.5877652933258702,
+        "pool_cyl_2": 0.6631813237595198,
+        "pool_cyl_3": 0.7816684609942904
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9500732011108187,
+        "blue_cylinder": 0.9834285142951414,
+        "soda_can": 1.0591072552581084,
+        "foam_block": 0.732944022139984,
+        "pool_box_1": 0.3771757581991264,
+        "pool_box_2": 0.829065274566312,
+        "pool_box_3": 0.9163318389471479,
+        "pool_cyl_1": 0.5694288303577637,
+        "pool_cyl_2": 0.6370082319089393,
+        "pool_cyl_3": 0.745822989741991
+      },
+      "shells": {
+        "red_cube": 1.0703377898066193,
+        "blue_cylinder": 1.1027870856831221,
+        "soda_can": 1.177058124164321,
+        "foam_block": 0.761483882837793,
+        "pool_box_1": 0.3771757581991264,
+        "pool_box_2": 0.9477138936448168,
+        "pool_box_3": 1.0331535596275578,
+        "pool_cyl_1": 0.5877652933258702,
+        "pool_cyl_2": 0.6631813237595198,
+        "pool_cyl_3": 0.7816684609942904
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9500615685282474,
+        "blue_cylinder": 0.9834168632354054,
+        "soda_can": 1.0590957097393678,
+        "foam_block": 0.7329346826503058,
+        "pool_box_1": 0.3771757588507064,
+        "pool_box_2": 0.8290540497088772,
+        "pool_box_3": 0.9163207762256089,
+        "pool_cyl_1": 0.5694194928812889,
+        "pool_cyl_2": 0.636998896556867,
+        "pool_cyl_3": 0.7458136571479597
+      },
+      "shells": {
+        "red_cube": 1.0703362537021492,
+        "blue_cylinder": 1.1027855278741923,
+        "soda_can": 1.1770566305728538,
+        "foam_block": 0.7614757754629342,
+        "pool_box_1": 0.3771757588507064,
+        "pool_box_2": 0.9477126364623956,
+        "pool_box_3": 1.0331524048139673,
+        "pool_cyl_1": 0.5877574829618921,
+        "pool_cyl_2": 0.66317435082174,
+        "pool_cyl_3": 0.7816624948505858
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9500615685282474,
+        "blue_cylinder": 0.9834168632354054,
+        "soda_can": 1.0590957097393678,
+        "foam_block": 0.7329346826503058,
+        "pool_box_1": 0.3771757588507064,
+        "pool_box_2": 0.8290540497088772,
+        "pool_box_3": 0.9163207762256089,
+        "pool_cyl_1": 0.5694194928812889,
+        "pool_cyl_2": 0.636998896556867,
+        "pool_cyl_3": 0.7458136571479597
+      },
+      "shells": {
+        "red_cube": 1.0703362537021492,
+        "blue_cylinder": 1.1027855278741923,
+        "soda_can": 1.1770566305728538,
+        "foam_block": 0.7614757754629342,
+        "pool_box_1": 0.3771757588507064,
+        "pool_box_2": 0.9477126364623956,
+        "pool_box_3": 1.0331524048139673,
+        "pool_cyl_1": 0.5877574829618921,
+        "pool_cyl_2": 0.66317435082174,
+        "pool_cyl_3": 0.7816624948505858
+      }
+    },
+    {
+      "tube": {
+        "red_cube": 0.9500546105179479,
+        "blue_cylinder": 0.9834098941684837,
+        "soda_can": 1.0590888038049946,
+        "foam_block": 0.7329290963447515,
+        "pool_box_1": 0.3771757592404956,
+        "pool_box_2": 0.8290473356061278,
+        "pool_box_3": 0.9163141591103492,
+        "pool_cyl_1": 0.5694139077800753,
+        "pool_cyl_2": 0.6369933127265158,
+        "pool_cyl_3": 0.7458080749675264
+      },
+      "shells": {
+        "red_cube": 1.070335334822339,
+        "blue_cylinder": 1.1027845960082256,
+        "soda_can": 1.1770557371201886,
+        "foam_block": 0.7614709257668666,
+        "pool_box_1": 0.3771757592404956,
+        "pool_box_2": 0.9477118844376475,
+        "pool_box_3": 1.0331517140245932,
+        "pool_cyl_1": 0.5877528109755982,
+        "pool_cyl_2": 0.6631701797726215,
+        "pool_cyl_3": 0.781658926048909
+      }
+    }
+  ],
+  "contacts": [],
+  "contacts_recorded": true,
+  "contacts_window": {
+    "seq_lo": 3853,
+    "seq_hi": 4006,
+    "wall_lo_ns": 157024523547458,
+    "wall_hi_ns": 157027598646208,
+    "states_in_window": 154,
+    "states_with_contacts_key": 154,
+    "reset_in_window": false,
+    "covered": true,
+    "seq_contiguous": true
+  }
+}

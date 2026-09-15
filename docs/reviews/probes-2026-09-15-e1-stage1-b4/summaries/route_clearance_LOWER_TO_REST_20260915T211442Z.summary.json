@@ -1,0 +1,109 @@
+{
+ "stem": "route_clearance_LOWER_TO_REST_20260915T211442Z",
+ "cycle": "S1a",
+ "role": "parked",
+ "route": "LOWER_TO_REST",
+ "identity": {
+  "ok": true,
+  "reasons": [],
+  "run_dir": "/Users/terrancehamilton/reachy-1-2-sim-stage1/docs/reviews/probes-2026-09-15-e1-stage1-b4/e1_server_runs/run_20260915_211004",
+  "manifest": {
+   "format_version": 1,
+   "started_at": "2026-09-15T21:10:04.862240+00:00",
+   "model_path": "/Users/terrancehamilton/reachy-1-2-sim-stage1/native_mujoco/model/reachy_1_2.xml",
+   "model_sha256": "618ef2499f6207d5e9e72f8b9a4e538b0521008afc1a80f3ecfbab22ab35abb4",
+   "scene_path": "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+   "scene_sha256": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+   "scene_revision": "initial",
+   "mujoco_version": "3.11.0",
+   "python_version": "3.14.0 (v3.14.0:ebf955df7a8, Oct  7 2025, 08:20:14) [Clang 16.0.0 (clang-1600.0.26.6)]",
+   "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+   "protocol_version": 1,
+   "calibration_provenance": "measured_2026_08_27",
+   "depth_enabled": false,
+   "seg_enabled": false,
+   "contacts_tracked": true,
+   "effects": {
+    "blur_sigma": 0.0,
+    "noise_std": 0.0,
+    "drop_probability": 0.0,
+    "latency_ms": 0.0
+   },
+   "seeds": [],
+   "total_steps": null,
+   "total_duration_s": null,
+   "state_count": 0,
+   "command_count": 0
+  },
+  "scene_chain_sha256": {
+   "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/e1_boards/B4_pool_box_1_r2c3.yaml": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+   "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/FWDCenterLabSivaPool.yaml": "8666d92b22d9809b26accedd964a9c90714355e34537d413c2fce990fa547c5e",
+   "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/FWDCenterLabSiva.yaml": "6c2a758c8c3f6f5aef8a29b68f53f7e5e6ab68a54f62574335af1a0a988c59bd",
+   "/Users/terrancehamilton/reachy-1-2-sim-stage1/scenes/FWDCenterLabMCC.yaml": "0a1a6d6053dda1fdc3154afeaf9115b314d3c2621904d29dabfeaeac679b108a"
+  },
+  "joint_agreement_deg": {
+   "r_shoulder_pitch": 7.810913222348143e-17,
+   "r_shoulder_roll": 0.001501665738365636,
+   "r_arm_yaw": 1.4197928485693912e-17,
+   "r_elbow_pitch": 2.802538800008623e-17,
+   "r_forearm_yaw": 2.3906939380686103e-17,
+   "r_wrist_pitch": 3.671225580828403e-16,
+   "r_wrist_roll": 0.0035774781668891364,
+   "r_gripper": 0.007496515586382202
+  },
+  "status": {
+   "backend": "mujoco-remote",
+   "frames_stale": false,
+   "left_age_ms": 24,
+   "right_age_ms": 20,
+   "left_seq": 3198,
+   "right_seq": 3198
+  },
+  "checked_at_wall_ns": 1789506879929177000
+ },
+ "settled_pose_check": {
+  "pool_box_1": {
+   "yaml_xyz": [
+    0.4318,
+    -0.1524,
+    0.76
+   ],
+   "stream_xyz": [
+    0.4318000044842695,
+    -0.15240000761621458,
+    0.7599550413200046
+   ],
+   "dxy_m": 8.838291521253544e-09,
+   "dz_m": 4.495867999543268e-05,
+   "ok": true
+  }
+ },
+ "displacement_m": {
+  "pool_box_2": 3.636611363035683e-10,
+  "pool_box_1": 3.952043065648974e-10,
+  "pool_box_3": 3.6408787749412716e-10,
+  "soda_can": 3.5537718833569194e-10,
+  "pool_cyl_1": 3.821714896724569e-10,
+  "pool_cyl_3": 3.5524252800285115e-10,
+  "red_cube": 3.631502557610907e-10,
+  "blue_cylinder": 3.833089774069945e-10,
+  "foam_block": 3.976039311175087e-10,
+  "pool_cyl_2": 3.616529078854764e-10
+ },
+ "contacts": [],
+ "contacts_recorded": true,
+ "contacts_window": {
+  "seq_lo": 13750,
+  "seq_hi": 13903,
+  "wall_lo_ns": 157222471072583,
+  "wall_hi_ns": 157225546094458,
+  "states_in_window": 154,
+  "states_with_contacts_key": 154,
+  "reset_in_window": false,
+  "covered": true,
+  "seq_contiguous": true
+ },
+ "alignment_n": 60,
+ "tailcheck_stdout": "target HOME = {\"r_shoulder_pitch\": 0.0, \"r_shoulder_roll\": 0.0, \"r_arm_yaw\": 0.0, \"r_elbow_pitch\": 0.0, \"r_forearm_yaw\": 0.0, \"r_wrist_pitch\": 0.0, \"r_wrist_roll\": 0.0, \"r_gripper\": -45.0}\ntail_samples=60 (last 3.0s)  max_gross_err_deg=0.0  max_spread_deg=0.4  r_gripper=-36.5 (target -45.0)\ngross residuals: r_shoulder_pitch=0.0, r_shoulder_roll=0.0, r_arm_yaw=0.0, r_elbow_pitch=0.0\nwrist residuals (info): r_forearm_yaw=0.0, r_wrist_pitch=0.0, r_wrist_roll=39.5\nsamples_ok=True posture_ok=True still_ok=True gripper_ok=False\nPARKED_AT_HOME=NO\ntailcheck exit=1 (mode=start)\n",
+ "linker_stdout": "Wrote /Users/terrancehamilton/reachy-1-2-sim-stage1/runs/route_clearance_LOWER_TO_REST_20260915T211442Z.link.json: contacts=0 (evidence on 154/154 states, reset_in_window=False)\nlinker exit=0\n"
+}
