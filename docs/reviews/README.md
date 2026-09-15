@@ -9,6 +9,7 @@ checkout of this repository rather than from one person's machine.
 | `2026-09-12-repair-review-and-56-74-design.md` | ADR-0003; `fix/bounded-review-followups-56-74` (A1–A6, R4–R6, Slice 1 of #56/#74) | `probes-2026-09-12/` |
 | (PR #108 review, in the PR and ADR-0003 "Correcting the tube") | ADR-0003's tube correction: coverage, newly refused boards, the shells thumb-pad gap | `probes-2026-09-14/` |
 | (`feat/shells-collision-coverage`, in the PR and ADR-0003 Slice 2) | "shells" gains the `thumb_pad` capsule and a widened `finger` capsule; coverage, sweep, and fixture-table re-derivation | `probes-2026-09-14-shells-collision-coverage/` |
+| (`feat/sim-e1-readiness`, in the PR and ADR-0003 "E1 (simulator)") | Simulator-E1 readiness: board YAMLs, verified simulator identity, automatic artefact linking, arm-link contact recording | `probes-2026-09-14-sim-e1-readiness/` |
 
 What goes here: the review text, the probe scripts it ran, and their
 human-readable summaries. What does not: raw regenerated output (`.json`

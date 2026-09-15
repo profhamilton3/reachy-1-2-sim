@@ -416,8 +416,9 @@ It establishes that `"shells"` is now a correct bound on the model hand —
 both the parts that were already covered and the collision pads that were
 not — the same standard `TestTubeCoversMJCFHand` holds the tube to. It does
 **not** establish that switching a consumer to `"shells"` is safe: that
-still needs a margin decided from E1 (still blocked on an operator and a
-live arm), and E3's real-gripper measurement. This PR is the geometry
+still needs a margin decided from simulator E1 (readiness landed
+2026-09-14; no flight has been made — see "What is still open" below) and
+E3's real-gripper measurement. This PR is the geometry
 precondition Slice 2 PR2 was waiting on; PR2 itself — switching
 `panel_executor._footprint_refusal` to `hand="shells"`, choosing
 `FOOTPRINT_MARGIN`, recovering the refused boards — is still out of scope
@@ -425,29 +426,72 @@ here.
 
 ## What is still open
 
-- **E1** — re-fly the tabletop legs with 20 Hz joint logging, reporting
-  per-link realised clearance under both hand models
-  (`scripts/measure_route_clearance.py`). Resolves: the tabletop margin:
-  whether `"shells"` (or a margin on `"tube"`) should ever become the
-  guard's default. **Still open** — this needs an operator and a live arm,
-  neither of which this repo can provide; nothing here changes that.
+- **E1 (simulator)** — realised motion and clearance against the native
+  MuJoCo backend, reached through the SDK bridge
+  (`scripts/measure_route_clearance.py`), reporting per-link realised
+  clearance under both hand models at the aperture the (simulated) hand
+  actually had. This measures the SIMULATOR'S actuator model tracking the
+  commanded path — `native_mujoco/ACTUATOR_MODEL.md`'s own words, "sim-tuned
+  for stable position control, not calibrated to Dynamixel datasheets" —
+  never the physical robot's. **Any margin simulator E1 yields is
+  simulator-specific and provisional**: it says what this simulator's arm
+  does on this simulator's actuator model against these simulator object
+  dimensions (decision D6), not what the real Reachy would do. The guard is
+  never promoted on simulator evidence alone (see the Slice 2 PR2 entry
+  below).
+
+  Readiness for this measurement (assignment 2026-09-14, "simulator-E1
+  readiness", `outputs/assignment-2026-09-14-sim-e1-readiness.md`) is
+  **implemented, offline, no flight made**: six committed board scene YAMLs
+  (`scenes/e1_boards/`, `scripts/make_e1_boards.py`); a verified-identity
+  check (`scripts/e1_identity.py`) that the recorder runs itself, before
+  recording — never trusting the client's own `REACHY_SIM_BACKEND` or any
+  other env var — and refuses to record if the actually-connected simulator
+  bridge cannot be established (loopback host, exactly one live physics run
+  directory, round-by-round joint/timing correlation against that
+  directory's own advancing stream, scene-hash identity, and the container
+  bridge's `/status`); automatic linking of scene hash, actual object
+  poses, joint/aperture samples, and the server's own recorded stream into
+  a `<log>.link.json` sidecar (`scripts/link_e1_flight.py`), including a
+  5 mm settled-pose check against each board's own YAML pose; and
+  arm-link/object contact recording, including contacts that displace
+  nothing (`native_mujoco/contact_accumulator.py`, gated behind `--record`).
+  None of this proves simulator identity or the SDK protocol can be made
+  cryptographically airtight — see `scripts/e1_identity.py`'s own docstring
+  for the residual limitation (the real robot's SDK protocol, which the fake
+  server mirrors, carries no simulator-identity field; only joint values are
+  reachable through it, and joint-value agreement alone is a correlation
+  check, not a proof — this is refused-on-ambiguity, not
+  proven-by-cryptography).
+
+  **Pilot protocol, not yet run**: a parked (motionless) recording under
+  the standing read-only sim approval, then one separately-approved flight
+  (`LOWER_TO_REST` × `B4_pool_box_1_r2c3`, the widest shells margin) before
+  any wider campaign — see
+  `outputs/e1-operator-checklist-2026-09-14.md`. **Still open**: no flight,
+  simulator or physical, has been made.
 
   **The prerequisite this ADR previously recorded — the recorder must log
   the actual gripper aperture — is now implemented** (2026-09-14,
   aperture-logging PR, no live motion): `record_joint_log` streams all
   eight `rig_routes.R_JOINTS` (`ARM7` plus `r_gripper`), the same read-only
   `getattr(...).present_position` access as the other seven, at the same
-  instant. The log schema is `schema_version: 2`; every value is degrees;
-  `t` is elapsed seconds from `time.monotonic()`, spacing best-effort (read
-  each sample's own `t`, never assume uniform `1/sample_hz`).
+  instant. The log schema is now `schema_version: 3` (2026-09-14, sim-E1
+  readiness — 2 added aperture logging, 3 adds `wall_time_ns` per sample and
+  `t0_wall_ns` on the header for aligning a sample to the server's own
+  recorded stream); every value is degrees; `t` is elapsed seconds from
+  `time.monotonic()`, spacing best-effort (read each sample's own `t`, never
+  assume uniform `1/sample_hz`).
 
   A recorded sample's aperture is validated, not trusted blindly: missing
   raises `ApertureDataError` unless the caller passes
   `allow_missing_aperture=True` **and** declares the log's `schema_version`
-  as one this module has explicit legacy fallback logic for (today: only
-  `1`, real schema-1 logs) — a `schema_version` claimed to be the current
-  one (`2`) with a missing aperture always raises, the flag
-  notwithstanding, because the current schema has no excuse for a gap. An
+  as one eligible for that rescue (today: only `1`, real schema-1 logs —
+  schema 2 is a recognised past shape but was never eligible, since it
+  always had `r_gripper`) — a `schema_version` claimed to be the current one
+  (`3`) with a missing aperture always raises, the flag notwithstanding,
+  because the current schema has no excuse for a gap; the same schema also
+  always raises `SampleTimestampError` for a missing `wall_time_ns`. An
   unrecognised `schema_version` (neither current nor a supported legacy
   one) raises `UnsupportedSchemaVersionError` outright, before any
   per-sample check. Every such fallback sample is named in the report
@@ -470,15 +514,20 @@ here.
   commanded *endpoint* aperture, applied uniformly along that leg, not a
   per-sample commanded value). `hand_radius` and the tube are untouched by
   this; only the recorder's own schema, validation, and reporting math
-  changed (2026-09-14, follow-up to Opus's review of the first version of
-  this PR).
+  changed.
 
-  What is **not** done by this: no flight has been made. E1 is blocked on
-  an operator and a live arm, not on the recorder any more.
+  What is **not** done by this: no flight, simulator or physical, has been
+  made.
+- **Physical validation** — E2 and E3 (below), plus a physical re-flight of
+  the tabletop legs that nobody has scheduled. The guard is not promoted on
+  simulator E1 evidence alone: a candidate margin from simulator E1 says
+  what the simulator's actuator model does, and physical validation is what
+  says whether the real robot agrees.
 - **E2** — the same instrumentation on the SWING_1 rail crossing.
 - **E3** — real gripper envelope vs. the MJCF shells (tape measure on the
   physical Reachy 1.2): whether `"shells"` is a bound on the *real* hand,
-  not only the model's.
+  not only the model's. Motion-free, like E1 readiness — a caliper and a
+  ruler, not a flight.
 - ~~**`"shells"` must cover the collision pads** before it can be
   promoted~~ — **done 2026-09-14** (Slice 2 PR1): `thumb_pad` and a widened
   `finger` capsule, verified the way `TestTubeCoversMJCFHand` verifies the
@@ -491,7 +540,7 @@ here.
   now met. Recovering them still means switching the tabletop guard to
   `"shells"`, with a margin decided from E1 — not shrinking the tube — and
   `"shells"` becomes a guard **only** once that margin exists; coverage
-  alone is not a promotion decision. Waits on E1.
+  alone is not a promotion decision. Waits on simulator E1 and E3.
 - The 1.6 cm wrist-roll term is now inside the radius; a tighter treatment
   (anchoring the tube at the thumb pivot) is possible but would change the
   capsule's endpoints, which every consumer reads, and is not worth it while
@@ -517,10 +566,13 @@ here.
 
 Revisit this ADR when:
 
-- E1 delivers realised per-leg clearance and a margin decision is made for
-  Slice 2 PR2 (switching the tabletop guard to `"shells"`) — **`"shells"`
-  becomes a guard only once that margin is decided; coverage (done) is a
-  precondition, not a promotion**;
+- simulator E1 delivers Δ_sim per leg family (realised-vs-planned clearance,
+  both hand models, labelled simulator-specific and provisional) and a
+  margin decision is made for Slice 2 PR2 (switching the tabletop guard to
+  `"shells"`) — **`"shells"` becomes a guard only once that margin is
+  decided, and only after physical validation (E3, and the physical
+  re-flight nobody has scheduled) agrees with the simulator; coverage
+  (done) is a precondition, not a promotion**;
 - the guard moves to `"shells"` and the tube stops being what any consumer
   flies;
 - E3 measures the real gripper against the MJCF shells.
