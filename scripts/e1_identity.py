@@ -106,14 +106,16 @@ import sys
 import time
 import urllib.request
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
 _HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "src"))
+sys.path.insert(0, str(_HERE.parent / "native_mujoco"))
 
 from reachy_ai.motion import rig_routes as R  # noqa: E402
+from joint_map import by_mjcf_index as _joint_by_mjcf_index  # noqa: E402
 
 #: The 8 joints identity is checked over -- the same set
 #: `measure_route_clearance.py` records (ARM7 + r_gripper).
@@ -420,3 +422,145 @@ def verify_simulator_identity(
         manifest=manifest, scene_chain_sha256=scene_chain_sha256,
         joint_agreement_deg=joint_agreement, status=status,
         checked_at_wall_ns=wall_clock_ns())
+
+
+@dataclass(frozen=True)
+class ComplianceCheck:
+    """Bounded pre-motion check (issue #116): did the physics actually reach
+    the compliance state the operator just commanded, before the route
+    primitive runs. See `require_compliance` for what it reads and why."""
+    ok: bool
+    reasons: Tuple[str, ...]
+    per_joint: Dict[str, dict]
+    waited_s: float
+    last_state_age_s: float
+
+    def as_dict(self) -> dict:
+        return {
+            "ok": self.ok,
+            "reasons": list(self.reasons),
+            "per_joint": self.per_joint,
+            "waited_s": self.waited_s,
+            "last_state_age_s": self.last_state_age_s,
+        }
+
+
+def _commands_with_compliance_tail(
+    commands_path: pathlib.Path, n: int = 5,
+) -> List[dict]:
+    """The last `n` commands.jsonl entries that carried a non-null
+    `compliant` entry for at least one joint -- oldest first. Tolerant of a
+    torn last line, same reasoning as `_read_last_state`."""
+    try:
+        raw_lines = commands_path.read_text().splitlines()
+    except OSError:
+        return []
+    out: List[dict] = []
+    for raw in reversed(raw_lines):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            entry = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        compliant = entry.get("compliant")
+        if isinstance(compliant, list) and any(v is not None for v in compliant):
+            out.append(entry)
+            if len(out) >= n:
+                break
+    out.reverse()
+    return out
+
+
+def _describe_sent_compliance(entry: dict) -> str:
+    names = []
+    for i, v in enumerate(entry.get("compliant") or []):
+        if v is None:
+            continue
+        joint = _joint_by_mjcf_index(i)
+        name = joint.sdk_name if joint is not None else f"idx{i}"
+        names.append(f"{name}={v}")
+    return f"seq {entry.get('seq')}: " + ", ".join(names)
+
+
+def require_compliance(
+    run_dir: str,
+    joints: Sequence[str],
+    *,
+    compliant: bool = False,
+    timeout_s: float = 3.0,
+    max_state_age_s: float = 0.5,
+    read_last_state: Callable[[pathlib.Path], Optional[dict]] = _read_last_state,
+    now_ns: Callable[[], int] = time.monotonic_ns,
+    sleep: Callable[[float], None] = time.sleep,
+) -> ComplianceCheck:
+    """Poll the run directory's state stream (never the SDK client's cached
+    `joint.compliant`, which is written by the client and read back only at
+    connect -- see the module docstring) until every named joint reports
+    `compliant == <expected>` on a FRESH sample, or `timeout_s` elapses.
+
+    Never sends anything, never retries motion, never touches tolerances.
+    """
+    run_dir_path = pathlib.Path(run_dir)
+    states_path = run_dir_path / "states.jsonl"
+    commands_path = run_dir_path / "commands.jsonl"
+    poll_period_s = 1.0 / 20.0  # >= 20 Hz, per the assignment
+
+    start_ns = now_ns()
+    while True:
+        state = read_last_state(states_path)
+        waited_s = (now_ns() - start_ns) / 1e9
+        per_joint: Dict[str, dict] = {}
+        bad: List[str] = []
+        fresh = False
+        age_s = float("inf")
+
+        if state is None:
+            bad.append("states.jsonl has no readable sample yet")
+        else:
+            wall_time_ns = state.get("wall_time_ns")
+            if isinstance(wall_time_ns, (int, float)):
+                age_s = abs(now_ns() - wall_time_ns) / 1e9
+            fresh = age_s <= max_state_age_s
+            server_joints = {j.get("name"): j for j in state.get("joints", [])}
+            for name in joints:
+                entry = server_joints.get(name)
+                if entry is None:
+                    bad.append(f"{name}: not in the last state sample")
+                    continue
+                entry_compliant = bool(entry.get("compliant"))
+                per_joint[name] = {
+                    "compliant": entry_compliant,
+                    "effort": entry.get("effort"),
+                    "seq": state.get("seq"),
+                    "sim_step": state.get("sim_step"),
+                }
+                if entry_compliant != compliant:
+                    bad.append(
+                        f"{name}: compliant={entry_compliant} (want "
+                        f"{compliant}), effort={entry.get('effort')}")
+
+        if fresh and not bad:
+            return ComplianceCheck(
+                ok=True, reasons=(), per_joint=per_joint,
+                waited_s=waited_s, last_state_age_s=age_s)
+
+        if waited_s >= timeout_s:
+            reasons = list(bad)
+            if not fresh:
+                reasons.append(
+                    f"state stream is stale (last sample {age_s:.3f}s old, "
+                    f"> {max_state_age_s}s max) -- refusing to pass on old "
+                    "data")
+            sent = _commands_with_compliance_tail(commands_path, n=5)
+            if sent:
+                reasons.append(
+                    "commands sent with a compliant flag (most recent "
+                    "last): " + " | ".join(
+                        _describe_sent_compliance(e) for e in sent))
+            return ComplianceCheck(
+                ok=False, reasons=tuple(reasons), per_joint=per_joint,
+                waited_s=waited_s, last_state_age_s=age_s)
+
+        sleep(poll_period_s)
