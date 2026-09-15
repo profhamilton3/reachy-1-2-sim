@@ -18,11 +18,25 @@ Two halves:
   * `align_and_recompute()` -- the offline alignment block: for every
     recorder sample, the server state chosen by (i) nearest `wall_time_ns`
     then (ii) refined to the state within +/-60 ms whose 8-joint vector is
-    nearest, plus the contacts (work item 4) accumulated in that window and
-    clearance recomputed on the server's own `qpos` (both hand models) --
-    so a contact instant is judged on the physics' joints, not the 20 Hz
-    SDK reading. Runnable standalone, with no live server, given only the
-    log and a run directory.
+    nearest, and clearance recomputed on the server's own `qpos` (both
+    hand models) -- so a contact instant is judged on the physics' joints,
+    not the 20 Hz SDK reading. Runnable standalone, with no live server,
+    given only the log and a run directory.
+
+    Contacts (work item 4) are NOT read only from the aligned states --
+    the server pushes a state (and drains its contact accumulator) at
+    50 Hz while a recorder sample lands at ~20 Hz, so most states are
+    never any sample's nearest match. Every state's own `contacts` field
+    is the accumulator's drain since the PREVIOUS push -- a contiguous,
+    non-overlapping window (see `native_mujoco/contact_accumulator.py`) --
+    so the union of `contacts` from EVERY state whose `sim_step` falls
+    between the first and last ALIGNED sample's state (inclusive) is the
+    complete, non-duplicated contact record for the flight, independent of
+    which states the 20 Hz samples happened to land on. A state missing
+    the `contacts` key entirely (a run recorded before work item 4) is
+    reported via `contacts_recorded: False` rather than folded into a
+    silent zero; a `contacts` field that is present but malformed raises
+    `ContactEvidenceError` rather than being silently dropped.
 
 Alignment needs `wall_time_ns` on both sides to mean the same clock -- see
 `measure_route_clearance.py`'s "Sample wall-clock" docstring section: both
@@ -63,6 +77,12 @@ _SETTLED_TOL_Z_M = 0.005
 HAND_MODES = ("tube", "shells")
 
 
+class ContactEvidenceError(RuntimeError):
+    """A state's `contacts` field is present but malformed -- raised
+    instead of silently treating the state as contact-free, since that
+    would make a real contact invisible to the checklist's STOP rule."""
+
+
 def read_states(run_dir: str) -> List[dict]:
     """Every line of `<run_dir>/states.jsonl`, parsed."""
     path = pathlib.Path(run_dir) / "states.jsonl"
@@ -81,6 +101,62 @@ def _server_joint_degrees(state: dict) -> Dict[str, float]:
         for j in state.get("joints", [])
         if j.get("name") in R.R_JOINTS
     }
+
+
+def _validated_contacts_field(state: dict) -> Optional[List[dict]]:
+    """The state's own `contacts` list, or `None` if the key is absent
+    entirely (a run recorded before work item 4, or with contact
+    tracking off -- distinct from a state that HAS the key with an empty
+    list, which means the accumulator genuinely saw nothing). Raises
+    `ContactEvidenceError` if the key is present but not a list of dicts
+    each naming `arm_geom`/`object_id` -- a malformed entry must fail
+    loudly, never be read as "no contacts"."""
+    if "contacts" not in state:
+        return None
+    contacts = state["contacts"]
+    if not isinstance(contacts, list):
+        raise ContactEvidenceError(
+            f"state sim_step={state.get('sim_step')!r}: 'contacts' is "
+            f"{type(contacts).__name__}, expected a list")
+    for c in contacts:
+        if not isinstance(c, dict) or "arm_geom" not in c or "object_id" not in c:
+            raise ContactEvidenceError(
+                f"state sim_step={state.get('sim_step')!r}: malformed "
+                f"contact entry {c!r}")
+    return contacts
+
+
+def contacts_in_sim_step_range(
+    states: Sequence[dict], lo: int, hi: int,
+    contacts_by_sim_step: Optional[Dict[int, List[dict]]] = None,
+) -> Tuple[List[dict], bool]:
+    """Union of contacts for every state whose `sim_step` falls in
+    `[lo, hi]` inclusive (not just the states an individual recorder
+    sample happened to align to -- see `align_and_recompute`'s
+    docstring). `contacts_by_sim_step`, when given, overrides each
+    state's own `contacts` field (keyed by `sim_step`) rather than
+    reading it from the state -- for a caller with its own window
+    bookkeeping; still applied across the full range, not just aligned
+    states. Returns `(contacts, contacts_recorded)`: `contacts_recorded`
+    is `False` only when NOT ONE state in range carries evidence (no
+    `contacts` key anywhere, and no override given) -- callers must not
+    conflate that with a genuine zero-contact flight."""
+    out: List[dict] = []
+    contacts_recorded = False
+    for state in states:
+        sim_step = state.get("sim_step")
+        if sim_step is None or not (lo <= sim_step <= hi):
+            continue
+        if contacts_by_sim_step is not None:
+            out.extend(contacts_by_sim_step.get(sim_step, []))
+            contacts_recorded = True
+            continue
+        contacts = _validated_contacts_field(state)
+        if contacts is None:
+            continue
+        contacts_recorded = True
+        out.extend(contacts)
+    return out, contacts_recorded
 
 
 def _joint_residual_deg(sample_joints_deg: Dict[str, float],
@@ -266,17 +342,22 @@ def align_and_recompute(
     samples: Sequence[dict], run_dir: str, scene_path: str,
     contacts_by_sim_step: Optional[Dict[int, List[dict]]] = None,
 ) -> dict:
-    """The alignment block: per-sample alignment, contacts in the aligned
-    window (if `contacts_by_sim_step` -- keyed by the STATE's `sim_step` --
-    is given; states carry their own accumulated-since-last-push contacts,
-    see `native_mujoco.contact_accumulator`), and server-side clearance
-    recomputed at each aligned state, both hand models."""
+    """The alignment block: per-sample alignment and server-side
+    clearance recomputed at each aligned state (both hand models), plus
+    the FULL contact record for the flight -- every state's own
+    `contacts` field (see `native_mujoco.contact_accumulator`) unioned
+    across the entire `[first aligned sim_step, last aligned sim_step]`
+    range, not just the states individual samples happened to align to
+    (the server pushes state at 50 Hz; a recorder sample lands at ~20 Hz,
+    so most states are never any sample's nearest match -- see
+    `contacts_in_sim_step_range`). `contacts_by_sim_step`, if given,
+    overrides each state's own field rather than being read from it, but
+    is still applied over the same full range."""
     states = read_states(run_dir)
     scene_model = SceneModel.from_yaml(scene_path)
     alignment = align_samples(samples, states)
     by_sim_step = {s.get("sim_step"): s for s in states}
 
-    contacts_in_window: List[dict] = []
     clearance_by_sample = []
     for record in alignment:
         sim_step = record["server_sim_step"]
@@ -285,13 +366,21 @@ def align_and_recompute(
             clearance_by_sample.append(_clearance_for_state(state, scene_model))
         else:
             clearance_by_sample.append({})
-        if contacts_by_sim_step is not None:
-            contacts_in_window.extend(contacts_by_sim_step.get(sim_step, []))
+
+    aligned_sim_steps = [r["server_sim_step"] for r in alignment
+                         if r["server_sim_step"] is not None]
+    if aligned_sim_steps:
+        contacts_in_window, contacts_recorded = contacts_in_sim_step_range(
+            states, min(aligned_sim_steps), max(aligned_sim_steps),
+            contacts_by_sim_step=contacts_by_sim_step)
+    else:
+        contacts_in_window, contacts_recorded = [], False
 
     return {
         "alignment": alignment,
         "server_side_clearance": clearance_by_sample,
         "contacts": contacts_in_window,
+        "contacts_recorded": contacts_recorded,
     }
 
 
