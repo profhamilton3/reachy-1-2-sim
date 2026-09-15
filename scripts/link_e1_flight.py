@@ -102,15 +102,34 @@ class ContactEvidenceError(RuntimeError):
     would make a real contact invisible to the checklist's STOP rule."""
 
 
-def read_states(run_dir: str) -> List[dict]:
-    """Every line of `<run_dir>/states.jsonl`, parsed."""
+def read_states(
+    run_dir: str, *, out_flags: Optional[dict] = None,
+) -> List[dict]:
+    """Every line of `<run_dir>/states.jsonl`, parsed.
+
+    N2 (2026-09-15 matrix readiness): the recorder calls `build_base_sidecar`
+    while the server is still appending at 50 Hz, so the very LAST line can
+    be torn (a partial write caught mid-flush). Exactly one such trailing
+    line is tolerated -- dropped, with `out_flags['torn_trailing_line']`
+    set to `True` when the caller passes `out_flags` -- so a flight is not
+    lost to a race the recorder itself creates. Any OTHER unparseable line
+    (not the last) means the file is not one a single server run wrote
+    cleanly, and raises `ContactEvidenceError` rather than a bare
+    `JSONDecodeError` a caller has to guess the cause of."""
     path = pathlib.Path(run_dir) / "states.jsonl"
-    states = []
     with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                states.append(json.loads(line))
+        lines = [stripped for stripped in (line.strip() for line in f) if stripped]
+    states: List[dict] = []
+    for i, line in enumerate(lines):
+        try:
+            states.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            if i == len(lines) - 1:
+                if out_flags is not None:
+                    out_flags["torn_trailing_line"] = True
+                break
+            raise ContactEvidenceError(
+                f"states.jsonl line {i + 1} is not valid JSON: {exc}") from exc
     return states
 
 
@@ -256,11 +275,19 @@ def contacts_in_flight_window(
     be treated as suspect."""
     ordered = sorted(states, key=_require_seq)
     walls = [_require_wall_ns(s) for s in ordered]
-    for a, b in zip(walls, walls[1:]):
-        if b < a:
+    seqs_all = [_require_seq(s) for s in ordered]
+    for sa, sb, wa, wb in zip(seqs_all, seqs_all[1:], walls, walls[1:]):
+        # F11 (2026-09-15 matrix readiness): checked file-wide, like the
+        # other structural invariants here, not only inside the contact
+        # window -- a duplicated seq anywhere proves the file was not
+        # written by a single server run, whether or not it falls in the
+        # window this flight cares about.
+        if sb == sa:
+            raise ContactEvidenceError(f"duplicate seq {sb} in states.jsonl")
+        if wb < wa:
             raise ContactEvidenceError(
                 f"states.jsonl is not in wall-clock order along seq: "
-                f"wall_time_ns {b} follows {a}")
+                f"wall_time_ns {wb} follows {wa}")
 
     lo = first_sample_wall_ns - _WINDOW_PAD_NS
     hi = last_sample_wall_ns + _WINDOW_PAD_NS
@@ -276,8 +303,6 @@ def contacts_in_flight_window(
     seqs = [s["seq"] for s in window]
     seq_contiguous = True
     for a, b in zip(seqs, seqs[1:]):
-        if b == a:
-            raise ContactEvidenceError(f"duplicate seq {b} in states.jsonl")
         if b != a + 1:
             seq_contiguous = False
 
@@ -509,10 +534,35 @@ def align_and_recompute(
     recordings in one server run), so it is not unique across the whole
     `states.jsonl`, while `seq` is monotonic for the life of the server
     process."""
-    states = read_states(run_dir)
+    torn_flags: dict = {}
+    states = read_states(run_dir, out_flags=torn_flags)
+    # F10 (2026-09-15 matrix readiness): every state's shape and its
+    # seq/wall_time_ns are checked here, before align_samples touches any
+    # of them -- a torn line or a foreign stream must exit 5 with a named
+    # cause (ContactEvidenceError), not crash inside align_sample's
+    # unchecked .get() arithmetic with a bare traceback.
+    for s in states:
+        if not isinstance(s, dict):
+            raise ContactEvidenceError(
+                f"states.jsonl contains a non-object line: {s!r}")
+        _require_seq(s)
+        _require_wall_ns(s)
     scene_model = SceneModel.from_yaml(scene_path)
     alignment = align_samples(samples, states)
     by_seq = {s.get("seq"): s for s in states}
+
+    # Priority 1 (2026-09-15 matrix readiness): read manifest.json fresh
+    # from run_dir -- not from a possibly-stale sidecar -- so a --run-dir
+    # relink is judged on what THIS run dir's server actually tracked, not
+    # on identity_check.manifest captured at recording time. A run dir
+    # whose manifest predates contacts_tracked, or sets it false, must
+    # refuse even if every state carries a 'contacts' key.
+    manifest_path = pathlib.Path(run_dir) / "manifest.json"
+    try:
+        run_manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        run_manifest = {}
+    manifest_contacts_tracked = run_manifest.get("contacts_tracked")
 
     clearance_by_sample = []
     for record in alignment:
@@ -526,8 +576,14 @@ def align_and_recompute(
         contacts_in_window, contacts_recorded, contacts_window = (
             contacts_in_flight_window(
                 states, samples[0]["wall_time_ns"], samples[-1]["wall_time_ns"]))
+        if torn_flags.get("torn_trailing_line"):
+            contacts_window["torn_trailing_line"] = True
     else:
         contacts_in_window, contacts_recorded, contacts_window = [], False, {}
+
+    if contacts_recorded and manifest_contacts_tracked is not True:
+        contacts_recorded = False
+        contacts_window["manifest_contacts_tracked"] = manifest_contacts_tracked
 
     return {
         "alignment": alignment,
@@ -586,9 +642,13 @@ def main() -> None:
             if w.get("states_with_contacts_key", 0) != w.get("states_in_window", 0):
                 reasons.append("not every state in the window carries the "
                                 "'contacts' key")
+        if "manifest_contacts_tracked" in w:
+            reasons.append(
+                f"manifest.contacts_tracked missing/false "
+                f"({w['manifest_contacts_tracked']!r})")
         reason = "; ".join(reasons) or "insufficient evidence"
-        print(f"FAIL: no contact evidence in the server run dir -- this is NOT "
-              f"usable E1 data ({reason}; contacts_recorded=false; see {path})")
+        print(f"FAIL: contact evidence incomplete -- NOT usable E1 data "
+              f"({reason}; contacts_recorded=false; see {path})")
         sys.exit(4)
     w = sidecar["contacts_window"]
     print(f"Wrote {path}: contacts={len(sidecar['contacts'])} "

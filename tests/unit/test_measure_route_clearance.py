@@ -125,6 +125,63 @@ class TestRefusesWithoutTheEnvVar:
         assert "REACHY_SIM_RECORD_CLEARANCE" in capsys.readouterr().out
 
 
+class TestLazySdkConstruction:
+    """N1 (2026-09-15 matrix readiness): `ReachySDK` is constructed lazily,
+    inside `_read_sdk_joints`, which `verify_simulator_identity` only calls
+    AFTER the loopback and run-dir checks pass. A mistyped `--host` (or a
+    stray `REACHY_IP`, the `--host` default) must never open a gRPC
+    channel to whatever answers there before the refusal fires."""
+
+    def test_reachysdk_not_constructed_before_loopback_refusal(
+            self, monkeypatch, mrc, tmp_path):
+        """Uses the REAL e1_identity.verify_simulator_identity (not
+        stubbed), so the loopback check that fires first actually runs."""
+        monkeypatch.setenv("REACHY_SIM_RECORD_CLEARANCE", "1")
+        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+        calls = []
+        monkeypatch.setattr(
+            mrc, "ReachySDK",
+            lambda host, sdk_port: (
+                calls.append((host, sdk_port)),
+                types.SimpleNamespace(r_arm=_StubArm(R.REST)))[1])
+        monkeypatch.setattr(
+            sys, "argv",
+            ["measure_route_clearance.py", "--host", "192.168.1.50",
+             "--route", "LOWER_TO_REST", "--duration", "0.05",
+             "--record-root", str(tmp_path)])
+        with pytest.raises(SystemExit) as exc:
+            mrc.main()
+        assert exc.value.code == 2
+        assert calls == [], (
+            "ReachySDK must not be constructed before the loopback refusal")
+
+    def test_reachysdk_is_constructed_once_identity_passes(
+            self, monkeypatch, mrc, tmp_path):
+        monkeypatch.setenv("REACHY_SIM_RECORD_CLEARANCE", "1")
+        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+        calls = []
+        monkeypatch.setattr(
+            mrc, "ReachySDK",
+            lambda host, sdk_port: (
+                calls.append((host, sdk_port)),
+                types.SimpleNamespace(r_arm=_StubArm(R.REST)))[1])
+        _stub_identity_ok(monkeypatch, mrc)
+        # This test is only about WHEN ReachySDK is constructed, not the
+        # sidecar-linking pipeline (covered by test_link_e1_flight.py and
+        # test_e1_identity.py) -- stub it out so a bare identity.run_dir=""
+        # from _stub_identity_ok doesn't fail this test for an unrelated
+        # reason.
+        monkeypatch.setattr(
+            mrc.link_e1_flight, "build_base_sidecar",
+            lambda **kw: {"settled_pose_check": {}})
+        monkeypatch.setattr(
+            sys, "argv",
+            ["measure_route_clearance.py", "--route", "LOWER_TO_REST",
+             "--duration", "0.05", "--record-root", str(tmp_path)])
+        mrc.main()
+        assert len(calls) == 1
+
+
 class TestRecordingIncludesTheAperture:
     """Replaces the old hard block (`APERTURE_LOGGED`, deleted this commit)
     with checks on what the recorder actually does now: every sample

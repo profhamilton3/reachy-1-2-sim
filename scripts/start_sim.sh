@@ -56,17 +56,8 @@ LOG="${REACHY_SIM_SERVER_LOG:-/tmp/reachy_mujoco_server.log}"
 # host path) AND the noVNC/RViz view (container path /opt/scenes/<file>), so the
 # two views always match.
 SCENE_IN="${REACHY_SIM_SCENE:-tabletop_demo}"
-case "$SCENE_IN" in
-    /*)         SCENE="$SCENE_IN" ;;                         # absolute path
-    *.yaml)     SCENE="$REPO/scenes/$(basename "$SCENE_IN")" ;;
-    *)          SCENE="$REPO/scenes/${SCENE_IN}.yaml" ;;     # short name
-esac
-if [ ! -f "$SCENE" ]; then
-    echo "✖ Scene not found: $SCENE" >&2
-    echo "  Available: $(ls "$REPO/scenes"/*.yaml | xargs -n1 basename | sed 's/\.yaml//' | tr '\n' ' ')" >&2
-    exit 1
-fi
-SCENE_FILE="/opt/scenes/$(basename "$SCENE")"   # path inside the container
+source "$REPO/scripts/lib/scene_path.sh"
+resolve_scene_path "$REPO" "$SCENE_IN" || exit 1
 
 echo "▶ Stopping any existing native server on :8765 …"
 lsof -tiTCP:8765 -sTCP:LISTEN 2>/dev/null | xargs -r kill -9 || true

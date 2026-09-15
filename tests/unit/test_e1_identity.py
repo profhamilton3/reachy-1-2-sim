@@ -61,15 +61,22 @@ def _write_run_dir(tmp_path, *, manifest_meta, wall_time_ns, sim_step,
     return rec.run_dir
 
 
-def _manifest_for(scene_path):
+def _manifest_for(scene_path, *, contacts_tracked=True):
     scene_path = os.path.abspath(scene_path)
-    return {
+    manifest = {
         "model_path": "model/reachy_1_2.xml",
         "model_sha256": "deadbeef",
         "scene_path": scene_path,
         "scene_sha256": ei._sha256_file(__import__("pathlib").Path(scene_path)),
         "scene_revision": "r1",
     }
+    # Priority 1 (2026-09-15 matrix readiness): every "good" manifest fixture
+    # in this file defaults to tracking on, matching a real server started
+    # with --record; contacts_tracked=False (or omitted entirely) is
+    # exercised explicitly by TestContactsTrackedManifestGate below.
+    if contacts_tracked is not None:
+        manifest["contacts_tracked"] = contacts_tracked
+    return manifest
 
 
 def _good_http_get(url):
@@ -302,6 +309,108 @@ class TestJointAgreement:
             http_get=_good_http_get,
             now_ns=lambda: wall_time_ns, wall_clock_ns=lambda: 0,
             sleep=lambda s: None, min_reads=1,
+        )
+        assert result.ok is True, result.reasons
+
+
+class TestContactsTrackedManifestGate:
+    """Priority 1 (2026-09-15 matrix readiness, the matrix gate): a manifest
+    whose `contacts_tracked` is missing, `False`, or any non-`True` value
+    refuses -- `native_mujoco/server.py` sets this from `_record_contacts`,
+    and a matrix is many server restarts; a manifest that doesn't say
+    tracking was on must not let a flight through."""
+
+    def test_missing_contacts_tracked_refuses(self, tmp_path):
+        manifest = _manifest_for(_BOARD_SCENE, contacts_tracked=None)
+        assert "contacts_tracked" not in manifest
+        wall_time_ns = 10_000_000_000
+        _write_run_dir(
+            tmp_path, manifest_meta=manifest,
+            wall_time_ns=wall_time_ns, sim_step=100)
+        result = ei.verify_simulator_identity(
+            host="localhost", port=50051, scene_path=_BOARD_SCENE,
+            record_root=str(tmp_path),
+            read_sdk_joints=lambda: _sdk_joints(_POSE_DEG),
+            http_get=_good_http_get,
+            now_ns=lambda: wall_time_ns, wall_clock_ns=lambda: 0,
+            sleep=lambda s: None, min_reads=1,
+        )
+        assert result.ok is False
+        assert any("manifest.contacts_tracked is None" in r
+                  for r in result.reasons)
+
+    def test_false_contacts_tracked_refuses(self, tmp_path):
+        manifest = _manifest_for(_BOARD_SCENE, contacts_tracked=False)
+        wall_time_ns = 10_000_000_000
+        _write_run_dir(
+            tmp_path, manifest_meta=manifest,
+            wall_time_ns=wall_time_ns, sim_step=100)
+        result = ei.verify_simulator_identity(
+            host="localhost", port=50051, scene_path=_BOARD_SCENE,
+            record_root=str(tmp_path),
+            read_sdk_joints=lambda: _sdk_joints(_POSE_DEG),
+            http_get=_good_http_get,
+            now_ns=lambda: wall_time_ns, wall_clock_ns=lambda: 0,
+            sleep=lambda s: None, min_reads=1,
+        )
+        assert result.ok is False
+        assert any("manifest.contacts_tracked is False" in r
+                  for r in result.reasons)
+
+    def test_true_contacts_tracked_is_unchanged_pass(self, tmp_path):
+        manifest = _manifest_for(_BOARD_SCENE, contacts_tracked=True)
+        wall_time_ns = 10_000_000_000
+        _write_run_dir(
+            tmp_path, manifest_meta=manifest,
+            wall_time_ns=wall_time_ns, sim_step=100)
+        result = ei.verify_simulator_identity(
+            host="localhost", port=50051, scene_path=_BOARD_SCENE,
+            record_root=str(tmp_path),
+            read_sdk_joints=lambda: _sdk_joints(_POSE_DEG),
+            http_get=_good_http_get,
+            now_ns=lambda: wall_time_ns, wall_clock_ns=lambda: 0,
+            sleep=lambda s: None, min_reads=1,
+        )
+        assert result.ok is True, result.reasons
+
+
+class TestContainerCheck:
+    """N8/A2 (2026-09-15 matrix readiness): run via `docker compose exec`,
+    the recorder shares no clock with the host native server it's
+    checking. Refuse rather than let the operator "fix" an otherwise
+    fail-closed refusal by pointing --record-root somewhere wrong."""
+
+    def test_dockerenv_present_refuses_even_with_everything_else_good(
+            self, tmp_path):
+        wall_time_ns = 10_000_000_000
+        _write_run_dir(
+            tmp_path, manifest_meta=_manifest_for(_BOARD_SCENE),
+            wall_time_ns=wall_time_ns, sim_step=100)
+        result = ei.verify_simulator_identity(
+            host="localhost", port=50051, scene_path=_BOARD_SCENE,
+            record_root=str(tmp_path),
+            read_sdk_joints=lambda: _sdk_joints(_POSE_DEG),
+            http_get=_good_http_get,
+            now_ns=lambda: wall_time_ns, wall_clock_ns=lambda: 0,
+            sleep=lambda s: None, min_reads=1,
+            in_container=lambda: True,
+        )
+        assert result.ok is False
+        assert any("running inside a container" in r for r in result.reasons)
+
+    def test_dockerenv_absent_does_not_add_a_reason(self, tmp_path):
+        wall_time_ns = 10_000_000_000
+        _write_run_dir(
+            tmp_path, manifest_meta=_manifest_for(_BOARD_SCENE),
+            wall_time_ns=wall_time_ns, sim_step=100)
+        result = ei.verify_simulator_identity(
+            host="localhost", port=50051, scene_path=_BOARD_SCENE,
+            record_root=str(tmp_path),
+            read_sdk_joints=lambda: _sdk_joints(_POSE_DEG),
+            http_get=_good_http_get,
+            now_ns=lambda: wall_time_ns, wall_clock_ns=lambda: 0,
+            sleep=lambda s: None, min_reads=1,
+            in_container=lambda: False,
         )
         assert result.ok is True, result.reasons
 

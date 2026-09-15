@@ -21,6 +21,12 @@ telemetry during a flight an operator did not mean to record is still a
 surprise worth a deliberate opt-in, even though nothing here can move the
 arm.
 
+Host Python may not be able to install `reachy-sdk` directly (e.g. no
+CPython 3.14 wheel for a transitive dependency) -- see
+`docs/e1-host-recorder-env.md` for the exact venv recipe this script was
+verified against, and run from a host shell, never the container
+(`e1_identity.py` refuses container runs; see that doc's last section).
+
 ## Log schema (schema_version 3)
 
     {
@@ -707,9 +713,20 @@ def main() -> None:
               "than a claimed backend.")
         sys.exit(2)
 
-    reachy = ReachySDK(host=args.host, sdk_port=args.port)
+    # Constructed lazily, on first use inside _read_sdk_joints -- N1
+    # (2026-09-15 matrix readiness): verify_simulator_identity only calls
+    # read_sdk_joints after the loopback and run-dir checks already pass,
+    # so a mistyped --host (or a stray REACHY_IP) never opens a gRPC
+    # channel before those refusals fire.
+    _reachy_box: Dict[str, object] = {}
+
+    def _reachy() -> "ReachySDK":
+        if "sdk" not in _reachy_box:
+            _reachy_box["sdk"] = ReachySDK(host=args.host, sdk_port=args.port)
+        return _reachy_box["sdk"]
 
     def _read_sdk_joints() -> Dict[str, float]:
+        reachy = _reachy()
         return {name: float(getattr(reachy.r_arm, name).present_position)
                 for name in R.R_JOINTS}
 
@@ -728,6 +745,8 @@ def main() -> None:
             print(f"  - {reason}")
         sys.exit(2)
     print(f"Simulator identity verified: run_dir={identity.run_dir}")
+
+    reachy = _reachy()
 
     t0_wall_ns = time.monotonic_ns()
     print(f"Recording {args.route} for {args.duration:.1f}s at {SAMPLE_HZ:.0f} Hz "
