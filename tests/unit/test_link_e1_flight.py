@@ -340,6 +340,123 @@ class TestContactEvidenceIntegrity:
             lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
 
 
+class TestCoverageGaps:
+    """F7/F9 (2026-09-15 review): the pad's timing assumption ('a state is
+    pushed every ~20ms, so 60ms of padding is always enough') is checked,
+    not trusted, and a state that cannot be placed in the window at all
+    (missing `seq`/`wall_time_ns`) fails loudly instead of silently
+    dropping its evidence. In every case here, incomplete evidence must
+    read as `contacts_recorded: False` -- never as a successful zero."""
+
+    _CG_STEP_NS = 20_000_000  # 50 Hz nominal server push
+
+    def test_delayed_covering_push_is_not_covered(self, tmp_path):
+        """P1: the push that covers the flight's last sample (its
+        `contacts` field drains everything since the previous push, up to
+        and including its own push time) lands 61ms after the last
+        sample -- 1ms past the 60ms pad -- carrying a real contact. The
+        pre-fix window silently excluded that state and still reported
+        `contacts_recorded=True` with full evidence on every state it DID
+        include. The fix must refuse instead: there is no push anywhere
+        inside the window whose own time is at or after the last sample,
+        so the tail of the flight has no evidence at all."""
+        base = 7_000_000_000
+        states = [_state(i, 100 + i, base + i * self._CG_STEP_NS, contacts=[])
+                 for i in range(5)]  # idx0..idx4, ending at base+80ms
+        last_sample_wall = base + 4 * self._CG_STEP_NS + 10_000_000  # 10ms after idx4
+        covering_wall = last_sample_wall + 61_000_000  # P1's exact shape
+        states.append(_state(5, 105, covering_wall, contacts=[_contact(105)]))
+        run_dir = _write_states(tmp_path, states)
+
+        samples = [
+            {"wall_time_ns": base, "joints": dict(_POSE_DEG)},
+            {"wall_time_ns": last_sample_wall, "joints": dict(_POSE_DEG)},
+        ]
+        block = lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+        assert block["contacts_recorded"] is False, (
+            "the covering push (with a real contact) landed outside the "
+            "pad -- this must not read as a clean, fully-covered zero")
+        assert block["contacts"] is None
+        assert block["contacts_window"]["covered"] is False
+
+    def test_stream_ending_early_is_not_covered(self, tmp_path):
+        """P2: the server stopped writing states.jsonl 2 seconds before
+        the recorder's last sample (recorder outlived the server). No
+        state anywhere covers the last sample; the pre-fix code reported
+        exit 0, contacts=0, 'evidence on 50/50 states' -- a clean-looking
+        report built entirely on states that all predate the flight's own
+        end."""
+        base = 8_000_000_000
+        states = [_state(i, 100 + i, base + i * self._CG_STEP_NS, contacts=[])
+                 for i in range(50)]
+        run_dir = _write_states(tmp_path, states)
+
+        last_state_wall = base + 49 * self._CG_STEP_NS
+        samples = [
+            {"wall_time_ns": base, "joints": dict(_POSE_DEG)},
+            {"wall_time_ns": last_state_wall + 2_000_000_000,
+             "joints": dict(_POSE_DEG)},
+        ]
+        block = lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+        assert block["contacts_recorded"] is False
+        assert block["contacts"] is None
+        assert block["contacts_window"]["covered"] is False
+        assert block["contacts_window"]["states_with_contacts_key"] == \
+            block["contacts_window"]["states_in_window"], (
+            "every state DOES carry the key -- the gap is coverage, not "
+            "the evidence key, and must still refuse")
+
+    def test_missing_wall_time_ns_raises_not_silently_dropped(self, tmp_path):
+        """P4: a state inside the window has no `wall_time_ns` and carries
+        a contact. The pre-fix filter (`s.get('wall_time_ns', -1)`) read
+        that as 'far outside any window' and silently excluded it --
+        `contacts_recorded=True`, evidence 9/9, the contact just gone."""
+        states = [
+            _state(0, 100, _CW_BASE_WALL_NS, contacts=[]),
+            _state(1, 101, _CW_BASE_WALL_NS + _CW_STEP_NS, contacts=[_contact(101)]),
+            _state(2, 102, _CW_BASE_WALL_NS + 2 * _CW_STEP_NS, contacts=[]),
+        ]
+        del states[1]["wall_time_ns"]
+        run_dir = _write_states(tmp_path, states)
+        samples = [{"wall_time_ns": _CW_BASE_WALL_NS + i * _CW_STEP_NS,
+                   "joints": dict(_POSE_DEG)} for i in (0, 2)]
+        with pytest.raises(lef.ContactEvidenceError, match="wall_time_ns"):
+            lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+
+    def test_missing_seq_raises_not_silently_dropped(self, tmp_path):
+        """P5: a state inside the window has no `seq`. The pre-fix code
+        crashed with a bare `KeyError` (an undocumented exit 1, not a
+        clean `FAIL:` / exit 5) -- this must raise the documented
+        `ContactEvidenceError` instead."""
+        states = [
+            _state(0, 100, _CW_BASE_WALL_NS, contacts=[]),
+            _state(1, 101, _CW_BASE_WALL_NS + _CW_STEP_NS, contacts=[_contact(101)]),
+        ]
+        del states[1]["seq"]
+        run_dir = _write_states(tmp_path, states)
+        samples = [{"wall_time_ns": _CW_BASE_WALL_NS, "joints": dict(_POSE_DEG)},
+                  {"wall_time_ns": _CW_BASE_WALL_NS + _CW_STEP_NS,
+                   "joints": dict(_POSE_DEG)}]
+        with pytest.raises(lef.ContactEvidenceError, match="seq"):
+            lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+
+    def test_wall_time_out_of_seq_order_raises(self, tmp_path):
+        """F9 follow-up (review §5.2): `wall_time_ns` must be
+        non-decreasing along `seq` -- a single-threaded server with a
+        monotonic clock cannot produce the reverse, so a file that does is
+        corrupted evidence, not data to sort past silently."""
+        states = [
+            _state(0, 100, _CW_BASE_WALL_NS, contacts=[]),
+            _state(1, 101, _CW_BASE_WALL_NS - _CW_STEP_NS, contacts=[]),
+        ]
+        run_dir = _write_states(tmp_path, states)
+        samples = [{"wall_time_ns": _CW_BASE_WALL_NS, "joints": dict(_POSE_DEG)},
+                  {"wall_time_ns": _CW_BASE_WALL_NS - _CW_STEP_NS,
+                   "joints": dict(_POSE_DEG)}]
+        with pytest.raises(lef.ContactEvidenceError, match="wall-clock order"):
+            lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+
+
 class TestMovingArmSdkLag:
     """F2 (2026-09-14 re-review, probe E2): with a moving arm, the SDK
     reading `align_sample` matches against reflects a state OLDER than the
@@ -604,6 +721,117 @@ class TestContactsThroughLinkFlight:
         states = [_state(0, 100, _CW_BASE_WALL_NS, contacts=[{"bogus": True}])]
         run_dir = _write_states(tmp_path, states)
         samples = [{"t": 0.0, "wall_time_ns": _CW_BASE_WALL_NS, "joints": dict(_POSE_DEG)}]
+        log_path = _write_log_and_base_sidecar(tmp_path, monkeypatch, run_dir, samples)
+
+        script = os.path.join(_HERE, "../../scripts/link_e1_flight.py")
+        result = subprocess.run(
+            [sys.executable, script, str(log_path)],
+            capture_output=True, text=True, check=False)
+        assert result.returncode == 5, result.stdout + result.stderr
+        assert "FAIL" in result.stdout
+
+
+class TestCoverageGapsThroughLinkFlight:
+    """F7/F9 end to end, through the actual CLI subprocess the checklist
+    runs -- incomplete evidence must never exit 0."""
+
+    _CG_STEP_NS = 20_000_000
+
+    def test_cli_exits_4_on_delayed_covering_push(self, tmp_path, monkeypatch):
+        """The review's 61ms-delayed-push repro (P1), through the CLI: a
+        real contact exists on a state pushed just past the 60ms pad, and
+        the run must refuse (exit 4), not print `Wrote ... contacts=0`."""
+        base = 7_000_000_000
+        states = [_state(i, 100 + i, base + i * self._CG_STEP_NS, contacts=[])
+                 for i in range(5)]
+        last_sample_wall = base + 4 * self._CG_STEP_NS + 10_000_000
+        covering_wall = last_sample_wall + 61_000_000
+        states.append(_state(5, 105, covering_wall, contacts=[_contact(105)]))
+        run_dir = _write_states(tmp_path, states)
+
+        samples = [{"t": 0.0, "wall_time_ns": base, "joints": dict(_POSE_DEG)},
+                  {"t": 0.1, "wall_time_ns": last_sample_wall,
+                   "joints": dict(_POSE_DEG)}]
+        log_path = _write_log_and_base_sidecar(tmp_path, monkeypatch, run_dir, samples)
+
+        script = os.path.join(_HERE, "../../scripts/link_e1_flight.py")
+        result = subprocess.run(
+            [sys.executable, script, str(log_path)],
+            capture_output=True, text=True, check=False)
+        assert result.returncode == 4, result.stdout + result.stderr
+        assert "FAIL" in result.stdout
+        assert "contacts=0" not in result.stdout, (
+            "a real contact exists on the delayed covering push -- this "
+            "must never print as a clean, fully-covered zero")
+
+        sidecar = json.loads(lef.sidecar_path_for(str(log_path)).read_text())
+        assert sidecar["contacts_recorded"] is False
+        assert sidecar["contacts"] is None
+
+    def test_cli_exits_4_on_stream_ending_early(self, tmp_path, monkeypatch):
+        """P2 through the CLI: the recorder sampled 2 seconds past the
+        last recorded state (the server died mid-recording). The pre-fix
+        CLI exited 0 with `contacts=0 (evidence on 50/50 states)`."""
+        base = 8_000_000_000
+        states = [_state(i, 100 + i, base + i * self._CG_STEP_NS, contacts=[])
+                 for i in range(50)]
+        run_dir = _write_states(tmp_path, states)
+        last_state_wall = base + 49 * self._CG_STEP_NS
+
+        samples = [{"t": 0.0, "wall_time_ns": base, "joints": dict(_POSE_DEG)},
+                  {"t": 2.0, "wall_time_ns": last_state_wall + 2_000_000_000,
+                   "joints": dict(_POSE_DEG)}]
+        log_path = _write_log_and_base_sidecar(tmp_path, monkeypatch, run_dir, samples)
+
+        script = os.path.join(_HERE, "../../scripts/link_e1_flight.py")
+        result = subprocess.run(
+            [sys.executable, script, str(log_path)],
+            capture_output=True, text=True, check=False)
+        assert result.returncode == 4, result.stdout + result.stderr
+        assert "FAIL" in result.stdout
+        assert "Wrote" not in result.stdout
+
+        sidecar = json.loads(lef.sidecar_path_for(str(log_path)).read_text())
+        assert sidecar["contacts_recorded"] is False
+        assert sidecar["contacts"] is None
+
+    def test_cli_exits_5_on_missing_wall_time_ns(self, tmp_path, monkeypatch):
+        """P4 through the CLI: a malformed/missing timing field on an
+        in-window state must fail loudly (exit 5, a documented
+        `ContactEvidenceError`), never silently drop the state (and
+        whatever contact it carries) out of the window."""
+        states = [
+            _state(0, 100, _CW_BASE_WALL_NS, contacts=[]),
+            _state(1, 101, _CW_BASE_WALL_NS + _CW_STEP_NS, contacts=[_contact(101)]),
+            _state(2, 102, _CW_BASE_WALL_NS + 2 * _CW_STEP_NS, contacts=[]),
+        ]
+        del states[1]["wall_time_ns"]
+        run_dir = _write_states(tmp_path, states)
+        samples = [{"t": i * 0.05, "wall_time_ns": _CW_BASE_WALL_NS + i * _CW_STEP_NS,
+                   "joints": dict(_POSE_DEG)} for i in (0, 2)]
+        log_path = _write_log_and_base_sidecar(tmp_path, monkeypatch, run_dir, samples)
+
+        script = os.path.join(_HERE, "../../scripts/link_e1_flight.py")
+        result = subprocess.run(
+            [sys.executable, script, str(log_path)],
+            capture_output=True, text=True, check=False)
+        assert result.returncode == 5, result.stdout + result.stderr
+        assert "FAIL" in result.stdout
+
+    def test_cli_exits_5_on_missing_seq(self, tmp_path, monkeypatch):
+        """P5 through the CLI: the pre-fix code crashed with a bare,
+        undocumented `KeyError` (exit 1) here -- this must be the same
+        documented exit 5 as any other malformed-evidence case."""
+        states = [
+            _state(0, 100, _CW_BASE_WALL_NS, contacts=[]),
+            _state(1, 101, _CW_BASE_WALL_NS + _CW_STEP_NS, contacts=[_contact(101)]),
+        ]
+        del states[1]["seq"]
+        run_dir = _write_states(tmp_path, states)
+        samples = [{"t": 0.0, "wall_time_ns": _CW_BASE_WALL_NS,
+                   "joints": dict(_POSE_DEG)},
+                  {"t": 0.05, "wall_time_ns": _CW_BASE_WALL_NS + _CW_STEP_NS,
+                   "joints": dict(_POSE_DEG)}]
         log_path = _write_log_and_base_sidecar(tmp_path, monkeypatch, run_dir, samples)
 
         script = os.path.join(_HERE, "../../scripts/link_e1_flight.py")

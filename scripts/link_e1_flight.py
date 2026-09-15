@@ -45,7 +45,17 @@ Two halves:
     (a run recorded before work item 4) is reported via
     `contacts_recorded: False` rather than folded into a silent zero; a
     `contacts` field that is present but malformed raises
-    `ContactEvidenceError` rather than being silently dropped.
+    `ContactEvidenceError` rather than being silently dropped. So does a
+    state missing `seq` or `wall_time_ns` (or carrying a non-int value for
+    either) -- a run of `.get(..., -1)` defaults used to make a state like
+    that silently unplaceable in the window, which is how a real contact
+    went missing with no error at all (F7/F9 fix-up, 2026-09-15 review).
+    The window's own coverage is also verified, not assumed: the last
+    sample's covering push (the first state pushed AT OR AFTER it -- see
+    `contacts_in_flight_window`) must actually exist inside the padded
+    window, and every state between the window's ends must actually have
+    been recorded (`seq` increasing by exactly 1) -- either gap reads as
+    `contacts_recorded: False`, never as a false "no contacts" success.
 
 Alignment needs `wall_time_ns` on both sides to mean the same clock -- see
 `measure_route_clearance.py`'s "Sample wall-clock" docstring section: both
@@ -135,6 +145,40 @@ def _validated_contacts_field(state: dict) -> Optional[List[dict]]:
     return contacts
 
 
+def _require_seq(state: dict) -> int:
+    """`state['seq']`, validated. Missing or non-int `seq` cannot be placed
+    in seq order at all -- silently defaulting it (the pre-F9 behaviour)
+    is how a state, and any contact it carries, used to fall out of the
+    window with no error. Raises `ContactEvidenceError` instead."""
+    if "seq" not in state:
+        raise ContactEvidenceError(
+            f"state sim_step={state.get('sim_step')!r}: missing 'seq'")
+    seq = state["seq"]
+    if not isinstance(seq, int) or isinstance(seq, bool):
+        raise ContactEvidenceError(
+            f"state sim_step={state.get('sim_step')!r}: 'seq' is "
+            f"{type(seq).__name__}, expected int")
+    return seq
+
+
+def _require_wall_ns(state: dict) -> int:
+    """`state['wall_time_ns']`, validated the same way as `_require_seq`.
+    P4 (2026-09-15 review): the pre-fix window filter used
+    `s.get('wall_time_ns', -1)`, which silently reads a state missing this
+    field as far outside any window -- excluding it, and any contact it
+    carries, with `contacts_recorded` still reading `True`. Raises
+    instead."""
+    if "wall_time_ns" not in state:
+        raise ContactEvidenceError(
+            f"state seq={state.get('seq')!r}: missing 'wall_time_ns'")
+    wall = state["wall_time_ns"]
+    if not isinstance(wall, int) or isinstance(wall, bool):
+        raise ContactEvidenceError(
+            f"state seq={state.get('seq')!r}: 'wall_time_ns' is "
+            f"{type(wall).__name__}, expected int")
+    return wall
+
+
 #: Padding applied to the sample-derived wall-time window, in nanoseconds.
 #: This is deliberately the SAME constant as `_ALIGN_WINDOW_S`: the
 #: alignment refinement already assumes a chosen state can be up to
@@ -171,32 +215,77 @@ def contacts_in_flight_window(
     `sim_step`, which restarts at 0 on every scene reset within the same
     `--record` run dir; a duplicate `seq` inside the window is impossible
     for a real `states.jsonl` and raises `ContactEvidenceError` rather
-    than silently double-counting or dropping one copy.
+    than silently double-counting or dropping one copy. A state missing
+    `seq` or `wall_time_ns`, or carrying a non-int value for either, also
+    raises (`_require_seq`/`_require_wall_ns`) -- treating it as simply
+    outside the window, the pre-fix behaviour, is how a real contact went
+    missing with `contacts_recorded` still reading `True` (F9; P4/P5).
+
+    F7 (2026-09-15 review): a state's `contacts` field is the
+    accumulator's drain since the PREVIOUS push, so the one state that can
+    cover the instant `last_sample_wall_ns` is whichever is pushed FIRST
+    AT OR AFTER it -- "the covering push" -- however late the sim
+    thread's render/encode stall delayed it past the ~20ms period the pad
+    assumes (P1: pushed 61ms after the last sample, outside the 60ms pad).
+    Rather than assume that push landed inside `[lo, hi]`, `covered` checks
+    it directly: the window's earliest state must be at or before
+    `first_sample_wall_ns` AND its latest state must be at or after
+    `last_sample_wall_ns`. If the state stream stops before the flight's
+    last sample at all (P2: the server died mid-recording, or the
+    recorder outlived it), no push anywhere can cover it and `covered` is
+    `False`. Separately, `seq_contiguous` checks that every push between
+    the window's ends was actually recorded (`seq` increasing by exactly
+    1): a real `states.jsonl` never skips one (`Recorder.record_state` is
+    called synchronously on the sim thread for every push), so a gap here
+    means a chunk of accumulated contact evidence is simply absent --
+    unrecoverable no matter how the pad is sized (this is the "don't just
+    widen the pad" fix: the pad governs over-inclusion at the edges, never
+    whether the evidence in between actually exists).
 
     Returns `(contacts, contacts_recorded, meta)`. `contacts_recorded` is
-    `True` only when EVERY state in the window carries the `contacts` key
-    (strict -- see `_validated_contacts_field`); a run where only some
-    states carry it is evidence gap, not partial data, and callers must
-    not treat it as usable. `meta` carries the window's `seq` bounds, wall
+    `True` only when the window is `covered`, `seq_contiguous`, non-empty,
+    and EVERY state in it carries the `contacts` key (strict -- see
+    `_validated_contacts_field`); any one of those gaps reads as
+    `contacts_recorded: False` -- incomplete evidence must never report as
+    a successful zero. `meta` carries the window's `seq` bounds, wall
     bounds, state counts (for the evidence-coverage line printed by the
-    CLI), and `reset_in_window` -- True if `sim_step` decreases between
-    consecutive (by `seq`) states inside the window, meaning a scene reset
-    happened mid-recording (not just between recordings) and any
-    clearance/contact attribution here should be treated as suspect."""
+    CLI), `covered`, `seq_contiguous`, and `reset_in_window` -- True if
+    `sim_step` decreases between consecutive (by `seq`) states inside the
+    window, meaning a scene reset happened mid-recording (not just
+    between recordings) and any clearance/contact attribution here should
+    be treated as suspect."""
+    ordered = sorted(states, key=_require_seq)
+    walls = [_require_wall_ns(s) for s in ordered]
+    for a, b in zip(walls, walls[1:]):
+        if b < a:
+            raise ContactEvidenceError(
+                f"states.jsonl is not in wall-clock order along seq: "
+                f"wall_time_ns {b} follows {a}")
+
     lo = first_sample_wall_ns - _WINDOW_PAD_NS
     hi = last_sample_wall_ns + _WINDOW_PAD_NS
-    window = sorted(
-        (s for s in states if lo <= s.get("wall_time_ns", -1) <= hi),
-        key=lambda s: s["seq"])
-    seen_seq: set = set()
+    window = [s for s, w in zip(ordered, walls) if lo <= w <= hi]
+    window_walls = [w for w in walls if lo <= w <= hi]
+
+    covered = (
+        bool(window_walls)
+        and window_walls[0] <= first_sample_wall_ns
+        and window_walls[-1] >= last_sample_wall_ns
+    )
+
+    seqs = [s["seq"] for s in window]
+    seq_contiguous = True
+    for a, b in zip(seqs, seqs[1:]):
+        if b == a:
+            raise ContactEvidenceError(f"duplicate seq {b} in states.jsonl")
+        if b != a + 1:
+            seq_contiguous = False
+
     out: List[dict] = []
     with_key = 0
     prev_step = None
     reset_in_window = False
     for s in window:
-        if s["seq"] in seen_seq:
-            raise ContactEvidenceError(f"duplicate seq {s['seq']} in states.jsonl")
-        seen_seq.add(s["seq"])
         if prev_step is not None and s.get("sim_step", 0) < prev_step:
             reset_in_window = True
         prev_step = s.get("sim_step", prev_step)
@@ -213,8 +302,12 @@ def contacts_in_flight_window(
         "states_in_window": len(window),
         "states_with_contacts_key": with_key,
         "reset_in_window": reset_in_window,
+        "covered": covered,
+        "seq_contiguous": seq_contiguous,
     }
-    contacts_recorded = with_key == len(window) and len(window) > 0
+    contacts_recorded = (
+        covered and seq_contiguous and with_key == len(window) and len(window) > 0
+    )
     return out, contacts_recorded, meta
 
 
@@ -476,8 +569,26 @@ def main() -> None:
         sys.exit(5)
     sidecar = read_sidecar(args.log_path)
     if not sidecar.get("contacts_recorded"):
+        w = sidecar.get("contacts_window", {})
+        reasons = []
+        if w.get("states_in_window", 0) == 0:
+            reasons.append("no recorded state falls inside the window "
+                            "(wrong run dir?)")
+        else:
+            if not w.get("covered", True):
+                reasons.append(
+                    "the recorded states do not span the flight (the "
+                    "stream ended early, or the covering push after the "
+                    "last sample landed outside the window)")
+            if not w.get("seq_contiguous", True):
+                reasons.append("a gap in recorded states (seq) means some "
+                                "contact evidence is missing")
+            if w.get("states_with_contacts_key", 0) != w.get("states_in_window", 0):
+                reasons.append("not every state in the window carries the "
+                                "'contacts' key")
+        reason = "; ".join(reasons) or "insufficient evidence"
         print(f"FAIL: no contact evidence in the server run dir -- this is NOT "
-              f"usable E1 data (contacts_recorded=false; see {path})")
+              f"usable E1 data ({reason}; contacts_recorded=false; see {path})")
         sys.exit(4)
     w = sidecar["contacts_window"]
     print(f"Wrote {path}: contacts={len(sidecar['contacts'])} "
