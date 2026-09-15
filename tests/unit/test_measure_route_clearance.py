@@ -43,6 +43,19 @@ def mrc(monkeypatch):
     return m
 
 
+def _stub_identity_ok(monkeypatch, mrc):
+    """Bypass e1_identity.verify_simulator_identity with an ok=True stub --
+    for tests exercising main()'s APERTURE path (E1 readiness work item 2
+    added an identity check ahead of it; see test_e1_identity.py for that
+    check's own tests)."""
+    monkeypatch.setattr(
+        mrc.e1_identity, "verify_simulator_identity",
+        lambda **kw: mrc.e1_identity.SimulatorIdentityCheck(
+            ok=True, reasons=(), run_dir="", manifest={},
+            scene_chain_sha256={}, joint_agreement_deg={}, status={},
+            checked_at_wall_ns=0))
+
+
 #: Sentinel for `_synthetic_log`'s `gripper_deg` default, distinct from
 #: `None` -- which is itself one of the invalid values these tests inject
 #: on purpose (`test_non_numeric_or_non_finite_always_raises`), so the
@@ -50,14 +63,20 @@ def mrc(monkeypatch):
 _USE_POSTURE_APERTURE = object()
 
 
-def _synthetic_log(pose, n=5, gripper_deg=_USE_POSTURE_APERTURE, omit_gripper=False):
+def _synthetic_log(pose, n=5, gripper_deg=_USE_POSTURE_APERTURE, omit_gripper=False,
+                   omit_wall_time_ns=False):
     """A log that never moves -- every sample is the same pose. Includes a
     valid `r_gripper` reading by default (`pose["r_gripper"]`, the same
     posture the rest of the sample comes from). Pass `gripper_deg` to use a
     specific aperture instead -- including an intentionally invalid one
     (`None`, a string, NaN...) for the validation tests -- or
     `omit_gripper=True` to leave the key out entirely, simulating a
-    schema_version 1 log for the missing-data tests below."""
+    schema_version 1 log for the missing-data tests below.
+
+    Includes a synthetic (but real-shaped) `wall_time_ns` per sample by
+    default, 20 ms apart -- the current schema (3) requires it; pass
+    `omit_wall_time_ns=True` to build a schema-3-shaped log missing it, for
+    TestSchemaAwareLoading's own test of that requirement."""
     joints_base = {j: pose[j] for j in R.ARM7}
     samples = []
     for i in range(n):
@@ -66,7 +85,10 @@ def _synthetic_log(pose, n=5, gripper_deg=_USE_POSTURE_APERTURE, omit_gripper=Fa
             joints["r_gripper"] = (pose["r_gripper"]
                                    if gripper_deg is _USE_POSTURE_APERTURE
                                    else gripper_deg)
-        samples.append({"t": i / 20.0, "joints": joints})
+        sample = {"t": i / 20.0, "joints": joints}
+        if not omit_wall_time_ns:
+            sample["wall_time_ns"] = 1_000_000_000 + i * 20_000_000
+        samples.append(sample)
     return samples
 
 
@@ -176,9 +198,11 @@ class TestRecordingIncludesTheAperture:
         monkeypatch.setattr(mrc, "ReachySDK",
                             lambda host, sdk_port: types.SimpleNamespace(
                                 r_arm=_BadArm(R.REST)))
+        _stub_identity_ok(monkeypatch, mrc)
         monkeypatch.setattr(sys, "argv",
                             ["measure_route_clearance.py", "--route",
-                             "LOWER_TO_REST", "--duration", "0.05"])
+                             "LOWER_TO_REST", "--duration", "0.05",
+                             "--record-root", str(tmp_path)])
         with pytest.raises(SystemExit) as exc:
             mrc.main()
         assert exc.value.code != 0
@@ -205,9 +229,11 @@ class TestRecordingIncludesTheAperture:
         monkeypatch.setattr(mrc, "ReachySDK",
                             lambda host, sdk_port: types.SimpleNamespace(
                                 r_arm=_BadArm(R.REST)))
+        _stub_identity_ok(monkeypatch, mrc)
         monkeypatch.setattr(sys, "argv",
                             ["measure_route_clearance.py", "--route",
-                             "LOWER_TO_REST", "--duration", "0.05"])
+                             "LOWER_TO_REST", "--duration", "0.05",
+                             "--record-root", str(tmp_path)])
         with pytest.raises(SystemExit):
             mrc.main()
 
@@ -304,7 +330,7 @@ class TestSchemaAwareLoading:
     refused outright rather than guessed at."""
 
     def test_current_schema_missing_aperture_always_raises(self, mrc):
-        """schema_version == LOG_SCHEMA_VERSION (2) with a missing
+        """schema_version == LOG_SCHEMA_VERSION (3) with a missing
         r_gripper key must raise even with the flag -- a gap in the
         CURRENT schema is a dropped field or a bad recording, never an
         old log format."""
@@ -317,6 +343,50 @@ class TestSchemaAwareLoading:
             mrc.validated_samples(
                 log, schema_version=mrc.LOG_SCHEMA_VERSION,
                 allow_missing_aperture=True)
+
+    def test_schema_2_is_recognised_but_still_raises_on_missing_aperture(
+            self, mrc):
+        """E1 readiness (assignment 2026-09-14, work item 3) contract
+        detail resolved before implementation: schema 2 became a
+        RECOGNISED legacy schema the day schema 3 shipped (no longer
+        UnsupportedSchemaVersionError) -- but it was never eligible for the
+        missing-aperture rescue, because schema 2 logs always had
+        r_gripper. A missing key in a declared schema-2 log must still
+        raise ApertureDataError, allow_missing_aperture notwithstanding."""
+        assert 2 in mrc._SUPPORTED_LEGACY_SCHEMA_VERSIONS
+        assert 2 not in mrc._MISSING_APERTURE_ELIGIBLE_SCHEMA_VERSIONS
+        log = _synthetic_log(R.REST, n=2, omit_gripper=True)
+        with pytest.raises(mrc.ApertureDataError):
+            mrc.validated_samples(log, schema_version=2,
+                                  allow_missing_aperture=False)
+        with pytest.raises(mrc.ApertureDataError):
+            mrc.validated_samples(log, schema_version=2,
+                                  allow_missing_aperture=True)
+
+    def test_current_schema_missing_wall_time_ns_raises_sample_timestamp_error(
+            self, mrc):
+        """The other half of the same work item: a schema-3 (current) log
+        missing wall_time_ns is rejected by validated_samples -- a distinct
+        exception from ApertureDataError, since the aperture itself is
+        fine here."""
+        log = _synthetic_log(R.REST, n=2, omit_wall_time_ns=True)
+        with pytest.raises(mrc.SampleTimestampError):
+            mrc.validated_samples(log, schema_version=mrc.LOG_SCHEMA_VERSION)
+        # schema 1 and 2 predate the field -- never checked for it
+        mrc.validated_samples(log, schema_version=1, allow_missing_aperture=True)
+        mrc.validated_samples(log, schema_version=2)
+
+    def test_missing_both_aperture_and_wall_time_ns_raises_aperture_error_first(
+            self, mrc):
+        """A sample missing both fields is diagnosed as an aperture
+        problem, not a timestamp one -- aperture is checked first per
+        sample (see validated_samples). This is the exact shape of several
+        pre-existing tests below (old_style_log has neither field), so the
+        check order is pinned here rather than left implicit."""
+        log = _synthetic_log(R.REST, n=1, omit_gripper=True,
+                             omit_wall_time_ns=True)
+        with pytest.raises(mrc.ApertureDataError):
+            mrc.validated_samples(log, schema_version=mrc.LOG_SCHEMA_VERSION)
 
     def test_default_schema_version_is_current_so_the_flag_alone_never_rescues(
             self, mrc):
@@ -339,7 +409,7 @@ class TestSchemaAwareLoading:
             mrc.validated_samples(log, schema_version=1,
                                   allow_missing_aperture=False)
 
-    @pytest.mark.parametrize("bad_version", [0, 3, -1, 1.5, "2"])
+    @pytest.mark.parametrize("bad_version", [0, 4, -1, 1.5, "2"])
     def test_unrecognised_schema_version_is_rejected_outright(
             self, mrc, bad_version):
         """Neither the current schema nor a version this module has
@@ -371,7 +441,7 @@ class TestSchemaAwareLoading:
         log = _synthetic_log(R.REST, n=3)
         path = mrc.save_log(log, "LOWER_TO_REST", _SCENE_PATH)
         loaded = mrc.load_log(path)
-        assert mrc.schema_version_of(loaded) == mrc.LOG_SCHEMA_VERSION == 2
+        assert mrc.schema_version_of(loaded) == mrc.LOG_SCHEMA_VERSION == 3
         assert loaded["samples"] == log
         # and reading it the schema-aware way works end to end
         result = mrc.report(loaded["samples"], loaded["route"],
@@ -420,10 +490,12 @@ class TestAperturePropagatesIntoClearance:
         first's or an aggregate."""
         pose = R.REST
         log = [
-            {"t": 0.0, "joints": {**{j: pose[j] for j in R.ARM7},
-                                  "r_gripper": _GRIPPER_SHUT_LIMIT_DEG}},
-            {"t": 0.05, "joints": {**{j: pose[j] for j in R.ARM7},
-                                   "r_gripper": _GRIPPER_OPEN_LIMIT_DEG}},
+            {"t": 0.0, "wall_time_ns": 1_000_000_000,
+             "joints": {**{j: pose[j] for j in R.ARM7},
+                       "r_gripper": _GRIPPER_SHUT_LIMIT_DEG}},
+            {"t": 0.05, "wall_time_ns": 1_050_000_000,
+             "joints": {**{j: pose[j] for j in R.ARM7},
+                       "r_gripper": _GRIPPER_OPEN_LIMIT_DEG}},
         ]
         scene = SceneModel.from_yaml(_SCENE_PATH)
         result = mrc.realised_clearance(log, scene)
@@ -656,7 +728,7 @@ class TestSaveLog:
         path = mrc.save_log(log, "LOWER_TO_REST", _SCENE_PATH)
         with open(path) as f:
             saved = json.load(f)
-        assert saved["schema_version"] == mrc.LOG_SCHEMA_VERSION == 2
+        assert saved["schema_version"] == mrc.LOG_SCHEMA_VERSION == 3
         for sample in saved["samples"]:
             assert "r_gripper" in sample["joints"]
             assert isinstance(sample["joints"]["r_gripper"], (int, float))

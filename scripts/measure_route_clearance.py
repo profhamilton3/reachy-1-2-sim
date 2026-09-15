@@ -21,7 +21,7 @@ telemetry during a flight an operator did not mean to record is still a
 surprise worth a deliberate opt-in, even though nothing here can move the
 arm.
 
-## Log schema (schema_version 2)
+## Log schema (schema_version 3)
 
     {
       "route": str,
@@ -30,14 +30,28 @@ arm.
                                   # Actual spacing is best-effort -- read
                                   # each sample's own "t", never assume
                                   # exactly 1/sample_hz between samples.
-      "schema_version": 2,       # 1 (or absent) predates aperture logging:
-                                  # "joints" has no "r_gripper" key. See
-                                  # `allow_missing_aperture` below.
+      "schema_version": 3,       # 2 added aperture logging; 1 (or absent)
+                                  # predates it -- "joints" has no
+                                  # "r_gripper" key. See `allow_missing_aperture`
+                                  # below. 3 (this one) adds "t0_wall_ns" here
+                                  # and "wall_time_ns" on every sample (E1
+                                  # readiness, assignment 2026-09-14, work
+                                  # item 3) -- see "Sample wall-clock, and
+                                  # why it is monotonic_ns" below.
+      "t0_wall_ns": int,          # time.monotonic_ns() when recording started
+                                  # -- schema 3+ only.
       "samples": [
         {
           "t": float,            # seconds elapsed since recording started,
                                   # from time.monotonic() -- NOT wall-clock,
                                   # NOT guaranteed evenly spaced.
+          "wall_time_ns": int,   # time.monotonic_ns() at this sample --
+                                  # schema 3+ only; REQUIRED for schema 3
+                                  # (validated_samples raises if absent -- a
+                                  # gap here is a bad recording, the same
+                                  # stance as a missing r_gripper on the
+                                  # current schema). See below for why this
+                                  # is monotonic_ns, not time.time_ns().
           "joints": {             # every value is DEGREES, matching every
                                   # other joint reading in this codebase
                                   # (kinematics.py, rig_routes.py) --
@@ -55,6 +69,37 @@ arm.
       ],
     }
 
+## Sample wall-clock, and why it is monotonic_ns
+
+`wall_time_ns` is named to match `native_mujoco.protocol.State.wall_time_ns`
+-- the field the native server stamps on every state it streams and every
+line of `<run_dir>/states.jsonl` -- so `scripts/link_e1_flight.py` (E1
+readiness work item 3c) can align a sample here to the state nearest it in
+time. Despite the name, THAT field is `time.monotonic_ns()`
+(`protocol.py`'s `_now_ns`, never overridden with real wall-clock time in
+`server.py`'s `_build_state`), not `time.time_ns()`: confirmed by reading
+`mujoco_remote_backend.py` (diffs it against its own `time.monotonic_ns()`
+to compute staleness, line ~101/559) and `scripts/benchmark.py` (same, line
+~94) -- both already treat it as monotonic, not wall-clock, elsewhere in
+this codebase.
+
+So this module stamps its own samples with `time.monotonic_ns()` too, never
+`time.time_ns()`: a wall-clock reading and a monotonic reading share no
+fixed offset, so mixing them would make every alignment computation in the
+linker meaningless. This is safe BECAUSE this module and
+`native_mujoco/server.py` are both host-native processes (this module's own
+usage instructions run it directly on the host, connecting outward to the
+SDK's gRPC port; the native server is launched the same way, `mjpython
+server.py`, never inside the Docker container) -- both read literally the
+same OS monotonic clock. That is a stronger guarantee than the
+cross-container comparisons already elsewhere in this codebase
+(`mujoco_remote_backend.py` runs inside the Docker container and diffs its
+own clock against the host-native server's `wall_time_ns` over the
+websocket -- comparable only to the extent the container runtime's
+monotonic clock tracks the host's); this module never needs that weaker
+guarantee because it never compares against anything running inside the
+container.
+
 ## Missing or invalid aperture
 
 The aperture is the variable that decides whether the hand is inside the
@@ -65,15 +110,24 @@ answer, and this module never manufactures one silently:
 
   * A sample missing the `r_gripper` key raises `ApertureDataError` by
     default. `allow_missing_aperture=True` only ever rescues this for a
-    log DECLARED as a supported legacy schema (today: `schema_version ==
-    1`, or absent, which meant 1 before this schema existed) -- passed
-    explicitly to `validated_samples`/`realised_clearance`/`report` via
-    their `schema_version` argument. **A `schema_version == 2` log with a
-    missing `r_gripper` key always raises, `allow_missing_aperture`
-    notwithstanding**: 2 is this module's own current schema, so a gap in
-    one is a dropped field or a bad recording, never an old log format,
-    and the flag exists for the latter only. An unrecognised
-    `schema_version` (anything but 2 or a version in
+    log DECLARED as a schema in `_MISSING_APERTURE_ELIGIBLE_SCHEMA_VERSIONS`
+    (today: `schema_version == 1`, or absent, which meant 1 before this
+    schema existed) -- passed explicitly to
+    `validated_samples`/`realised_clearance`/`report` via their
+    `schema_version` argument. **This set is deliberately NARROWER than
+    `_SUPPORTED_LEGACY_SCHEMA_VERSIONS`** (E1 readiness, assignment
+    2026-09-14, work item 3 -- resolved before implementation, 2026-09-14):
+    schema 2 became a RECOGNISED legacy schema the day schema 3 shipped
+    (`_SUPPORTED_LEGACY_SCHEMA_VERSIONS = (1, 2)`, so a schema-2 log no
+    longer raises `UnsupportedSchemaVersionError`), but it was never a
+    schema that predates aperture logging -- schema 2 logs HAVE `r_gripper`
+    -- so it never joined the missing-aperture rescue set. **A
+    `schema_version` of 2 OR `LOG_SCHEMA_VERSION` (the current schema) with
+    a missing `r_gripper` key always raises, `allow_missing_aperture`
+    notwithstanding**: only schema 1 predates aperture logging, so a gap in
+    a 2-or-current log is a dropped field or a bad recording, never an old
+    log format, and the flag exists for schema 1 only. An unrecognised
+    `schema_version` (anything but `LOG_SCHEMA_VERSION` or a version in
     `_SUPPORTED_LEGACY_SCHEMA_VERSIONS`) raises `UnsupportedSchemaVersionError`
     immediately, before any per-sample check -- this module never guesses
     what an unfamiliar shape means. When the flag does apply, the fallback
@@ -85,6 +139,12 @@ answer, and this module never manufactures one silently:
     without `allow_missing_aperture` or which `schema_version` was
     declared -- a corrupt reading is a different problem than an old log
     format, and is never worth guessing past.
+  * A schema-3 (current) sample missing `wall_time_ns`, or whose value is
+    not a finite number, ALWAYS raises `SampleTimestampError` -- schema 1
+    and 2 logs predate this field and are read without it (the linker
+    simply cannot align them to a server run), but a gap in a *current*
+    schema log is a dropped field or a bad recording, the same stance
+    `r_gripper` already gets.
 
 ## Failed recordings are preserved, marked invalid
 
@@ -112,8 +172,13 @@ guard itself only ever checks leg endpoints).
 
 Usage (operator flies the route by hand during --duration):
     export REACHY_SIM_RECORD_CLEARANCE=1
+    export REACHY_SIM_RECORD=/abs/path/e1_server_runs   # the native server's own --record dir
     python3 scripts/measure_route_clearance.py --route LOWER_TO_REST \\
-        --duration 15 --host <ip>
+        --duration 15 --host localhost --record-root "$REACHY_SIM_RECORD"
+
+`--record-root` (or REACHY_SIM_RECORD) is required: this module refuses to
+record unless it can verify simulator identity against that directory
+first -- see e1_identity.py.
 """
 
 from __future__ import annotations
@@ -145,6 +210,9 @@ from reachy_ai.motion.kinematics import (  # noqa: E402
 )
 from reachy_ai.scene.awareness import SceneModel  # noqa: E402
 
+import e1_identity  # noqa: E402 -- E1 readiness work item 2, same dir (scripts/)
+import link_e1_flight  # noqa: E402 -- E1 readiness work item 3
+
 SAMPLE_HZ = 20.0
 RUNS_DIR = _HERE.parent / "runs"
 HAND_MODES = ("tube", "shells")
@@ -158,16 +226,33 @@ GRIPPER_JOINT = "r_gripper"
 
 #: A log without a "schema_version" field predates this module's aperture
 #: logging (was 1 implicitly).  Bump this if the schema changes again.
-LOG_SCHEMA_VERSION = 2
+#: 3 (E1 readiness, assignment 2026-09-14, work item 3) adds "t0_wall_ns"
+#: and per-sample "wall_time_ns" -- see the module docstring's "Sample
+#: wall-clock" section.
+LOG_SCHEMA_VERSION = 3
 
-#: schema_version values this module knows how to fall back for under
-#: `allow_missing_aperture=True` -- today, only the one pre-aperture shape
-#: that ever existed.  `LOG_SCHEMA_VERSION` itself (the CURRENT schema) is
-#: deliberately never in this set: a gap in a schema-2 log is a dropped
-#: field or a bad recording, not an old log format, and is never eligible
-#: for the fallback.  Extend this set only when a *new* current schema
-#: makes today's schema_version 2 a legacy one in turn.
-_SUPPORTED_LEGACY_SCHEMA_VERSIONS = (1,)
+#: schema_version values this module RECOGNISES as a legacy shape -- i.e.
+#: never raises `UnsupportedSchemaVersionError` for.  This is NOT the same
+#: set as "eligible for the missing-aperture rescue" (see
+#: `_MISSING_APERTURE_ELIGIBLE_SCHEMA_VERSIONS` immediately below) --
+#: schema 2 is a recognised legacy schema (it has aperture logging, just not
+#: wall-clock timestamps) but was never eligible for that rescue, because it
+#: never lacked `r_gripper` in the first place.  Extend this set whenever a
+#: new current schema makes today's `LOG_SCHEMA_VERSION` a legacy one in turn.
+_SUPPORTED_LEGACY_SCHEMA_VERSIONS = (1, 2)
+
+#: schema_version values eligible for `allow_missing_aperture=True`'s
+#: missing-`r_gripper` rescue -- ONLY the one shape that ever predated
+#: aperture logging.  Deliberately narrower than
+#: `_SUPPORTED_LEGACY_SCHEMA_VERSIONS`: adding a schema to that set
+#: (recognising it, so it is read instead of rejected) must never silently
+#: widen this one (resolved before implementation, 2026-09-14, alongside the
+#: schema-3 bump -- schema 2 logs always have `r_gripper`, so a gap in one is
+#: a bad recording, not an old format, exactly like a gap in the current
+#: schema). Extend this set only when a schema that ACTUALLY predates
+#: aperture logging is retired from `LOG_SCHEMA_VERSION`/current use -- never
+#: just because a schema became legacy.
+_MISSING_APERTURE_ELIGIBLE_SCHEMA_VERSIONS = (1,)
 
 #: schema_version stamped on a diagnostic log by `save_invalid_log`.
 #: Deliberately not 1, not `LOG_SCHEMA_VERSION`, and never added to
@@ -211,6 +296,18 @@ class ApertureDataError(ValueError):
     """
 
 
+class SampleTimestampError(ValueError):
+    """A schema-3 (current) sample is missing `wall_time_ns`, or it is not a
+    finite number. Only `LOG_SCHEMA_VERSION` requires this field -- schema 1
+    and 2 logs predate it and are read without it (see the module
+    docstring's "Sample wall-clock" section); a gap in a *current* schema
+    log is a dropped field or a bad recording, the same stance
+    `ApertureDataError` already takes for a missing `r_gripper`. There is no
+    rescue flag for this one: a log that cannot be aligned to a server run
+    is not usable E1 data regardless of whether its aperture is fine.
+    """
+
+
 class UnsupportedSchemaVersionError(ValueError):
     """`schema_version` is neither `LOG_SCHEMA_VERSION` (the current
     schema) nor a value in `_SUPPORTED_LEGACY_SCHEMA_VERSIONS` (a schema
@@ -238,6 +335,11 @@ def record_joint_log(arm, duration_s: float, hz: float = SAMPLE_HZ) -> List[Dict
     the loop compensates for cumulative drift against the nominal period
     (`next_tick`), not for a single slow iteration, so consumers must read
     each sample's own `t` rather than assume uniform `1/hz` spacing.
+
+    Every sample also carries `wall_time_ns` (`time.monotonic_ns()`, read at
+    the same instant as the joint poses) -- see the module docstring's
+    "Sample wall-clock" section for why this is monotonic_ns, not
+    time.time_ns(), and what it lets `link_e1_flight.py` do.
     """
     period = 1.0 / hz
     joints = {name: getattr(arm, name) for name in R.R_JOINTS}
@@ -248,19 +350,30 @@ def record_joint_log(arm, duration_s: float, hz: float = SAMPLE_HZ) -> List[Dict
         if elapsed >= duration_s:
             break
         pose = {name: float(j.present_position) for name, j in joints.items()}
-        samples.append({"t": elapsed, "joints": pose})
+        samples.append({"t": elapsed, "wall_time_ns": time.monotonic_ns(),
+                        "joints": pose})
         next_tick = t0 + period * (len(samples))
         time.sleep(max(0.0, next_tick - time.monotonic()))
     return samples
 
 
-def save_log(samples: List[Dict], route: str, scene_path: str) -> pathlib.Path:
+def save_log(samples: List[Dict], route: str, scene_path: str, *,
+            t0_wall_ns: Optional[int] = None) -> pathlib.Path:
+    """`t0_wall_ns` (schema 3+): `time.monotonic_ns()` at the moment
+    recording started -- the same clock as every sample's own
+    `wall_time_ns`, for a human/audit trail (never used for alignment math;
+    the linker aligns on each sample's own `wall_time_ns`). Optional and
+    `None` for a log not built from a real `record_joint_log` call (a
+    synthetic test log, for instance) -- `validated_samples` never reads
+    this field, only per-sample `wall_time_ns`.
+    """
     RUNS_DIR.mkdir(exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     path = RUNS_DIR / f"route_clearance_{route}_{stamp}.json"
     with open(path, "w") as f:
         json.dump({"route": route, "scene": scene_path, "sample_hz": SAMPLE_HZ,
-                  "schema_version": LOG_SCHEMA_VERSION, "samples": samples},
+                  "schema_version": LOG_SCHEMA_VERSION,
+                  "t0_wall_ns": t0_wall_ns, "samples": samples},
                  f, indent=1)
     return path
 
@@ -283,7 +396,8 @@ def schema_version_of(log: Dict) -> int:
 
 
 def save_invalid_log(samples: List[Dict], route: str, scene_path: str,
-                     reason: str) -> pathlib.Path:
+                     reason: str, *,
+                     t0_wall_ns: Optional[int] = None) -> pathlib.Path:
     """Persist a recording that failed aperture validation -- never
     silently discarded, so a bad flight can be diagnosed rather than
     re-flown blind. Every sample actually recorded is kept, including the
@@ -307,7 +421,7 @@ def save_invalid_log(samples: List[Dict], route: str, scene_path: str,
         json.dump({"valid": False, "error": reason, "route": route,
                   "scene": scene_path, "sample_hz": SAMPLE_HZ,
                   "schema_version": _INVALID_LOG_SCHEMA_VERSION,
-                  "samples": samples},
+                  "t0_wall_ns": t0_wall_ns, "samples": samples},
                  f, indent=1)
     return path
 
@@ -358,14 +472,23 @@ def validated_samples(
     trusted -- missing, or present but non-numeric / non-finite / out of
     range (this last group always, regardless of `allow_missing_aperture`
     or `schema_version`). A missing reading is rescued by
-    `allow_missing_aperture=True` ONLY when `schema_version` is one this
-    module recognises as a supported legacy schema: a missing key in a
-    `schema_version == LOG_SCHEMA_VERSION` (current) log always raises,
-    the flag notwithstanding, because the current schema has no excuse for
-    a gap. Never silently substitutes an assumption: the only path to one
-    is the explicit flag on a recognised legacy schema, and even then
-    every sample it was used for is returned in the second list so the
-    caller can report it rather than lose it.
+    `allow_missing_aperture=True` ONLY when `schema_version` is in
+    `_MISSING_APERTURE_ELIGIBLE_SCHEMA_VERSIONS` (today: 1) -- a
+    NARROWER set than "recognised at all"
+    (`_SUPPORTED_LEGACY_SCHEMA_VERSIONS`, today: 1 and 2): schema 2 is a
+    recognised past shape but never predated aperture logging, so a
+    missing key in a `schema_version == 2` OR `== LOG_SCHEMA_VERSION`
+    (current) log always raises, the flag notwithstanding, because neither
+    has an excuse for a gap. Never silently substitutes an assumption: the
+    only path to one is the explicit flag on schema 1, and even then every
+    sample it was used for is returned in the second list so the caller
+    can report it rather than lose it.
+
+    On a `schema_version == LOG_SCHEMA_VERSION` (current) log, ALSO raises
+    `SampleTimestampError` naming the sample if any `wall_time_ns` is
+    missing or non-finite (checked per sample, after that sample's
+    aperture -- see the module docstring's "Sample wall-clock" section);
+    schema 1 and 2 predate this field and are never checked for it.
     """
     if (schema_version != LOG_SCHEMA_VERSION
             and schema_version not in _SUPPORTED_LEGACY_SCHEMA_VERSIONS):
@@ -374,7 +497,9 @@ def validated_samples(
             f"({LOG_SCHEMA_VERSION}) or a supported legacy schema "
             f"({_SUPPORTED_LEGACY_SCHEMA_VERSIONS}) -- refusing to guess "
             "what this log's shape means.")
-    missing_is_legacy = schema_version in _SUPPORTED_LEGACY_SCHEMA_VERSIONS
+    missing_aperture_eligible = (
+        schema_version in _MISSING_APERTURE_ELIGIBLE_SCHEMA_VERSIONS)
+    requires_wall_time = schema_version == LOG_SCHEMA_VERSION
 
     out: List[Tuple[List[float], float]] = []
     assumed: List[int] = []
@@ -382,30 +507,51 @@ def validated_samples(
         joints = sample["joints"]
         q7 = [joints[j] for j in R.ARM7]
         if GRIPPER_JOINT not in joints:
-            if not (allow_missing_aperture and missing_is_legacy):
+            if not (allow_missing_aperture and missing_aperture_eligible):
                 where = sample.get('t')
-                if missing_is_legacy:
+                if missing_aperture_eligible:
                     detail = (
                         "This sample has no usable clearance answer; pass "
                         "allow_missing_aperture=True to fall back to the "
                         "safe (wide-open) assumption for it explicitly, or "
                         "drop it from the log.")
-                else:
+                elif schema_version == LOG_SCHEMA_VERSION:
                     detail = (
                         f"schema_version={schema_version} is this module's "
                         "CURRENT schema, which always includes r_gripper; "
                         "a missing key here is a dropped field or a bad "
                         "recording, not an old log format -- "
                         "allow_missing_aperture does not apply to it.")
+                else:
+                    detail = (
+                        f"schema_version={schema_version} is a recognised "
+                        "past schema that already had aperture logging "
+                        "(unlike schema 1); a missing key here is a "
+                        "dropped field or a bad recording, not an old log "
+                        "format -- allow_missing_aperture does not apply "
+                        "to it.")
                 raise ApertureDataError(
                     f"sample {i} (t={where}): missing '{GRIPPER_JOINT}' "
                     f"(schema_version={schema_version!r}). {detail}")
             assumed.append(i)
             out.append((q7, None))
-            continue
-        gripper_deg = _validated_gripper_deg(
-            joints[GRIPPER_JOINT], i, sample.get("t"))
-        out.append((q7, gripper_deg))
+        else:
+            gripper_deg = _validated_gripper_deg(
+                joints[GRIPPER_JOINT], i, sample.get("t"))
+            out.append((q7, gripper_deg))
+
+        if requires_wall_time:
+            wall_time_ns = sample.get("wall_time_ns")
+            if (wall_time_ns is None
+                    or not isinstance(wall_time_ns, (int, float))
+                    or isinstance(wall_time_ns, bool)
+                    or not math.isfinite(wall_time_ns)):
+                raise SampleTimestampError(
+                    f"sample {i} (t={sample.get('t')}): missing or "
+                    f"non-finite 'wall_time_ns' (schema_version="
+                    f"{schema_version!r}, current schema requires it -- "
+                    "see the module docstring's 'Sample wall-clock' "
+                    f"section); got {wall_time_ns!r}")
     return out, assumed
 
 
@@ -540,9 +686,50 @@ def main() -> None:
     parser.add_argument("--duration", type=float, default=15.0,
                         help="seconds to record; fly the route by hand during "
                              "this window")
+    parser.add_argument(
+        "--record-root", default=os.environ.get("REACHY_SIM_RECORD"),
+        help="the native server's own --record directory (E1 readiness "
+             "work item 2). Defaulting from REACHY_SIM_RECORD is a path "
+             "HINT ONLY -- every fact about the directory it names (that "
+             "it is live, that its scene matches --scene, that its "
+             "backend is mujoco-remote) is verified by the identity "
+             "check below, never assumed from the env var.")
+    parser.add_argument(
+        "--status-url", default="http://localhost:8080/status",
+        help="the container camera server's /status endpoint (issue #40), "
+             "used to confirm the bridge backend is mujoco-remote")
     args = parser.parse_args()
 
+    if not args.record_root:
+        print("FAIL: --record-root is required (or set REACHY_SIM_RECORD) "
+              "-- the native server's own --record directory, so this "
+              "script can verify it is talking to the live physics rather "
+              "than a claimed backend.")
+        sys.exit(2)
+
     reachy = ReachySDK(host=args.host, sdk_port=args.port)
+
+    def _read_sdk_joints() -> Dict[str, float]:
+        return {name: float(getattr(reachy.r_arm, name).present_position)
+                for name in R.R_JOINTS}
+
+    # Verified simulator identity (E1 readiness work item 2): established
+    # BEFORE the recording loop connects, and refused outright -- not
+    # downgraded to a warning -- on any failure. See e1_identity.py's
+    # module docstring for exactly what this does and does not prove.
+    identity = e1_identity.verify_simulator_identity(
+        host=args.host, port=args.port, scene_path=args.scene,
+        record_root=args.record_root, status_url=args.status_url,
+        read_sdk_joints=_read_sdk_joints)
+    if not identity.ok:
+        print("FAIL: simulator identity could not be established -- "
+              "refusing to record. Reasons:")
+        for reason in identity.reasons:
+            print(f"  - {reason}")
+        sys.exit(2)
+    print(f"Simulator identity verified: run_dir={identity.run_dir}")
+
+    t0_wall_ns = time.monotonic_ns()
     print(f"Recording {args.route} for {args.duration:.1f}s at {SAMPLE_HZ:.0f} Hz "
          "-- fly the route now. This only reads present_position.")
     samples = record_joint_log(reachy.r_arm, args.duration)
@@ -558,7 +745,8 @@ def main() -> None:
     try:
         validated_samples(samples, allow_missing_aperture=False)
     except ApertureDataError as exc:
-        invalid_path = save_invalid_log(samples, args.route, args.scene, str(exc))
+        invalid_path = save_invalid_log(samples, args.route, args.scene, str(exc),
+                                        t0_wall_ns=t0_wall_ns)
         print(f"FAIL: recorded log has an unusable gripper aperture: {exc}\n"
               f"Saved {len(samples)} samples as INVALID to {invalid_path} "
               "for diagnosis -- not a usable E1 log. E1 needs every "
@@ -566,8 +754,29 @@ def main() -> None:
               "connection to r_gripper and re-fly.")
         sys.exit(1)
 
-    path = save_log(samples, args.route, args.scene)
+    path = save_log(samples, args.route, args.scene, t0_wall_ns=t0_wall_ns)
     print(f"Saved {len(samples)} samples to {path}")
+
+    # Automatic artefact linking (E1 readiness work item 3b): write the
+    # sidecar while the run directory is still fresh, then refuse to call
+    # this flight usable E1 data if the board object was not where the
+    # YAML says it should be -- both files stay on disk either way (the
+    # flight is diagnosable), but exit 3 marks it distinctly from a normal
+    # success (exit 0) or an aperture failure (exit 1).
+    sidecar = link_e1_flight.build_base_sidecar(
+        log_path=str(path), samples=samples, scene_path=args.scene,
+        identity_check=identity, run_dir=identity.run_dir)
+    sidecar_path = link_e1_flight.write_sidecar(str(path), sidecar)
+    print(f"Saved link sidecar to {sidecar_path}")
+    settled = sidecar["settled_pose_check"]
+    if not all(v.get("ok") for v in settled.values()):
+        print(f"FAIL: settled_pose_check found a board object away from "
+              f"its YAML pose -- see {sidecar_path}. The log and sidecar "
+              "are both saved for diagnosis; this is not usable E1 data.")
+        for oid, check in settled.items():
+            if not check.get("ok"):
+                print(f"  - {oid}: {check}")
+        sys.exit(3)
 
     result = report(samples, args.route, args.scene)
     print(json.dumps(result, indent=2))
