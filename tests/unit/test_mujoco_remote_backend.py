@@ -591,3 +591,36 @@ class TestCameraFrameMeta:
         })
 
         assert not meta.exists()
+
+
+class TestIngestStateToleratesContacts:
+    """E1 readiness (assignment 2026-09-14, work item 4): the state stream
+    gained a `contacts` key (native_mujoco.protocol.State). `_ingest_state`
+    must ingest a state carrying it unchanged -- it only ever reads known
+    keys via `msg.get(...)`, so an unrecognised key (this one, or any
+    future one) is silently ignored, never a KeyError or a schema
+    mismatch."""
+
+    def test_state_with_contacts_key_ingests_without_error(self):
+        b = _make_remote_backend()
+        b._ingest_state({
+            "seq": 5, "sim_step": 100, "sim_time_s": 0.2,
+            "scene_revision": "r1", "joints": [], "force_sensors": [],
+            "grippers": [], "objects": [], "interactive": [],
+            "contacts": [{"arm_geom": "r_finger_col", "object_id": "foam_block",
+                         "steps": 2, "max_normal_force_n": 1.0,
+                         "min_dist_m": -0.001, "first_sim_step": 99,
+                         "last_sim_step": 100, "pos_at_max_force": [0, 0, 0]}],
+        })
+        assert b._snapshot.seq == 5
+        assert b._snapshot.sim_step == 100
+
+    def test_state_without_contacts_key_still_ingests(self):
+        """A state from BEFORE this field existed must still work -- the
+        bridge never requires it."""
+        b = _make_remote_backend()
+        b._ingest_state({
+            "seq": 1, "sim_step": 1, "sim_time_s": 0.0,
+            "scene_revision": "r1", "joints": [],
+        })
+        assert b._snapshot.seq == 1

@@ -79,6 +79,48 @@ def load_world(
         return model, [], [], None
 
 
+def contact_records(model: mujoco.MjModel, data: mujoco.MjData) -> List[ContactRecord]:
+    """All active contacts on `data` this step, as typed `ContactRecord`
+    objects. Free function (E1 readiness, assignment 2026-09-14, work item
+    4) so `native_mujoco/server.py`'s `SimState` -- a separate, parallel
+    stepping implementation that does not build a `SimulationCore` -- can
+    reuse the same geom/body-name lookup and `mj_contactForce` loop rather
+    than a second copy of it. `SimulationCore.snapshot_contacts` below is
+    now a thin wrapper; behaviour is unchanged."""
+    records = []
+    for i in range(data.ncon):
+        c = data.contact[i]
+        g1, g2 = int(c.geom1), int(c.geom2)
+        b1 = int(model.geom_bodyid[g1])
+        b2 = int(model.geom_bodyid[g2])
+
+        def _gname(gid: int) -> str:
+            n = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, gid)
+            return n or ""
+
+        def _bname(bid: int) -> str:
+            n = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, bid)
+            return n or ""
+
+        # MuJoCo stores 6-DOF contact frame; normal force = contactforce[0].
+        force = np.zeros(6)
+        mujoco.mj_contactForce(model, data, i, force)
+        records.append(ContactRecord(
+            geom1=_gname(g1),
+            geom2=_gname(g2),
+            body1=_bname(b1),
+            body2=_bname(b2),
+            contype1=int(model.geom_contype[g1]),
+            contype2=int(model.geom_contype[g2]),
+            conaffinity1=int(model.geom_conaffinity[g1]),
+            conaffinity2=int(model.geom_conaffinity[g2]),
+            pos=(float(c.pos[0]), float(c.pos[1]), float(c.pos[2])),
+            normal_force=float(force[0]),
+            dist=float(c.dist),
+        ))
+    return records
+
+
 class SimulationCore:
     """Physics engine core shared by the server and episode runner.
 
@@ -197,38 +239,7 @@ class SimulationCore:
 
     def snapshot_contacts(self) -> List[ContactRecord]:
         """All active contacts this step as typed ContactRecord objects."""
-        records = []
-        for i in range(self.data.ncon):
-            c = self.data.contact[i]
-            g1, g2 = int(c.geom1), int(c.geom2)
-            b1 = int(self.model.geom_bodyid[g1])
-            b2 = int(self.model.geom_bodyid[g2])
-
-            def _gname(gid: int) -> str:
-                n = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, gid)
-                return n or ""
-
-            def _bname(bid: int) -> str:
-                n = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, bid)
-                return n or ""
-
-            # MuJoCo stores 6-DOF contact frame; normal force = contactforce[0].
-            force = np.zeros(6)
-            mujoco.mj_contactForce(self.model, self.data, i, force)
-            records.append(ContactRecord(
-                geom1=_gname(g1),
-                geom2=_gname(g2),
-                body1=_bname(b1),
-                body2=_bname(b2),
-                contype1=int(self.model.geom_contype[g1]),
-                contype2=int(self.model.geom_contype[g2]),
-                conaffinity1=int(self.model.geom_conaffinity[g1]),
-                conaffinity2=int(self.model.geom_conaffinity[g2]),
-                pos=(float(c.pos[0]), float(c.pos[1]), float(c.pos[2])),
-                normal_force=float(force[0]),
-                dist=float(c.dist),
-            ))
-        return records
+        return contact_records(self.model, self.data)
 
     def snapshot_grippers(self) -> Tuple[List[Dict], List[Dict]]:
         states = self.gripper.update(self.data)
