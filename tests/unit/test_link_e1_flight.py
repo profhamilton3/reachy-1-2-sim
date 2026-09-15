@@ -87,10 +87,16 @@ def _cw_aligned_idxs():
 
 
 def _cw_run_dir(tmp_path, contact_idxs=None):
+    """Every state carries its own `contacts` key -- `[]` when nothing
+    touched anything, a real drain when it did -- matching what the real
+    server actually writes (`_build_state` always sets the key while
+    `--record` is on; see F4 in the 2026-09-14 re-review: a fixture that
+    OMITS the key on contact-free states exercises the partial-coverage
+    path, not the real one)."""
     contact_idxs = set(_CW_CONTACT_IDXS if contact_idxs is None else contact_idxs)
     states = [
         _state(i, 100 + i, _CW_BASE_WALL_NS + i * _CW_STEP_NS,
-              contacts=([_contact(100 + i)] if i in contact_idxs else None))
+              contacts=([_contact(100 + i)] if i in contact_idxs else []))
         for i in range(_CW_N_STATES)
     ]
     return _write_states(tmp_path, states)
@@ -191,23 +197,48 @@ class TestContactsFullWindow:
             assert 100 + i in reported, f"contact at index {i} (between samples) was dropped"
 
     def test_flight_boundary_included_and_out_of_range_excluded(self, tmp_path):
-        """Contacts exactly at the first/last ALIGNED state are included
-        (inclusive bounds); contacts outside [first, last] aligned
-        sim_step -- before the flight starts or after it ends -- are not."""
-        boundary_idxs = {
-            "before": 0, "at_first": _CW_FIRST_ALIGNED_IDX,
-            "at_last": _CW_LAST_ALIGNED_IDX, "after": _CW_N_STATES - 1,
-        }
-        assert boundary_idxs["before"] < _CW_FIRST_ALIGNED_IDX
-        assert boundary_idxs["after"] > _CW_LAST_ALIGNED_IDX
+        """Contacts exactly at the first/last SAMPLE's own wall time are
+        included (the window is inclusive), a contact right at the edge
+        of the +/-60ms pad is included (3 states = 60ms at this fixture's
+        20ms push period), and a contact one state beyond the pad is not.
 
-        run_dir = _cw_run_dir(tmp_path, contact_idxs=boundary_idxs.values())
-        block = lef.align_and_recompute(_cw_samples(), run_dir, _BOARD_SCENE)
+        F2 (2026-09-14 re-review): this boundary is now defined by wall
+        time around the SAMPLES, not by the ALIGNED states' `sim_step` --
+        the pre-fix window ended at the aligned sim_step, which for an
+        identical-pose fixture (no lag) coincides with the sample's own
+        state, so this shape specifically pins the padded edge rather than
+        re-deriving the old (buggy) sim_step-range boundary."""
+        step_ns = 20_000_000
+        base = 6_000_000_000
+        n_states = 20
+        first_sample_idx, last_sample_idx = 5, 14
+        boundary_idxs = {
+            "at_pad_edge_before": first_sample_idx - 3,  # exactly -60ms: included
+            "outside_before": first_sample_idx - 4,       # -80ms: excluded
+            "at_first_sample": first_sample_idx,
+            "at_last_sample": last_sample_idx,
+            "at_pad_edge_after": last_sample_idx + 3,     # exactly +60ms: included
+            "outside_after": last_sample_idx + 4,          # +80ms: excluded
+        }
+        states = [
+            _state(i, 100 + i, base + i * step_ns,
+                  contacts=([_contact(100 + i)] if i in boundary_idxs.values() else []))
+            for i in range(n_states)
+        ]
+        run_dir = _write_states(tmp_path, states)
+        samples = [
+            {"wall_time_ns": base + first_sample_idx * step_ns, "joints": dict(_POSE_DEG)},
+            {"wall_time_ns": base + last_sample_idx * step_ns, "joints": dict(_POSE_DEG)},
+        ]
+
+        block = lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
         reported = {c["first_sim_step"] for c in block["contacts"]}
-        assert 100 + boundary_idxs["at_first"] in reported
-        assert 100 + boundary_idxs["at_last"] in reported
-        assert 100 + boundary_idxs["before"] not in reported
-        assert 100 + boundary_idxs["after"] not in reported
+        assert 100 + boundary_idxs["at_first_sample"] in reported
+        assert 100 + boundary_idxs["at_last_sample"] in reported
+        assert 100 + boundary_idxs["at_pad_edge_before"] in reported
+        assert 100 + boundary_idxs["at_pad_edge_after"] in reported
+        assert 100 + boundary_idxs["outside_before"] not in reported
+        assert 100 + boundary_idxs["outside_after"] not in reported
 
     def test_no_double_counting(self, tmp_path):
         run_dir = _cw_run_dir(tmp_path)
@@ -217,14 +248,22 @@ class TestContactsFullWindow:
         assert len(seen) == len(set(seen))
 
     def test_contacts_if_only_aligned_states_were_used_would_miss_most(self, tmp_path):
-        """Documents the bug being fixed: filtering to only the ALIGNED
-        states' own contacts (the old behaviour) finds just the overlap
-        between contact-bearing indices and aligned indices -- fewer than
-        the full ten. Guards against a future regression back to that
-        narrower read."""
-        aligned = set(_cw_aligned_idxs())
-        only_aligned_overlap = [i for i in _CW_CONTACT_IDXS if i in aligned]
-        assert 0 < len(only_aligned_overlap) < len(_CW_CONTACT_IDXS)
+        """F6 (2026-09-14 re-review): the old test of this name asserted
+        only index-set arithmetic and never called the linker, so it could
+        not fail on a revert to aligned-only reading. This version drives
+        the REAL alignment (`lef.align_samples`) and computes the
+        aligned-only subset through it, so a revert of
+        `align_and_recompute` back to reading contacts only from aligned
+        states would fail this test."""
+        run_dir = _cw_run_dir(tmp_path)
+        states = lef.read_states(run_dir)
+        alignment = lef.align_samples(_cw_samples(), states)
+        aligned_sim_steps = {r["server_sim_step"] for r in alignment}
+        only_aligned = [
+            c for s in states if s.get("sim_step") in aligned_sim_steps
+            for c in (s.get("contacts") or [])
+        ]
+        assert 0 < len(only_aligned) < len(_CW_CONTACT_IDXS)
 
 
 class TestContactEvidenceIntegrity:
@@ -233,15 +272,22 @@ class TestContactEvidenceIntegrity:
 
     def test_missing_contacts_key_is_flagged_not_silently_zero(self, tmp_path):
         """A run recorded before work item 4 (or with --record's contact
-        tracking off) has no 'contacts' key on any state at all."""
+        tracking off) has no 'contacts' key on any state at all. F1/F4
+        (2026-09-14 re-review): missing evidence must read as `None`, not
+        `[]` -- an empty list is indistinguishable from a genuine
+        zero-contact flight to any downstream consumer that doesn't also
+        check `contacts_recorded`."""
         states = [_state(i, 100 + i, _CW_BASE_WALL_NS + i * _CW_STEP_NS)
                  for i in range(5)]
         run_dir = _write_states(tmp_path, states)
         samples = [{"wall_time_ns": _CW_BASE_WALL_NS + i * _CW_STEP_NS,
                    "joints": dict(_POSE_DEG)} for i in range(5)]
         block = lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
-        assert block["contacts"] == []
+        assert block["contacts"] is None
         assert block["contacts_recorded"] is False
+        w = block["contacts_window"]
+        assert w["states_with_contacts_key"] == 0
+        assert w["states_in_window"] == 5
 
     def test_genuine_zero_contacts_is_distinguished_from_missing(self, tmp_path):
         """The key IS present on every state (contact tracking covered
@@ -255,6 +301,29 @@ class TestContactEvidenceIntegrity:
         block = lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
         assert block["contacts"] == []
         assert block["contacts_recorded"] is True
+
+    def test_partial_coverage_is_not_recorded(self, tmp_path):
+        """F4 (2026-09-14 re-review): the key is present on SOME states in
+        the window but not others -- e.g. a mid-recording toggle, or (as
+        the review notes) a state written by a server build that dropped
+        the field partway through. `contacts_recorded` must be strictly
+        `False` (not `True` on the strength of the first state that HAS
+        the key, the pre-fix behaviour), `contacts` must read `None`, and
+        the coverage counts must show the gap."""
+        states = [
+            _state(0, 100, _CW_BASE_WALL_NS, contacts=[_contact(100)]),
+            _state(1, 101, _CW_BASE_WALL_NS + _CW_STEP_NS),  # no key at all
+            _state(2, 102, _CW_BASE_WALL_NS + 2 * _CW_STEP_NS, contacts=[]),
+        ]
+        run_dir = _write_states(tmp_path, states)
+        samples = [{"wall_time_ns": _CW_BASE_WALL_NS + i * _CW_STEP_NS,
+                   "joints": dict(_POSE_DEG)} for i in range(3)]
+        block = lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+        assert block["contacts"] is None
+        assert block["contacts_recorded"] is False
+        w = block["contacts_window"]
+        assert w["states_with_contacts_key"] == 2
+        assert w["states_in_window"] == 3
 
     def test_malformed_contacts_field_type_raises(self, tmp_path):
         states = [_state(0, 100, _CW_BASE_WALL_NS, contacts="not-a-list")]
@@ -271,14 +340,174 @@ class TestContactEvidenceIntegrity:
             lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
 
 
-def _cw_write_log_and_base_sidecar(tmp_path, monkeypatch):
-    """Full setup for the end-to-end tests: a real run dir (10 contact
-    windows, per `_cw_run_dir`), a real schema-3 log via `save_log`, and
-    the base sidecar `measure_route_clearance.main()` would have written
-    right after the flight -- everything `link_flight` needs on disk."""
+class TestMovingArmSdkLag:
+    """F2 (2026-09-14 re-review, probe E2): with a moving arm, the SDK
+    reading `align_sample` matches against reflects a state OLDER than the
+    sample's own wall time (pipeline lag), so the aligned state is
+    systematically earlier than the sample. Keying the contact window on
+    the aligned states' `sim_step` (the pre-fix behaviour) therefore trims
+    real physics off the END of the window. This reproduces that shape
+    directly (not via the identical-pose fixtures the original tests used,
+    which cannot see the bug -- Q4 in the re-review) and proves the fix by
+    checking the window against the WALL-TIME-independent-of-alignment
+    result, while separately confirming the alignment itself really is
+    lagged."""
+
+    _MA_N_STATES = 60
+    _MA_STEP_NS = 20_000_000  # 50 Hz server push, matching _STATE_HZ
+    _MA_BASE_WALL_NS = 9_000_000_000
+    _MA_LAG_STATES = 2  # 40 ms SDK lag, matching probe E2
+    _MA_DEG_PER_STATE = 0.5
+
+    @classmethod
+    def _pose(cls, i):
+        i = max(i, 0)
+        return {**_POSE_DEG,
+               "r_shoulder_pitch": _POSE_DEG["r_shoulder_pitch"] + cls._MA_DEG_PER_STATE * i}
+
+    def _run_dir(self, tmp_path, contact_idxs):
+        states = [
+            _state(i, 100 + i, self._MA_BASE_WALL_NS + i * self._MA_STEP_NS,
+                  pose_deg=self._pose(i),
+                  contacts=([_contact(100 + i)] if i in contact_idxs else []))
+            for i in range(self._MA_N_STATES)
+        ]
+        return _write_states(tmp_path, states)
+
+    def _lagged_samples(self):
+        """A sample every 3 states (~15 Hz, close to the recorder's real
+        ~20 Hz), starting at state index 2 so the lag never reaches
+        before state 0; each sample's `joints` are the SDK's reading of
+        the arm `_MA_LAG_STATES` states EARLIER than the state whose wall
+        time the sample shares -- i.e. the SDK is stale by 40 ms."""
+        idxs = list(range(2, self._MA_N_STATES, 3))
+        return [
+            {"wall_time_ns": self._MA_BASE_WALL_NS + i * self._MA_STEP_NS,
+             "joints": self._pose(i - self._MA_LAG_STATES)}
+            for i in idxs
+        ]
+
+    def test_tail_contacts_survive_alignment_lag(self, tmp_path):
+        last_two = [self._MA_N_STATES - 2, self._MA_N_STATES - 1]  # 58, 59
+        run_dir = self._run_dir(tmp_path, contact_idxs=set(last_two))
+        samples = self._lagged_samples()
+
+        block = lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+
+        # The alignment IS lagged: the last sample's aligned state is not
+        # the last state in the stream.
+        last_aligned_sim_step = block["alignment"][-1]["server_sim_step"]
+        assert last_aligned_sim_step == 100 + (self._MA_N_STATES - 1 - self._MA_LAG_STATES), (
+            "fixture assumption broken: the last sample should align "
+            f"{self._MA_LAG_STATES} states before the stream's end")
+
+        # ...yet both tail contacts -- AFTER the aligned end -- are still
+        # reported, because the window is wall-time-derived, not
+        # alignment-derived.
+        reported = {c["first_sim_step"] for c in block["contacts"]}
+        assert reported == {100 + i for i in last_two}
+        assert block["contacts_recorded"] is True
+
+
+class TestResetHandling:
+    """F3/F5 (2026-09-14 re-review): `sim_step` restarts at 0 on every
+    scene reset within one `--record` run dir; `seq` does not. These test
+    the window and clearance lookup directly against that shape."""
+
+    _RH_STEP_NS = 20_000_000
+
+    def test_contact_from_a_prior_epoch_is_not_attributed_to_the_next(self, tmp_path):
+        """Probe E1 shape: a reset happens BETWEEN two recordings in the
+        same server run (checklist section 4's own procedure). Epoch A had
+        a contact; epoch B (the flight actually being linked) did not.
+        Because both epochs' `sim_step` restarts at 0, the OLD range-based
+        window (`lo <= sim_step <= hi` over ALL states) could numerically
+        re-include epoch A's contact for epoch B's flight; the wall-time
+        window must not, since the epochs are far apart in wall time."""
+        epoch_a_base = 1_000_000_000
+        epoch_a = [
+            _state(i, i, epoch_a_base + i * self._RH_STEP_NS,
+                  pose_deg={**_POSE_DEG, "r_shoulder_pitch": -90.0},
+                  contacts=([_contact(i)] if i == 10 else []))
+            for i in range(30)
+        ]
+        # Epoch B starts 10 s later (wall time) -- far outside any
+        # alignment/contact padding -- and its own sim_step restarts at 0,
+        # numerically overlapping epoch A's.
+        epoch_b_base = epoch_a_base + 10_000_000_000
+        epoch_b_pose = {**_POSE_DEG, "r_shoulder_pitch": -60.0}  # distinguishable
+        epoch_b = [
+            _state(30 + i, i, epoch_b_base + i * self._RH_STEP_NS,
+                  pose_deg=epoch_b_pose, contacts=[])
+            for i in range(30)
+        ]
+        run_dir = _write_states(tmp_path, epoch_a + epoch_b)
+
+        sample_idxs = list(range(0, 30, 3))
+        samples = [
+            {"wall_time_ns": epoch_b_base + i * self._RH_STEP_NS,
+             "joints": epoch_b_pose}
+            for i in sample_idxs
+        ]
+
+        block = lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+
+        assert block["contacts"] == []
+        assert block["contacts_recorded"] is True
+        assert block["contacts_window"]["reset_in_window"] is False
+
+        # server_side_clearance is computed on epoch B's own state (keyed
+        # by `seq`), not whatever `by_sim_step` last-wins happened to pick.
+        scene_model = SceneModel.from_yaml(_BOARD_SCENE)
+        expected_state = next(s for s in epoch_b if s["sim_step"] == sample_idxs[0])
+        assert block["server_side_clearance"][0] == lef._clearance_for_state(
+            expected_state, scene_model)
+
+    def test_reset_inside_the_window_is_flagged(self, tmp_path):
+        """Probe E5 shape: the reset happens DURING the recording being
+        linked (not between two recordings) -- `sim_step` still restarts
+        at 0 partway through, but wall time keeps advancing continuously.
+        `reset_in_window` must be True so the checklist can flag the
+        result as suspect rather than silently trusting it."""
+        base = 2_000_000_000
+        pre_reset = [_state(i, i, base + i * self._RH_STEP_NS, contacts=[])
+                    for i in range(16)]
+        post_reset = [
+            _state(16 + i, i, base + (16 + i) * self._RH_STEP_NS, contacts=[])
+            for i in range(14)
+        ]
+        states = pre_reset + post_reset
+        run_dir = _write_states(tmp_path, states)
+
+        samples = [
+            {"wall_time_ns": states[0]["wall_time_ns"], "joints": dict(_POSE_DEG)},
+            {"wall_time_ns": states[-1]["wall_time_ns"], "joints": dict(_POSE_DEG)},
+        ]
+        block = lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+        assert block["contacts_window"]["reset_in_window"] is True
+
+    def test_duplicate_seq_in_window_raises(self, tmp_path):
+        """A real `states.jsonl` cannot repeat `seq` (it is `self._seq +=
+        1` every push, never reset) -- if it somehow does, that is
+        corrupted evidence, not a state to silently pick one copy of."""
+        base = 3_000_000_000
+        states = [
+            _state(0, 100, base, contacts=[]),
+            _state(0, 101, base + self._RH_STEP_NS, contacts=[]),  # dup seq
+        ]
+        run_dir = _write_states(tmp_path, states)
+        samples = [{"wall_time_ns": base, "joints": dict(_POSE_DEG)},
+                  {"wall_time_ns": base + self._RH_STEP_NS, "joints": dict(_POSE_DEG)}]
+        with pytest.raises(lef.ContactEvidenceError, match="duplicate seq"):
+            lef.align_and_recompute(samples, run_dir, _BOARD_SCENE)
+
+
+def _write_log_and_base_sidecar(tmp_path, monkeypatch, run_dir, samples):
+    """Full setup for the end-to-end tests: a real schema-3 log via
+    `save_log` and the base sidecar `measure_route_clearance.main()` would
+    have written right after the flight -- everything `link_flight` needs
+    on disk, for an ARBITRARY run dir + samples pair."""
     monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path / "runs")
-    run_dir = _cw_run_dir(tmp_path)
-    samples = _cw_samples()
     log_path = mrc.save_log(samples, "LOWER_TO_REST", str(_BOARD_SCENE),
                             t0_wall_ns=samples[0]["wall_time_ns"])
     identity = _FakeIdentity(manifest={"scene_revision": "r1"},
@@ -287,6 +516,15 @@ def _cw_write_log_and_base_sidecar(tmp_path, monkeypatch):
         log_path=str(log_path), samples=samples, scene_path=_BOARD_SCENE,
         identity_check=identity, run_dir=str(run_dir))
     lef.write_sidecar(str(log_path), base_sidecar)
+    return log_path
+
+
+def _cw_write_log_and_base_sidecar(tmp_path, monkeypatch):
+    """`_write_log_and_base_sidecar` for the standard 10-contact-window
+    fixture (`_cw_run_dir`/`_cw_samples`)."""
+    run_dir = _cw_run_dir(tmp_path)
+    samples = _cw_samples()
+    log_path = _write_log_and_base_sidecar(tmp_path, monkeypatch, run_dir, samples)
     return log_path, run_dir
 
 
@@ -314,7 +552,9 @@ class TestContactsThroughLinkFlight:
 
     def test_cli_subprocess_writes_all_ten_contacts(self, tmp_path, monkeypatch):
         """The literal command the checklist runs:
-        `python3 scripts/link_e1_flight.py <log_path>`."""
+        `python3 scripts/link_e1_flight.py <log_path>`. F1/F2 (2026-09-14
+        re-review): a successful run must print the evidence-coverage line
+        (`N/N states`, `reset_in_window=...`), not just `Wrote <path>`."""
         log_path, _ = _cw_write_log_and_base_sidecar(tmp_path, monkeypatch)
         script = os.path.join(_HERE, "../../scripts/link_e1_flight.py")
         result = subprocess.run(
@@ -322,6 +562,8 @@ class TestContactsThroughLinkFlight:
             capture_output=True, text=True, check=False)
         assert result.returncode == 0, result.stderr
         assert "Wrote" in result.stdout
+        assert "contacts=10" in result.stdout
+        assert "reset_in_window=False" in result.stdout
 
         sidecar_path = lef.sidecar_path_for(str(log_path))
         sidecar = json.loads(sidecar_path.read_text())
@@ -329,6 +571,47 @@ class TestContactsThroughLinkFlight:
         assert len(sidecar["contacts"]) == 10
         reported = {c["first_sim_step"] for c in sidecar["contacts"]}
         assert reported == {100 + i for i in _CW_CONTACT_IDXS}
+
+    def test_cli_exits_4_on_missing_contact_evidence(self, tmp_path, monkeypatch):
+        """F1 (2026-09-14 re-review): the pre-fix CLI exited 0 whether or
+        not any state carried contact evidence, so a run against a server
+        not tracking contacts read (to an operator following the
+        checklist) as a clean zero-contact flight. Missing evidence must
+        refuse, non-zero, with a FAIL line -- not print `Wrote` and exit 0."""
+        states = [_state(i, 100 + i, _CW_BASE_WALL_NS + i * _CW_STEP_NS)
+                 for i in range(5)]  # no 'contacts' key anywhere
+        run_dir = _write_states(tmp_path, states)
+        samples = [{"t": i * 0.05, "wall_time_ns": _CW_BASE_WALL_NS + i * _CW_STEP_NS,
+                   "joints": dict(_POSE_DEG)} for i in range(5)]
+        log_path = _write_log_and_base_sidecar(tmp_path, monkeypatch, run_dir, samples)
+
+        script = os.path.join(_HERE, "../../scripts/link_e1_flight.py")
+        result = subprocess.run(
+            [sys.executable, script, str(log_path)],
+            capture_output=True, text=True, check=False)
+        assert result.returncode == 4, result.stdout + result.stderr
+        assert "FAIL" in result.stdout
+        assert "not usable" in result.stdout or "NOT" in result.stdout
+
+        sidecar = json.loads(lef.sidecar_path_for(str(log_path)).read_text())
+        assert sidecar["contacts_recorded"] is False
+        assert sidecar["contacts"] is None
+
+    def test_cli_exits_5_on_malformed_contact_evidence(self, tmp_path, monkeypatch):
+        """Q3 (2026-09-14 re-review): a malformed `contacts` field is a
+        distinct failure from missing evidence -- crash-loud (a non-zero
+        exit distinct from 4), never silently dropped."""
+        states = [_state(0, 100, _CW_BASE_WALL_NS, contacts=[{"bogus": True}])]
+        run_dir = _write_states(tmp_path, states)
+        samples = [{"t": 0.0, "wall_time_ns": _CW_BASE_WALL_NS, "joints": dict(_POSE_DEG)}]
+        log_path = _write_log_and_base_sidecar(tmp_path, monkeypatch, run_dir, samples)
+
+        script = os.path.join(_HERE, "../../scripts/link_e1_flight.py")
+        result = subprocess.run(
+            [sys.executable, script, str(log_path)],
+            capture_output=True, text=True, check=False)
+        assert result.returncode == 5, result.stdout + result.stderr
+        assert "FAIL" in result.stdout
 
 
 class TestSettledPoseCheck:

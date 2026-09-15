@@ -29,13 +29,22 @@ Two halves:
     never any sample's nearest match. Every state's own `contacts` field
     is the accumulator's drain since the PREVIOUS push -- a contiguous,
     non-overlapping window (see `native_mujoco/contact_accumulator.py`) --
-    so the union of `contacts` from EVERY state whose `sim_step` falls
-    between the first and last ALIGNED sample's state (inclusive) is the
+    so the union of `contacts` from EVERY state whose `wall_time_ns` falls
+    in `[first sample, last sample] +/- the alignment window` is the
     complete, non-duplicated contact record for the flight, independent of
-    which states the 20 Hz samples happened to land on. A state missing
-    the `contacts` key entirely (a run recorded before work item 4) is
-    reported via `contacts_recorded: False` rather than folded into a
-    silent zero; a `contacts` field that is present but malformed raises
+    which states the 20 Hz samples happened to land on AND independent of
+    the joint-residual refinement that alignment applies on top of the
+    wall-time match (blocker B1 fix-up: keying the window on the ALIGNED
+    states' `sim_step` -- as the first cut of this file did -- trims up to
+    one alignment window off the end whenever the arm is moving, because a
+    moving arm's aligned state is systematically earlier than the sample's
+    own wall time; see `contacts_in_flight_window`). The window is keyed
+    on each state's `seq` (monotonic for the life of the server process),
+    not `sim_step` (which restarts at 0 on every scene reset within the
+    same recording run dir). A state missing the `contacts` key entirely
+    (a run recorded before work item 4) is reported via
+    `contacts_recorded: False` rather than folded into a silent zero; a
+    `contacts` field that is present but malformed raises
     `ContactEvidenceError` rather than being silently dropped.
 
 Alignment needs `wall_time_ns` on both sides to mean the same clock -- see
@@ -126,37 +135,87 @@ def _validated_contacts_field(state: dict) -> Optional[List[dict]]:
     return contacts
 
 
-def contacts_in_sim_step_range(
-    states: Sequence[dict], lo: int, hi: int,
-    contacts_by_sim_step: Optional[Dict[int, List[dict]]] = None,
-) -> Tuple[List[dict], bool]:
-    """Union of contacts for every state whose `sim_step` falls in
-    `[lo, hi]` inclusive (not just the states an individual recorder
-    sample happened to align to -- see `align_and_recompute`'s
-    docstring). `contacts_by_sim_step`, when given, overrides each
-    state's own `contacts` field (keyed by `sim_step`) rather than
-    reading it from the state -- for a caller with its own window
-    bookkeeping; still applied across the full range, not just aligned
-    states. Returns `(contacts, contacts_recorded)`: `contacts_recorded`
-    is `False` only when NOT ONE state in range carries evidence (no
-    `contacts` key anywhere, and no override given) -- callers must not
-    conflate that with a genuine zero-contact flight."""
+#: Padding applied to the sample-derived wall-time window, in nanoseconds.
+#: This is deliberately the SAME constant as `_ALIGN_WINDOW_S`: the
+#: alignment refinement already assumes a chosen state can be up to
+#: `_ALIGN_WINDOW_S` away (by wall time) from the sample it represents
+#: (`align_sample`'s `window_s`), so a contact window narrower than that
+#: could exclude physics that alignment itself considers "this sample's".
+#: It is also, independently, >= 3x the server's own state-push period
+#: (`native_mujoco/server.py`: `_STATE_HZ = 50` -> 20 ms between pushes;
+#: `_ALIGN_WINDOW_S` = 60 ms = 3 push periods): every state's `contacts`
+#: field is the accumulator's drain since the PREVIOUS push, so the
+#: state pushed immediately after `hi` still covers the 20 ms interval
+#: ending at its own wall time, which starts strictly before `hi` -- a
+#: pad of one push period would already be enough to guarantee no drain
+#: is split by the boundary; 60 ms is 3x that margin. Over-inclusion at
+#: each end (a state just outside `[first sample, last sample]` whose
+#: own drain window doesn't actually overlap it) is the fail-closed
+#: direction and is recorded in `contacts_window` for the record.
+_WINDOW_PAD_NS = int(_ALIGN_WINDOW_S * 1e9)
+
+
+def contacts_in_flight_window(
+    states: Sequence[dict], first_sample_wall_ns: int, last_sample_wall_ns: int,
+) -> Tuple[List[dict], bool, dict]:
+    """Union of every state's own `contacts` for states whose
+    `wall_time_ns` lies in `[first_sample_wall_ns - pad, last_sample_wall_ns
+    + pad]` (`pad` = `_WINDOW_PAD_NS`, see its docstring) -- independent of
+    which states the recorder samples happened to align to, and of the
+    joint-residual refinement `align_sample` applies on top of wall time
+    (see `align_and_recompute`'s docstring for why keying on the ALIGNED
+    states' `sim_step` -- the pre-fix behaviour -- drops the tail of a
+    moving-arm flight).
+
+    Keyed on `seq` (monotonic for the life of the server process), not
+    `sim_step`, which restarts at 0 on every scene reset within the same
+    `--record` run dir; a duplicate `seq` inside the window is impossible
+    for a real `states.jsonl` and raises `ContactEvidenceError` rather
+    than silently double-counting or dropping one copy.
+
+    Returns `(contacts, contacts_recorded, meta)`. `contacts_recorded` is
+    `True` only when EVERY state in the window carries the `contacts` key
+    (strict -- see `_validated_contacts_field`); a run where only some
+    states carry it is evidence gap, not partial data, and callers must
+    not treat it as usable. `meta` carries the window's `seq` bounds, wall
+    bounds, state counts (for the evidence-coverage line printed by the
+    CLI), and `reset_in_window` -- True if `sim_step` decreases between
+    consecutive (by `seq`) states inside the window, meaning a scene reset
+    happened mid-recording (not just between recordings) and any
+    clearance/contact attribution here should be treated as suspect."""
+    lo = first_sample_wall_ns - _WINDOW_PAD_NS
+    hi = last_sample_wall_ns + _WINDOW_PAD_NS
+    window = sorted(
+        (s for s in states if lo <= s.get("wall_time_ns", -1) <= hi),
+        key=lambda s: s["seq"])
+    seen_seq: set = set()
     out: List[dict] = []
-    contacts_recorded = False
-    for state in states:
-        sim_step = state.get("sim_step")
-        if sim_step is None or not (lo <= sim_step <= hi):
-            continue
-        if contacts_by_sim_step is not None:
-            out.extend(contacts_by_sim_step.get(sim_step, []))
-            contacts_recorded = True
-            continue
-        contacts = _validated_contacts_field(state)
+    with_key = 0
+    prev_step = None
+    reset_in_window = False
+    for s in window:
+        if s["seq"] in seen_seq:
+            raise ContactEvidenceError(f"duplicate seq {s['seq']} in states.jsonl")
+        seen_seq.add(s["seq"])
+        if prev_step is not None and s.get("sim_step", 0) < prev_step:
+            reset_in_window = True
+        prev_step = s.get("sim_step", prev_step)
+        contacts = _validated_contacts_field(s)
         if contacts is None:
             continue
-        contacts_recorded = True
+        with_key += 1
         out.extend(contacts)
-    return out, contacts_recorded
+    meta = {
+        "seq_lo": window[0]["seq"] if window else None,
+        "seq_hi": window[-1]["seq"] if window else None,
+        "wall_lo_ns": lo,
+        "wall_hi_ns": hi,
+        "states_in_window": len(window),
+        "states_with_contacts_key": with_key,
+        "reset_in_window": reset_in_window,
+    }
+    contacts_recorded = with_key == len(window) and len(window) > 0
+    return out, contacts_recorded, meta
 
 
 def _joint_residual_deg(sample_joints_deg: Dict[str, float],
@@ -340,47 +399,49 @@ def _clearance_for_state(state: dict, scene_model: SceneModel) -> Dict[str, dict
 
 def align_and_recompute(
     samples: Sequence[dict], run_dir: str, scene_path: str,
-    contacts_by_sim_step: Optional[Dict[int, List[dict]]] = None,
 ) -> dict:
     """The alignment block: per-sample alignment and server-side
     clearance recomputed at each aligned state (both hand models), plus
     the FULL contact record for the flight -- every state's own
     `contacts` field (see `native_mujoco.contact_accumulator`) unioned
-    across the entire `[first aligned sim_step, last aligned sim_step]`
-    range, not just the states individual samples happened to align to
-    (the server pushes state at 50 Hz; a recorder sample lands at ~20 Hz,
-    so most states are never any sample's nearest match -- see
-    `contacts_in_sim_step_range`). `contacts_by_sim_step`, if given,
-    overrides each state's own field rather than being read from it, but
-    is still applied over the same full range."""
+    across the wall-time window `[first sample, last sample]` (plus the
+    alignment window as padding), not just the states individual samples
+    happened to align to (the server pushes state at 50 Hz; a recorder
+    sample lands at ~20 Hz, so most states are never any sample's nearest
+    match -- see `contacts_in_flight_window`).
+
+    Both the clearance lookup and the contact window are keyed on `seq`,
+    not `sim_step`: `sim_step` restarts at 0 on every scene reset within
+    the same `--record` run dir (checklist section 4 resets BETWEEN
+    recordings in one server run), so it is not unique across the whole
+    `states.jsonl`, while `seq` is monotonic for the life of the server
+    process."""
     states = read_states(run_dir)
     scene_model = SceneModel.from_yaml(scene_path)
     alignment = align_samples(samples, states)
-    by_sim_step = {s.get("sim_step"): s for s in states}
+    by_seq = {s.get("seq"): s for s in states}
 
     clearance_by_sample = []
     for record in alignment:
-        sim_step = record["server_sim_step"]
-        state = by_sim_step.get(sim_step)
+        state = by_seq.get(record["server_seq"])
         if state is not None:
             clearance_by_sample.append(_clearance_for_state(state, scene_model))
         else:
             clearance_by_sample.append({})
 
-    aligned_sim_steps = [r["server_sim_step"] for r in alignment
-                         if r["server_sim_step"] is not None]
-    if aligned_sim_steps:
-        contacts_in_window, contacts_recorded = contacts_in_sim_step_range(
-            states, min(aligned_sim_steps), max(aligned_sim_steps),
-            contacts_by_sim_step=contacts_by_sim_step)
+    if samples:
+        contacts_in_window, contacts_recorded, contacts_window = (
+            contacts_in_flight_window(
+                states, samples[0]["wall_time_ns"], samples[-1]["wall_time_ns"]))
     else:
-        contacts_in_window, contacts_recorded = [], False
+        contacts_in_window, contacts_recorded, contacts_window = [], False, {}
 
     return {
         "alignment": alignment,
         "server_side_clearance": clearance_by_sample,
-        "contacts": contacts_in_window,
+        "contacts": contacts_in_window if contacts_recorded else None,
         "contacts_recorded": contacts_recorded,
+        "contacts_window": contacts_window,
     }
 
 
@@ -408,8 +469,20 @@ def main() -> None:
                              "existing sidecar (e.g. retained artefacts "
                              "moved to a new path)")
     args = parser.parse_args()
-    path = link_flight(args.log_path, run_dir=args.run_dir)
-    print(f"Wrote {path}")
+    try:
+        path = link_flight(args.log_path, run_dir=args.run_dir)
+    except ContactEvidenceError as exc:
+        print(f"FAIL: contact evidence malformed -- {exc}")
+        sys.exit(5)
+    sidecar = read_sidecar(args.log_path)
+    if not sidecar.get("contacts_recorded"):
+        print(f"FAIL: no contact evidence in the server run dir -- this is NOT "
+              f"usable E1 data (contacts_recorded=false; see {path})")
+        sys.exit(4)
+    w = sidecar["contacts_window"]
+    print(f"Wrote {path}: contacts={len(sidecar['contacts'])} "
+          f"(evidence on {w['states_with_contacts_key']}/{w['states_in_window']} "
+          f"states, reset_in_window={w['reset_in_window']})")
 
 
 if __name__ == "__main__":
