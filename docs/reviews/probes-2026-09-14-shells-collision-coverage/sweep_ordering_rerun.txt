@@ -1,0 +1,6 @@
+positions: 224
+tube>reference (>2mm):  0  max 0.0000 cm
+tube>shells (>2mm):     0  max 0.0000 cm
+shells>reference (>2mm): 0  max 0.000000 cm  (before Slice 2: 62 positions, max 1.0 cm)
+shells tighter than tube by >1cm: 189  (unchanged by Slice 2)
+tube over-conservatism vs reference, max: 12.9604 cm

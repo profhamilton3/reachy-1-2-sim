@@ -2,13 +2,17 @@
 that motivated the "shells" hand mode, computed here with
 `SceneModel.clearance` for both hand modes rather than quoted from the
 review's own scratch probes -- re-run 2026-09-14 after the tube's coverage
-correction (docs/adr/0003, "Correcting the tube").
+correction (docs/adr/0003, "Correcting the tube"), and again the same day
+(Slice 2) once "shells" gained the `thumb_pad` capsule and a widened
+`finger` capsule.
 
   * TestNamedBoards -- the four named boards in the review's table, worst
     clearance over ANY guarded route (every `FOOTPRINT_LEGS` leg), for both
-    hand="tube" (today's default) and hand="shells" (opt-in). The tube
-    column changed with the correction; the legacy numbers are recorded in
-    the class docstring.
+    hand="tube" (today's default) and hand="shells" (opt-in), plus the two
+    4 cm pool objects on r2c3 the tube correction newly refuses (added in
+    Slice 2). The tube column changed with the correction; the shells
+    column changed again in Slice 2 once the pads were covered; the legacy
+    numbers are recorded in the class docstring.
 
   * TestCorrectionNewlyRefuses -- every scene object on every grid cell,
     every guarded route: which boards the corrected tube refuses that the
@@ -19,8 +23,10 @@ correction (docs/adr/0003, "Correcting the tube").
     method, copied in below; ALL hand geoms including the collision pads) at
     each position, all three at the same aperture. The tube never reads more
     clearance than the MJCF geometry (its coverage, on real objects).
-    "shells" does, at 62/224 -- the thumb-pad gap pinned in
-    test_arm_geometry_mjcf.py::TestShellsMissThumbPad.
+    Before Slice 2, "shells" did too, at 62/224 -- the thumb-pad gap pinned
+    in test_arm_geometry_mjcf.py::TestShellsMissThumbPad. Since the pad
+    coverage (test_arm_geometry_mjcf.py::TestShellsCoverMJCFHand), that
+    count is 0/224.
 
 Offline throughout: MuJoCo is used only to `mj_forward` a compiled model and
 read back geom frames, never `mj_step`, and no server is started.
@@ -93,27 +99,49 @@ def _cell_xy(cell_id):
 
 class TestNamedBoards:
     """The review's fixture table (section 4), re-run under the corrected
-    tube.  Legacy tube column (aperture-only, centre-swung radius, as the
-    review measured it): evidence -1.7, incident -8.0, foam@r3c3 -5.2,
-    soda@r2c3 -0.4 cm.  All four were already refused; the correction makes
-    each ~4 cm more negative (the REST leg's tube radius at -45 deg went
-    7.5 -> 11.5 cm).  "shells" rows read positive but are statements about
-    the VISUAL shells only -- see TestShellsMissThumbPad.  The guard keeps
-    hand="tube" and FOOTPRINT_MARGIN=0.0 (this slice changes no default)."""
+    tube, and a third time (Slice 2, 2026-09-14) once "shells" gained the
+    `thumb_pad` capsule and a widened `finger` capsule.
+
+    Legacy tube column (aperture-only, centre-swung radius, as the review
+    measured it): evidence -1.7, incident -8.0, foam@r3c3 -5.2, soda@r2c3
+    -0.4 cm.  All four were already refused; the correction makes each ~4 cm
+    more negative (the REST leg's tube radius at -45 deg went 7.5 -> 11.5 cm).
+
+    Pre-Slice-2 "shells" column (visual shells only, no collision pads):
+    evidence +4.5, incident -2.4, foam@r3c3 +3.4, soda@r2c3 +4.5 cm -- see
+    the now-regression test TestShellsCoversThumbAndFingerPads. With the pads
+    covered, `foam_on_r3c3` drops from +3.4 to +2.1 cm (the board sits closer
+    to the thumb side than the others); the rest are unchanged to the
+    displayed precision.  All shells numbers stay positive except
+    `incident_board`, i.e. only `incident_board` remains refused by shells
+    geometry -- the guard keeps hand="tube" and FOOTPRINT_MARGIN=0.0
+    regardless (this slice changes no default).
+
+    `pool_box_1`/`pool_cyl_1` on r2c3 (added here in Slice 2) are the two
+    boards the tube correction newly refuses (TestCorrectionNewlyRefuses);
+    both are comfortably positive under shells-with-pads, same as under the
+    visual shells before it (+6.3 / +5.9 cm, unchanged to displayed
+    precision -- neither board is anywhere near the thumb pad's gap)."""
 
     @pytest.mark.parametrize("objects,oid,expected_tube_cm,expected_shells_cm", [
         pytest.param(
             {"soda_can": _cell_xy("cell_r1c1"), "foam_block": _cell_xy("cell_r2c3")},
-            "foam_block", -5.7, +4.5, id="evidence_board"),
+            "foam_block", -5.699, +4.479, id="evidence_board"),
         pytest.param(
             {"foam_block": (_cell_xy("cell_r2c3")[0], _cell_xy("cell_r2c3")[1] - 0.07)},
-            "foam_block", -11.9, -2.4, id="incident_board"),
+            "foam_block", -11.944, -2.414, id="incident_board"),
         pytest.param(
             {"foam_block": _cell_xy("cell_r3c3")},
-            "foam_block", -9.4, +3.4, id="foam_on_r3c3"),
+            "foam_block", -9.369, +2.106, id="foam_on_r3c3"),
         pytest.param(
             {"soda_can": _cell_xy("cell_r2c3")},
-            "soda_can", -4.4, +4.5, id="soda_can_on_r2c3"),
+            "soda_can", -4.379, +4.535, id="soda_can_on_r2c3"),
+        pytest.param(
+            {"pool_box_1": _cell_xy("cell_r2c3")},
+            "pool_box_1", -3.719, +6.258, id="pool_box_1_on_r2c3"),
+        pytest.param(
+            {"pool_cyl_1": _cell_xy("cell_r2c3")},
+            "pool_cyl_1", -3.079, +5.936, id="pool_cyl_1_on_r2c3"),
     ])
     def test_worst_clearance_under_the_corrected_tube(
             self, objects, oid, expected_tube_cm, expected_shells_cm):
@@ -374,24 +402,33 @@ class TestSweepOrdering:
     corrected tube at the review's resolution (4 cm grid, 224 positions, 13
     samples/leg, n=41 surface sampling), tube / shells / reference all at
     the leg's guarded aperture, reference over ALL MJCF hand geoms
-    including the collision pads:
+    including the collision pads.  Re-measured again 2026-09-14 (Slice 2)
+    once "shells" gained the `thumb_pad` capsule and a widened `finger`
+    capsule:
 
       * tube <= reference at 224/224: the tube never reads more clearance
         than the true MJCF geometry.  This is the coverage claim on real
         objects, and the thing the 2026-09-14 correction exists for (before
         it: tube > shells at 3/224, by up to 2.8 cm).
       * tube <= shells at 224/224: nothing left of the finger poking out.
-      * shells > reference at 62/224 (by more than 2 mm; up to 1.0 cm): the "shells" model
-        does not contain r_thumb_col (TestShellsMissThumbPad).  Pinned, not
-        asserted away; when "shells" gains a thumb-pad capsule this count
-        should go to 0 and the pin be re-derived.
-      * shells tighter than tube by > 1 cm at 189/224 (was 158): the
-        corrected tube is a correct bound and a looser one -- up to 13 cm
-        of over-conservatism against the true geometry on this sweep.
+      * shells > reference at 0/224 (was 62/224 by up to 1.0 cm, before
+        Slice 2 covered r_thumb_col and r_finger_col): the pad coverage
+        closes the gap `TestShellsMissThumbPad` pinned; the max observed
+        gap is now machine precision (~5e-13 m), the coverage bound
+        attained rather than approached.  See
+        test_arm_geometry_mjcf.py::TestShellsCoverMJCFHand /
+        TestShellsCoversThumbAndFingerPads.
+      * shells tighter than tube by > 1 cm at 189/224 (unchanged by Slice 2
+        -- the pad additions are 0.05 cm at most on this sweep's positions,
+        well under the 1 cm threshold): the corrected tube is a correct
+        bound and a looser one -- up to 13 cm of over-conservatism against
+        the true geometry on this sweep.
 
     NOT evidence the guard is adequate: it says the tube contains the model
     hand.  E3 (the real gripper vs the MJCF) and E1 (through-the-move) are
-    still open.
+    still open.  Recovering the tube's over-conservatism by switching a
+    consumer to "shells" is still Slice 2 PR2's job, after E1 -- this PR
+    only makes "shells" a correct bound.
     """
 
     def test_tube_covers_reference_and_the_shells_gap_is_pinned(self, sweep_model):
@@ -413,14 +450,23 @@ class TestSweepOrdering:
             f"tube read more clearance than shells at {ts_violations} "
             f"positions (max {max(ts_gaps) * 100:.2f} cm)")
 
-        # The shells thumb-pad gap, pinned (see class docstring).
-        assert sr_violations == 62, (
+        # The shells thumb-pad gap, closed 2026-09-14 (Slice 2): "shells" now
+        # covers r_thumb_col and r_finger_col, so it never reads more
+        # clearance than the MJCF reference on this sweep -- the small
+        # positive residual is floating-point noise at the attained bound,
+        # not a real gap (contrast the pre-Slice-2 62/224, up to 1.0 cm).
+        assert sr_violations == 0, (
             f"shells read more clearance than the MJCF reference at "
-            f"{sr_violations} positions (pinned at 62 -- the r_thumb_col gap; "
-            "re-derive rather than edit the count)")
-        assert max(sr_gaps) == pytest.approx(0.0102, abs=0.001)
+            f"{sr_violations} positions (was 0 after Slice 2's pad coverage "
+            "-- a violation here means the thumb-pad/finger-pad gap reopened)")
+        assert max(sr_gaps) < 1e-6, (
+            f"shells reads {max(sr_gaps) * 100:.4f} cm more clearance than "
+            "the MJCF reference somewhere on the sweep -- expected machine "
+            "precision now that shells covers the collision pads")
 
         # shells is a much tighter bound than the corrected tube at most of
-        # the board -- the over-conservatism Slice 2 is meant to recover.
+        # the board -- the over-conservatism Slice 2 PR2 is meant to recover.
+        # Unchanged by the pad coverage: the widened finger/thumb_pad add at
+        # most ~0.05 cm here, well under the 1 cm threshold.
         assert sum(1 for g in ts_gaps if g < -0.01) == 189
         assert max(-g for g in tr_gaps) == pytest.approx(0.1296, abs=0.003)

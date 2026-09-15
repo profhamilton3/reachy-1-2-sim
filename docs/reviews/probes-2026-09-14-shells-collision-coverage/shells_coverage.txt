@@ -1,0 +1,43 @@
+finger radius: 1.6125 cm (was shell-only 1.5620 cm)
+thumb_pad radius: 1.6125 cm
+== coverage: worst excess over named waypoints + FOOTPRINT_LEGS samples ==
+worst excess (must be <= 1e-9): 3.435e-16 m at ('BACK', -68.8)
+== coverage: full r_gripper x r_wrist_roll grid, HOVER base ==
+worst excess (must be <= 1e-9): 2.845e-16 m at roll,g=(45.0, -35.0)
+== thumb_pad / finger_pad margin, now (was 2.05 / 1.25 cm outside; 0.05 cm outside for the finger pad) ==
+  HOVER  g= -68.8  thumb_pad  0.00000 cm (was +2.05)  finger_pad  0.00000 cm
+  HOVER  g= -45.0  thumb_pad  0.00000 cm (was +2.05)  finger_pad  0.00000 cm
+  HOVER  g=   0.0  thumb_pad  0.00000 cm (was +2.05)  finger_pad  0.00000 cm
+  HOVER  g=  20.0  thumb_pad  0.00000 cm (was +1.25)  finger_pad  0.00000 cm
+  REST   g= -68.8  thumb_pad  0.00000 cm (was +2.05)  finger_pad  0.00000 cm
+  REST   g= -45.0  thumb_pad  0.00000 cm (was +2.05)  finger_pad  0.00000 cm
+  REST   g=   0.0  thumb_pad  0.00000 cm (was +2.05)  finger_pad  0.00000 cm
+  REST   g=  20.0  thumb_pad  0.00000 cm (was +1.25)  finger_pad  0.00000 cm
+== tube radius - shells capsule axis-distance (surface / centreline), cm ==
+  REST       -68.8 surface -1.1946  centreline  0.4179
+  REST       -45.0 surface -0.8424  centreline  0.7701
+  REST         0.0 surface -0.4704  centreline  1.3833
+  REST        20.0 surface -0.4704  centreline  1.3833
+  REST_SHUT  -68.8 surface -1.1946  centreline  0.4179
+  REST_SHUT  -45.0 surface -0.8424  centreline  0.7701
+  REST_SHUT    0.0 surface -0.4704  centreline  1.3833
+  REST_SHUT   20.0 surface -0.4704  centreline  1.3833
+  HOVER      -68.8 surface -1.1864  centreline  0.4260
+  HOVER      -45.0 surface -0.8320  centreline  0.7804
+  HOVER        0.0 surface -0.3182  centreline  1.5355
+  HOVER       20.0 surface -0.3182  centreline  1.5355
+  PRESENT    -68.8 surface -1.1864  centreline  0.4260
+  PRESENT    -45.0 surface -0.8320  centreline  0.7804
+  PRESENT      0.0 surface -0.3182  centreline  1.5355
+  PRESENT     20.0 surface -0.3182  centreline  1.5355
+  HOME       -68.8 surface -1.1864  centreline  0.4260
+  HOME       -45.0 surface -0.8320  centreline  0.7804
+  HOME         0.0 surface -0.3182  centreline  1.5355
+  HOME        20.0 surface -0.3182  centreline  1.5355
+== fixture table (tube new / shells-with-pads), cm ==
+  evidence         tube  -5.699  shells-with-pads   4.479
+  incident         tube -11.944  shells-with-pads  -2.414
+  foam_r3c3        tube  -9.369  shells-with-pads   2.106
+  soda_r2c3        tube  -4.379  shells-with-pads   4.535
+  pool_box_1_r2c3  tube  -3.719  shells-with-pads   6.258
+  pool_cyl_1_r2c3  tube  -3.079  shells-with-pads   5.936

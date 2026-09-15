@@ -2,7 +2,9 @@
 
 - Status: Accepted (geometry only — no consumer default, margin, waypoint
   or speed changes; the tube's radius and length were corrected 2026-09-14,
-  see "Correcting the tube")
+  see "Correcting the tube"; the Slice 2 precondition on "shells" covering
+  the collision pads was met the same day, see "Slice 2: 'shells' covers
+  the collision pads")
 - Date: 2026-09-12
 - Decision owners: IITG Reachy 1.2 simulation project
 - Relates to: #56, #74; ADR-0002's revisit condition on the capsule-vs-physics
@@ -312,7 +314,8 @@ the fixture table's shells column describes the visual shells, not the
 collision hand; and `"shells"` must gain a thumb-pad capsule (and have its
 coverage verified the same way as the tube) **before** it can be a guard.
 That is now a Slice 2 precondition. Not corrected here — outside this
-correction's scope.
+correction's scope. **Closed 2026-09-14, same day — see "Slice 2: 'shells'
+covers the collision pads" below.**
 
 ### 5. What this does and does not establish
 
@@ -324,6 +327,101 @@ the real gripper (E3 is open), the guard samples the commanded path and not
 the realised one (E1 is open and blocked), and the margin is still 0.0.
 Passing tests here mean the tube matches the model; they are not evidence
 about the robot.
+
+## Slice 2: "shells" covers the collision pads (2026-09-14)
+
+Scope: `kinematics._shells_hand_capsules` only. No consumer switched to
+`"shells"` (`panel_executor._footprint_refusal` keeps `hand="tube"`); no
+waypoint, speed, margin, or aperture changed; the tube itself, `hand_radius`,
+and E1 execution are untouched; E1 is not unblocked. Evidence:
+`docs/reviews/probes-2026-09-14-shells-collision-coverage/` and the tests
+named below.
+
+### What changed in `kinematics.py`
+
+- **`thumb_pad`**, a new capsule for `r_thumb_col`: same axis convention as
+  every other shells capsule (local Z through the box centre — pos
+  `(0, 0.005, -0.085)` in the thumb frame — radius the box's XY
+  half-diagonal, `hypot(0.014, 0.008)` ≈ 1.61 cm). It cannot be folded into
+  the existing `thumb` capsule because the pad sits entirely below the
+  visual thumb box's own end cap (item 4 above).
+- **`finger`**'s radius widened** from `hypot(0.012, 0.010)` (the visual
+  shell alone) to `hypot(0.014, 0.008)` ≈ 1.61 cm, to also contain
+  `r_finger_col`. `r_finger_col`'s z-range already falls inside the visual
+  finger box's axis span, and both boxes share the same centreline, so the
+  tightest single capsule containing both is the *larger* of their own two
+  corner distances — not `hypot(pad_x, shell_y)` ≈ 1.72 cm, which would pad
+  the bound past what either box needs. No endpoint change.
+- `"tube"` and `hand_radius` are untouched; `"shells"` is still opt-in with
+  no consumer.
+
+### Verification against the MJCF
+
+`tests/unit/test_arm_geometry_mjcf.py`:
+
+- **`TestShellsCoverMJCFHand`** — the exact analogue of
+  `TestTubeCoversMJCFHand` for `"shells"`: every corner of all four hand
+  boxes, and the wrist ball's far surface, is inside SOME shells capsule at
+  every named waypoint, every `FOOTPRINT_LEGS` sample, and the full
+  `r_gripper` x `r_wrist_roll` grid. Measured worst excess **≤ 3.5 × 10⁻¹⁶
+  m** (machine precision).
+- **`TestShellsCoversThumbAndFingerPads`** (formerly
+  `TestShellsMissThumbPad`, now a regression case) — the pad that was 2.05
+  cm (1.25 cm, finger shut) outside every shells capsule, and the finger
+  pad that was 0.5 mm outside, are both now inside to machine precision.
+  Old numbers recorded in the parametrisation.
+- **`TestTubeVsShellsCapsules`** — re-derived: the widened `finger` capsule
+  moves the surface shortfall by up to ~0.05 cm wherever it is the widest
+  capsule (e.g. REST −68.8°: −1.14 → −1.19 cm); centrelines stay
+  non-negative throughout, as before.
+
+`tests/unit/test_footprint_boards.py::TestSweepOrdering` (same 224-position
+sweep as the tube correction): **shells > reference goes from 62/224 (up to
+1.0 cm) to 0/224** (max observed gap now ~5 × 10⁻¹³ m — floating-point noise
+at the attained bound). Everything else the sweep measures — tube ≤
+reference at 224/224, tube ≤ shells at 224/224, shells tighter than tube by
+> 1 cm at 189/224, tube over-conservatism max 12.96 cm — is unchanged: the
+pad additions move the finger/thumb radius by ~0.05 cm at most, well under
+this sweep's thresholds.
+
+### The fixture table, a third time
+
+`tests/unit/test_footprint_boards.py::TestNamedBoards`, re-run with
+`"shells"` now covering the pads, plus the two 4 cm pool objects on r2c3
+(the boards the tube correction newly refuses):
+
+| fixture | tube (corrected) | shells (visual only, pre-Slice-2) | shells-with-pads | flyable-by-shells? |
+|---|---|---|---|---|
+| evidence board | −5.7 cm | +4.5 cm | +4.48 cm | yes (unchanged) |
+| incident board | −11.9 cm | −2.4 cm | −2.41 cm | no (unchanged — the only one refused by shells) |
+| `foam_block` on r3c3 | −9.4 cm | +3.4 cm | **+2.11 cm** | yes, but tighter — closest to the thumb side of the six |
+| `soda_can` on r2c3 | −4.4 cm | +4.5 cm | +4.54 cm | yes (unchanged) |
+| `pool_box_1` on r2c3 | −3.7 cm | +6.3 cm | +6.26 cm | yes (unchanged) |
+| `pool_cyl_1` on r2c3 | −3.1 cm | +5.9 cm | +5.94 cm | yes (unchanged) |
+
+No row's flyable-by-shells status flips. `foam_block` on r3c3 is the only
+one that moves by more than rounding, because it is the board closest to
+the thumb side of the six — but it stays comfortably positive.
+
+Because `TestShellsCoverMJCFHand` now proves `"shells"` bounds the whole
+MJCF hand (visual shells and both collision pads, not only the visual
+shells), the five positive rows above are relabelled **"flyable by shells
+geometry"**, dropping the "visual-only" qualifier item 4 above required.
+That is a statement about the model hand, not a safety decision: no margin
+is set, E1 has not flown, and E3 (real gripper vs. the MJCF) is still open.
+
+### What this does and does not establish
+
+It establishes that `"shells"` is now a correct bound on the model hand —
+both the parts that were already covered and the collision pads that were
+not — the same standard `TestTubeCoversMJCFHand` holds the tube to. It does
+**not** establish that switching a consumer to `"shells"` is safe: that
+still needs a margin decided from E1 (still blocked on an operator and a
+live arm), and E3's real-gripper measurement. This PR is the geometry
+precondition Slice 2 PR2 was waiting on; PR2 itself — switching
+`panel_executor._footprint_refusal` to `hand="shells"`, choosing
+`FOOTPRINT_MARGIN`, recovering the refused boards — is still out of scope
+here.
 
 ## What is still open
 
@@ -381,16 +479,19 @@ about the robot.
 - **E3** — real gripper envelope vs. the MJCF shells (tape measure on the
   physical Reachy 1.2): whether `"shells"` is a bound on the *real* hand,
   not only the model's.
-- **`"shells"` must cover the collision pads** before it can be promoted:
-  add a capsule for `r_thumb_col` (it hangs below the visual thumb box) and
-  widen the finger capsule by the pad's 2 mm, then verify `"shells"` the
-  way `TestTubeCoversMJCFHand` verifies the tube. Until then the fixture
-  table's shells column is not a statement about the collision hand.
-- **Slice 2 — recovering the corrected tube's over-conservatism.** The
-  tube now refuses `pool_box_1`/`pool_cyl_1` on r2c3 and 15/224 cube
-  positions whose true clearance is +3.3 cm or better. Recovering them means
-  switching the tabletop guard to a `"shells"` that covers the pads, with a
-  margin decided from E1 — not shrinking the tube.
+- ~~**`"shells"` must cover the collision pads** before it can be
+  promoted~~ — **done 2026-09-14** (Slice 2 PR1): `thumb_pad` and a widened
+  `finger` capsule, verified the way `TestTubeCoversMJCFHand` verifies the
+  tube (`TestShellsCoverMJCFHand`). The fixture table's shells column is
+  now a statement about the collision hand, not only the visual shells.
+- **Slice 2 PR2 — recovering the corrected tube's over-conservatism.** The
+  tube still refuses `pool_box_1`/`pool_cyl_1` on r2c3 and 15/224 cube
+  positions whose true clearance is +3.3 cm or better; the geometry
+  precondition for recovering them (a `"shells"` that covers the pads) is
+  now met. Recovering them still means switching the tabletop guard to
+  `"shells"`, with a margin decided from E1 — not shrinking the tube — and
+  `"shells"` becomes a guard **only** once that margin exists; coverage
+  alone is not a promotion decision. Waits on E1.
 - The 1.6 cm wrist-roll term is now inside the radius; a tighter treatment
   (anchoring the tube at the thumb pivot) is possible but would change the
   capsule's endpoints, which every consumer reads, and is not worth it while
@@ -402,8 +503,9 @@ about the robot.
   range; it is ~4 cm larger on the REST leg than before, and refuses the
   two 4 cm pool objects on r2c3 and a corner strip of the board that it
   used to allow, all with positive true clearance (item 3 above).
-- A route or ability wanting `"shells"` clearance can ask for it; nothing
-  does yet, and nothing should until it covers the collision pads.
+- A route or ability wanting `"shells"` clearance can ask for it, and
+  `"shells"` now covers the collision pads (Slice 2 PR1); nothing asks for
+  it yet, and nothing should until a margin is decided from E1.
 - `docs/adr/0002`'s revisit condition on the capsule-vs-physics disagreement
   is met: the disagreement is the hand tube, explained and quantified, not
   an open question.
@@ -416,8 +518,9 @@ about the robot.
 Revisit this ADR when:
 
 - E1 delivers realised per-leg clearance and a margin decision is made for
-  Slice 2 (switching the tabletop guard to `"shells"`);
-- `"shells"` gains a thumb-pad capsule and passes the same coverage test as
-  the tube, or the guard moves to `"shells"` and the tube stops being what
-  any consumer flies;
+  Slice 2 PR2 (switching the tabletop guard to `"shells"`) — **`"shells"`
+  becomes a guard only once that margin is decided; coverage (done) is a
+  precondition, not a promotion**;
+- the guard moves to `"shells"` and the tube stops being what any consumer
+  flies;
 - E3 measures the real gripper against the MJCF shells.

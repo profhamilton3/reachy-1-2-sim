@@ -19,13 +19,25 @@ re-implementation of the chain.
   * TestTubeVsShellsCapsules -- the assignment's "tube bounds the shells"
     inequality, as it actually stands now: the tube contains every shells
     capsule's CENTRELINE; the capsule SURFACES still poke out by the shells
-    capsules' own slack over their boxes (<= 1.1 cm), which is not a
-    coverage gap against the MJCF and is pinned, not asserted away.
+    capsules' own slack over their boxes (<= 1.2 cm), which is not a
+    coverage gap against the MJCF and is pinned, not asserted away. Numbers
+    re-derived 2026-09-14 (Slice 2) for the widened `finger` capsule and the
+    new `thumb_pad` capsule, both of which count toward this margin.
 
-  * TestShellsMissThumbPad -- a DISCREPANCY in the opt-in "shells" model:
-    the MJCF's r_thumb_col sits entirely below the visual thumb box, so
-    "shells" does not contain it (2.05 cm). No consumer flies "shells"; it
-    is pinned here as a precondition on ever promoting it (Slice 2).
+  * TestShellsCoverMJCFHand -- added 2026-09-14 (Slice 2): the exact
+    analogue of TestTubeCoversMJCFHand for "shells", now that it carries a
+    `thumb_pad` capsule (for `r_thumb_col`) and a widened `finger` capsule
+    (for `r_finger_col`). Every corner of all four hand boxes, and the
+    wrist ball's far surface, is inside SOME shells capsule at every named
+    waypoint, every FOOTPRINT_LEGS sample, and the full r_gripper x
+    r_wrist_roll grid -- worst excess machine precision.
+
+  * TestShellsCoversThumbAndFingerPads -- the regression case for the
+    DISCREPANCY TestShellsMissThumbPad pinned 2026-09-14: `r_thumb_col` was
+    2.05 cm outside every shells capsule (1.25 cm with the finger shut) and
+    `r_finger_col` was 0.5 mm outside the finger capsule. Both pads are now
+    inside, to machine precision, checked straight off MuJoCo's own geom
+    frames -- the old numbers are recorded in the parametrisation.
 
 Offline throughout: MuJoCo is used only to `mj_forward` a compiled model and
 read back geom frames, never `mj_step`, and no server is started.
@@ -334,6 +346,80 @@ class TestDemonstratedMisses:
             f"{(farthest - r) * 100:.2f} cm (was {old_miss_cm} cm)")
 
 
+_SHELLS_HAND_CAPSULE_NAMES = ("thumb", "thumb_pad", "finger", "wrist_ball")
+
+
+def _shells_excess(m, d, jq, q7, gripper_deg):
+    """Worst corner excess of the MJCF hand geometry against the shells
+    capsules at this pose: excess > 0 means some corner of some hand box
+    (or the wrist ball's surface) is outside EVERY shells capsule.  The
+    analogue of `_tube_excess`, but against several capsules instead of
+    one: a corner only needs to be inside the nearest one."""
+    _set_arm(m, d, jq, q7, gripper_deg)
+    caps = [(np.array(p0), np.array(p1), r) for n, p0, p1, r in
+            link_capsules(q7, "right", gripper_deg, hand="shells")
+            if n in _SHELLS_HAND_CAPSULE_NAMES]
+
+    def excess(p):
+        return min((_segment_distance(p, a, b) if np.any(a != b)
+                    else float(np.linalg.norm(p - a))) - r
+                   for a, b, r in caps)
+
+    farthest = max(excess(p) for gname in HAND_BOXES for p in _box_corners(m, d, gname))
+    ball = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, "r_wrist_ball")
+    ball_excess = excess(d.geom_xpos[ball]) + float(m.geom_size[ball][0])
+    return max(farthest, ball_excess)
+
+
+class TestShellsCoverMJCFHand:
+    """The exact analogue of `TestTubeCoversMJCFHand` for the opt-in
+    "shells" hand model, now that it carries the `thumb_pad` capsule and a
+    widened `finger` capsule (2026-09-14, Slice 2, ADR-0003 item 4 /
+    `TestShellsCoversThumbAndFingerPads`): every corner of all four hand
+    boxes, and the wrist ball's far surface, must be inside SOME shells
+    capsule -- not necessarily the same one -- at every named waypoint,
+    every `FOOTPRINT_LEGS` sample, and a grid over the full `r_gripper` x
+    `r_wrist_roll` range.
+
+    Unlike the tube, "shells" is several capsules and is not claimed to be
+    a *tight* bound in every direction (a corner covered by one capsule's
+    slack is not "the bound attained" the way the tube's single isotropic
+    radius is) -- only that it is a bound at all, everywhere the tube is
+    checked.
+    """
+
+    def test_named_waypoints_and_footprint_samples(self, compiled):
+        m, d = compiled
+        jq = _joint_qpos_addrs(m)
+        poses = [(n, [p[j] for j in R.ARM7]) for n, p in _named_poses().items()]
+        poses += _footprint_leg_samples()
+        for label, q7 in poses:
+            for g in GRIPPER_SAMPLES + (_GRIPPER_SHUT_LIMIT_DEG,):
+                excess = _shells_excess(m, d, jq, q7, g)
+                assert excess <= 1e-9, (
+                    f"{label} gripper={g}: MJCF hand geometry outside every "
+                    f"shells capsule by {excess * 1000:.2f} mm")
+
+    def test_full_gripper_and_roll_range(self, compiled):
+        """A grid over the whole supported r_gripper x r_wrist_roll range, on
+        HOVER, matching `TestTubeCoversMJCFHand.test_full_gripper_and_roll_
+        range`'s coverage."""
+        m, d = compiled
+        jq = _joint_qpos_addrs(m)
+        base = [R.HOVER[j] for j in R.ARM7]
+        worst_excess = -1.0
+        for roll in ROLL_GRID:
+            q7 = list(base)
+            q7[6] = roll
+            for g in GRIPPER_GRID:
+                excess = _shells_excess(m, d, jq, q7, g)
+                worst_excess = max(worst_excess, excess)
+                assert excess <= 1e-9, (
+                    f"roll={roll} gripper={g}: outside every shells capsule "
+                    f"by {excess * 1000:.2f} mm")
+        assert worst_excess <= 1e-9
+
+
 def _shells_axis_margins(posture_name, gripper_deg):
     """(worst surface margin, worst centreline margin) of the shells hand
     capsules against the tube's radius, measured from the tube axis."""
@@ -367,72 +453,79 @@ class TestTubeVsShellsCapsules:
     surface can sit outside a tube that contains the box exactly.  That
     shortfall is bounded by the capsule's own radius -- it is the shells
     model's slack, not a coverage gap against the MJCF (which
-    TestTubeCoversMJCFHand checks directly).  Pinned rather than asserted
-    away.
+    TestTubeCoversMJCFHand / TestShellsCoverMJCFHand check directly).
+    Pinned rather than asserted away.
+
+    Re-derived 2026-09-14 (Slice 2): the widened `finger` capsule (now
+    `hypot(0.014, 0.008)`, was `hypot(0.012, 0.010)`) increases the surface
+    shortfall by ~0.05 cm wherever the finger sets the widest capsule; the
+    new `thumb_pad` capsule (same radius as the widened finger, further
+    from the axis than the thumb shell at open apertures) does not change
+    which capsule is widest at any of these poses.
     """
 
     @pytest.mark.parametrize("posture,gripper_deg,expected_surface_cm", [
-        ("REST", -68.8, -1.14),
-        ("REST", -45.0, -0.79),
-        ("REST", 0.0, -0.47),
-        ("REST", 20.0, -0.47),
-        ("REST_SHUT", -68.8, -1.14),
-        ("HOVER", -68.8, -1.14),
-        ("HOVER", -45.0, -0.78),
-        ("HOVER", 0.0, -0.32),
-        ("PRESENT", -68.8, -1.14),
-        ("HOME", -68.8, -1.14),
+        ("REST", -68.8, -1.1946),
+        ("REST", -45.0, -0.8424),
+        ("REST", 0.0, -0.4704),
+        ("REST", 20.0, -0.4704),
+        ("REST_SHUT", -68.8, -1.1946),
+        ("HOVER", -68.8, -1.1864),
+        ("HOVER", -45.0, -0.8320),
+        ("HOVER", 0.0, -0.3182),
+        ("PRESENT", -68.8, -1.1864),
+        ("HOME", -68.8, -1.1864),
     ])
     def test_centreline_inside_surface_shortfall_is_capsule_slack(
             self, posture, gripper_deg, expected_surface_cm):
         surface, centreline = _shells_axis_margins(posture, gripper_deg)
         assert centreline >= -1e-9
-        assert surface == pytest.approx(expected_surface_cm / 100.0, abs=0.003)
+        assert surface == pytest.approx(expected_surface_cm / 100.0, abs=0.001)
         # the shortfall never exceeds the widest shells capsule's radius
         widest = max(r for n, _p0, _p1, r in
                      link_capsules([getattr(R, posture)[j] for j in R.ARM7],
                                    "right", gripper_deg, hand="shells")
-                     if n in ("thumb", "finger", "wrist_ball"))
+                     if n in _SHELLS_HAND_CAPSULE_NAMES)
         assert -surface <= widest + 1e-9
 
 
-class TestShellsMissThumbPad:
-    """DISCREPANCY in the opt-in "shells" model, found 2026-09-14 while
-    adding the collision pads to the coverage reference.
+class TestShellsCoversThumbAndFingerPads:
+    """Regression case for the DISCREPANCY `TestShellsMissThumbPad` pinned
+    2026-09-14, closed the same day (Slice 2, ADR-0003 item 4).
 
-    The MJCF's r_thumb_col (pos z -0.085, half 0.022 -> z in [-0.107, -0.063]
-    below r_gripper_thumb) sits ENTIRELY below the visual r_thumb_body box
-    (z in [-0.060, +0.016]); the MJCF comment says the pinch pads were
-    placed deliberately rather than derived from the "bulky visual box".
-    "shells" is built from the visual boxes, so it does not contain the pad
-    physics actually contacts with: the pad's far corner is 2.05 cm outside
-    every shells capsule (1.25 cm with the finger shut, when the finger
-    capsule covers part of it).  r_finger_col is 0.5 mm outside the finger
-    capsule (it is 2 mm wider in X than the shell).
+    Before this PR: the MJCF's r_thumb_col (pos z -0.085, half 0.022 -> z in
+    [-0.107, -0.063] below r_gripper_thumb) sat ENTIRELY below the visual
+    r_thumb_body box (z in [-0.060, +0.016]); the MJCF comment says the
+    pinch pads were placed deliberately rather than derived from the "bulky
+    visual box". "shells" was built from the visual boxes only, so it did
+    not contain the pad physics actually contacts with: the pad's far
+    corner was 2.05 cm outside every shells capsule (1.25 cm with the
+    finger shut, when the finger capsule covered part of it), and
+    r_finger_col was 0.5 mm outside the finger capsule (it is 2 mm wider in
+    X than the shell).
 
-    No consumer flies "shells" and this slice does not change that.  It
-    means the fixture table's shells column (test_footprint_boards.py) is a
-    statement about the visual shells, not about the collision hand, and
-    that "shells" must gain a thumb-pad capsule before it can be a guard
-    (docs/adr/0003, Slice 2).  Pinned so the gap cannot be forgotten; when
-    "shells" is extended, re-derive these numbers.
+    Now: a dedicated `thumb_pad` capsule covers `r_thumb_col`, and `finger`'s
+    radius is widened to `hypot(0.014, 0.008)` (the pad's own corner
+    distance, which exceeds the shell's) to cover `r_finger_col`. Both are
+    inside to machine precision -- the same construction the tube uses,
+    verified corner-for-corner off MuJoCo's own frames, not approximated.
     """
 
-    @pytest.mark.parametrize("posture,gripper_deg,expected_out_cm", [
+    @pytest.mark.parametrize("posture,gripper_deg,old_thumb_pad_out_cm", [
         ("HOVER", -68.8, 2.05), ("HOVER", -45.0, 2.05), ("HOVER", 0.0, 2.05),
         ("HOVER", 20.0, 1.25),
         ("REST", -68.8, 2.05), ("REST", -45.0, 2.05), ("REST", 0.0, 2.05),
         ("REST", 20.0, 1.25),
     ])
-    def test_thumb_pad_outside_every_shells_capsule(
-            self, compiled, posture, gripper_deg, expected_out_cm):
+    def test_thumb_and_finger_pads_now_inside_the_shells_capsules(
+            self, compiled, posture, gripper_deg, old_thumb_pad_out_cm):
         m, d = compiled
         jq = _joint_qpos_addrs(m)
         q7 = [getattr(R, posture)[j] for j in R.ARM7]
         _set_arm(m, d, jq, q7, gripper_deg)
         caps = [(np.array(p0), np.array(p1), r) for n, p0, p1, r in
                 link_capsules(q7, "right", gripper_deg, hand="shells")
-                if n in ("thumb", "finger", "wrist_ball")]
+                if n in _SHELLS_HAND_CAPSULE_NAMES]
 
         def outside(p):
             return min(
@@ -442,6 +535,10 @@ class TestShellsMissThumbPad:
 
         thumb_pad = max(outside(p) for p in _box_corners(m, d, "r_thumb_col"))
         finger_pad = max(outside(p) for p in _box_corners(m, d, "r_finger_col"))
-        assert thumb_pad == pytest.approx(expected_out_cm / 100.0, abs=0.002)
-        assert finger_pad == pytest.approx(0.0005, abs=0.0005)
-        assert thumb_pad > 0.01, "the shells thumb-pad gap has closed -- re-derive"
+        assert thumb_pad <= 1e-9, (
+            f"{posture} gripper={gripper_deg}: r_thumb_col still "
+            f"{thumb_pad * 100:.2f} cm outside every shells capsule "
+            f"(was {old_thumb_pad_out_cm} cm before the thumb_pad capsule)")
+        assert finger_pad <= 1e-9, (
+            f"{posture} gripper={gripper_deg}: r_finger_col still "
+            f"{finger_pad * 100:.3f} cm outside the widened finger capsule")

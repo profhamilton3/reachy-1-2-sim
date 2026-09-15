@@ -180,11 +180,12 @@ _FINGER_FRAME_BOXES = (
 # The tube above is one isotropic capsule around BOTH pads, sized from the
 # aperture alone.  It is what every consumer flies against today and stays
 # the default.  "shells" is a second, opt-in `link_capsules` mode: one
-# capsule per MJCF visual shell (upper_arm and forearm are unchanged; the
-# hand becomes three capsules instead of one), built from the same frames
-# MuJoCo itself places these bodies at (native_mujoco/model/reachy_1_2.xml),
-# not measured or eyeballed independently — `test_arm_geometry_mjcf.py`
-# checks the two agree to 2 mm.
+# capsule per MJCF visual shell plus one for each collision pad (upper_arm
+# and forearm are unchanged; the hand becomes four capsules instead of one:
+# thumb, thumb_pad, finger, wrist_ball), built from the same frames MuJoCo
+# itself places these bodies at (native_mujoco/model/reachy_1_2.xml), not
+# measured or eyeballed independently — `test_arm_geometry_mjcf.py` checks
+# the two agree to 2 mm.
 #
 # r_wrist2hand -> r_gripper_thumb -> r_gripper_finger, exactly as the MJCF
 # nests them: the thumb hangs a fixed offset below the wrist, WRIST_ROLL
@@ -203,6 +204,33 @@ _THUMB_SHELL_RADIUS = math.hypot(0.025, 0.028)
 _FINGER_BOX_CENTER = np.array([0.0, 0.0, -0.038])
 _FINGER_BOX_HALF_Z = 0.038
 _FINGER_SHELL_RADIUS = math.hypot(0.012, 0.010)
+
+# Collision pads (`r_thumb_col` / `r_finger_col`, same MJCF file), added
+# 2026-09-14 (Slice 2, ADR-0003 item 4 -- formerly pinned as a gap by
+# TestShellsMissThumbPad, now closed and checked by
+# TestShellsCoversThumbAndFingerPads).  These are what physics actually
+# contacts, and "shells" did not contain them:
+#
+#   r_thumb_col sits entirely BELOW the visual thumb box (z in [-0.107,
+#   -0.063] against the shell's [-0.060, +0.016] in the thumb frame) -- no
+#   widening of the existing `thumb` capsule can reach it without extending
+#   past the shell's own end cap, so it gets its own capsule, same axis
+#   convention (local Z through the box centre, radius the XY half-diagonal).
+#
+#   r_finger_col's z-range ([-0.069, -0.041]) already falls inside the
+#   visual finger box's axis span ([-0.076, 0]); it is 2 mm wider in X
+#   (half 0.014 vs the shell's 0.012) and 2 mm narrower in Y (0.008 vs
+#   0.010).  Both boxes share the same centreline (x=y=0), so the tightest
+#   single capsule containing both is the LARGER of their own two corner
+#   distances -- hypot(0.014, 0.008) = 1.61 cm, vs the shell's own hypot
+#   (0.012, 0.010) = 1.56 cm -- not hypot(pad_x, shell_y) = 1.72 cm, which
+#   would pad the bound past what either box actually needs and make
+#   "shells" looser than necessary against the sweep reference.
+_THUMB_PAD_BOX_CENTER = np.array([0.0, 0.005, -0.085])
+_THUMB_PAD_BOX_HALF_Z = 0.022
+_THUMB_PAD_RADIUS = math.hypot(0.014, 0.008)
+_FINGER_PAD_RADIUS = math.hypot(0.014, 0.008)
+_FINGER_RADIUS = max(_FINGER_SHELL_RADIUS, _FINGER_PAD_RADIUS)
 
 _WRIST_BALL_RADIUS = 0.028
 
@@ -377,11 +405,14 @@ def link_capsules(joints: Sequence[float], side: str = "right",
 
     ``hand`` selects the hand model. ``"tube"`` (default, unchanged, and every
     consumer's current behaviour) is one isotropic capsule around both pads.
-    ``"shells"`` is five capsules instead of three: ``upper_arm`` and
-    ``forearm`` unchanged, plus ``thumb``, ``finger`` and ``wrist_ball`` in
-    place of ``hand`` -- one capsule per MJCF visual shell, at the frames
-    MuJoCo itself places them at.  See the module-level comment above
-    ``_THUMB_ORIGIN_OFFSET``.  No consumer passes this yet; it exists to be
+    ``"shells"`` is six capsules instead of three: ``upper_arm`` and
+    ``forearm`` unchanged, plus ``thumb``, ``thumb_pad``, ``finger`` and
+    ``wrist_ball`` in place of ``hand`` -- one capsule per MJCF visual shell,
+    plus ``thumb_pad`` for the collision pad that sits below the visual
+    thumb box (``finger``'s radius is widened to also cover the finger's own
+    collision pad) -- at the frames MuJoCo itself places them at.  See the
+    module-level comment above ``_THUMB_ORIGIN_OFFSET`` and
+    ``_THUMB_PAD_BOX_CENTER``.  No consumer passes this yet; it exists to be
     validated against the compiled MJCF (`test_arm_geometry_mjcf.py`) ahead of
     #56/#74's decision to use it.
     """
@@ -414,12 +445,18 @@ def link_capsules(joints: Sequence[float], side: str = "right",
 
 def _shells_hand_capsules(wrist: np.ndarray, gripper_deg: float,
                           joints: Sequence[float], side: str) -> List[Capsule]:
-    """thumb / finger / wrist_ball capsules for `link_capsules(hand="shells")`.
+    """thumb / thumb_pad / finger / wrist_ball capsules for
+    `link_capsules(hand="shells")`.
 
     Rebuilds the chain up to wrist_pitch (the frame the thumb offset is
     actually expressed in, before wrist_roll rotates the thumb -- and
     everything under it -- about the wrist's own local X) directly from
     `joints`, term for term the same way `link_frames` composes it.
+
+    `thumb_pad` covers `r_thumb_col` (rides the thumb frame, same as
+    `thumb`); `finger`'s radius is widened to also cover `r_finger_col`
+    (see `_FINGER_RADIUS`).  Both collision pads added 2026-09-14, Slice 2 --
+    see the module comment above `_THUMB_PAD_BOX_CENTER`.
     """
     q = np.radians(np.asarray(list(joints)[:7], dtype=float))
     sign = 1.0 if side == "right" else -1.0
@@ -441,6 +478,11 @@ def _shells_hand_capsules(wrist: np.ndarray, gripper_deg: float,
     thumb_b = thumb_origin + R_thumb @ (
         _THUMB_BOX_CENTER + np.array([0.0, 0.0, _THUMB_BOX_HALF_Z]))
 
+    thumb_pad_a = thumb_origin + R_thumb @ (
+        _THUMB_PAD_BOX_CENTER + np.array([0.0, 0.0, -_THUMB_PAD_BOX_HALF_Z]))
+    thumb_pad_b = thumb_origin + R_thumb @ (
+        _THUMB_PAD_BOX_CENTER + np.array([0.0, 0.0, _THUMB_PAD_BOX_HALF_Z]))
+
     R_finger = R_thumb @ _rotx(math.radians(gripper_deg))
     finger_origin = thumb_origin + R_thumb @ _FINGER_HINGE_OFFSET
     finger_a = finger_origin + R_finger @ (
@@ -450,7 +492,8 @@ def _shells_hand_capsules(wrist: np.ndarray, gripper_deg: float,
 
     return [
         ("thumb", xyz(thumb_a), xyz(thumb_b), _THUMB_SHELL_RADIUS),
-        ("finger", xyz(finger_a), xyz(finger_b), _FINGER_SHELL_RADIUS),
+        ("thumb_pad", xyz(thumb_pad_a), xyz(thumb_pad_b), _THUMB_PAD_RADIUS),
+        ("finger", xyz(finger_a), xyz(finger_b), _FINGER_RADIUS),
         ("wrist_ball", xyz(wrist), xyz(wrist), _WRIST_BALL_RADIUS),
     ]
 
