@@ -1,0 +1,158 @@
+{
+ "log": "recorder_logs/route_clearance_LOWER_TO_REST_20260915T175021Z.json",
+ "sidecar": "recorder_logs/route_clearance_LOWER_TO_REST_20260915T175021Z.link.json",
+ "route": "LOWER_TO_REST",
+ "schema_version": 3,
+ "n_samples": 1200,
+ "span_s": 59.952,
+ "identity": {
+  "ok": true,
+  "reasons": [],
+  "run_dir": "/Users/terrancehamilton/reachy-1-2-sim-e1/docs/reviews/probes-2026-09-15-e1-tabletop-sim/e1_server_runs/run_20260915_173758",
+  "joint_agreement_deg_max": 0.004325967749863935,
+  "status": {
+   "backend": "mujoco-remote",
+   "frames_stale": false,
+   "left_age_ms": 43,
+   "right_age_ms": 41,
+   "left_seq": 18421,
+   "right_seq": 18421
+  }
+ },
+ "manifest_scene_sha256": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+ "server_run_dir": "/Users/terrancehamilton/reachy-1-2-sim-e1/docs/reviews/probes-2026-09-15-e1-tabletop-sim/e1_server_runs/run_20260915_173758",
+ "settled_pose_check": {
+  "pool_box_1": {
+   "yaml_xyz": [
+    0.4318,
+    -0.1524,
+    0.76
+   ],
+   "stream_xyz": [
+    0.4318000154400941,
+    -0.15240002597246244,
+    0.7599550413200056
+   ],
+   "dxy_m": 3.021531582312399e-08,
+   "dz_m": 4.495867999443348e-05,
+   "ok": true
+  }
+ },
+ "displacement_m": {
+  "foam_block": 8.060337391123999e-09,
+  "pool_cyl_1": 7.2673428922796636e-09,
+  "pool_box_3": 7.405459886415485e-09,
+  "blue_cylinder": 7.3119790250079905e-09,
+  "soda_can": 7.303962064981354e-09,
+  "pool_cyl_2": 7.288636397285828e-09,
+  "pool_box_2": 7.403419933963821e-09,
+  "red_cube": 7.3840624611174615e-09,
+  "pool_cyl_3": 7.2219477591055686e-09,
+  "pool_box_1": 8.025004696615091e-09
+ },
+ "contacts_recorded": true,
+ "contacts": [],
+ "contacts_window": {
+  "seq_lo": 34129,
+  "seq_hi": 37131,
+  "wall_lo_ns": 144904138283125,
+  "wall_hi_ns": 144964210050541,
+  "states_in_window": 3003,
+  "states_with_contacts_key": 3003,
+  "reset_in_window": false,
+  "covered": true,
+  "seq_contiguous": true
+ },
+ "no_reshape_asserted": true,
+ "alignment_summary": {
+  "n": 1200,
+  "wall_offset_s_min": -0.076065875,
+  "wall_offset_s_median": 0.0145534585,
+  "wall_offset_s_max": 0.069806708,
+  "joint_residual_deg_max": 0.17653809742962273
+ },
+ "server_side_clearance_pool_box_1_worst": {
+  "tube_m": -0.039894489383284895,
+  "tube_at_t_s": 9.550516125018476,
+  "tube_gripper_deg_at_worst": -44.64,
+  "shells_m": 0.06162900213085709,
+  "shells_at_t_s": 9.350160000001779
+ },
+ "motion_in_recording": {
+  "first_moving_t_s": 3.2511310830013826,
+  "last_moving_t_s": 9.70240858301986,
+  "parked_tail_s": 50.25
+ },
+ "first_sample_joints_deg": {
+  "r_shoulder_pitch": -68.96,
+  "r_shoulder_roll": -24.83,
+  "r_arm_yaw": 0.09,
+  "r_elbow_pitch": -79.72,
+  "r_forearm_yaw": -0.02,
+  "r_wrist_pitch": 0.07,
+  "r_wrist_roll": -0.04,
+  "r_gripper": -45.03
+ },
+ "last_sample_joints_deg": {
+  "r_shoulder_pitch": -39.95,
+  "r_shoulder_roll": -9.97,
+  "r_arm_yaw": -0.04,
+  "r_elbow_pitch": -45.27,
+  "r_forearm_yaw": -0.01,
+  "r_wrist_pitch": -9.84,
+  "r_wrist_roll": 30.01,
+  "r_gripper": -44.99
+ },
+ "gripper_deg": {
+  "min": -45.04,
+  "max": 19.19
+ },
+ "tail_check_output": "target REST = {\"r_shoulder_pitch\": -40.0, \"r_shoulder_roll\": -10.0, \"r_arm_yaw\": 0.0, \"r_elbow_pitch\": -45.0, \"r_forearm_yaw\": 0.0, \"r_wrist_pitch\": -10.0, \"r_wrist_roll\": 30.0, \"r_gripper\": -45.0}\ntail_samples=61 (last 3.0s)  max_gross_err_deg=0.3  max_spread_deg=0.0  r_gripper=-45.0 (target -45.0)\ngross residuals: r_shoulder_pitch=0.0, r_shoulder_roll=0.0, r_arm_yaw=0.0, r_elbow_pitch=0.3\nwrist residuals (info): r_forearm_yaw=0.0, r_wrist_pitch=0.2, r_wrist_roll=0.0\nsamples_ok=True posture_ok=True still_ok=True gripper_ok=True\nPARKED_AT_REST=yes\n",
+ "linker_stdout": "Wrote runs/route_clearance_LOWER_TO_REST_20260915T175021Z.link.json: contacts=0 (evidence on 3003/3003 states, reset_in_window=False)\n",
+ "notebook_cell": {
+  "tool": "rig_motion.from_present (= fly_route LOWER_TO_REST)",
+  "cell": 4,
+  "go": "go",
+  "recorder_status": "ready",
+  "t_start_mono_ns": 144907298753166,
+  "t_start_wall_ns": 1789494564607632000,
+  "start_pose": {
+   "r_shoulder_pitch": -69.0,
+   "r_shoulder_roll": -24.8,
+   "r_arm_yaw": 0.1,
+   "r_elbow_pitch": -79.7,
+   "r_forearm_yaw": -0.0,
+   "r_wrist_pitch": 0.1,
+   "r_wrist_roll": -0.0,
+   "r_gripper": -45.0
+  },
+  "outcome": "returned",
+  "reached": [
+   "REST_SHUT",
+   "REST"
+  ],
+  "phases": [
+   [
+    144907299181958,
+    "REST_SHUT"
+   ],
+   [
+    144910629689583,
+    "REST"
+   ]
+  ],
+  "t_end_mono_ns": 144913960452166,
+  "t_end_wall_ns": 1789494571269457000,
+  "elapsed_s": 6.661699,
+  "end_pose": {
+   "r_shoulder_pitch": -40.0,
+   "r_shoulder_roll": -9.8,
+   "r_arm_yaw": 0.1,
+   "r_elbow_pitch": -45.3,
+   "r_forearm_yaw": -0.0,
+   "r_wrist_pitch": -9.8,
+   "r_wrist_roll": 30.0,
+   "r_gripper": -45.0
+  }
+ }
+}
