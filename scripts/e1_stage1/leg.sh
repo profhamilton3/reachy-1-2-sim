@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # One recorded leg: recorder -> linker -> tail check. Every non-zero exit is a
-# STOP (writes control/stop and exits non-zero). DUR is read from
-# plan_<CYCLE>.json (single source of truth, plan.py), never a positional
-# argument -- adapted from PR #117's leg.sh (control/tools/leg.sh), which
-# took DUR on the command line.
+# STOP (writes control/stop and exits non-zero). DUR and the board's scene
+# path are both read from plan_<CYCLE>.json (single source of truth,
+# plan.py's BOARDS registry), never positional arguments -- adapted from PR
+# #117's leg.sh (control/tools/leg.sh), which took DUR on the command line
+# and hard-coded the B4 scene path (decision note
+# outputs/e1-stage2-decision-2026-09-15.md §6 item 1).
 #
 # All three python invocations below use $E1_PYTHON (default: python3),
 # not whatever "python3" resolves to on PATH. measure_route_clearance.py
@@ -21,9 +23,11 @@ stop() { echo "STOP: $1" | tee -a "$P/control/stop"; exit 9; }
 [ -f "$P/control/stop" ] && stop "stop marker already present"
 DUR=$("$PY" -c "import json,sys; print(json.load(open(sys.argv[1]))['legs'][sys.argv[2]]['dur_s'])" "$P/plan_${CYCLE}.json" "$NAME") \
   || stop "could not read DUR for $NAME from $P/plan_${CYCLE}.json"
+SCENE_REL=$("$PY" -c "import json,sys; print(json.load(open(sys.argv[1]))['scene_rel'])" "$P/plan_${CYCLE}.json") \
+  || stop "could not read scene_rel for $CYCLE from $P/plan_${CYCLE}.json"
 cd "$REPO"
 REACHY_SIM_RECORD_CLEARANCE=1 "$PY" -u scripts/measure_route_clearance.py \
-  --route "$ROUTE" --duration "$DUR" --host localhost --scene "$REPO/scenes/e1_boards/B4_pool_box_1_r2c3.yaml" \
+  --route "$ROUTE" --duration "$DUR" --host localhost --scene "$REPO/$SCENE_REL" \
   --record-root "$P/e1_server_runs" > "$P/control/recorder_$NAME.log" 2>&1
 rc=$?; echo "recorder exit=$rc" >> "$P/control/recorder_$NAME.log"
 [ $rc -eq 0 ] || stop "recorder $NAME exit $rc"

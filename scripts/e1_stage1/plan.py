@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
-from typing import Dict, NamedTuple, Tuple
+from typing import Dict, NamedTuple, Optional, Tuple
 
 #: Self-contained on purpose (project memory: "Test Path Gotcha" -- no
 #: conftest.py, and a file can pass only via sys.path leakage from another
@@ -210,3 +210,163 @@ def cycle_durations(cycle: str, *, lead_in_s: float = LEAD_IN_S,
     return {leg.name: leg_duration_s(leg.route, lead_in_s=lead_in_s,
                                       compliance_timeout_s=compliance_timeout_s)
             for leg in CYCLES[cycle]}
+
+
+# ── Stage 2: board registry (decision note
+# outputs/e1-stage2-decision-2026-09-15.md §5/§6 item 1) ────────────────────
+#
+# Stage 1 flew B4 only, with the scene path hard-coded into the generator's
+# `connect_cell_source` and into `leg.sh`/`parked.sh`'s `--scene` literal.
+# Stage 2's authorized scope is exactly these three boards, in this fixed
+# order (B4, then B1, then B2 -- enforced operationally, not by this
+# module: nothing here remembers which boards a *previous* run already
+# flew). B3/B5 were proposed as an extension and never authorized; B6 is
+# `make_e1_boards.py`'s deliberately-unflyable incident board and is never
+# named in `REACHY_SIM_SCENE` anywhere in this tree -- naming any of the
+# three by mistake must fail with a reason, not fall through to a generic
+# "unknown board".
+BOARDS: Dict[str, str] = {
+    "B4": "scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+    "B1": "scenes/e1_boards/B1_evidence.yaml",
+    "B2": "scenes/e1_boards/B2_foam_r3c3.yaml",
+}
+BOARD_ORDER: Tuple[str, ...] = ("B4", "B1", "B2")
+_UNAUTHORIZED_BOARDS: Tuple[str, ...] = ("B3", "B5", "B6")
+
+
+def board_scene_rel(board: str) -> str:
+    """`scenes/e1_boards/<file>.yaml`, relative to the repo root, for one of
+    the three Stage 2 boards -- the single place that maps a board id to a
+    scene path, so the generator, `leg.sh`, and `parked.sh` all resolve the
+    same board to the same file rather than carrying independent copies of
+    the path string."""
+    if board in _UNAUTHORIZED_BOARDS:
+        raise ValueError(
+            f"board {board!r} is not authorized for Stage 2 (decision note "
+            f"outputs/e1-stage2-decision-2026-09-15.md §5); the flyable "
+            f"boards, in order, are {BOARD_ORDER}")
+    try:
+        return BOARDS[board]
+    except KeyError:
+        raise ValueError(
+            f"unknown board {board!r}; choose from {BOARD_ORDER}") from None
+
+
+# ── Stage 2: repetition-aware cycle/leg identities (decision note §5/§6
+# item 2) ────────────────────────────────────────────────────────────────
+#
+# Stage 1's `CYCLES` above names legs `setup_a`, `flight_a`, ... -- fixed
+# strings, fine for one cycle per shape ever generated. Stage 2 flies 6
+# repetitions of each shape per board (54 flights + 36 setups, decision
+# note §5); reusing those same leg names across repetitions would reuse
+# `go_<leg>` / `<leg>_done` / `recorder_<leg>.log` marker names too, so a
+# second repetition's motion cell would find the FIRST repetition's
+# leftover `go_setup_a` already on disk and fire without a fresh operator
+# signal (decision note §6 item 2 -- the concrete bug this section exists
+# to close). `SHAPES` holds the same three leg chains as `CYCLES` (kept
+# separate rather than deriving `CYCLES` from it, so Stage 1's exact,
+# already-evidenced structure is never touched by a Stage 2 change --
+# `test_stage2_shapes_match_legacy_cycles` in the test suite pins the two
+# tables equal so they cannot silently drift apart); `stage2_legs` builds a
+# leg tuple whose every `.name` embeds board + shape + repetition, making
+# every marker name globally unique by construction.
+class LegSpec(NamedTuple):
+    kind: str  # "setup" or "flight" -- also the leg-name suffix
+    route: str
+    tool: str
+    desc: str
+    check: str
+
+
+SHAPES: Dict[str, Tuple[LegSpec, ...]] = {
+    "a": (
+        LegSpec("setup", "RAISE_TO_SIDE", "primitives.raise_to_side",
+                "HOME->PRESENT", "PLACE_ROUTE_start"),
+        LegSpec("flight", "LOWER_TO_REST", "rig_motion.from_present",
+                "PRESENT->REST", "PRESENT"),
+    ),
+    "b": (
+        LegSpec("flight", "PLACE_ROUTE", "rig_motion.deploy_to_rest",
+                "HOME->REST", "PLACE_ROUTE_start"),
+    ),
+    "c": (
+        LegSpec("setup", "PLACE_ROUTE", "rig_motion.deploy_to_rest",
+                "HOME->REST", "PLACE_ROUTE_start"),
+        LegSpec("flight", "LIFT_TO_PRESENT", "rig_motion.to_present",
+                "REST->PRESENT", "REST"),
+    ),
+}
+SHAPE_ORDER: Tuple[str, ...] = ("a", "b", "c")
+
+#: Repetitions per route per board (decision note §5): "6 per route per
+#: board -> 54 flights"; shapes a/c also carry one recorded setup each.
+REPS_PER_SHAPE: int = 6
+
+
+def cycle_id(board: str, shape: str, rep: int) -> str:
+    """`S2-<board>-<shape>-r<rep>` -- unique per board+shape+repetition,
+    and embedded in every leg name `stage2_legs` builds for it, so binding
+    markers (`binding_ok_<cycle_id>` / `binding_FAIL_<cycle_id>`) and the
+    frozen `plan_<cycle_id>.json` are unique the same way."""
+    if shape not in SHAPES:
+        raise ValueError(f"unknown shape {shape!r}; choose from {SHAPE_ORDER}")
+    if rep < 1:
+        raise ValueError(f"rep must be >= 1, got {rep}")
+    board_scene_rel(board)  # raises on an unauthorized/unknown board
+    return f"S2-{board}-{shape}-r{rep}"
+
+
+def stage2_legs(board: str, shape: str, rep: int) -> Tuple[Leg, ...]:
+    cid = cycle_id(board, shape, rep)
+    return tuple(
+        Leg(f"{cid}-{spec.kind}", spec.route, spec.tool, spec.desc, spec.check)
+        for spec in SHAPES[shape]
+    )
+
+
+# ── Stage 2 policy A: starting-state verification (decision note §4) ──────
+#
+# "Recommended: policy A -- stiff-zero for every Stage 2 cycle, declared
+# and verified." The two accepted populations, read from a settled pose in
+# degrees: every joint within `STIFF_ZERO_TOL_DEG` of zero is "stiff-zero";
+# gripper/wrist_roll matching the gravity keyframe within
+# `KEYFRAME_SAG_TOL_DEG` is "keyframe-sag"; anything else is neither, and
+# the decision note is explicit that this "failure stops progression" --
+# `classify_start_variant` returns `None` for that case rather than
+# guessing which population it belongs to.
+STIFF_ZERO_TOL_DEG: float = 1.0
+KEYFRAME_SAG_GRIPPER_DEG: float = -36.0
+KEYFRAME_SAG_WRIST_ROLL_DEG: float = 39.0
+KEYFRAME_SAG_TOL_DEG: float = 5.0
+
+
+def classify_start_variant(
+    pose: Dict[str, float], *, gross_joints: Tuple[str, ...] = _R.GROSS_JOINTS,
+) -> Optional[str]:
+    """Pure classification of a settled pose (degrees) into `"stiff-zero"`,
+    `"keyframe-sag"`, or `None` (matches neither -- STOP). No I/O: callers
+    read the pose from wherever it lives (a settle sample, a parked
+    recording's last sample) and pass it in as a plain dict."""
+    try:
+        gripper = float(pose["r_gripper"])
+        wrist_roll = float(pose["r_wrist_roll"])
+        gross = [float(pose[j]) for j in gross_joints]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    if (all(abs(v) <= STIFF_ZERO_TOL_DEG for v in gross)
+            and abs(gripper) <= STIFF_ZERO_TOL_DEG
+            and abs(wrist_roll) <= STIFF_ZERO_TOL_DEG):
+        return "stiff-zero"
+    if (abs(gripper - KEYFRAME_SAG_GRIPPER_DEG) <= KEYFRAME_SAG_TOL_DEG
+            and abs(wrist_roll - KEYFRAME_SAG_WRIST_ROLL_DEG) <= KEYFRAME_SAG_TOL_DEG):
+        return "keyframe-sag"
+    return None
+
+
+#: Stage 0's one-time policy-A "arm on" step has no route to budget --
+#: named here so its recorded duration is still derived from the same
+#: three terms as every other recorded action, not a separate literal.
+def armon_duration_s(*, lead_in_s: float = LEAD_IN_S,
+                      compliance_timeout_s: float = COMPLIANCE_TIMEOUT_S) -> float:
+    return lead_in_s + compliance_timeout_s + PARKED_TAIL_S + MARGIN_S

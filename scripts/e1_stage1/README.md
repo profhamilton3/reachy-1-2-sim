@@ -149,3 +149,97 @@ does `reachy.turn_on("r_arm")` still advance `cmd_seq`, and can that make
 noted in the assignment's verified facts; `mujoco_remote_backend.py` and
 `fake_reachy_server.py` read from this tree at `4d727c0`. No SDK was
 instantiated and no server was started to answer this section.)
+
+## Stage 2 additions (decision note `outputs/e1-stage2-decision-2026-09-15.md`)
+
+Stage 1 flew one board (B4) once. Stage 2 flies three boards, 18 cycles
+each (6 repetitions of shapes `a`/`b`/`c`), so this package gained the
+identity and preparation machinery Stage 1 never needed. Nothing below
+changes a guard, margin, tolerance, route, or stop rule -- it is
+generator/shell tooling, same as everything above.
+
+### Board parameterization
+
+`plan.BOARDS` (`B4`/`B1`/`B2` -> `scenes/e1_boards/<file>.yaml`) is the one
+place a board id maps to a scene path. `make_cycle_notebook.generate`
+(legacy, defaults to `board="B4"` -- byte-identical output to before),
+`generate_repetition`, and `generate_stage0` all resolve the scene through
+`plan.board_scene_rel`, freeze the result into `plan_<identity>.json` as
+`scene_rel`, and `leg.sh`/`parked.sh` read it from there (or, for
+`parked.sh`, resolve it directly via `--board`) rather than carrying an
+independent path literal. `B3`/`B5` (never authorized for Stage 2) and
+`B6` (the deliberately-unflyable incident board) are refused by name with
+a reason, not silently treated as "unknown".
+
+### Repetition-aware identity (decision note §6 item 2)
+
+Stage 1's leg names (`setup_a`, `flight_a`, ...) were fixed strings --
+fine for one cycle per shape ever generated. Stage 2 flies six
+repetitions of each shape per board; reusing those names would reuse
+`go_<leg>`/`<leg>_done`/`recorder_<leg>.log` marker names too, so a second
+repetition could find the first repetition's leftover `go_setup_a`
+already on disk and fire its motion cell without a fresh operator signal.
+`plan.stage2_legs(board, shape, rep)` gives every leg a name built from
+`plan.cycle_id(board, shape, rep)` (`S2-<board>-<shape>-r<rep>`), so every
+marker is unique by construction. `make_cycle_notebook.generate_repetition`
+additionally refuses, before writing anything, if this identity's plan
+file or any of its legs' markers already exist in the evidence directory
+(a stale marker from a crashed prior attempt, not just a plan file, is
+enough to refuse), and if the evidence directory has already recorded a
+*different* session id for this board (`control/e1_stage2_sessions.json`
+-- one server session per board, per decision note §5).
+
+### Policy A: Stage 0 arm-on, and the per-cycle start-variant gate (decision note §4)
+
+`turn_on("r_arm")` is **not** treated as motion-free here, even though
+going stiff pins `goal_position` to `present_position` for each joint (see
+the already-stiff-arm investigation above) -- the only way to know nothing
+moved is to record it and check, not to assert it. `make_cycle_notebook
+.generate_stage0(board, session, ...)` generates a small, once-per-board-
+session notebook (`armon_cell_source`) that runs `turn_on("r_arm")` +
+`require_compliance` gated exactly like a leg (go-marker, recorder,
+baseline `cmd_seq`) but calls no route function at all, and is recorded
+via the same `leg.sh` chain (`armon` is just another leg name in that
+notebook's own `plan_stage0_<board>_<session>.json`).
+
+Separately, every cycle's *preceding* parked recording is verified with
+`start_variant.py` (invoked from the promoted `parked.sh`, below): it
+classifies the recording's last sample with `plan.classify_start_variant`
+into `"stiff-zero"`, `"keyframe-sag"`, or neither. `parked.sh` treats
+"neither" as a STOP, same as a failed recorder/linker step -- "failure
+stops progression" is enforced the same way every other fail-closed check
+in this package is, not by a separate escalation path.
+
+### `parked.sh` promoted into the package (decision note §6 item 3)
+
+C3 parked recordings used to live only in each evidence directory's own
+`control/tools/parked.sh` (hand-copied, PR #117's shape). `parked.sh` is
+now versioned here, board-parameterized (`--board`, resolved via
+`plan.board_scene_rel`, not a hard-coded path), and runs the
+`start_variant.py` check described above after its (informational,
+`mode=start`) tail check. Usage:
+
+```
+parked.sh <repo> <evidence-dir> <name> <board> <route-label>
+```
+
+`<route-label>` is the upcoming cycle's first leg route -- the recorder's
+planned-vs-realised clearance reference only; nothing is flown regardless
+of its value, same as Stage 1's parked recordings.
+
+### CLI summary
+
+```
+# Legacy Stage 1 (unchanged):
+python -m scripts.e1_stage1.make_cycle_notebook S1a --repo <repo> --evidence-dir <dir>
+
+# Stage 2, one repetition:
+python -m scripts.e1_stage1.make_cycle_notebook \
+    --board B4 --shape a --rep 3 --session <session-id> \
+    --repo <repo> --evidence-dir <dir>
+
+# Stage 2, Stage 0 arm-on setup (once per board/session, before reset #1):
+python -m scripts.e1_stage1.make_cycle_notebook \
+    --stage0 --board B4 --session <session-id> \
+    --repo <repo> --evidence-dir <dir>
+```
