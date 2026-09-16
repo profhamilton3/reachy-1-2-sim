@@ -4,6 +4,7 @@ from here; the timing literals baked into the notebook's cell 1 are
 compared against this module by `test_notebook_constants_match_plan`."""
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 from typing import Dict, NamedTuple, Optional, Tuple
@@ -324,6 +325,26 @@ def stage2_legs(board: str, shape: str, rep: int) -> Tuple[Leg, ...]:
     )
 
 
+def stage0_identity(board: str, session: str) -> str:
+    """`stage0-<board>-<session>` -- unchanged shape from before PR #124's
+    M1 fix, factored out here so `make_cycle_notebook.generate_stage0` and
+    `stage0_armon_leg_name` share one definition instead of two copies of
+    the f-string."""
+    board_scene_rel(board)  # raises on an unauthorized/unknown board
+    return f"stage0-{board}-{session}"
+
+
+def stage0_armon_leg_name(board: str, session: str) -> str:
+    """`<stage0 identity>-armon` -- the Stage 0 arm-on leg's name, unique
+    per board+session the same way `stage2_legs` makes every Stage 2 leg
+    name unique per board+shape+repetition (PR #124 review, M1: before
+    this fix, EVERY Stage 0 notebook used the fixed marker names
+    `go_armon`/`recorder_armon.log`/`armon_done`, so one board's leftover
+    Stage 0 markers could satisfy a DIFFERENT board's armon cell -- the
+    one action this package insists is not motion-free)."""
+    return f"{stage0_identity(board, session)}-armon"
+
+
 # ── Stage 2 policy A: starting-state verification (decision note §4) ──────
 #
 # "Recommended: policy A -- stiff-zero for every Stage 2 cycle, declared
@@ -346,7 +367,18 @@ def classify_start_variant(
     """Pure classification of a settled pose (degrees) into `"stiff-zero"`,
     `"keyframe-sag"`, or `None` (matches neither -- STOP). No I/O: callers
     read the pose from wherever it lives (a settle sample, a parked
-    recording's last sample) and pass it in as a plain dict."""
+    recording's last sample) and pass it in as a plain dict.
+
+    Both known variants share the same gross-joint posture (the reset
+    teleports the model to one keyframe; §3's Stage 1 record shows the
+    keyframe-sag leg's gross joints already at `home` before `turn_on`,
+    same as the stiff-zero legs) -- they differ only in gripper/wrist_roll,
+    which settle at different rates depending on whether the arm was
+    compliant or stiff at reset time. PR #124 review, M3: a wildly-off
+    gross posture that happened to share keyframe-sag's gripper/wrist_roll
+    values used to classify as `"keyframe-sag"` anyway; requiring the gross
+    joints here for BOTH branches closes that gap rather than only guarding
+    `"stiff-zero"`."""
     try:
         gripper = float(pose["r_gripper"])
         wrist_roll = float(pose["r_wrist_roll"])
@@ -354,14 +386,66 @@ def classify_start_variant(
     except (KeyError, TypeError, ValueError):
         return None
 
-    if (all(abs(v) <= STIFF_ZERO_TOL_DEG for v in gross)
-            and abs(gripper) <= STIFF_ZERO_TOL_DEG
-            and abs(wrist_roll) <= STIFF_ZERO_TOL_DEG):
+    if not all(abs(v) <= STIFF_ZERO_TOL_DEG for v in gross):
+        return None
+    if abs(gripper) <= STIFF_ZERO_TOL_DEG and abs(wrist_roll) <= STIFF_ZERO_TOL_DEG:
         return "stiff-zero"
     if (abs(gripper - KEYFRAME_SAG_GRIPPER_DEG) <= KEYFRAME_SAG_TOL_DEG
             and abs(wrist_roll - KEYFRAME_SAG_WRIST_ROLL_DEG) <= KEYFRAME_SAG_TOL_DEG):
         return "keyframe-sag"
     return None
+
+
+#: Policy A (decision note §4, accepted): every Stage 2 cycle must start
+#: stiff-zero, not merely "a known variant" -- `keyframe-sag` means Stage
+#: 0's `turn_on` did not hold (motors off, server restarted, or Stage 0
+#: skipped) and must prevent motion the same as no evidence at all.
+REQUIRED_START_VARIANT: str = "stiff-zero"
+
+
+def start_variant_gate(
+    ctrl_dir: pathlib.Path, cycle: str,
+) -> Tuple[bool, Optional[str], Optional[dict]]:
+    """The per-cycle policy-A gate (decision note §4; PR #124 review, M3):
+    read `<ctrl_dir>/start_variant_<cycle>.json` (written by `parked.sh`,
+    see its `--cycle` argument) and require that it exists, parses, is
+    bound to THIS `cycle` (not a stale or wrong-cycle file), and that its
+    recorded `pose` independently re-classifies to `REQUIRED_START_VARIANT`
+    -- the declared `start_variant` field is cross-checked against a fresh
+    `classify_start_variant` call on the recorded pose rather than trusted
+    verbatim, so a hand-edited or stale-schema file cannot talk its way
+    past the gate. Returns `(ok, reason_if_not_ok, doc_or_None)`; callers
+    (the generated notebook's binding cell) fold `ok` into `PREV_OK` so a
+    failing gate makes every leg in the cycle `not_eligible` -- no
+    `turn_on`/route call is reachable without it."""
+    path = ctrl_dir / f"start_variant_{cycle}.json"
+    if not path.is_file():
+        return False, "missing start_variant evidence for this cycle", None
+    try:
+        doc = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        return False, f"start_variant evidence is corrupt: {exc}", None
+    if not isinstance(doc, dict):
+        return False, "start_variant evidence is not a JSON object", None
+    if doc.get("cycle") != cycle:
+        return (False,
+                f"start_variant evidence is bound to cycle "
+                f"{doc.get('cycle')!r}, not this cycle {cycle!r} -- stale "
+                "or wrong-cycle evidence must never authorize this cycle's "
+                "motion", doc)
+    recomputed = classify_start_variant(doc.get("pose") or {})
+    declared = doc.get("start_variant")
+    if recomputed != declared:
+        return (False,
+                f"declared start_variant {declared!r} does not match its "
+                f"own recorded pose (recomputed {recomputed!r})", doc)
+    if recomputed != REQUIRED_START_VARIANT:
+        return (False,
+                f"start_variant is {recomputed!r}, not "
+                f"{REQUIRED_START_VARIANT!r} -- policy A requires "
+                f"{REQUIRED_START_VARIANT!r} for every Stage 2 cycle "
+                "(decision note §4)", doc)
+    return True, None, doc
 
 
 #: Stage 0's one-time policy-A "arm on" step has no route to budget --

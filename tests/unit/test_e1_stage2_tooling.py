@@ -11,8 +11,10 @@ SDK, no notebook executed as a whole, no Docker.
 import ast
 import json
 import os
+import pathlib
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import types
@@ -25,6 +27,7 @@ sys.path.insert(0, os.path.join(_HERE, "../../scripts"))
 sys.path.insert(0, os.path.join(_HERE, "../../src"))
 
 from e1_stage1 import gating, make_cycle_notebook, plan, start_variant  # noqa: E402
+from reachy_ai.motion import rig_routes  # noqa: E402
 
 
 # ── Helpers (mirrors test_e1_stage1_notebook.py) ────────────────────────────
@@ -172,6 +175,17 @@ class TestClassifyStartVariant:
         pose = dict(self._GROSS, r_shoulder_pitch=10.0, r_gripper=0.0, r_wrist_roll=0.0)
         assert plan.classify_start_variant(pose) is None
 
+    def test_gross_joint_off_breaks_keyframe_sag_even_if_wrist_and_gripper_match(self):
+        """PR #124 review, M3: before the fix, a wildly-off gross posture
+        (r_shoulder_pitch=45 deg here) that happened to share
+        keyframe-sag's gripper/wrist_roll values still classified as
+        'keyframe-sag', exit 0, no stop. Both variants share the same
+        reset-keyframe gross posture (decision note §3's Stage 1 record);
+        requiring it for keyframe-sag too closes the gap."""
+        pose = dict(self._GROSS, r_shoulder_pitch=45.0,
+                    r_gripper=-36.0, r_wrist_roll=39.0)
+        assert plan.classify_start_variant(pose) is None
+
     def test_missing_key_is_none(self):
         assert plan.classify_start_variant({"r_gripper": 0.0}) is None
 
@@ -206,6 +220,18 @@ class TestStartVariantScript:
 
     def test_wrong_argc_exits_two(self):
         assert start_variant.main([]) == 2
+
+    def test_cycle_flag_missing_value_exits_two(self):
+        assert start_variant.main(["x.json", "--cycle"]) == 2
+
+    def test_cycle_flag_is_embedded_in_output(self, tmp_path, capsys):
+        gross = {j: 0.0 for j in plan._R.GROSS_JOINTS}
+        path = self._write_recording(tmp_path, dict(gross, r_gripper=0.0, r_wrist_roll=0.0))
+        rc = start_variant.main([str(path), "--cycle", "S2-B4-a-r3"])
+        assert rc == 0
+        doc = json.loads(capsys.readouterr().out)
+        assert doc["cycle"] == "S2-B4-a-r3"
+        assert doc["start_variant"] == "stiff-zero"
 
 
 # ── gating.py: stop outranks any later marker ──────────────────────────────
@@ -471,7 +497,7 @@ class TestArmonCell:
         assert code_cells[2].source.startswith("# Stage 0")
 
     def test_armon_cell_never_calls_any_route_function(self):
-        src = make_cycle_notebook.armon_cell_source()
+        src = make_cycle_notebook.armon_cell_source("stage0-B4-sess1-armon")
         tree = ast.parse(src)
         route_fns = {call.split(".")[-1] for call in plan.TOOL_TO_CALL}
         for node in ast.walk(tree):
@@ -479,7 +505,7 @@ class TestArmonCell:
                 assert node.func.attr not in route_fns
 
     def test_armon_cell_requires_compliance_gate_before_turn_on(self):
-        src = make_cycle_notebook.armon_cell_source()
+        src = make_cycle_notebook.armon_cell_source("stage0-B4-sess1-armon")
         assert "require_compliance(" in src
         assert "min_cmd_seq=" in src
         tree = ast.parse(src)
@@ -498,9 +524,10 @@ class TestArmonCell:
     # _build_namespace but for the no-route armon cell ──────────────────────
 
     def _build_armon_namespace(self, tmp_path, *, prev_ok, baseline,
-                                require_compliance_result, calls):
-        (tmp_path / "go_armon").touch()
-        (tmp_path / "recorder_armon.log").write_text("fly the route now")
+                                require_compliance_result, calls,
+                                leg_name="stage0-B4-sess1-armon"):
+        (tmp_path / f"go_{leg_name}").touch()
+        (tmp_path / f"recorder_{leg_name}.log").write_text("fly the route now")
 
         def fake_read_last_state(path):
             return baseline
@@ -555,7 +582,7 @@ class TestArmonCell:
         ns = self._build_armon_namespace(
             tmp_path, prev_ok=True, baseline={}, require_compliance_result=None,
             calls=calls)
-        src = make_cycle_notebook.armon_cell_source()
+        src = make_cycle_notebook.armon_cell_source("stage0-B4-sess1-armon")
         exec(compile(src, "<armon invalid baseline>", "exec"), ns)
         assert calls["turn_on"] == []
         assert calls["require_compliance"] == []
@@ -568,7 +595,7 @@ class TestArmonCell:
         ns = self._build_armon_namespace(
             tmp_path, prev_ok=True, baseline={"cmd_seq": 3},
             require_compliance_result=self._FakeChk(ok=False), calls=calls)
-        src = make_cycle_notebook.armon_cell_source()
+        src = make_cycle_notebook.armon_cell_source("stage0-B4-sess1-armon")
         exec(compile(src, "<armon compliance fails>", "exec"), ns)
         assert len(calls["turn_on"]) == 1
         assert ns["LEG"]["outcome"] == "STOP compliance_check"
@@ -580,7 +607,7 @@ class TestArmonCell:
         ns = self._build_armon_namespace(
             tmp_path, prev_ok=True, baseline={"cmd_seq": 3},
             require_compliance_result=self._FakeChk(ok=True), calls=calls)
-        src = make_cycle_notebook.armon_cell_source()
+        src = make_cycle_notebook.armon_cell_source("stage0-B4-sess1-armon")
         exec(compile(src, "<armon compliance ok>", "exec"), ns)
         assert len(calls["turn_on"]) == 1
         assert ns["LEG"]["outcome"] == "returned"
@@ -598,7 +625,7 @@ class TestArmonCell:
         ns = self._build_armon_namespace(
             tmp_path, prev_ok=True, baseline={"cmd_seq": 3},
             require_compliance_result=self._FakeChk(ok=False), calls=calls)
-        src = make_cycle_notebook.armon_cell_source()
+        src = make_cycle_notebook.armon_cell_source("stage0-B4-sess1-armon")
         exec(compile(src, "<armon compliance fails>", "exec"), ns)
         assert (tmp_path / "stop").exists()
 
@@ -608,3 +635,367 @@ class TestArmonCell:
             tmp_path, lambda: (tmp_path / f"go_{next_leg_name}").exists(),
             timeout_s=1, period=0.01)
         assert result == "stop"
+
+
+# ── M1 (PR #124 review): Stage 0 armon markers are identity-scoped ─────────
+
+class TestStage0IdentityScopedMarkers:
+    """Before this fix every board's Stage 0 notebook used the fixed
+    marker names go_armon/recorder_armon.log/armon_done, so one board's
+    leftover Stage 0 markers could satisfy a DIFFERENT board's armon
+    cell -- the one action this package insists is not motion-free.
+    Proves B4's Stage 0 artifacts cannot authorize B1's turn_on."""
+
+    def test_b4_stage0_leftover_markers_do_not_appear_in_b1s_armon_cell(
+            self, repo_two_commits, tmp_path):
+        repo, first, second = repo_two_commits
+        evidence_dir = tmp_path / "evidence"
+        make_cycle_notebook.generate_stage0(
+            "B4", "sess1", repo=str(repo), evidence_dir=str(evidence_dir),
+            required_sha=first)
+        b4_leg = plan.stage0_armon_leg_name("B4", "sess1")
+        control = evidence_dir / "control"
+        control.mkdir(parents=True, exist_ok=True)
+        (control / f"go_{b4_leg}").touch()
+        (control / f"recorder_{b4_leg}.log").write_text("fly the route now")
+        (control / f"{b4_leg}_done").write_text("{}")
+
+        out_b1 = make_cycle_notebook.generate_stage0(
+            "B1", "sess1", repo=str(repo), evidence_dir=str(evidence_dir),
+            required_sha=first)
+        nb_b1 = nbformat.read(str(out_b1), as_version=4)
+        armon_cell = [c for c in nb_b1.cells
+                      if c.cell_type == "code" and c.source.startswith("# Stage 0")][0]
+        b1_leg = plan.stage0_armon_leg_name("B1", "sess1")
+        assert b1_leg != b4_leg
+        assert f"go_{b1_leg}" in armon_cell.source
+        assert b4_leg not in armon_cell.source
+
+    def test_b4_stage0_leftover_markers_do_not_satisfy_b1s_gate_at_runtime(
+            self, tmp_path):
+        """Exec-based: B4's leftover go/recorder markers sit on disk; B1's
+        own rendered armon cell must not find them ready, so turn_on is
+        never reached."""
+        b4_leg = plan.stage0_armon_leg_name("B4", "sess1")
+        b1_leg = plan.stage0_armon_leg_name("B1", "sess1")
+        (tmp_path / f"go_{b4_leg}").touch()
+        (tmp_path / f"recorder_{b4_leg}.log").write_text("fly the route now")
+
+        calls = {"turn_on": []}
+
+        def fake_turn_on(*a, **kw):
+            calls["turn_on"].append((a, kw))
+
+        def wait_for(pred, timeout_s, period=0.25):
+            return "ready" if pred() else "timeout"
+
+        ns = {
+            "reachy": types.SimpleNamespace(
+                turn_on=fake_turn_on, r_arm=types.SimpleNamespace()),
+            "e1_identity": types.SimpleNamespace(),
+            "R": types.SimpleNamespace(R_JOINTS=("r_shoulder_pitch",)),
+            "ident": types.SimpleNamespace(run_dir=str(tmp_path)),
+            "CTRL": tmp_path,
+            "wait_for": wait_for,
+            "_pose": lambda: {"r_shoulder_pitch": 0.0},
+            "PREV_OK": True,
+            "CYCLE": "stage0-B1-sess1",
+            "LEAD_IN_S": 0.0,
+            "COMPLIANCE_TIMEOUT_S": 0.0,
+            "time": types.SimpleNamespace(
+                monotonic=time.monotonic, monotonic_ns=time.monotonic_ns,
+                time_ns=time.time_ns, sleep=lambda s: None),
+            "json": json, "pathlib": __import__("pathlib"),
+            "traceback": traceback,
+        }
+        src = make_cycle_notebook.armon_cell_source(b1_leg)
+        exec(compile(src, "<b1 armon>", "exec"), ns)
+        assert ns["LEG"]["go"] == "timeout"
+        assert calls["turn_on"] == []
+        assert ns["LEG"]["outcome"] == "not_attempted"
+
+
+# ── M2 (PR #124 review): refusals happen before any write; the session
+# ledger is recorded atomically and is concurrency-safe ────────────────────
+
+class TestSessionLedgerRefusesBeforeWriting:
+    """Every refusal this package can raise for generate_repetition/
+    generate_stage0 must leave the evidence directory -- and the session
+    ledger specifically -- exactly as it found it. A rejected call must
+    never reserve a session or otherwise dirty state."""
+
+    def _ledger(self, evidence_dir):
+        path = pathlib.Path(evidence_dir) / "control" / "e1_stage2_sessions.json"
+        return json.loads(path.read_text()) if path.is_file() else None
+
+    def test_bad_repo_refusal_leaves_no_ledger_and_a_correct_retry_succeeds(
+            self, repo_two_commits, tmp_path):
+        repo, first, second = repo_two_commits
+        evidence_dir = str(tmp_path / "evidence")
+        with pytest.raises(make_cycle_notebook.GenerationRefused,
+                            match="git rev-parse"):
+            make_cycle_notebook.generate_repetition(
+                "B4", "a", 1, session="s1", repo=str(tmp_path / "not_a_repo"),
+                evidence_dir=evidence_dir, required_sha=first)
+        assert self._ledger(evidence_dir) is None
+
+        out = make_cycle_notebook.generate_repetition(
+            "B4", "a", 1, session="s2", repo=str(repo),
+            evidence_dir=evidence_dir, required_sha=first)
+        assert out.exists()
+        assert self._ledger(evidence_dir)["B4"] == "s2"
+
+    def test_docs_reviews_refusal_leaves_the_repo_clean(
+            self, repo_two_commits, tmp_path):
+        repo, first, second = repo_two_commits
+        bad_evidence_dir = repo / "docs" / "reviews" / "historical-evidence"
+        with pytest.raises(make_cycle_notebook.GenerationRefused,
+                            match="docs/reviews"):
+            make_cycle_notebook.generate_repetition(
+                "B4", "a", 1, session="s1", repo=str(repo),
+                evidence_dir=str(bad_evidence_dir), required_sha=first)
+        status = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
+                                 capture_output=True, text=True, check=True)
+        assert status.stdout.strip() == ""
+        assert not bad_evidence_dir.exists()
+
+    def test_stale_marker_refusal_does_not_pin_the_session(
+            self, repo_two_commits, tmp_path):
+        repo, first, second = repo_two_commits
+        evidence_dir = tmp_path / "evidence"
+        legs = plan.stage2_legs("B4", "a", 1)
+        control = evidence_dir / "control"
+        control.mkdir(parents=True)
+        (control / f"go_{legs[0].name}").touch()
+        with pytest.raises(make_cycle_notebook.GenerationRefused,
+                            match="stale marker"):
+            make_cycle_notebook.generate_repetition(
+                "B4", "a", 1, session="typo-session", repo=str(repo),
+                evidence_dir=str(evidence_dir), required_sha=first)
+        assert self._ledger(evidence_dir) is None
+
+
+class TestConcurrentSessionReservation:
+    """PR #124 review, M2: a 12-way concurrent race for the SAME board
+    with DIFFERENT session ids used to produce more than one 'winner'
+    (demonstrated in the review as 1 OK / 11 refused -- a narrow but real
+    window). Locking + atomic write + a re-check under the lock must make
+    this exactly one winner, every time, with no corrupt ledger and no
+    orphan notebook/plan file for a call that ultimately lost the race."""
+
+    def test_concurrent_generate_repetition_same_board_exactly_one_session_wins(
+            self, repo_two_commits, tmp_path):
+        repo, first, second = repo_two_commits
+        evidence_dir = str(tmp_path / "evidence")
+        n = 12
+        results = [None] * n
+        barrier = threading.Barrier(n)
+
+        def worker(i):
+            barrier.wait()
+            try:
+                make_cycle_notebook.generate_repetition(
+                    "B4", "a", i + 1, session=f"sess{i}", repo=str(repo),
+                    evidence_dir=evidence_dir, required_sha=first)
+                results[i] = "ok"
+            except make_cycle_notebook.GenerationRefused as exc:
+                results[i] = f"refused: {exc}"
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        oks = [r for r in results if r == "ok"]
+        assert len(oks) == 1, results
+
+        ledger_path = pathlib.Path(evidence_dir) / "control" / "e1_stage2_sessions.json"
+        ledger = json.loads(ledger_path.read_text())
+        assert set(ledger.keys()) == {"B4"}
+        winner_index = results.index("ok")
+        assert ledger["B4"] == f"sess{winner_index}"
+
+        for i, r in enumerate(results):
+            if r != "ok":
+                assert "session" in r
+            else:
+                identity = plan.cycle_id("B4", "a", i + 1)
+                assert (pathlib.Path(evidence_dir) / f"plan_{identity}.json").is_file()
+            if i != winner_index:
+                identity = plan.cycle_id("B4", "a", i + 1)
+                assert not (pathlib.Path(evidence_dir) / f"plan_{identity}.json").is_file()
+
+
+# ── M3 (PR #124 review): the per-cycle start-variant gate, bound to the
+# cycle, in the generated execution path ────────────────────────────────────
+
+class TestStartVariantGate:
+    """plan.start_variant_gate: missing, corrupt, wrong-cycle, tampered,
+    and non-stiff-zero (including keyframe-sag) evidence must all refuse;
+    only a stiff-zero pose bound to the exact cycle passes."""
+
+    _STIFF_ZERO_POSE = dict({j: 0.0 for j in plan._R.GROSS_JOINTS},
+                             r_gripper=0.0, r_wrist_roll=0.0)
+    _KEYFRAME_SAG_POSE = dict({j: 0.0 for j in plan._R.GROSS_JOINTS},
+                              r_gripper=-36.0, r_wrist_roll=39.0)
+
+    def _write(self, ctrl, cycle, *, start_variant, pose, write_cycle=None):
+        (ctrl / f"start_variant_{cycle}.json").write_text(json.dumps({
+            "start_variant": start_variant, "pose": pose,
+            "cycle": cycle if write_cycle is None else write_cycle,
+        }))
+
+    def test_missing_evidence_refuses(self, tmp_path):
+        ok, reason, doc = plan.start_variant_gate(tmp_path, "S2-B4-a-r1")
+        assert ok is False
+        assert "missing" in reason
+        assert doc is None
+
+    def test_corrupt_evidence_refuses(self, tmp_path):
+        (tmp_path / "start_variant_S2-B4-a-r1.json").write_text("{not json")
+        ok, reason, doc = plan.start_variant_gate(tmp_path, "S2-B4-a-r1")
+        assert ok is False
+        assert "corrupt" in reason
+
+    def test_wrong_cycle_evidence_refuses(self, tmp_path):
+        self._write(tmp_path, "S2-B4-a-r1", start_variant="stiff-zero",
+                    pose=self._STIFF_ZERO_POSE, write_cycle="S2-B4-a-r2")
+        ok, reason, doc = plan.start_variant_gate(tmp_path, "S2-B4-a-r1")
+        assert ok is False
+        assert "bound to cycle 'S2-B4-a-r2'" in reason
+
+    def test_keyframe_sag_evidence_refuses_under_policy_a(self, tmp_path):
+        self._write(tmp_path, "S2-B4-a-r1", start_variant="keyframe-sag",
+                    pose=self._KEYFRAME_SAG_POSE)
+        ok, reason, doc = plan.start_variant_gate(tmp_path, "S2-B4-a-r1")
+        assert ok is False
+        assert "not 'stiff-zero'" in reason
+
+    def test_tampered_declared_variant_refuses(self, tmp_path):
+        """Declared 'stiff-zero' but the recorded pose actually reclassifies
+        differently -- the gate must not trust the declared field verbatim."""
+        self._write(tmp_path, "S2-B4-a-r1", start_variant="stiff-zero",
+                    pose=self._KEYFRAME_SAG_POSE)
+        ok, reason, doc = plan.start_variant_gate(tmp_path, "S2-B4-a-r1")
+        assert ok is False
+        assert "does not match" in reason
+
+    def test_valid_stiff_zero_bound_to_this_cycle_passes(self, tmp_path):
+        self._write(tmp_path, "S2-B4-a-r1", start_variant="stiff-zero",
+                    pose=self._STIFF_ZERO_POSE)
+        ok, reason, doc = plan.start_variant_gate(tmp_path, "S2-B4-a-r1")
+        assert ok is True
+        assert reason is None
+        assert doc["start_variant"] == "stiff-zero"
+
+
+class TestStartVariantGateWiredIntoGeneratedNotebooks:
+
+    @pytest.mark.parametrize("shape", plan.SHAPE_ORDER)
+    def test_generate_repetition_binding_cell_calls_the_gate(
+            self, shape, repo_two_commits, tmp_path):
+        repo, first, second = repo_two_commits
+        out = make_cycle_notebook.generate_repetition(
+            "B4", shape, 1, session="sess1", repo=str(repo),
+            evidence_dir=str(tmp_path / "evidence"), required_sha=first)
+        nb = nbformat.read(str(out), as_version=4)
+        binding_src = nb.cells[2].source
+        assert "plan.start_variant_gate(CTRL, CYCLE)" in binding_src
+        assert "PREV_OK = PREV_OK and START_VARIANT_OK" in binding_src
+        compile(binding_src, "<binding>", "exec")
+
+    def test_legacy_generate_binding_cell_has_no_start_variant_gate(
+            self, repo_two_commits, tmp_path):
+        """Stage 1 compatibility (PR #124 review, M4): the gate is a Stage
+        2 addition and must not change Stage 1's already-evidenced
+        notebook shape."""
+        repo, first, second = repo_two_commits
+        out = make_cycle_notebook.generate(
+            "S1a", repo=str(repo), evidence_dir=str(tmp_path / "evidence"),
+            required_sha=first)
+        nb = nbformat.read(str(out), as_version=4)
+        binding_src = nb.cells[2].source
+        assert "start_variant_gate" not in binding_src
+
+    def test_stage0_binding_cell_has_no_start_variant_gate(
+            self, repo_two_commits, tmp_path):
+        """Stage 0 is what MAKES the arm stiff-zero in the first place --
+        there is no preceding parked recording for it to check."""
+        repo, first, second = repo_two_commits
+        out = make_cycle_notebook.generate_stage0(
+            "B4", "sess1", repo=str(repo),
+            evidence_dir=str(tmp_path / "evidence"), required_sha=first)
+        nb = nbformat.read(str(out), as_version=4)
+        binding_src = nb.cells[2].source
+        assert "start_variant_gate" not in binding_src
+
+
+class TestNoRouteCallWithoutCurrentGates:
+    """A failed start_variant_gate sets PREV_OK False in the binding cell
+    (decision note §4; PR #124 review, M3). Proves that on a REAL Stage
+    2-generated leg cell, PREV_OK False makes the leg not_eligible with no
+    turn_on/route call reachable -- the stub namespace below deliberately
+    omits `reachy`/`turn_on`/the route module, so if the gate wiring ever
+    regressed and either became reachable, this raises NameError rather
+    than silently passing."""
+
+    def test_prev_ok_false_from_the_gate_blocks_turn_on_and_route(
+            self, repo_two_commits, tmp_path):
+        repo, first, second = repo_two_commits
+        out = make_cycle_notebook.generate_repetition(
+            "B4", "a", 1, session="sess1", repo=str(repo),
+            evidence_dir=str(tmp_path / "evidence"), required_sha=first)
+        nb = nbformat.read(str(out), as_version=4)
+        motion_cells = [c for c in nb.cells
+                        if c.cell_type == "code" and c.source.startswith("# Leg ")]
+        assert motion_cells
+
+        ns = {
+            "PREV_OK": False,  # what a failed start_variant_gate produces
+            "CTRL": tmp_path, "CYCLE": "S2-B4-a-r1", "json": json,
+        }
+        exec(compile(motion_cells[0].source, "<leg0 prev_ok False>", "exec"), ns)
+
+        assert ns["LEG"]["go"] == "not_eligible"
+        assert ns["LEG"]["outcome"] == "not_attempted"
+
+
+# ── M5 (PR #124 review): HOME's tail-check target is not stiff-zero ────────
+
+class TestHomeToleranceIsNotStiffZero:
+    """'Do not confuse HOME's normal gripper target with stiff-zero.'
+    leg.sh's end-mode tail check against HOME -- the only check that
+    Stage 0's turn_on did not move the arm -- requires r_gripper within
+    e1_tail_check.GRIPPER_TOL_DEG (3 deg) of HOME's own r_gripper target
+    (-45 deg, OPEN), a world apart from stiff-zero's |r_gripper| <= 1 deg
+    requirement. Passing the armon tail check is not evidence of reaching
+    stiff-zero; this proves the two acceptance criteria can never be
+    conflated by construction."""
+
+    def test_home_pose_does_not_classify_as_a_known_start_variant(self):
+        assert rig_routes.HOME["r_gripper"] == pytest.approx(-45.0)
+        assert plan.classify_start_variant(rig_routes.HOME) is None
+
+    def test_home_gripper_target_is_far_outside_stiff_zero_tolerance(self):
+        gap = abs(rig_routes.HOME["r_gripper"]) - plan.STIFF_ZERO_TOL_DEG
+        assert gap > 40.0
+
+
+# ── M4 (PR #124 review): an unauthorized board's reasoned refusal reaches
+# the CLI user rather than a generic argparse error ─────────────────────────
+
+class TestCLIBoardRefusalReachesTheUser:
+
+    def test_unauthorized_board_via_stage0_cli_prints_reasoned_refusal(
+            self, repo_two_commits, tmp_path, capsys):
+        repo, first, second = repo_two_commits
+        rc = make_cycle_notebook.main([
+            "--stage0", "--board", "B6", "--session", "sess1",
+            "--repo", str(repo), "--evidence-dir", str(tmp_path / "evidence"),
+        ])
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "REFUSED:" in err
+        assert "B6" in err
+        assert "decision note" in err

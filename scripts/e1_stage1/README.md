@@ -162,14 +162,27 @@ generator/shell tooling, same as everything above.
 
 `plan.BOARDS` (`B4`/`B1`/`B2` -> `scenes/e1_boards/<file>.yaml`) is the one
 place a board id maps to a scene path. `make_cycle_notebook.generate`
-(legacy, defaults to `board="B4"` -- byte-identical output to before),
-`generate_repetition`, and `generate_stage0` all resolve the scene through
-`plan.board_scene_rel`, freeze the result into `plan_<identity>.json` as
-`scene_rel`, and `leg.sh`/`parked.sh` read it from there (or, for
-`parked.sh`, resolve it directly via `--board`) rather than carrying an
-independent path literal. `B3`/`B5` (never authorized for Stage 2) and
-`B6` (the deliberately-unflyable incident board) are refused by name with
-a reason, not silently treated as "unknown".
+(legacy, defaults to `board="B4"`), `generate_repetition`, and
+`generate_stage0` all resolve the scene through `plan.board_scene_rel`,
+freeze the result into `plan_<identity>.json` as `scene_rel`, and
+`leg.sh`/`parked.sh` read it from there (or, for `parked.sh`, resolve it
+directly via `--board`) rather than carrying an independent path literal.
+`B3`/`B5` (never authorized for Stage 2) and `B6` (the
+deliberately-unflyable incident board) are refused by name with a reason,
+not silently treated as "unknown" -- including from the CLI: `--board`
+does not restrict argparse `choices`, so an unauthorized board reaches
+`plan.board_scene_rel`'s reasoned `ValueError` (which `main()` prints as
+`REFUSED: ...`) instead of a generic "invalid choice" (PR #124 review,
+M4).
+
+For `generate`'s default `board="B4"`, the generated `SCENE` literal is
+byte-identical to Stage 1's pre-Stage-2 hard-coded string
+(`test_legacy_generate_defaults_to_b4_scene_unchanged`). The rest of
+`generate`'s cell 2 is not byte-identical: it now imports `gating` and
+delegates `wait_for` to `gating.wait_for` (same poll order and behaviour
+as the inline closure it replaced), and `plan_S1a.json` gains `board`/
+`scene_rel` keys with no existing value changed. "Byte-identical" applied
+only to the `SCENE` string, not the whole notebook (PR #124 review, M4).
 
 ### Repetition-aware identity (decision note §6 item 2)
 
@@ -181,13 +194,27 @@ repetition could find the first repetition's leftover `go_setup_a`
 already on disk and fire its motion cell without a fresh operator signal.
 `plan.stage2_legs(board, shape, rep)` gives every leg a name built from
 `plan.cycle_id(board, shape, rep)` (`S2-<board>-<shape>-r<rep>`), so every
-marker is unique by construction. `make_cycle_notebook.generate_repetition`
-additionally refuses, before writing anything, if this identity's plan
-file or any of its legs' markers already exist in the evidence directory
-(a stale marker from a crashed prior attempt, not just a plan file, is
-enough to refuse), and if the evidence directory has already recorded a
-*different* session id for this board (`control/e1_stage2_sessions.json`
--- one server session per board, per decision note §5).
+marker is unique by construction. The same is true of Stage 0's own armon
+leg: `plan.stage0_armon_leg_name(board, session)` builds
+`stage0-<board>-<session>-armon` -- before this fix every Stage 0
+notebook used the fixed names `go_armon`/`recorder_armon.log`/
+`armon_done`, so one board's leftover Stage 0 markers could satisfy a
+*different* board's armon cell and fire `turn_on` with no fresh operator
+signal and no recorder running (PR #124 review, M1).
+
+`make_cycle_notebook.generate_repetition`/`generate_stage0` refuse,
+before writing anything, if this identity's plan file or any of its
+legs' markers already exist in the evidence directory (a stale marker
+from a crashed prior attempt, not just a plan file, is enough to refuse),
+and if the evidence directory has already recorded a *different* session
+id for this board (`control/e1_stage2_sessions.json` -- one server
+session per board, per decision note §5). Every one of these checks is
+read-only and runs before any file is written; the session ledger itself
+is recorded last, right before the notebook/plan files, under a file
+lock with an atomic (`os.replace`) write and a re-check inside the lock,
+so a refused call never reserves a session or dirties the evidence
+directory, and two concurrent calls naming different sessions for the
+same board can never both win (PR #124 review, M2).
 
 ### Policy A: Stage 0 arm-on, and the per-cycle start-variant gate (decision note §4)
 
@@ -199,16 +226,67 @@ moved is to record it and check, not to assert it. `make_cycle_notebook
 session notebook (`armon_cell_source`) that runs `turn_on("r_arm")` +
 `require_compliance` gated exactly like a leg (go-marker, recorder,
 baseline `cmd_seq`) but calls no route function at all, and is recorded
-via the same `leg.sh` chain (`armon` is just another leg name in that
-notebook's own `plan_stage0_<board>_<session>.json`).
+via the same `leg.sh` chain (its leg name is the identity-scoped
+`plan.stage0_armon_leg_name(board, session)`, a key in that notebook's own
+`plan_stage0-<board>-<session>.json` -- note the hyphens, not
+underscores).
 
-Separately, every cycle's *preceding* parked recording is verified with
+**The exact `leg.sh` invocation for the armon recording** (M5 -- this was
+previously undocumented):
+
+```
+E1_PYTHON=<e1venv python> scripts/e1_stage1/leg.sh <repo> <evidence-dir> \
+    stage0-<board>-<session> stage0-<board>-<session>-armon \
+    RAISE_TO_SIDE HOME end
+```
+
+`RAISE_TO_SIDE` there is a clearance-table label only -- nothing in the
+armon cell can fly it (`test_armon_cell_never_calls_any_route_function`).
+`end` mode is required: it is the only mode in which a failed tail check
+writes `control/stop`; in `start` mode the check is merely informational.
+
+**This tail check proves position-invariance against `HOME`, not
+"reached stiff-zero" -- the two are not the same acceptance criterion.**
+`e1_tail_check.check(..., "HOME")` requires the last sample's `r_gripper`
+within `GRIPPER_TOL_DEG` (3°) of `rig_routes.HOME`'s own `r_gripper`
+target, which is `OPEN = -45.0°` (`rig_routes.pose()`: "gripper open
+unless told otherwise"). Policy A's `stiff-zero` requires `|r_gripper| <=
+STIFF_ZERO_TOL_DEG` (1°). These targets are 44° apart -- a passing armon
+tail check does not and cannot mean the arm reached stiff-zero
+(`plan.classify_start_variant` applied to `rig_routes.HOME` itself
+returns `None`, matching neither variant, by construction). Stage 0's
+`turn_on` only has to prove the arm didn't move while going stiff; it is
+what makes the *following* reset settle to stiff-zero rather than sag to
+keyframe-sag (decision note §3), not something that asserts stiff-zero
+itself. Whether stiff-zero was actually reached is checked separately,
+per cycle, by the parked-recording gate below.
+
+Every cycle's *preceding* parked recording is verified with
 `start_variant.py` (invoked from the promoted `parked.sh`, below): it
 classifies the recording's last sample with `plan.classify_start_variant`
-into `"stiff-zero"`, `"keyframe-sag"`, or neither. `parked.sh` treats
-"neither" as a STOP, same as a failed recorder/linker step -- "failure
-stops progression" is enforced the same way every other fail-closed check
-in this package is, not by a separate escalation path.
+into `"stiff-zero"`, `"keyframe-sag"`, or neither, and embeds the cycle id
+(`--cycle`) it is being recorded for into
+`control/start_variant_<cycle>.json`. `parked.sh` STOPs unless the
+classification is *exactly* `"stiff-zero"` -- under policy A,
+`"keyframe-sag"` means Stage 0's `turn_on` did not hold (motors off,
+server restarted, or Stage 0 skipped) and must prevent motion the same as
+matching neither variant (PR #124 review, M3; this was previously an open
+policy question -- the code now enforces policy A's own text literally).
+
+**The generated Stage 2 cycle notebook enforces this gate itself**, not
+only `parked.sh` at recording time: the binding cell (once per cycle,
+before any leg is eligible) calls `plan.start_variant_gate(CTRL, CYCLE)`,
+which requires `control/start_variant_<CYCLE>.json` to exist, parse, be
+bound to *this* cycle (not a stale or wrong-cycle file), and independently
+re-classify its own recorded `pose` to `stiff-zero` -- the declared
+`start_variant` field is never trusted verbatim. Missing, corrupt,
+wrong-cycle, or non-stiff-zero (including `keyframe-sag`) evidence folds
+into `PREV_OK`, so every leg's `go = wait_for(...) if PREV_OK else
+"not_eligible"` short-circuits and no `turn_on`/route call is reachable
+that cycle. This gate is Stage 2-only: legacy `generate` and
+`generate_stage0` do not carry it (Stage 0 is what *establishes*
+stiff-zero for the first cycle; there is no preceding parked recording
+for it to check).
 
 ### `parked.sh` promoted into the package (decision note §6 item 3)
 
@@ -220,12 +298,19 @@ now versioned here, board-parameterized (`--board`, resolved via
 `mode=start`) tail check. Usage:
 
 ```
-parked.sh <repo> <evidence-dir> <name> <board> <route-label>
+parked.sh <repo> <evidence-dir> <name> <board> <route-label> <cycle>
 ```
 
 `<route-label>` is the upcoming cycle's first leg route -- the recorder's
 planned-vs-realised clearance reference only; nothing is flown regardless
-of its value, same as Stage 1's parked recordings.
+of its value, same as Stage 1's parked recordings. `<cycle>` (PR #124
+review, M3) is the upcoming Stage 2 cycle id this recording will
+authorize (e.g. `S2-B4-a-r3`) and must match the `CYCLE` variable baked
+into that cycle's generated notebook -- it binds the evidence file
+(`start_variant_<cycle>.json`) independent of `<name>`, which remains
+free-form for the recorder log's own filename. Re-recording for a cycle
+that already has `start_variant_<cycle>.json` is refused (no re-fly, no
+recovery -- decision note §5).
 
 ### CLI summary
 

@@ -40,10 +40,13 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import fcntl
 import json
+import os
 import pathlib
 import subprocess
 import sys
+import uuid
 from typing import Callable, List, Sequence
 
 from . import plan
@@ -78,26 +81,26 @@ def _session_ledger_path(evidence_dir: str) -> pathlib.Path:
     return pathlib.Path(evidence_dir) / "control" / "e1_stage2_sessions.json"
 
 
-def _check_and_record_session(evidence_dir: str, *, board: str, session: str) -> None:
-    """One server session per board (decision note §5: "one server run per
-    board"). Refuses a generation call that names a different session id
-    for a board this evidence directory has already recorded one for --
-    the reused-execution-directory shape that let a stale run
-    directory/marker satisfy a later attempt's checks by coincidence
-    (decision note §6 item 2). Recording the first session id seen for a
-    board is not itself a claim that session ran cleanly; it only pins
-    what this evidence directory is allowed to keep meaning by "this
-    board" from here on."""
-    ledger_path = _session_ledger_path(evidence_dir)
-    ledger: dict = {}
-    if ledger_path.is_file():
-        try:
-            ledger = json.loads(ledger_path.read_text())
-        except json.JSONDecodeError as exc:
-            raise GenerationRefused(
-                f"{ledger_path} is corrupt ({exc}) -- refusing to guess "
-                "which session this evidence directory already recorded "
-                f"for board {board!r}")
+def _read_ledger(ledger_path: pathlib.Path) -> dict:
+    if not ledger_path.is_file():
+        return {}
+    try:
+        return json.loads(ledger_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise GenerationRefused(
+            f"{ledger_path} is corrupt ({exc}) -- refusing to guess which "
+            "session this evidence directory already recorded")
+
+
+def _check_session(evidence_dir: str, *, board: str, session: str) -> None:
+    """Read-only pre-check (PR #124 review, M2): raises if this evidence
+    directory already recorded a *different* session for `board`, without
+    touching the ledger file. Called alongside every other before-any-write
+    refusal (`_refuse_if_identity_reused`, `_validate_repo_and_evidence_dir`)
+    so a call that is going to be refused for ANY reason never dirties the
+    ledger, and a subsequent, correctly-formed call for this board is never
+    blocked by a session id an earlier, refused call happened to name."""
+    ledger = _read_ledger(_session_ledger_path(evidence_dir))
     existing = ledger.get(board)
     if existing is not None and existing != session:
         raise GenerationRefused(
@@ -107,9 +110,45 @@ def _check_and_record_session(evidence_dir: str, *, board: str, session: str) ->
             "same evidence directory is the reused-execution-directory "
             "shape decision note §6 item 2 warns about; use a fresh "
             "evidence directory for a new session")
-    ledger[board] = session
+
+
+def _record_session(evidence_dir: str, *, board: str, session: str) -> None:
+    """One server session per board (decision note §5: "one server run per
+    board"). Called only after every other refusal has already passed and
+    only just before `_write_notebook_and_plan` (PR #124 review, M2) --
+    never first -- so a call that is ultimately refused never reserves a
+    session or leaves a ledger write behind.
+
+    Locked (`fcntl.flock` on a sibling `.lock` file) with a re-check of the
+    ledger under the lock, and written via temp-file + `os.replace` (never
+    a bare `write_text`, which is not atomic against a concurrent reader or
+    writer): two concurrent generation calls naming different sessions for
+    the same board cannot both win. The loser raises here -- before it has
+    written any notebook/plan file -- rather than silently overwriting the
+    winner's ledger entry (demonstrated by a 12-way concurrent race in the
+    PR #124 review; this closes it rather than just narrowing the window)."""
+    ledger_path = _session_ledger_path(evidence_dir)
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
-    ledger_path.write_text(json.dumps(ledger, indent=2, sort_keys=True))
+    lock_path = ledger_path.with_name(ledger_path.name + ".lock")
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            ledger = _read_ledger(ledger_path)
+            existing = ledger.get(board)
+            if existing is not None and existing != session:
+                raise GenerationRefused(
+                    f"evidence dir {evidence_dir!r} already recorded "
+                    f"session {existing!r} for board {board!r} (recorded "
+                    "by a concurrent generation call); this call names "
+                    f"session {session!r} -- use a fresh evidence "
+                    "directory for a new session")
+            ledger[board] = session
+            tmp_path = ledger_path.with_name(
+                f"{ledger_path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}")
+            tmp_path.write_text(json.dumps(ledger, indent=2, sort_keys=True))
+            os.replace(tmp_path, ledger_path)
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _refuse_if_identity_reused(
@@ -191,9 +230,21 @@ print("python:", sys.executable)
 '''
 
 
-def binding_cell_source() -> str:
-    return '''# Cell 2 -- motion-client binding check + W4 fresh-server provenance
-import e1_identity, provenance, gating
+def binding_cell_source(*, require_start_variant: bool = False) -> str:
+    """`require_start_variant=True` (Stage 2 cycles only -- `generate_repetition`)
+    appends the policy-A per-cycle gate (decision note §4; PR #124 review,
+    M3): `plan.start_variant_gate` requires `control/start_variant_<CYCLE>.json`
+    to exist, be bound to THIS cycle, and independently re-classify its
+    recorded pose to `stiff-zero` -- missing, corrupt, wrong-cycle, or any
+    other variant (including `keyframe-sag`) folds into `PREV_OK`, so every
+    leg's `go = wait_for(...) if PREV_OK else "not_eligible"` short-circuits
+    to `"not_eligible"` and no `turn_on`/route call is reachable. Legacy
+    Stage 1 (`generate`) and Stage 0's arm-on setup (`generate_stage0`) both
+    keep the default `False` -- Stage 0 is what MAKES the arm stiff-zero in
+    the first place (there is no preceding parked recording to check), and
+    Stage 1's already-evidenced notebooks must not change shape."""
+    src = '''# Cell 2 -- motion-client binding check + W4 fresh-server provenance
+import e1_identity, provenance, gating, plan
 from reachy_ai.motion import rig_routes as R
 from reachy_ai.motion import primitives
 from reachy_ai.tasks import rig_motion
@@ -223,6 +274,21 @@ def start_check(kind):
     return {"kind": kind, "ok": bool(ok), "why": why, "posture_of": here, "pose": {k: round(v, 1) for k, v in p.items()}}
 PREV_OK = BINDING_OK
 '''
+    if require_start_variant:
+        src += '''# Policy A per-cycle gate (decision note §4; PR #124 review M3): this
+# cycle's parked-recording start-variant evidence must exist, be bound to
+# THIS cycle, and independently recompute to stiff-zero from its own
+# recorded pose. Missing, corrupt, wrong-cycle, or non-stiff-zero
+# (including keyframe-sag) evidence prevents every leg's motion this
+# cycle -- it can never be satisfied by another cycle's or another
+# board's artifacts.
+START_VARIANT_OK, START_VARIANT_REASON, START_VARIANT_DOC = plan.start_variant_gate(CTRL, CYCLE)
+print("start_variant gate:", START_VARIANT_OK, START_VARIANT_REASON or "", START_VARIANT_DOC)
+if not START_VARIANT_OK:
+    (CTRL / f"binding_FAIL_{CYCLE}").write_text(json.dumps({"reason": "start_variant", "detail": START_VARIANT_REASON}, default=str))
+PREV_OK = PREV_OK and START_VARIANT_OK
+'''
+    return src
 
 
 def motion_cell_source(leg: plan.Leg) -> str:
@@ -270,7 +336,7 @@ PREV_OK = LEG["outcome"] == "returned"
 '''
 
 
-def armon_cell_source() -> str:
+def armon_cell_source(leg_name: str) -> str:
     """Stage 0's policy-A preparation (decision note §4/§6): turn the right
     arm stiff BEFORE reset #1, recorded and gated exactly like any other
     leg -- `turn_on` is NOT treated as motion-free here. Going stiff pins
@@ -280,18 +346,28 @@ def armon_cell_source() -> str:
     parallel recorder this cell waits on is what proves whether it did.
     No route call anywhere in this cell -- the only commanded action is
     `turn_on`, gated behind the same go-marker/recorder/baseline-cmd_seq
-    chain every leg uses."""
-    return '''# Stage 0 -- explicit recorded setup action (policy A): arm stiff before reset #1
-LEG = {"leg": "armon", "route": None, "tool": "turn_on", "cycle": CYCLE}
-go = wait_for(lambda: (CTRL / "go_armon").exists(), 1800) if PREV_OK else "not_eligible"
+    chain every leg uses.
+
+    `leg_name` (PR #124 review, M1) must be identity-scoped --
+    `plan.stage0_armon_leg_name(board, session)` -- so `go_<leg_name>` /
+    `recorder_<leg_name>.log` / `<leg_name>_done` are unique per
+    board+session, the same way `plan.stage2_legs` makes every Stage 2 leg
+    name unique. Before this fix every Stage 0 notebook used the fixed
+    names `go_armon`/`recorder_armon.log`/`armon_done`, so one board's
+    leftover Stage 0 markers could satisfy a DIFFERENT board's armon cell
+    and fire `turn_on` with no fresh operator signal and no recorder
+    running -- the one action this package insists is not motion-free."""
+    return f'''# Stage 0 -- explicit recorded setup action (policy A): arm stiff before reset #1
+LEG = {{"leg": "{leg_name}", "route": None, "tool": "turn_on", "cycle": CYCLE}}
+go = wait_for(lambda: (CTRL / "go_{leg_name}").exists(), 1800) if PREV_OK else "not_eligible"
 LEG["go"] = go; print("go:", go)
-rec = wait_for(lambda: (CTRL / "recorder_armon.log").exists() and "fly the route now" in (CTRL / "recorder_armon.log").read_text(), 900) if go == "ready" else go
+rec = wait_for(lambda: (CTRL / "recorder_{leg_name}.log").exists() and "fly the route now" in (CTRL / "recorder_{leg_name}.log").read_text(), 900) if go == "ready" else go
 LEG["recorder_status"] = rec; print("recorder status:", rec)
 if rec == "ready":
     time.sleep(LEAD_IN_S)
     LEG["t_start_mono_ns"] = time.monotonic_ns(); LEG["t_start_wall_ns"] = time.time_ns()
     baseline = e1_identity._read_last_state(pathlib.Path(ident.run_dir) / "states.jsonl")
-    baseline_cmd_seq = (baseline or {}).get("cmd_seq")
+    baseline_cmd_seq = (baseline or {{}}).get("cmd_seq")
     if isinstance(baseline_cmd_seq, bool) or not isinstance(baseline_cmd_seq, int):
         LEG["outcome"] = "STOP no_valid_baseline_cmd_seq"; LEG["baseline"] = repr(baseline_cmd_seq)
         (CTRL / "stop").write_text(json.dumps(LEG, default=str))
@@ -305,12 +381,12 @@ if rec == "ready":
             (CTRL / "stop").write_text(json.dumps(chk.as_dict()))
     LEG["t_end_mono_ns"] = time.monotonic_ns(); LEG["t_end_wall_ns"] = time.time_ns()
     LEG["elapsed_s"] = (LEG["t_end_mono_ns"] - LEG["t_start_mono_ns"]) / 1e9
-    LEG["end_pose"] = {k: round(v, 1) for k, v in _pose().items()}
+    LEG["end_pose"] = {{k: round(v, 1) for k, v in _pose().items()}}
     print("outcome:", LEG["outcome"], "elapsed %.1f s" % LEG["elapsed_s"]); print("end pose:", LEG["end_pose"])
 else:
     LEG["outcome"] = "not_attempted"
 PREV_OK = LEG["outcome"] == "returned"
-(CTRL / "armon_done").write_text(json.dumps(LEG, default=str)); print(json.dumps(LEG, default=str))
+(CTRL / "{leg_name}_done").write_text(json.dumps(LEG, default=str)); print(json.dumps(LEG, default=str))
 '''
 
 
@@ -364,6 +440,13 @@ def _validate_repo_and_evidence_dir(
 def _write_notebook_and_plan(
     *, identity: str, cells: List[dict], evidence_dir: str, plan_doc: dict,
 ) -> pathlib.Path:
+    """Writes `plan_<identity>.json` then `e1_stage1_<identity>.ipynb`.
+    `plan_<identity>.json` is opened with `os.O_EXCL` (PR #124 review, M2
+    hardening): `_refuse_if_identity_reused` already checked this file does
+    not exist, but that check and this write are not atomic with each
+    other, so two concurrent calls for the exact same identity could both
+    pass the check; `O_EXCL` makes the second one fail here instead of
+    silently overwriting the first's plan file."""
     for i, cell in enumerate(cells):
         cell["id"] = f"cell-{i}"
     nb = {"cells": cells,
@@ -375,7 +458,16 @@ def _write_notebook_and_plan(
     evidence_path.mkdir(parents=True, exist_ok=True)
     nb_path = evidence_path / f"e1_stage1_{identity}.ipynb"
     plan_path = evidence_path / f"plan_{identity}.json"
-    plan_path.write_text(json.dumps(plan_doc, indent=2))
+    try:
+        fd = os.open(plan_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise GenerationRefused(
+            f"{plan_path} already exists -- identity {identity!r} was "
+            "written by a concurrent generation call between the reuse "
+            "check and this write; use a fresh evidence directory or a "
+            "never-used identity")
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(plan_doc, indent=2))
     nb_path.write_text(json.dumps(nb, indent=1))
     return nb_path
 
@@ -387,14 +479,22 @@ def generate(cycle: str, *, repo: str, evidence_dir: str,
              compliance_timeout_s: float = plan.COMPLIANCE_TIMEOUT_S,
              board: str = "B4",
              run_git: RunGit = _run_git) -> pathlib.Path:
-    """Legacy Stage 1 entry point (`S1a`/`S1b`/`S1c`) -- unchanged
-    behaviour and output for `board="B4"` (its default), which is the only
-    board Stage 1 ever ran. `board` is accepted so this shares
-    `connect_cell_source`'s scene parameter with the Stage 2 entry points
-    below rather than the two paths carrying independent scene literals;
-    it does not add the Stage 2 reused-identity refusal (`generate_repetition`
-    and `generate_stage0` below), since Stage 1's one-notebook-per-cycle
-    shape never had a repetition to collide with."""
+    """Legacy Stage 1 entry point (`S1a`/`S1b`/`S1c`) -- unchanged behaviour
+    for `board="B4"` (its default), which is the only board Stage 1 ever
+    ran; the `SCENE` literal is byte-identical to the pre-Stage-2
+    hard-coded string. Not the whole notebook, though (PR #124 review,
+    M4): cell 2's `wait_for` now delegates to `gating.wait_for` (same poll
+    order and behaviour as the inline closure it replaced) and
+    `plan_S1a.json` gains `board`/`scene_rel` keys with no existing value
+    changed. `board` is accepted so this shares `connect_cell_source`'s
+    scene parameter with the Stage 2 entry points below rather than the
+    two paths carrying independent scene literals; it does not add the
+    Stage 2 reused-identity refusal (`generate_repetition` and
+    `generate_stage0` below), since Stage 1's one-notebook-per-cycle shape
+    never had a repetition to collide with; and it does not carry the
+    Stage 2 policy-A start-variant gate (`binding_cell_source`'s
+    `require_start_variant`, default `False`) -- Stage 1's already-
+    evidenced notebooks must not change shape."""
     if cycle not in plan.CYCLES:
         raise GenerationRefused(
             f"unknown cycle {cycle!r}; choose from {sorted(plan.CYCLES)}")
@@ -449,10 +549,23 @@ def generate_repetition(
     additionally refuses (before writing anything) if this board's session
     in `evidence_dir` has already been recorded as a different session, or
     if this exact identity (or any of its legs' markers) already exists --
-    the two checks decision note §6 item 2 calls for."""
+    the two checks decision note §6 item 2 calls for.
+
+    Every read-only refusal (`_check_session`, `_refuse_if_identity_reused`,
+    `_validate_repo_and_evidence_dir`) runs BEFORE anything is written
+    (PR #124 review, M2): a call that is going to be refused never touches
+    the session ledger or writes a notebook/plan file. `_record_session`
+    (the only write before the notebook itself) runs last, right before
+    `_write_notebook_and_plan`.
+
+    The generated binding cell requires this cycle's own start-variant
+    evidence to independently reclassify as `stiff-zero` before any leg is
+    eligible (`binding_cell_source(require_start_variant=True)`; decision
+    note §4; PR #124 review, M3) -- legacy Stage 1 (`generate`) and Stage 0
+    (`generate_stage0`) do not carry this gate."""
     legs = list(plan.stage2_legs(board, shape, rep))
     identity = plan.cycle_id(board, shape, rep)
-    _check_and_record_session(evidence_dir, board=board, session=session)
+    _check_session(evidence_dir, board=board, session=session)
     _refuse_if_identity_reused(
         evidence_dir, identity=identity, leg_names=[leg.name for leg in legs])
     repo_sha = _validate_repo_and_evidence_dir(
@@ -475,7 +588,7 @@ def generate_repetition(
             compliance_timeout_s=compliance_timeout_s,
             required_sha=required_sha, merge_time_iso=merge_time_iso,
             scene_rel=scene_rel)),
-        _code_cell(binding_cell_source()),
+        _code_cell(binding_cell_source(require_start_variant=True)),
     ]
     cells.extend(_code_cell(motion_cell_source(leg)) for leg in legs)
     cells.append(_code_cell(final_cell_source()))
@@ -492,6 +605,7 @@ def generate_repetition(
         "legs": {leg.name: {"route": leg.route, "dur_s": durations[leg.name]}
                  for leg in legs},
     }
+    _record_session(evidence_dir, board=board, session=session)
     return _write_notebook_and_plan(
         identity=identity, cells=cells, evidence_dir=evidence_dir,
         plan_doc=plan_doc)
@@ -509,14 +623,22 @@ def generate_stage0(
     §4/§6): `turn_on("r_arm")` + `require_compliance`, before reset #1, as
     its own recorded action (`armon_cell_source`) -- not asserted
     motion-free. Shares the reused-identity refusal with
-    `generate_repetition`; `identity` here is `stage0-<board>-<session>`,
-    so a repeated Stage 0 call for the same board+session is refused the
-    same way a repeated cycle would be."""
-    plan.board_scene_rel(board)  # raises on an unauthorized/unknown board
-    identity = f"stage0-{board}-{session}"
-    _check_and_record_session(evidence_dir, board=board, session=session)
+    `generate_repetition`; `identity` here is `stage0-<board>-<session>`
+    (`plan.stage0_identity`), so a repeated Stage 0 call for the same
+    board+session is refused the same way a repeated cycle would be. The
+    armon leg's own marker names are `plan.stage0_armon_leg_name(board,
+    session)` -- identity-scoped (PR #124 review, M1), not the fixed
+    `"armon"` a different board's leftover markers used to be able to
+    satisfy.
+
+    Refusals run before any write, and the session ledger is recorded only
+    after every other check has passed (PR #124 review, M2), same ordering
+    as `generate_repetition`."""
+    identity = plan.stage0_identity(board, session)
+    armon_leg_name = plan.stage0_armon_leg_name(board, session)
+    _check_session(evidence_dir, board=board, session=session)
     _refuse_if_identity_reused(
-        evidence_dir, identity=identity, leg_names=["armon"])
+        evidence_dir, identity=identity, leg_names=[armon_leg_name])
     repo_sha = _validate_repo_and_evidence_dir(
         repo=repo, evidence_dir=evidence_dir, required_sha=required_sha,
         run_git=run_git)
@@ -535,7 +657,8 @@ def generate_stage0(
             f"-- policy A arm-on setup, no route\n\n"
             f"Code `{repo}` = `{repo_sha}`. One recorded action: "
             "`turn_on(\"r_arm\")` + `require_compliance`, gated exactly "
-            "like a leg; not asserted motion-free."),
+            "like a leg; not asserted motion-free. Armon leg name: "
+            f"`{armon_leg_name}`."),
         _code_cell(connect_cell_source(
             repo=repo, evidence_dir=evidence_dir, repo_sha=repo_sha,
             cycle=identity, lead_in_s=lead_in_s,
@@ -543,7 +666,7 @@ def generate_stage0(
             required_sha=required_sha, merge_time_iso=merge_time_iso,
             scene_rel=scene_rel)),
         _code_cell(binding_cell_source()),
-        _code_cell(armon_cell_source()),
+        _code_cell(armon_cell_source(armon_leg_name)),
         _code_cell(final_cell_source()),
     ]
 
@@ -553,9 +676,10 @@ def generate_stage0(
         "required_sha": required_sha, "merge_time_iso": merge_time_iso,
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "lead_in_s": lead_in_s, "compliance_timeout_s": compliance_timeout_s,
-        "margin_s": plan.MARGIN_S,
-        "legs": {"armon": {"route": route_label, "dur_s": dur_s}},
+        "margin_s": plan.MARGIN_S, "armon_leg": armon_leg_name,
+        "legs": {armon_leg_name: {"route": route_label, "dur_s": dur_s}},
     }
+    _record_session(evidence_dir, board=board, session=session)
     return _write_notebook_and_plan(
         identity=identity, cells=cells, evidence_dir=evidence_dir,
         plan_doc=plan_doc)
@@ -570,8 +694,13 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument("--lead-in-s", type=float, default=plan.LEAD_IN_S)
     p.add_argument("--compliance-timeout-s", type=float,
                     default=plan.COMPLIANCE_TIMEOUT_S)
-    p.add_argument("--board", choices=plan.BOARD_ORDER,
-                    help="Stage 2: board for --stage0 or --shape/--rep")
+    p.add_argument("--board",
+                    help="Stage 2: board for --stage0 or --shape/--rep "
+                         f"(one of {plan.BOARD_ORDER}; not restricted by "
+                         "argparse `choices` so an unauthorized board "
+                         "reaches plan.board_scene_rel's reasoned refusal "
+                         "instead of a generic argparse error -- PR #124 "
+                         "review M4)")
     p.add_argument("--shape", choices=plan.SHAPE_ORDER,
                     help="Stage 2: shape for a repetition (with --board/--rep/--session)")
     p.add_argument("--rep", type=int,
@@ -611,7 +740,11 @@ def main(argv: List[str] = None) -> int:
             raise GenerationRefused(
                 "specify either a legacy cycle id, --stage0 with "
                 "--board/--session, or --board/--shape/--rep/--session")
-    except GenerationRefused as exc:
+    except (GenerationRefused, ValueError) as exc:
+        # ValueError is what plan.board_scene_rel/cycle_id raise for an
+        # unauthorized/unknown board (PR #124 review, M4): --board no
+        # longer restricts argparse `choices`, so that reasoned message
+        # reaches the CLI user here instead of a generic "invalid choice".
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 1
     print(out)

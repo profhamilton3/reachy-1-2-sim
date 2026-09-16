@@ -11,8 +11,14 @@ module is only the file-reading/CLI wrapper the decision note asks for
 ("the start-variant check as a small script over the settle output", §6).
 No SDK, no server, no motion -- reads one JSON file.
 
+`--cycle <CYCLE>` (PR #124 review, M3) embeds the cycle id this evidence
+is being recorded for into the output JSON's `"cycle"` field, so
+`plan.start_variant_gate` can refuse evidence that is missing, stale, or
+recorded for a different cycle -- without it, nothing bound a parked
+recording's classification to the specific cycle it is meant to authorize.
+
 Usage:
-  python -m scripts.e1_stage1.start_variant <recording.json>
+  python -m scripts.e1_stage1.start_variant <recording.json> [--cycle <CYCLE>]
 """
 from __future__ import annotations
 
@@ -38,20 +44,42 @@ def classify_recording(recording: dict) -> Optional[str]:
     return plan.classify_start_variant(last_pose(recording))
 
 
+def _parse_argv(argv: List[str]) -> Optional[tuple]:
+    """Returns `(path, cycle)` or `None` on a bad argv (caller prints usage
+    and exits 2). `--cycle` is optional so existing callers that only ever
+    cared about "does this match a known variant at all" keep working."""
+    positional: List[str] = []
+    cycle: Optional[str] = None
+    it = iter(argv)
+    for tok in it:
+        if tok == "--cycle":
+            cycle = next(it, None)
+            if cycle is None:
+                return None
+        else:
+            positional.append(tok)
+    if len(positional) != 1:
+        return None
+    return positional[0], cycle
+
+
 def main(argv: List[str] = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
-    if len(argv) != 1:
-        print("usage: start_variant.py <recording.json>", file=sys.stderr)
+    parsed = _parse_argv(argv)
+    if parsed is None:
+        print("usage: start_variant.py <recording.json> [--cycle <CYCLE>]",
+              file=sys.stderr)
         return 2
-    path = pathlib.Path(argv[0])
+    arg_path, cycle = parsed
+    path = pathlib.Path(arg_path)
     try:
         doc = json.loads(path.read_text())
         pose = last_pose(doc)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        print(json.dumps({"start_variant": None, "error": str(exc)}, indent=2))
+        print(json.dumps({"start_variant": None, "cycle": cycle, "error": str(exc)}, indent=2))
         return 1
     variant = plan.classify_start_variant(pose)
-    print(json.dumps({"start_variant": variant, "pose": pose}, indent=2))
+    print(json.dumps({"start_variant": variant, "pose": pose, "cycle": cycle}, indent=2))
     return 0 if variant is not None else 1
 
 
