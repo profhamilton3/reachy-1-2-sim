@@ -44,8 +44,10 @@ import sys
 
 _HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "src"))
+sys.path.insert(0, str(_HERE))
 
 from reachy_ai.motion import rig_routes as R  # noqa: E402
+import experiment_gate  # noqa: E402
 
 TARGETS = ("PRESENT", "REST", "REST_SHUT", "HOME")
 POSTURE_TOL_DEG = 8.0
@@ -79,34 +81,6 @@ def check(samples, target_name, window_s=3.0):
     }
 
 
-def _sidecar_contacts_recorded(log_path):
-    """(ok, reason) for the recording's own linked contact evidence
-    (`scripts/link_e1_flight.py`'s `<log>.link.json` sidecar, same
-    `.with_suffix` derivation `leg.sh` and `link_e1_flight.sidecar_path_for`
-    use) -- `leg.sh` always runs the linker before this check, in `end`
-    mode STOPping on a non-zero linker exit (missing/incomplete contact
-    evidence) before the tail check is even reached. Re-checking it here
-    too means `check_init` is a complete, self-contained acceptance test
-    on its own -- correct when run standalone (the module's usage note:
-    "the operator sees the exact pose the log is being judged against"),
-    not only correct as one link in `leg.sh`'s chain."""
-    sidecar_path = pathlib.Path(log_path).with_suffix(".link.json")
-    try:
-        text = sidecar_path.read_text()
-    except OSError:
-        return False, f"no linked sidecar at {sidecar_path} (run link_e1_flight.py first)"
-    try:
-        sidecar = json.loads(text)
-    except json.JSONDecodeError as exc:
-        return False, f"sidecar {sidecar_path} is not valid JSON: {exc}"
-    if not isinstance(sidecar, dict):
-        return False, f"sidecar {sidecar_path} is not a JSON object"
-    if sidecar.get("contacts_recorded") is not True:
-        return (False, f"sidecar contacts_recorded={sidecar.get('contacts_recorded')!r}, "
-                       "not True -- contact evidence is missing or incomplete")
-    return True, ""
-
-
 def check_init(log_path, samples, window_s=3.0):
     """Stage 0 initialization acceptance (PR #124 re-review, R1) -- a
     dedicated check, distinct from both `check(..., "HOME")` (a posture
@@ -132,17 +106,21 @@ def check_init(log_path, samples, window_s=3.0):
         actually still -- spread <= `SPREAD_TOL_DEG` per joint, same
         stillness bar `check()` uses -- so the log ends on a settled
         arm, not mid-motion;
-      * is the recording's own contact evidence complete
-        (`_sidecar_contacts_recorded`) -- so a contact during the
-        transient, if one happened, would be visible rather than
-        silently unrecorded.
+      * is the recording's own contact evidence complete AND does it
+        describe an accepted experiment -- no recorded contact, every
+        tracked board object's displacement within tolerance
+        (`experiment_gate.evaluate`, PR #124 re-review R3: the shared
+        gate `leg.sh`/`parked.sh` also call, so Stage 0's own
+        acceptance check cannot pass a recording that a Stage 2 leg
+        would have STOPped on).
 
     Deliberately NO first-sample-vs-last-sample invariance requirement:
     the sag above is exactly the motion such a check would have to
     forbid, and it is not a failure -- Stage 0 has no preceding
     established pose to be invariant relative to (that is what this step
-    ESTABLISHES). If the tail is still and the contact evidence is
-    intact, that is everything this step is in a position to promise.
+    ESTABLISHES). If the tail is still and the experiment gate accepts
+    the recording, that is everything this step is in a position to
+    promise.
     """
     t_end = samples[-1]["t"]
     tail = [s for s in samples if s["t"] >= t_end - window_s]
@@ -150,12 +128,14 @@ def check_init(log_path, samples, window_s=3.0):
     spread = {j: max(s["joints"][j] for s in tail) - min(s["joints"][j] for s in tail)
               for j in R.R_JOINTS}
     still_ok = max(spread.values()) <= SPREAD_TOL_DEG
-    evidence_ok, evidence_reason = _sidecar_contacts_recorded(log_path)
-    ok = bool(n_ok and still_ok and evidence_ok)
+    gate = experiment_gate.evaluate(log_path)
+    ok = bool(n_ok and still_ok and gate["ok"])
     return {
         "target": "INIT", "tail_samples": len(tail), "window_s": window_s,
         "spread_deg": spread, "samples_ok": n_ok, "still_ok": still_ok,
-        "evidence_ok": evidence_ok, "evidence_reason": evidence_reason, "ok": ok,
+        "evidence_ok": gate["evidence_ok"], "evidence_reason": gate["evidence_reason"],
+        "experiment_accepted": gate["accepted"], "experiment_reason": gate["reason"],
+        "ok": ok,
     }
 
 
@@ -167,6 +147,9 @@ def report_init(res):
     print(f"samples_ok={res['samples_ok']} still_ok={res['still_ok']} "
           f"evidence_ok={res['evidence_ok']}" +
           (f" ({res['evidence_reason']})" if res["evidence_reason"] else ""))
+    if res["evidence_ok"]:
+        print(f"experiment_accepted={res['experiment_accepted']}" +
+              ("" if res["experiment_accepted"] else f" ({res['experiment_reason']})"))
     print(f"STAGE0_INIT_OK={'yes' if res['ok'] else 'NO'}")
 
 

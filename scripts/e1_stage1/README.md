@@ -268,9 +268,11 @@ wherever the arm already is (see the already-stiff-arm investigation
 above), which does not forbid the arm moving *before* that instant, only
 require it settled *after*. `check_init` asks two questions instead of a
 posture match: is the recording's final `window_s` (default 3 s, the
-same window `PARKED_TAIL_S` reserves for it) still, and is the
-recording's own contact evidence (`.link.json`'s `contacts_recorded`)
-complete. It requires no first-to-last invariance -- the lead-in sag is
+same window `PARKED_TAIL_S` reserves for it) still, and does the
+recording's own linked evidence pass the shared experiment-acceptance
+gate (`scripts/experiment_gate.py`, below -- complete evidence, no
+recorded contact, every tracked board object within displacement
+tolerance). It requires no first-to-last invariance -- the lead-in sag is
 exactly the motion such a requirement would have to forbid, and Stage 0
 has no preceding established pose to be invariant relative to; that is
 what this step establishes. `INIT` does **not** assert stiff-zero
@@ -341,6 +343,44 @@ for any of the 8 `R_JOINTS` all refuse. Folded into `PREV_OK` alongside
 `START_VARIANT_OK`, so neither this cycle's `turn_on` nor its route call
 is reachable without both the posture evidence and a fresh stiff reading
 agreeing.
+
+### Experiment-acceptance gate (2026-09-16 re-review, R3)
+
+`leg.sh`/`parked.sh` always ran the linker (`scripts/link_e1_flight.py`)
+and STOPped on a non-zero exit, but a non-zero linker exit only means the
+contact *evidence* is missing or malformed (`contacts_recorded` could not
+be computed). A recording whose evidence was complete and said a contact
+happened, or that a board moved during the flight, still reached `LEG
+ok`/`PARKED ok`: `contacts_recorded=True` is a completeness verdict, not
+a no-contact verdict, and nothing read `contacts`/`displacement_m`
+themselves anywhere in the chain (the decision note's own gate/stop rows
+for this were never enforced).
+
+`scripts/experiment_gate.py` closes that gap -- one shared check, called
+by `leg.sh`, `parked.sh`, and `e1_tail_check.check_init` (Stage 0's own
+acceptance check) alike, right after the linker succeeds:
+
+* **evidence invalid** (missing sidecar, unparseable, not tied to THIS
+  recording by its `log` field, or not the shape a successful linker run
+  produces) -- refuse; the gate cannot tell whether the experiment was
+  clean.
+* **experiment not accepted** -- the evidence is valid and complete, and
+  it says either a contact happened (`contacts` non-empty) or some
+  tracked board object moved more than 1 mm
+  (`experiment_gate.DISPLACEMENT_TOL_M`) between the first and last
+  sample -- refuse; the experiment it describes is rejected.
+* **accepted** -- evidence valid, no contact, every tracked object's
+  displacement finite and within tolerance.
+
+Either kind of refusal is a STOP, unconditionally -- unlike the tail
+check, the gate does not go informational in `start` mode: a recorded
+contact or a disturbed board is a safety fact about the leg that just
+flew, independent of its position in the cycle. `leg.sh`/`parked.sh` both
+archive the recording to `recorder_logs/` *before* calling the gate, so a
+rejected recording's log and sidecar are preserved for review, not lost
+to the STOP -- evidence validity and experiment acceptance are
+deliberately kept distinct (see the module's docstring): `evaluate()`
+never writes to the sidecar or the log, only reads them.
 
 ### `parked.sh` promoted into the package (decision note §6 item 3)
 

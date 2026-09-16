@@ -7,16 +7,21 @@
 # goes through plan.py's BOARDS registry instead of a hard-coded path, the
 # same single source of truth leg.sh reads from plan_<CYCLE>.json.
 #
-# Runs the same recorder -> linker -> tailcheck chain as leg.sh, but the
-# tailcheck is informational only (mode=start, matches PR #117's
-# parked.sh): a parked recording proves nothing flew, it is not gated on
-# reaching a route's target. After the chain, classifies the recording's
-# final pose with start_variant.py (decision note §4's policy-A gate) and
-# STOPs -- same fail-closed contract as every other check in this package
-# -- unless it matches EXACTLY "stiff-zero" (policy A requires stiff-zero
-# for every Stage 2 cycle; "keyframe-sag" means Stage 0's turn_on did not
-# hold and must prevent motion the same as no match at all -- PR #124
-# review, M3).
+# Runs the same recorder -> linker -> archive -> experiment gate ->
+# tailcheck chain as leg.sh, but the tailcheck is informational only
+# (mode=start, matches PR #117's parked.sh): a parked recording proves
+# nothing flew, it is not gated on reaching a route's target. The experiment
+# gate (scripts/experiment_gate.py, PR #124 re-review R3) is NOT
+# informational -- a parked recording is still a recording, and a contact or
+# a disturbed board during it must STOP the same as during a flight leg;
+# it runs right after the recording is archived to recorder_logs/, so a
+# rejected recording's evidence is preserved for review. After the chain,
+# classifies the recording's final pose with start_variant.py (decision
+# note §4's policy-A gate) and STOPs -- same fail-closed contract as every
+# other check in this package -- unless it matches EXACTLY "stiff-zero"
+# (policy A requires stiff-zero for every Stage 2 cycle; "keyframe-sag"
+# means Stage 0's turn_on did not hold and must prevent motion the same as
+# no match at all -- PR #124 review, M3).
 #
 # `<cycle>` (M3) binds this evidence to a specific cycle id, independent of
 # `<name>`: the classification is written to `start_variant_<cycle>.json`
@@ -65,6 +70,10 @@ LOG=$(grep -o 'Saved [0-9]* samples to .*' "$P/control/recorder_$NAME.log" | sed
 PYTHONPATH=src "$PY" scripts/link_e1_flight.py "$LOG" > "$P/control/linker_$NAME.txt" 2>&1
 rc=$?; echo "linker exit=$rc" >> "$P/control/linker_$NAME.txt"
 [ $rc -eq 0 ] || stop "linker $NAME exit $rc"
+mkdir -p "$P/recorder_logs"; cp "$LOG" "${LOG%.json}.link.json" "$P/recorder_logs/"
+"$PY" scripts/experiment_gate.py "$LOG" > "$P/control/gate_$NAME.txt" 2>&1
+rc=$?; echo "gate exit=$rc" >> "$P/control/gate_$NAME.txt"
+[ $rc -eq 0 ] || stop "experiment gate $NAME rejected (see $P/control/gate_$NAME.txt): exit $rc"
 PYTHONPATH=src "$PY" scripts/e1_tail_check.py "$LOG" HOME > "$P/control/tailcheck_${NAME}_HOME.txt" 2>&1
 rc=$?; echo "tailcheck exit=$rc (mode=start)" >> "$P/control/tailcheck_${NAME}_HOME.txt"
 PYTHONPATH="$REPO/scripts" "$PY" -m e1_stage1.start_variant "$LOG" --cycle "$CYCLE" > "$P/control/start_variant_$CYCLE.json" 2>&1
@@ -79,5 +88,4 @@ print(json.load(open(sys.argv[1])).get('start_variant'))
 if [ "$VARIANT" != "stiff-zero" ]; then
   stop "start_variant for cycle $CYCLE is '$VARIANT', not 'stiff-zero' -- policy A requires stiff-zero for every Stage 2 cycle (decision note §4)"
 fi
-mkdir -p "$P/recorder_logs"; cp "$LOG" "${LOG%.json}.link.json" "$P/recorder_logs/"
 echo "PARKED $NAME ok, cycle $CYCLE stiff-zero: $LOG"

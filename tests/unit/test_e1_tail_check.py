@@ -100,7 +100,8 @@ def _synthetic_settling(pose, seconds=14.0, still_from_s=6.0, drift_deg_per_s=6.
 
 
 def _write_log_and_sidecar(tmp_path, samples, *, sidecar_present=True,
-                            contacts_recorded=True, corrupt_sidecar=False):
+                            contacts_recorded=True, corrupt_sidecar=False,
+                            contacts=(), displacement_m=None, log_name=None):
     log_path = tmp_path / "flight.json"
     log_path.write_text(json.dumps({"samples": samples}))
     if sidecar_present:
@@ -108,7 +109,12 @@ def _write_log_and_sidecar(tmp_path, samples, *, sidecar_present=True,
         if corrupt_sidecar:
             sidecar_path.write_text("{not json")
         else:
-            sidecar_path.write_text(json.dumps({"contacts_recorded": contacts_recorded}))
+            sidecar_path.write_text(json.dumps({
+                "log": log_name if log_name is not None else log_path.name,
+                "contacts_recorded": contacts_recorded,
+                "contacts": list(contacts),
+                "displacement_m": displacement_m if displacement_m is not None else {},
+            }))
     return log_path
 
 
@@ -211,3 +217,120 @@ class TestCheckInit:
             capture_output=True, text=True, env=env)
         assert result.returncode != 0
         assert "PARKED_AT_HOME=NO" in result.stdout
+
+
+# ── check_init / experiment acceptance (2026-09-16 re-review, R3) ──────────
+#
+# check_init used to accept any recording whose sidecar said
+# `contacts_recorded: True` -- a completeness verdict, not a no-contact
+# verdict. The re-review demonstrated a recorded contact and a 20 mm board
+# displacement both passing INIT (and `leg.sh ... end`'s "LEG ok") anyway.
+# check_init now delegates to the shared `experiment_gate.evaluate`, the
+# same gate `leg.sh`/`parked.sh` call -- these cases exercise that gate
+# through check_init directly (`test_experiment_gate.py` covers the gate
+# module and its CLI on their own).
+
+class TestCheckInitExperimentAcceptance:
+
+    def test_recorded_contact_refuses(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(
+            tmp_path, samples,
+            contacts=[{"arm_geom": "r_hand_tube", "object_id": "pool_box_1"}])
+        res = etc.check_init(str(log_path), samples)
+        assert res["still_ok"] is True
+        assert res["evidence_ok"] is True
+        assert res["experiment_accepted"] is False
+        assert "contact" in res["experiment_reason"]
+        assert res["ok"] is False
+
+    def test_20mm_displacement_refuses(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(
+            tmp_path, samples, displacement_m={"pool_box_1": 0.020})
+        res = etc.check_init(str(log_path), samples)
+        assert res["evidence_ok"] is True
+        assert res["experiment_accepted"] is False
+        assert "pool_box_1" in res["experiment_reason"]
+        assert "20.00 mm" in res["experiment_reason"]
+        assert res["ok"] is False
+
+    def test_displacement_at_the_1mm_tolerance_boundary_passes(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(
+            tmp_path, samples, displacement_m={"pool_box_1": 0.001})
+        res = etc.check_init(str(log_path), samples)
+        assert res["experiment_accepted"] is True
+        assert res["ok"] is True
+
+    def test_displacement_just_over_1mm_refuses(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(
+            tmp_path, samples, displacement_m={"pool_box_1": 0.0010001})
+        res = etc.check_init(str(log_path), samples)
+        assert res["experiment_accepted"] is False
+        assert res["ok"] is False
+
+    def test_non_finite_displacement_refuses_as_invalid_evidence(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(tmp_path, samples)
+        sidecar_path = log_path.with_suffix(".link.json")
+        sidecar_path.write_text(json.dumps({
+            "log": log_path.name, "contacts_recorded": True, "contacts": [],
+            "displacement_m": {"pool_box_1": float("nan")},
+        }))
+        res = etc.check_init(str(log_path), samples)
+        assert res["evidence_ok"] is False
+        assert res["experiment_accepted"] is None
+        assert res["ok"] is False
+
+    def test_sidecar_naming_a_different_recording_refuses(self, tmp_path):
+        """A hand-copied or stale sidecar for another flight must not
+        authorize this one."""
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(
+            tmp_path, samples, log_name="some_other_recording.json")
+        res = etc.check_init(str(log_path), samples)
+        assert res["evidence_ok"] is False
+        assert "wrong-recording" in res["evidence_reason"]
+        assert res["ok"] is False
+
+    def test_missing_contacts_field_refuses_as_invalid_evidence(self, tmp_path):
+        """contacts_recorded=True with no 'contacts' key at all is not the
+        shape a successful linker run produces -- refuse, do not treat as
+        zero contacts."""
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(tmp_path, samples)
+        sidecar_path = log_path.with_suffix(".link.json")
+        sidecar_path.write_text(json.dumps(
+            {"log": log_path.name, "contacts_recorded": True}))
+        res = etc.check_init(str(log_path), samples)
+        assert res["evidence_ok"] is False
+        assert res["ok"] is False
+
+    def test_clean_recording_with_full_evidence_passes(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(
+            tmp_path, samples, contacts=[],
+            displacement_m={"pool_box_1": 0.0002})
+        res = etc.check_init(str(log_path), samples)
+        assert res["evidence_ok"] is True
+        assert res["experiment_accepted"] is True
+        assert res["ok"] is True
+
+    def test_cli_reports_stage0_init_not_ok_on_recorded_contact(self, tmp_path):
+        """The literal `scripts/e1_tail_check.py <log> INIT` CLI leg.sh
+        invokes -- non-zero exit and STAGE0_INIT_OK=NO on a recorded
+        contact, not just the Python-level result dict."""
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(
+            tmp_path, samples,
+            contacts=[{"arm_geom": "r_hand_tube", "object_id": "pool_box_1"}])
+        script = (pathlib.Path(_HERE) / "../../scripts/e1_tail_check.py").resolve()
+        src_dir = (pathlib.Path(_HERE) / "../../src").resolve()
+        env = dict(os.environ, PYTHONPATH=str(src_dir))
+        result = subprocess.run(
+            [sys.executable, str(script), str(log_path), "INIT"],
+            capture_output=True, text=True, env=env)
+        assert result.returncode != 0
+        assert "STAGE0_INIT_OK=NO" in result.stdout
