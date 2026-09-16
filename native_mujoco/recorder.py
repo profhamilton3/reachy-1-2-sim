@@ -23,11 +23,30 @@ from __future__ import annotations
 import datetime
 import json
 import pathlib
+import subprocess
 import time
 from typing import Any, Dict, Optional
 
 
 _FORMAT_VERSION = 1
+
+
+def _code_provenance() -> Dict[str, Any]:
+    """Best-effort git identity of THIS FILE's own repo checkout -- never
+    the caller's cwd, which may be anywhere. A dirty tree means the commit
+    alone does not prove what code actually ran, so callers must not treat
+    `code_sha` as trustworthy unless `code_sha_dirty` is exactly `False`."""
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    try:
+        sha = subprocess.run(["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+                              capture_output=True, text=True, timeout=2)
+        dirty = subprocess.run(["git", "-C", str(repo_root), "status", "--porcelain"],
+                                capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        return {"code_sha": None, "code_sha_dirty": None}
+    if sha.returncode != 0 or dirty.returncode != 0:
+        return {"code_sha": None, "code_sha_dirty": None}
+    return {"code_sha": sha.stdout.strip(), "code_sha_dirty": bool(dirty.stdout.strip())}
 
 
 class Recorder:
@@ -48,6 +67,7 @@ class Recorder:
         self._manifest_meta = {
             "format_version": _FORMAT_VERSION,
             "started_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            **_code_provenance(),
             **manifest_meta,
         }
         self._flush_manifest(total_steps=None, duration_s=None)

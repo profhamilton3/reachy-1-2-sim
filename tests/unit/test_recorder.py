@@ -5,6 +5,7 @@ All tests run offline — no MuJoCo or network required.
 
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -12,6 +13,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "native_mujoco"))
 
+import recorder as recorder_module
 from recorder import Recorder
 from replayer import Replayer
 
@@ -123,6 +125,55 @@ class TestFinalize:
         # Should still be parseable after close
         lines = (rec.run_dir / "states.jsonl").read_text().strip().split("\n")
         assert len(lines) == 5
+
+
+# ── Code provenance (Stage 1 execution notebook W4) ──────────────────────────
+
+class TestCodeProvenance:
+
+    def test_code_sha_and_dirty_present_in_a_git_tree(self, tmp_path, monkeypatch):
+        def fake_run(cmd, **kw):
+            if cmd[-2:] == ["rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="deadbeef\n", stderr="")
+            if cmd[-1] == "--porcelain":
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected git command: {cmd}")
+        monkeypatch.setattr(recorder_module.subprocess, "run", fake_run)
+        rec = Recorder.new(tmp_path)
+        manifest = json.loads((rec.run_dir / "manifest.json").read_text())
+        assert manifest["code_sha"] == "deadbeef"
+        assert manifest["code_sha_dirty"] is False
+
+    def test_dirty_tree_reported(self, tmp_path, monkeypatch):
+        def fake_run(cmd, **kw):
+            if cmd[-2:] == ["rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="deadbeef\n", stderr="")
+            if cmd[-1] == "--porcelain":
+                return subprocess.CompletedProcess(cmd, 0, stdout=" M recorder.py\n", stderr="")
+            raise AssertionError(f"unexpected git command: {cmd}")
+        monkeypatch.setattr(recorder_module.subprocess, "run", fake_run)
+        rec = Recorder.new(tmp_path)
+        manifest = json.loads((rec.run_dir / "manifest.json").read_text())
+        assert manifest["code_sha"] == "deadbeef"
+        assert manifest["code_sha_dirty"] is True
+
+    def test_code_sha_none_when_git_fails(self, tmp_path, monkeypatch):
+        def fake_run(cmd, **kw):
+            raise FileNotFoundError("git not found")
+        monkeypatch.setattr(recorder_module.subprocess, "run", fake_run)
+        rec = Recorder.new(tmp_path)
+        manifest = json.loads((rec.run_dir / "manifest.json").read_text())
+        assert manifest["code_sha"] is None
+        assert manifest["code_sha_dirty"] is None
+
+    def test_code_sha_none_on_nonzero_exit(self, tmp_path, monkeypatch):
+        def fake_run(cmd, **kw):
+            return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="not a git repo")
+        monkeypatch.setattr(recorder_module.subprocess, "run", fake_run)
+        rec = Recorder.new(tmp_path)
+        manifest = json.loads((rec.run_dir / "manifest.json").read_text())
+        assert manifest["code_sha"] is None
+        assert manifest["code_sha_dirty"] is None
 
 
 # ── Replayer ──────────────────────────────────────────────────────────────────
