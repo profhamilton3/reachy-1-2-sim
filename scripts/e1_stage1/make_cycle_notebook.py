@@ -242,7 +242,23 @@ def binding_cell_source(*, require_start_variant: bool = False) -> str:
     Stage 1 (`generate`) and Stage 0's arm-on setup (`generate_stage0`) both
     keep the default `False` -- Stage 0 is what MAKES the arm stiff-zero in
     the first place (there is no preceding parked recording to check), and
-    Stage 1's already-evidenced notebooks must not change shape."""
+    Stage 1's already-evidenced notebooks must not change shape.
+
+    Also appends, alongside the posture gate above (2026-09-16 re-review,
+    R2): `start_variant_gate` reads only joint angles, and a *compliant*
+    arm reads "zero within 1 deg" for part of its own settle window (the
+    README's already-stiff-arm investigation; decision note §3) -- so a
+    stiff-zero-classified posture is not on its own proof the arm is
+    currently STIFF. `e1_identity.require_compliance(ident.run_dir,
+    R.R_JOINTS, compliant=False, timeout_s=COMPLIANCE_TIMEOUT_S)` reads a
+    FRESH server-state sample (no `min_cmd_seq` -- nothing has been
+    commanded yet this cycle, freshness window only) and requires every
+    required joint's own `compliant` field is exactly `False`; missing,
+    malformed (non-bool), stale, or explicitly `compliant=True` evidence
+    all refuse via that function's own fail-closed contract. Folded into
+    `PREV_OK` before any leg's `go`, so neither `turn_on` nor a route call
+    is reachable without both the posture evidence and a fresh stiff
+    reading agreeing."""
     src = '''# Cell 2 -- motion-client binding check + W4 fresh-server provenance
 import e1_identity, provenance, gating, plan
 from reachy_ai.motion import rig_routes as R
@@ -286,7 +302,19 @@ START_VARIANT_OK, START_VARIANT_REASON, START_VARIANT_DOC = plan.start_variant_g
 print("start_variant gate:", START_VARIANT_OK, START_VARIANT_REASON or "", START_VARIANT_DOC)
 if not START_VARIANT_OK:
     (CTRL / f"binding_FAIL_{CYCLE}").write_text(json.dumps({"reason": "start_variant", "detail": START_VARIANT_REASON}, default=str))
-PREV_OK = PREV_OK and START_VARIANT_OK
+# Fresh pre-cycle compliance gate (2026-09-16 re-review, R2): the posture-only
+# stiff-zero classification above cannot tell "already stiff at reset" from
+# "compliant and reading zero for a moment before it sags" -- read ONE fresh
+# state sample (no min_cmd_seq: nothing has been commanded yet this cycle,
+# freshness window only) and require every required joint's own `compliant`
+# field is exactly False. Missing, malformed, stale, or explicitly compliant
+# evidence refuses via require_compliance's own fail-closed contract, the
+# same one the per-leg check after turn_on already relies on.
+COMPLIANCE_CHECK = e1_identity.require_compliance(ident.run_dir, R.R_JOINTS, compliant=False, timeout_s=COMPLIANCE_TIMEOUT_S)
+print("pre-cycle compliance gate:", COMPLIANCE_CHECK.ok, COMPLIANCE_CHECK.reasons)
+if not COMPLIANCE_CHECK.ok:
+    (CTRL / f"binding_FAIL_{CYCLE}").write_text(json.dumps({"reason": "pre_cycle_compliance", "detail": COMPLIANCE_CHECK.as_dict()}, default=str))
+PREV_OK = PREV_OK and START_VARIANT_OK and COMPLIANCE_CHECK.ok
 '''
     return src
 

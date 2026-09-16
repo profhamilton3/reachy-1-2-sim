@@ -231,13 +231,13 @@ via the same `leg.sh` chain (its leg name is the identity-scoped
 `plan_stage0-<board>-<session>.json` -- note the hyphens, not
 underscores).
 
-**The exact `leg.sh` invocation for the armon recording** (M5 -- this was
-previously undocumented):
+**The exact `leg.sh` invocation for the armon recording** (M5, corrected
+by the 2026-09-16 re-review's R1 -- `HOME` was wrong here, see below):
 
 ```
 E1_PYTHON=<e1venv python> scripts/e1_stage1/leg.sh <repo> <evidence-dir> \
     stage0-<board>-<session> stage0-<board>-<session>-armon \
-    RAISE_TO_SIDE HOME end
+    RAISE_TO_SIDE INIT end
 ```
 
 `RAISE_TO_SIDE` there is a clearance-table label only -- nothing in the
@@ -245,21 +245,46 @@ armon cell can fly it (`test_armon_cell_never_calls_any_route_function`).
 `end` mode is required: it is the only mode in which a failed tail check
 writes `control/stop`; in `start` mode the check is merely informational.
 
-**This tail check proves position-invariance against `HOME`, not
-"reached stiff-zero" -- the two are not the same acceptance criterion.**
-`e1_tail_check.check(..., "HOME")` requires the last sample's `r_gripper`
-within `GRIPPER_TOL_DEG` (3°) of `rig_routes.HOME`'s own `r_gripper`
-target, which is `OPEN = -45.0°` (`rig_routes.pose()`: "gripper open
-unless told otherwise"). Policy A's `stiff-zero` requires `|r_gripper| <=
-STIFF_ZERO_TOL_DEG` (1°). These targets are 44° apart -- a passing armon
-tail check does not and cannot mean the arm reached stiff-zero
+**`INIT` is a dedicated Stage 0 initialization acceptance check
+(`e1_tail_check.check_init`), not a posture target, and it is distinct
+from the post-reset stiff-zero gate below.** The invocation used to name
+`HOME` here, on the theory that "did the arm hold still" could piggyback
+on an existing posture target. It cannot: `e1_tail_check.check(...,
+"HOME")` requires the last sample's `r_gripper` within `GRIPPER_TOL_DEG`
+(3°) of `rig_routes.HOME`'s own `r_gripper` target, `OPEN = -45.0°`
+(`rig_routes.pose()`: "gripper open unless told otherwise"). But on a
+fresh, compliant server the gripper is still sagging toward the
+keyframe-sag pose during the recording (decision note §3: ~65 s to
+settle; the armon recording is 14 s), so it sits somewhere in
+`[-40°, 0°]` throughout -- disjoint from `HOME`'s `[-48°, -42°]` window.
+`HOME` in `end` mode was therefore unpassable by construction: every
+Stage 1 parked `HOME` tail check on a comparably fresh arm failed on
+exactly this criterion (2026-09-16 re-review, R1), which meant the
+documented invocation stopped the board session before cycle 1, every
+time.
+
+`INIT` allows that sag: Stage 0's `turn_on` pins `goal_position` to
+wherever the arm already is (see the already-stiff-arm investigation
+above), which does not forbid the arm moving *before* that instant, only
+require it settled *after*. `check_init` asks two questions instead of a
+posture match: is the recording's final `window_s` (default 3 s, the
+same window `PARKED_TAIL_S` reserves for it) still, and is the
+recording's own contact evidence (`.link.json`'s `contacts_recorded`)
+complete. It requires no first-to-last invariance -- the lead-in sag is
+exactly the motion such a requirement would have to forbid, and Stage 0
+has no preceding established pose to be invariant relative to; that is
+what this step establishes. `INIT` does **not** assert stiff-zero
 (`plan.classify_start_variant` applied to `rig_routes.HOME` itself
-returns `None`, matching neither variant, by construction). Stage 0's
-`turn_on` only has to prove the arm didn't move while going stiff; it is
+returns `None`, matching neither variant, by construction -- and
+`check_init` looks at stillness and contact evidence, never gripper
+angle, so it cannot be conflated with `stiff-zero` either). Stage 0's
+`turn_on` only has to prove the arm settled while going stiff; it is
 what makes the *following* reset settle to stiff-zero rather than sag to
 keyframe-sag (decision note §3), not something that asserts stiff-zero
 itself. Whether stiff-zero was actually reached is checked separately,
-per cycle, by the parked-recording gate below.
+per cycle, by the parked-recording gate below -- and, since the
+2026-09-16 re-review's R2, by a fresh-sample compliance check as well
+(below).
 
 Every cycle's *preceding* parked recording is verified with
 `start_variant.py` (invoked from the promoted `parked.sh`, below): it
@@ -287,6 +312,35 @@ that cycle. This gate is Stage 2-only: legacy `generate` and
 `generate_stage0` do not carry it (Stage 0 is what *establishes*
 stiff-zero for the first cycle; there is no preceding parked recording
 for it to check).
+
+**A stiff-zero posture alone does not prove the arm is currently
+stiff** (2026-09-16 re-review, R2): `plan.start_variant_gate` reads only
+joint angles, and a *compliant* arm reads "zero within 1°" for part of
+its settle window too -- it starts at the reset keyframe (every joint at
+0) and sags toward keyframe-sag over ~65 s (decision note §3), so early
+in that sag it is still within stiff-zero's 1° tolerance, and a
+`parked.sh` recording taken in that window would read the same as a
+genuinely stiff arm. So the binding cell also runs a fresh-sample
+compliance check, right alongside the posture gate above, before any
+cycle command:
+
+```python
+COMPLIANCE_CHECK = e1_identity.require_compliance(
+    ident.run_dir, R.R_JOINTS, compliant=False, timeout_s=COMPLIANCE_TIMEOUT_S)
+PREV_OK = PREV_OK and START_VARIANT_OK and COMPLIANCE_CHECK.ok
+```
+
+No `min_cmd_seq` -- nothing has been commanded yet this cycle, so this is
+a freshness-window read of whatever the server is reporting right now,
+not proof tied to a specific command the way the per-leg post-`turn_on`
+check is. `require_compliance`'s existing fail-closed contract does the
+rest: a missing sample, a non-bool `compliant` field (state stream not
+reporting compliance at all), a stale sample (older than
+`max_state_age_s`), or a sample that explicitly reports `compliant=True`
+for any of the 8 `R_JOINTS` all refuse. Folded into `PREV_OK` alongside
+`START_VARIANT_OK`, so neither this cycle's `turn_on` nor its route call
+is reachable without both the posture evidence and a fresh stiff reading
+agreeing.
 
 ### `parked.sh` promoted into the package (decision note §6 item 3)
 

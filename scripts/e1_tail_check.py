@@ -11,7 +11,14 @@ Usage (from the reachy-1-2-sim checkout, so the targets come from the
 reviewed code, never from this file):
 
     PYTHONPATH=src python3 scripts/e1_tail_check.py runs/<log>.json PRESENT|REST|REST_SHUT|HOME [window_s]
+    PYTHONPATH=src python3 scripts/e1_tail_check.py runs/<log>.json INIT [window_s]
     PYTHONPATH=src python3 scripts/e1_tail_check.py --selftest
+
+`INIT` (PR #124 re-review, R1) is not a posture target -- see
+`check_init`'s docstring. It is the check the Stage 0 armon recording
+(`e1_stage1/README.md`, "Policy A: Stage 0 arm-on") is judged against;
+`HOME` is wrong for that recording (a world apart on the gripper -- see
+`TestHomeToleranceIsNotStiffZero`) and must never be used there again.
 
 Targets are `reachy_ai.motion.rig_routes.{PRESENT,REST,REST_SHUT,HOME}`,
 read at run time and printed, so the operator sees the exact pose the log
@@ -70,6 +77,97 @@ def check(samples, target_name, window_s=3.0):
         "spread_deg": spread, "r_gripper": grip, "gripper_ok": grip_ok,
         "posture_ok": posture_ok, "still_ok": still_ok, "samples_ok": n_ok, "ok": ok,
     }
+
+
+def _sidecar_contacts_recorded(log_path):
+    """(ok, reason) for the recording's own linked contact evidence
+    (`scripts/link_e1_flight.py`'s `<log>.link.json` sidecar, same
+    `.with_suffix` derivation `leg.sh` and `link_e1_flight.sidecar_path_for`
+    use) -- `leg.sh` always runs the linker before this check, in `end`
+    mode STOPping on a non-zero linker exit (missing/incomplete contact
+    evidence) before the tail check is even reached. Re-checking it here
+    too means `check_init` is a complete, self-contained acceptance test
+    on its own -- correct when run standalone (the module's usage note:
+    "the operator sees the exact pose the log is being judged against"),
+    not only correct as one link in `leg.sh`'s chain."""
+    sidecar_path = pathlib.Path(log_path).with_suffix(".link.json")
+    try:
+        text = sidecar_path.read_text()
+    except OSError:
+        return False, f"no linked sidecar at {sidecar_path} (run link_e1_flight.py first)"
+    try:
+        sidecar = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return False, f"sidecar {sidecar_path} is not valid JSON: {exc}"
+    if not isinstance(sidecar, dict):
+        return False, f"sidecar {sidecar_path} is not a JSON object"
+    if sidecar.get("contacts_recorded") is not True:
+        return (False, f"sidecar contacts_recorded={sidecar.get('contacts_recorded')!r}, "
+                       "not True -- contact evidence is missing or incomplete")
+    return True, ""
+
+
+def check_init(log_path, samples, window_s=3.0):
+    """Stage 0 initialization acceptance (PR #124 re-review, R1) -- a
+    dedicated check, distinct from both `check(..., "HOME")` (a posture
+    target, wrong for this recording -- see `e1_stage1/README.md`) and
+    from `plan.classify_start_variant`'s post-reset stiff-zero gate (a
+    DIFFERENT recording, the parked recording that PRECEDES the next
+    cycle, not this one-time arm-on step).
+
+    What Stage 0's `turn_on("r_arm")` needs proof of is narrower than
+    "arrived somewhere": going stiff pins `goal_position` to whatever
+    `present_position` already is (README, "Already-stiff arm"
+    investigation, point 1) -- it does not, by itself, forbid the arm
+    moving up to that instant. On a fresh, compliant server the gripper
+    is still sagging toward the keyframe-sag pose during the recording's
+    lead-in (decision note Sec3: ~65s to settle, so a 14s armon recording
+    catches it mid-sag) -- real motion, not a bug, and rejecting it would
+    make the documented invocation unpassable by construction (as `HOME`
+    was). So THIS check allows any motion during that lead-in/turn_on
+    transient and asks two questions instead:
+
+      * is the recording's FINAL window (last `window_s` seconds, same
+        window `PARKED_TAIL_S` reserves for it in the timing budget)
+        actually still -- spread <= `SPREAD_TOL_DEG` per joint, same
+        stillness bar `check()` uses -- so the log ends on a settled
+        arm, not mid-motion;
+      * is the recording's own contact evidence complete
+        (`_sidecar_contacts_recorded`) -- so a contact during the
+        transient, if one happened, would be visible rather than
+        silently unrecorded.
+
+    Deliberately NO first-sample-vs-last-sample invariance requirement:
+    the sag above is exactly the motion such a check would have to
+    forbid, and it is not a failure -- Stage 0 has no preceding
+    established pose to be invariant relative to (that is what this step
+    ESTABLISHES). If the tail is still and the contact evidence is
+    intact, that is everything this step is in a position to promise.
+    """
+    t_end = samples[-1]["t"]
+    tail = [s for s in samples if s["t"] >= t_end - window_s]
+    n_ok = len(tail) >= 0.9 * SAMPLE_HZ * window_s
+    spread = {j: max(s["joints"][j] for s in tail) - min(s["joints"][j] for s in tail)
+              for j in R.R_JOINTS}
+    still_ok = max(spread.values()) <= SPREAD_TOL_DEG
+    evidence_ok, evidence_reason = _sidecar_contacts_recorded(log_path)
+    ok = bool(n_ok and still_ok and evidence_ok)
+    return {
+        "target": "INIT", "tail_samples": len(tail), "window_s": window_s,
+        "spread_deg": spread, "samples_ok": n_ok, "still_ok": still_ok,
+        "evidence_ok": evidence_ok, "evidence_reason": evidence_reason, "ok": ok,
+    }
+
+
+def report_init(res):
+    print("target INIT (Stage 0 initialization acceptance -- not a posture "
+          "target; see check_init's docstring)")
+    print(f"tail_samples={res['tail_samples']} (last {res['window_s']:.1f}s)  "
+          f"max_spread_deg={max(res['spread_deg'].values()):.1f}")
+    print(f"samples_ok={res['samples_ok']} still_ok={res['still_ok']} "
+          f"evidence_ok={res['evidence_ok']}" +
+          (f" ({res['evidence_reason']})" if res["evidence_reason"] else ""))
+    print(f"STAGE0_INIT_OK={'yes' if res['ok'] else 'NO'}")
 
 
 def report(res):
@@ -135,8 +233,13 @@ if __name__ == "__main__":
         sys.exit(0 if selftest() else 1)
     if len(sys.argv) < 3:
         raise SystemExit(__doc__)
-    log = json.load(open(sys.argv[1]))
+    log_path = sys.argv[1]
+    log = json.load(open(log_path))
     window = float(sys.argv[3]) if len(sys.argv) > 3 else 3.0
-    res = check(log["samples"], sys.argv[2], window)
-    report(res)
+    if sys.argv[2] == "INIT":
+        res = check_init(log_path, log["samples"], window)
+        report_init(res)
+    else:
+        res = check(log["samples"], sys.argv[2], window)
+        report(res)
     sys.exit(0 if res["ok"] else 1)

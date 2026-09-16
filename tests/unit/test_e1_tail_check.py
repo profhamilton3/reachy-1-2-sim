@@ -7,9 +7,16 @@ now as individually-visible pytest cases (each failure names ITS case,
 rather than a single 11/11 pass/fail line) plus the module's own
 invariant assertions (REST vs REST_SHUT differing only in `r_gripper`).
 Offline throughout: no samples come from a live server or SDK.
+
+Also covers `check_init`/`INIT` (2026-09-16 re-review, R1): the dedicated
+Stage 0 initialization acceptance check that replaced the unpassable
+`HOME` tail check documented in `e1_stage1/README.md`.
 """
 
+import json
 import os
+import pathlib
+import subprocess
 import sys
 
 import pytest
@@ -61,3 +68,146 @@ def test_gross_joint_posture_alone_does_not_separate_rest_from_rest_shut():
 
 def test_selftest_entrypoint_still_passes():
     assert etc.selftest() is True
+
+
+# ── check_init / INIT (2026-09-16 re-review, R1) ────────────────────────────
+#
+# HOME was the wrong acceptance criterion for the Stage 0 armon recording
+# (README, "Policy A: Stage 0 arm-on"): it requires r_gripper within 3 deg
+# of HOME's OPEN (-45 deg), but on a fresh, compliant server the gripper
+# is still sagging toward keyframe-sag (~[-40, 0] deg) throughout the
+# recording, disjoint from that window -- every Stage 1 parked HOME tail
+# check on a comparably fresh arm failed on exactly this criterion, which
+# in `end` mode stops the board session before cycle 1. `check_init`
+# replaces it: allow the turn_on transient (no first-to-last invariance),
+# require a stable final window, require complete contact evidence.
+
+def _synthetic_settling(pose, seconds=14.0, still_from_s=6.0, drift_deg_per_s=6.0):
+    """Samples that drift on `r_gripper` (standing in for the pre-turn_on
+    compliant sag) until `still_from_s`, then hold `pose` exactly -- the
+    shape check_init's "allow the transient, require a stable final
+    window" rule is meant to accept. With the default `window_s=3.0` and
+    `seconds=14.0` (== `plan.armon_duration_s()`), the tail covers
+    [11, 14)s, well after the default `still_from_s=6.0`."""
+    out = []
+    for k in range(int(seconds * etc.SAMPLE_HZ)):
+        t = k / etc.SAMPLE_HZ
+        p = dict(pose)
+        if t < still_from_s:
+            p["r_gripper"] = pose["r_gripper"] + (still_from_s - t) * drift_deg_per_s
+        out.append({"t": t, "wall_time_ns": 10**9 + k * 50_000_000, "joints": p})
+    return out
+
+
+def _write_log_and_sidecar(tmp_path, samples, *, sidecar_present=True,
+                            contacts_recorded=True, corrupt_sidecar=False):
+    log_path = tmp_path / "flight.json"
+    log_path.write_text(json.dumps({"samples": samples}))
+    if sidecar_present:
+        sidecar_path = log_path.with_suffix(".link.json")
+        if corrupt_sidecar:
+            sidecar_path.write_text("{not json")
+        else:
+            sidecar_path.write_text(json.dumps({"contacts_recorded": contacts_recorded}))
+    return log_path
+
+
+class TestCheckInit:
+
+    def test_settling_recording_with_complete_evidence_passes(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        # No first-to-last invariance: the first sample is well off HOME
+        # (mid-sag), the last is exactly HOME -- and that is fine.
+        assert abs(samples[0]["joints"]["r_gripper"]
+                   - samples[-1]["joints"]["r_gripper"]) > 30.0
+        log_path = _write_log_and_sidecar(tmp_path, samples)
+        res = etc.check_init(str(log_path), samples)
+        assert res["still_ok"] is True
+        assert res["samples_ok"] is True
+        assert res["evidence_ok"] is True
+        assert res["ok"] is True
+
+    def test_moving_in_the_final_window_fails(self, tmp_path):
+        """The transient is allowed everywhere EXCEPT the final window --
+        still moving there must fail, same stillness bar check() uses."""
+        samples = _synthetic_settling(R.HOME, still_from_s=12.0)
+        log_path = _write_log_and_sidecar(tmp_path, samples)
+        res = etc.check_init(str(log_path), samples)
+        assert res["still_ok"] is False
+        assert res["ok"] is False
+
+    def test_missing_sidecar_refuses(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(tmp_path, samples, sidecar_present=False)
+        res = etc.check_init(str(log_path), samples)
+        assert res["still_ok"] is True  # the motion criterion alone would pass
+        assert res["evidence_ok"] is False
+        assert "no linked sidecar" in res["evidence_reason"]
+        assert res["ok"] is False
+
+    def test_incomplete_contact_evidence_refuses(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(tmp_path, samples, contacts_recorded=False)
+        res = etc.check_init(str(log_path), samples)
+        assert res["evidence_ok"] is False
+        assert res["ok"] is False
+
+    def test_malformed_sidecar_refuses(self, tmp_path):
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(tmp_path, samples, corrupt_sidecar=True)
+        res = etc.check_init(str(log_path), samples)
+        assert res["evidence_ok"] is False
+        assert res["ok"] is False
+
+    def test_stage1_measured_gripper_values_that_failed_home_now_pass(self, tmp_path):
+        """The re-review's own evidence table: real Stage 1 parked-HOME
+        tail checks measured r_gripper at -38.1, -37.7, -40.1, and -0.0
+        deg (stiff-zero legs), with posture_ok/still_ok/samples_ok all
+        True and only HOME's gripper criterion failing. check_init has no
+        gripper (or any posture) criterion, so a still, evidence-complete
+        recording at any of these poses now passes."""
+        for gripper in (-38.1, -37.7, -40.1, -0.0):
+            pose = dict(R.HOME, r_gripper=gripper)
+            samples = etc._synthetic(pose, seconds=14.0)  # still throughout
+            log_path = _write_log_and_sidecar(tmp_path, samples)
+            res = etc.check_init(str(log_path), samples)
+            assert res["ok"] is True, gripper
+
+    def test_readme_documents_INIT_not_HOME_for_the_armon_invocation(self):
+        readme = (pathlib.Path(_HERE) / "../../scripts/e1_stage1/README.md").read_text()
+        assert "RAISE_TO_SIDE INIT end" in readme
+        assert "RAISE_TO_SIDE HOME end" not in readme
+
+    def test_cli_matches_the_exact_documented_invocation(self, tmp_path):
+        """`E1_PYTHON=<e1venv python> scripts/e1_stage1/leg.sh ... RAISE_TO_SIDE
+        INIT end` runs `PYTHONPATH=src <python> scripts/e1_tail_check.py
+        <log> INIT` (leg.sh:39) -- exercise that exact CLI form end to
+        end, not just the Python function."""
+        samples = _synthetic_settling(R.HOME, still_from_s=6.0)
+        log_path = _write_log_and_sidecar(tmp_path, samples)
+        script = (pathlib.Path(_HERE) / "../../scripts/e1_tail_check.py").resolve()
+        src_dir = (pathlib.Path(_HERE) / "../../src").resolve()
+        env = dict(os.environ, PYTHONPATH=str(src_dir))
+        result = subprocess.run(
+            [sys.executable, str(script), str(log_path), "INIT"],
+            capture_output=True, text=True, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "STAGE0_INIT_OK=yes" in result.stdout
+
+    def test_cli_reports_failure_for_the_old_HOME_target_on_the_same_recording(
+            self, tmp_path):
+        """The failure the re-review demonstrated, reproduced end to end:
+        the same still, evidence-complete recording that passes INIT
+        fails HOME, non-zero exit -- which is what made the previously
+        documented invocation stop the board session before cycle 1."""
+        pose = dict(R.HOME, r_gripper=-38.1)
+        samples = etc._synthetic(pose, seconds=14.0)
+        log_path = _write_log_and_sidecar(tmp_path, samples)
+        script = (pathlib.Path(_HERE) / "../../scripts/e1_tail_check.py").resolve()
+        src_dir = (pathlib.Path(_HERE) / "../../src").resolve()
+        env = dict(os.environ, PYTHONPATH=str(src_dir))
+        result = subprocess.run(
+            [sys.executable, str(script), str(log_path), "HOME"],
+            capture_output=True, text=True, env=env)
+        assert result.returncode != 0
+        assert "PARKED_AT_HOME=NO" in result.stdout

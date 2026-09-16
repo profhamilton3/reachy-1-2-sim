@@ -931,6 +931,129 @@ class TestStartVariantGateWiredIntoGeneratedNotebooks:
         assert "start_variant_gate" not in binding_src
 
 
+# ── R2 (2026-09-16 re-review): fresh pre-cycle compliance, alongside the
+# stiff-zero posture evidence, before any cycle command ─────────────────────
+
+class TestPreCycleComplianceGate:
+    """`start_variant_gate` reads only joint angles; a compliant arm reads
+    'zero within 1 deg' for part of its own settle window too (README,
+    already-stiff-arm investigation; decision note §3), so a stiff-zero
+    posture alone does not prove the arm is currently stiff. The binding
+    cell must also read a FRESH server-state sample (no `min_cmd_seq` --
+    nothing commanded yet this cycle) and require `compliant=False` for
+    every required joint, folded into `PREV_OK` alongside
+    `START_VARIANT_OK` so neither `turn_on` nor a route call is reachable
+    on missing, malformed, stale, or explicitly compliant evidence.
+    `require_compliance`'s own fail-closed handling of those four cases is
+    covered by `test_e1_identity.py::TestRequireCompliance`, unchanged by
+    this PR; these tests cover the NEW wiring only."""
+
+    def test_binding_cell_calls_require_compliance_with_freshness_only(self):
+        src = make_cycle_notebook.binding_cell_source(require_start_variant=True)
+        # Exact call text -- pins both the arguments present (compliant=False,
+        # timeout_s=COMPLIANCE_TIMEOUT_S) and, by construction, the absence of
+        # min_cmd_seq (nothing has been commanded this cycle yet, so this is a
+        # freshness-window-only read, unlike the per-leg check after turn_on).
+        assert ("COMPLIANCE_CHECK = e1_identity.require_compliance("
+                "ident.run_dir, R.R_JOINTS, compliant=False, "
+                "timeout_s=COMPLIANCE_TIMEOUT_S)") in src
+        assert "PREV_OK = PREV_OK and START_VARIANT_OK and COMPLIANCE_CHECK.ok" in src
+        compile(src, "<binding>", "exec")
+
+    def test_legacy_generate_binding_cell_has_no_compliance_gate(self):
+        src = make_cycle_notebook.binding_cell_source(require_start_variant=False)
+        assert "COMPLIANCE_CHECK" not in src
+
+    def test_stage0_binding_cell_has_no_compliance_gate(self, repo_two_commits, tmp_path):
+        """Stage 0 is what makes the arm stiff in the first place -- there
+        is no preceding cycle state to freshly re-check."""
+        repo, first, second = repo_two_commits
+        out = make_cycle_notebook.generate_stage0(
+            "B4", "sess1", repo=str(repo),
+            evidence_dir=str(tmp_path / "evidence"), required_sha=first)
+        nb = nbformat.read(str(out), as_version=4)
+        assert "COMPLIANCE_CHECK" not in nb.cells[2].source
+
+    def _exec_gate_fragment(self, tmp_path, *, start_variant_ok, compliance_ok,
+                             reasons=()):
+        """Execs the actual `require_start_variant=True` appended fragment
+        (not a re-implementation), stubbing only the two I/O boundaries
+        (`plan.start_variant_gate`, `e1_identity.require_compliance`) so
+        the gate's own control flow -- fold into PREV_OK, write
+        binding_FAIL -- runs for real."""
+        full_src = make_cycle_notebook.binding_cell_source(require_start_variant=True)
+        fragment = full_src.split("PREV_OK = BINDING_OK\n", 1)[1]
+
+        def fake_start_variant_gate(ctrl_dir, cycle):
+            return start_variant_ok, (None if start_variant_ok else "stub refusal"), None
+
+        def fake_require_compliance(run_dir, joints, *, compliant=False, timeout_s=None):
+            return types.SimpleNamespace(
+                ok=compliance_ok, reasons=tuple(reasons),
+                as_dict=lambda: {"ok": compliance_ok, "reasons": list(reasons)})
+
+        ns = {
+            "plan": types.SimpleNamespace(start_variant_gate=fake_start_variant_gate),
+            "e1_identity": types.SimpleNamespace(require_compliance=fake_require_compliance),
+            "R": types.SimpleNamespace(R_JOINTS=("r_shoulder_pitch",)),
+            "ident": types.SimpleNamespace(run_dir=str(tmp_path)),
+            "CTRL": tmp_path, "CYCLE": "S2-B4-a-r1",
+            "COMPLIANCE_TIMEOUT_S": 0.0,
+            "PREV_OK": True,
+            "json": json,
+        }
+        exec(compile(fragment, "<r2 gate fragment>", "exec"), ns)
+        return ns
+
+    def test_both_gates_ok_leaves_prev_ok_true(self, tmp_path):
+        ns = self._exec_gate_fragment(tmp_path, start_variant_ok=True, compliance_ok=True)
+        assert ns["PREV_OK"] is True
+        assert not (tmp_path / "binding_FAIL_S2-B4-a-r1").exists()
+
+    def test_compliance_failure_alone_blocks_prev_ok(self, tmp_path):
+        """Posture (start_variant) passes but the fresh compliance read
+        does not -- e.g. a compliant arm reading zero mid-settle -- PREV_OK
+        must still go False."""
+        ns = self._exec_gate_fragment(
+            tmp_path, start_variant_ok=True, compliance_ok=False,
+            reasons=("r_gripper: compliant=True (want False)",))
+        assert ns["PREV_OK"] is False
+        marker = tmp_path / "binding_FAIL_S2-B4-a-r1"
+        assert marker.exists()
+        assert "pre_cycle_compliance" in marker.read_text()
+
+    def test_start_variant_failure_alone_still_blocks_even_if_compliance_ok(self, tmp_path):
+        ns = self._exec_gate_fragment(tmp_path, start_variant_ok=False, compliance_ok=True)
+        assert ns["PREV_OK"] is False
+
+    def test_both_gates_failing_blocks(self, tmp_path):
+        ns = self._exec_gate_fragment(tmp_path, start_variant_ok=False, compliance_ok=False)
+        assert ns["PREV_OK"] is False
+
+    def test_compliance_failure_blocks_the_next_legs_turn_on_and_route(
+            self, repo_two_commits, tmp_path):
+        """Same shape as TestNoRouteCallWithoutCurrentGates, but the cause
+        is specifically a failed pre-cycle compliance read: PREV_OK False
+        makes every leg's motion cell not_eligible / not_attempted, with
+        no turn_on/route call reachable."""
+        repo, first, second = repo_two_commits
+        out = make_cycle_notebook.generate_repetition(
+            "B4", "a", 1, session="sess1", repo=str(repo),
+            evidence_dir=str(tmp_path / "evidence"), required_sha=first)
+        nb = nbformat.read(str(out), as_version=4)
+        motion_cells = [c for c in nb.cells
+                        if c.cell_type == "code" and c.source.startswith("# Leg ")]
+        assert motion_cells
+
+        ns = {
+            "PREV_OK": False,  # what a failed pre-cycle compliance check produces
+            "CTRL": tmp_path, "CYCLE": "S2-B4-a-r1", "json": json,
+        }
+        exec(compile(motion_cells[0].source, "<leg0 prev_ok False (compliance)>", "exec"), ns)
+        assert ns["LEG"]["go"] == "not_eligible"
+        assert ns["LEG"]["outcome"] == "not_attempted"
+
+
 class TestNoRouteCallWithoutCurrentGates:
     """A failed start_variant_gate sets PREV_OK False in the binding cell
     (decision note §4; PR #124 review, M3). Proves that on a REAL Stage
@@ -965,13 +1088,19 @@ class TestNoRouteCallWithoutCurrentGates:
 
 class TestHomeToleranceIsNotStiffZero:
     """'Do not confuse HOME's normal gripper target with stiff-zero.'
-    leg.sh's end-mode tail check against HOME -- the only check that
-    Stage 0's turn_on did not move the arm -- requires r_gripper within
-    e1_tail_check.GRIPPER_TOL_DEG (3 deg) of HOME's own r_gripper target
-    (-45 deg, OPEN), a world apart from stiff-zero's |r_gripper| <= 1 deg
-    requirement. Passing the armon tail check is not evidence of reaching
-    stiff-zero; this proves the two acceptance criteria can never be
-    conflated by construction."""
+    `rig_routes.HOME`'s own r_gripper (-45 deg, OPEN) is a world apart
+    from stiff-zero's |r_gripper| <= 1 deg requirement, so `HOME` was
+    never a usable stand-in for "did turn_on hold" -- and, as the
+    2026-09-16 re-review demonstrated, was not even reachable as an
+    `end`-mode tail-check target on a fresh, compliant server (the
+    gripper sags toward keyframe-sag, not toward OPEN, during the armon
+    recording). The Stage 0 armon recording is now judged with
+    `e1_tail_check.check_init`/`INIT` instead (see `TestCheckInit` in
+    `test_e1_tail_check.py`, and `e1_stage1/README.md`'s "Policy A"
+    section), which has no gripper or posture criterion at all -- so this
+    class keeps only the standing invariant that made `HOME` wrong in the
+    first place: it can never classify as, or be confused with,
+    stiff-zero."""
 
     def test_home_pose_does_not_classify_as_a_known_start_variant(self):
         assert rig_routes.HOME["r_gripper"] == pytest.approx(-45.0)
