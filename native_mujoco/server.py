@@ -26,7 +26,8 @@ import pathlib
 import sys
 import threading
 import time
-from typing import Any, Dict, Mapping, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import mujoco
 import numpy as np
@@ -99,6 +100,56 @@ _CAM_MARGIN = (
 _MAX_PENDING_PLACES = 256
 
 
+@dataclass
+class PendingUpdate:
+    """Merged joint_command state awaiting the next `apply_pending` tick.
+
+    Issue #116: the old `_pending_cmd` slot was an unconditional REPLACE, so
+    two bridge commands arriving between two consecutive `apply_pending`
+    calls (the sim thread stalls across several 20 ms bridge periods; the
+    Stage 1 run had 529 gaps > 40 ms) lost the earlier one entirely --
+    including one-shot `compliant`/limit flags the bridge sends only in the
+    batch where they changed. This merges every submission instead: targets
+    are idempotent (newest wins per joint, respecting mask), but a one-shot
+    field only changes when a submission explicitly carries a new value for
+    that joint -- an intervening position-only command never erases it.
+    """
+    seq: int = 0
+    n_merged: int = 0
+    target_rad: List[float] = field(default_factory=lambda: [0.0] * NUM_JOINTS)
+    target_set: List[bool] = field(default_factory=lambda: [False] * NUM_JOINTS)
+    compliant: List[Optional[bool]] = field(default_factory=lambda: [None] * NUM_JOINTS)
+    speed_limit: List[Optional[float]] = field(default_factory=lambda: [None] * NUM_JOINTS)
+    torque_limit: List[Optional[float]] = field(default_factory=lambda: [None] * NUM_JOINTS)
+
+    def merge(self, msg: Dict[str, Any]) -> None:
+        """Fold one submitted joint_command into this pending update.
+
+        Called under SimState._lock -- cheap (21-element lists), so holding
+        the lock here is not a contention concern.
+        """
+        tgt = msg.get("target_rad") or []
+        mask = msg.get("mask")
+        compliant = msg.get("compliant")
+        speed = msg.get("speed_limit_rad_s")
+        torque = msg.get("torque_limit_percent")
+        for i in range(NUM_JOINTS):
+            if mask is None or (i < len(mask) and mask[i]):
+                if i < len(tgt):
+                    self.target_rad[i] = tgt[i]
+                    self.target_set[i] = True
+            # else: masked out -- whatever target was already pending for
+            # this joint (if any) is left untouched, never clobbered.
+            if compliant is not None and i < len(compliant) and compliant[i] is not None:
+                self.compliant[i] = compliant[i]
+            if speed is not None and i < len(speed) and speed[i] is not None:
+                self.speed_limit[i] = speed[i]
+            if torque is not None and i < len(torque) and torque[i] is not None:
+                self.torque_limit[i] = torque[i]
+        self.seq = msg.get("seq", self.seq)
+        self.n_merged += 1
+
+
 class SimState:
     """Mutable simulation state — owned by the sim thread."""
 
@@ -116,11 +167,15 @@ class SimState:
         self.scene_revision = "initial"
         self._lock = threading.Lock()
         self._cmd_seq = 0
-        self._pending_cmd: Optional[Dict[str, Any]] = None
+        self._pending_update: Optional[PendingUpdate] = None
         self._pending_reset: Optional[Dict[str, Any]] = None
         self._pending_pause: Optional[bool] = None
         self._pending_places: list[Dict[str, Any]] = []
         self._place_results: list[Dict[str, Any]] = []
+        # Issue #116: joint_command seq(s) dropped at a reset boundary --
+        # merged/consumed pending, then surfaced once in the next state's
+        # `warnings` (see `pop_warnings` and `_build_state`).
+        self._pending_warnings: List[str] = []
 
         # R12-501: actuator/compliance model owns ctrl, gains and force limits.
         self._reset_physics()
@@ -161,7 +216,28 @@ class SimState:
 
     def submit_command(self, msg: Dict[str, Any]) -> None:
         with self._lock:
-            self._pending_cmd = msg
+            if self._pending_update is None:
+                self._pending_update = PendingUpdate()
+            self._pending_update.merge(msg)
+
+    def _drop_pending_update_locked(self) -> None:
+        """Clear `_pending_update` and record why, if it held anything.
+
+        Caller must hold `self._lock`. Shared by `submit_reset` (a command
+        already pending when a reset is asked for) and `apply_pending` (a
+        command submitted after the reset was asked for but before it was
+        applied -- the bridge holds commands during RESETTING, so there is
+        no legitimate source of one; see server.py's `submit_reset` docstring
+        and `apply_pending` below).
+        """
+        pu = self._pending_update
+        self._pending_update = None
+        if pu is None:
+            return
+        msg = (f"joint_command seq {pu.seq} ({pu.n_merged} merged) "
+               f"dropped at reset")
+        log.warning(msg)
+        self._pending_warnings.append(msg)
 
     def submit_reset(self, msg: Dict[str, Any]) -> None:
         # KNOWN GAP, NOT FIXED HERE (#43/#84 follow-up review, A5) — a single
@@ -195,6 +271,10 @@ class SimState:
         # against #43's original acceptance and place_ack's contract, which
         # this deliberately still mirrors.
         with self._lock:
+            # Issue #116: a command sitting in the slot when a reset is asked
+            # for is pre-reset by definition -- drop it now rather than let
+            # it be replayed onto the fresh keyframe.
+            self._drop_pending_update_locked()
             self._pending_reset = msg
 
     def submit_pause(self, paused: bool) -> None:
@@ -223,6 +303,14 @@ class SimState:
                 return
             self._pending_places.append(msg)
 
+    def pop_warnings(self) -> List[str]:
+        """Drain warnings accumulated since the last call (issue #116: a
+        dropped joint_command at a reset boundary), for `_build_state` to
+        surface exactly once in the next state it builds."""
+        with self._lock:
+            out, self._pending_warnings = self._pending_warnings, []
+        return out
+
     # --- Called by sim thread each step ---
 
     def apply_pending(self) -> Optional[Dict[str, Any]]:
@@ -231,11 +319,19 @@ class SimState:
         it rather than broadcast to whichever connection polls first."""
         with self._lock:
             pause = self._pending_pause
-            cmd = self._pending_cmd
+            pu = self._pending_update
             reset_req = self._pending_reset
             self._pending_pause = None
-            self._pending_cmd = None
+            self._pending_update = None
             self._pending_reset = None
+            if reset_req is not None and pu is not None:
+                # Issue #116: submitted after submit_reset() but before this
+                # tick applied it -- the bridge holds commands while
+                # RESETTING, so there is no legitimate source of one. Drop
+                # it the same way submit_reset() drops a pre-existing one.
+                self._pending_update = pu
+                self._drop_pending_update_locked()
+                pu = None
 
         if pause is not None:
             self.paused = pause
@@ -259,25 +355,26 @@ class SimState:
                 "_conn_id": reset_req.get("_conn_id"),
             }
 
-        if cmd is not None:
-            tgt = cmd.get("target_rad", [])
-            mask = cmd.get("mask")
-            compliant = cmd.get("compliant")            # optional list[bool|None]
-            speed = cmd.get("speed_limit_rad_s")        # optional list[float|None]
-            torque = cmd.get("torque_limit_percent")    # optional list[float|None]
-            for entry in JOINT_TABLE:
-                idx = entry.mjcf_index
-                if mask is not None and not (mask and mask[idx]):
-                    continue
-                if idx < len(tgt):
-                    self.controller.set_goal_position(idx, tgt[idx])
-                if compliant is not None and compliant[idx] is not None:
-                    self.controller.set_compliant(idx, compliant[idx])
-                if speed is not None and speed[idx] is not None:
-                    self.controller.set_speed_limit(idx, speed[idx])
-                if torque is not None and torque[idx] is not None:
-                    self.controller.set_torque_limit(idx, torque[idx])
-            self._cmd_seq = cmd.get("seq", self._cmd_seq)
+        # Nothing is applied, queued or replayed in a reset tick: `pu` is
+        # already None above whenever `reset_req is not None` (either
+        # dropped here or earlier by submit_reset()).
+        if pu is not None:
+            for i in range(NUM_JOINTS):
+                # Order matters only for readability, not physics (these are
+                # independent JointControlState fields applied before the
+                # next mj_step either way): compliance and limits first, so
+                # a joint made stiff in this same update is already stiff by
+                # the time its new target is set, and a joint made compliant
+                # is not handed a target it cannot hold.
+                if pu.compliant[i] is not None:
+                    self.controller.set_compliant(i, pu.compliant[i])
+                if pu.speed_limit[i] is not None:
+                    self.controller.set_speed_limit(i, pu.speed_limit[i])
+                if pu.torque_limit[i] is not None:
+                    self.controller.set_torque_limit(i, pu.torque_limit[i])
+                if pu.target_set[i]:
+                    self.controller.set_goal_position(i, pu.target_rad[i])
+            self._cmd_seq = pu.seq
 
         self._apply_places()
         return reset_info
@@ -761,6 +858,7 @@ class ReachyMujocoServer:
             seq=self._seq,
             sim_step=self._sim.step,
             sim_time_s=float(self._sim.data.time),
+            cmd_seq=self._sim._cmd_seq,
             scene_revision=self._sim.scene_revision,
             paused=self._sim.paused,
             joints=self._sim.snapshot_joints(),
@@ -768,6 +866,9 @@ class ReachyMujocoServer:
             grippers=grippers,
             force_sensors=force_sensors,
             interactive=self._sim.snapshot_interactive(),
+            # Issue #116: a joint_command dropped at a reset boundary is
+            # surfaced exactly once, in whichever state this call builds.
+            warnings=self._sim.pop_warnings(),
         )
         if self._record_contacts:
             # E1 readiness work item 4. Omitted entirely when not
