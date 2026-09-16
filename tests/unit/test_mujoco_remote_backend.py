@@ -348,6 +348,19 @@ class TestAcknowledgedReset:
             # Command should still be in _pending_cmds (not consumed).
             assert len(b._pending_cmds) == 1
 
+    def test_turn_on_on_already_stiff_arm_is_not_deduplicated(self):
+        """e1_stage1 README sec 6: an SDK turn_on() that repeats an unchanged
+        compliant=False (an already-stiff joint) still queues a new pending
+        command here -- submit_command never compares against a prior value,
+        so cmd_seq (assigned in _send() from a non-empty _pending_cmds,
+        line ~369) advances on the repeat exactly as on a genuine change."""
+        b = _make_remote_backend()
+        cmd = JointCommand(uid=JOINT_DEFS[0][1], compliant=False)
+        b.submit_command(cmd)
+        b.submit_command(cmd)
+        with b._lock:
+            assert len(b._pending_cmds) == 2
+
     def test_reset_ack_clears_resetting_state(self):
         """Simulating a reset_ack via _ingest_state-equivalent path."""
         b = _make_remote_backend()
