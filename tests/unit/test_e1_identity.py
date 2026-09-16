@@ -648,3 +648,253 @@ class TestRequireCompliance:
         assert any("no readable" in r for r in result.reasons)
         # >= 20 Hz poll rate -> at most timeout_s / period polls, plus one.
         assert len(sleeps) <= round(1.0 / (1.0 / 20.0)) + 1
+
+    # -- F2 (PR #118 review): min_cmd_seq ties evidence to the current call --
+
+    def test_min_cmd_seq_rejects_a_stale_but_fresh_looking_sample(self):
+        """A sample whose cmd_seq has not moved past the pre-call baseline
+        must not pass, even though it is fresh and every joint already
+        reports the wanted compliance -- it may be leftover from before the
+        call this check is gating (e.g. compliance persisted through a
+        reset)."""
+        now, now_ns, sleep = self._ticking_clock()
+        state = {
+            "seq": 5, "sim_step": 200, "wall_time_ns": now["ns"], "cmd_seq": 3,
+            "joints": [{"name": n, "compliant": False, "effort": 1.0}
+                       for n in R.R_JOINTS],
+        }
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5, min_cmd_seq=3,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=sleep,
+        )
+        assert result.ok is False
+        assert any("has not advanced past the pre-call baseline" in r
+                    for r in result.reasons)
+
+    def test_min_cmd_seq_passes_once_cmd_seq_advances_past_the_baseline(self):
+        now, now_ns, _ = self._ticking_clock()
+        state = {
+            "seq": 5, "sim_step": 200, "wall_time_ns": now["ns"], "cmd_seq": 4,
+            "joints": [{"name": n, "compliant": False, "effort": 1.0}
+                       for n in R.R_JOINTS],
+        }
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5, min_cmd_seq=3,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=lambda s: None,
+        )
+        assert result.ok is True, result.reasons
+
+    def test_min_cmd_seq_fails_closed_when_state_has_no_cmd_seq(self):
+        now, now_ns, sleep = self._ticking_clock()
+        state = {
+            "seq": 5, "sim_step": 200, "wall_time_ns": now["ns"],
+            "joints": [{"name": n, "compliant": False, "effort": 1.0}
+                       for n in R.R_JOINTS],
+        }
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5, min_cmd_seq=3,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=sleep,
+        )
+        assert result.ok is False
+        assert any("no numeric cmd_seq" in r for r in result.reasons)
+
+    def test_min_cmd_seq_default_none_keeps_old_behaviour(self):
+        """Not passing min_cmd_seq at all must behave exactly as before F2
+        -- freshness plus per-joint compliance is still sufficient."""
+        now, now_ns, _ = self._ticking_clock()
+        state = {
+            "seq": 5, "sim_step": 200, "wall_time_ns": now["ns"],
+            "joints": [{"name": n, "compliant": False, "effort": 1.0}
+                       for n in R.R_JOINTS],
+        }
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=lambda s: None,
+        )
+        assert result.ok is True, result.reasons
+
+    # -- F3 (PR #118 review): missing/malformed compliant fails closed --
+
+    def test_missing_compliant_key_fails_closed(self):
+        """Before F3, bool(None) == False would have silently satisfied a
+        compliant=False gate -- a state stream that does not report
+        compliance at all must never look stiff by omission."""
+        now, now_ns, sleep = self._ticking_clock()
+        joints = [{"name": n, "effort": 1.0} for n in R.R_JOINTS]
+        state = {"seq": 1, "sim_step": 10, "wall_time_ns": now["ns"],
+                  "joints": joints}
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=sleep,
+        )
+        assert result.ok is False
+        assert any("compliant field is missing or not a bool" in r
+                    for r in result.reasons)
+        assert all(result.per_joint[n]["compliant"] is None for n in R.R_JOINTS)
+
+    def test_missing_compliant_key_fails_closed_for_the_compliant_true_gate_too(self):
+        """Fail-closed must hold for BOTH gate directions, not just
+        compliant=False -- an unknown state is never treated as satisfying
+        either expectation."""
+        now, now_ns, sleep = self._ticking_clock()
+        joints = [{"name": n, "effort": 1.0} for n in R.R_JOINTS]
+        state = {"seq": 1, "sim_step": 10, "wall_time_ns": now["ns"],
+                  "joints": joints}
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=True,
+            timeout_s=0.01, max_state_age_s=0.5,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=sleep,
+        )
+        assert result.ok is False
+
+    def test_explicit_null_compliant_fails_closed(self):
+        now, now_ns, sleep = self._ticking_clock()
+        joints = [{"name": n, "compliant": None, "effort": 1.0}
+                  for n in R.R_JOINTS]
+        state = {"seq": 1, "sim_step": 10, "wall_time_ns": now["ns"],
+                  "joints": joints}
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=sleep,
+        )
+        assert result.ok is False
+        assert any("compliant field is missing or not a bool" in r
+                    for r in result.reasons)
+
+    def test_non_bool_compliant_fails_closed(self):
+        now, now_ns, sleep = self._ticking_clock()
+        joints = [{"name": n, "compliant": "false", "effort": 1.0}
+                  for n in R.R_JOINTS]
+        state = {"seq": 1, "sim_step": 10, "wall_time_ns": now["ns"],
+                  "joints": joints}
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=sleep,
+        )
+        assert result.ok is False
+        assert any("compliant field is missing or not a bool" in r
+                    for r in result.reasons)
+
+
+class TestReadLastStateTailReading:
+    """F1 (PR #118 review): `_read_last_state` must read a bounded TAIL of
+    states.jsonl, not the whole file, and still tolerate a torn last line
+    and a single record wider than the initial window."""
+
+    def test_small_tail_window_still_finds_the_last_line(self, tmp_path):
+        p = tmp_path / "states.jsonl"
+        lines = [json.dumps({"seq": i}) for i in range(1, 101)]
+        p.write_text("\n".join(lines) + "\n")
+        result = ei._read_last_state(p, tail_bytes=8)
+        assert result == {"seq": 100}
+
+    def test_default_window_reads_a_normal_state_unchanged(self, tmp_path):
+        p = tmp_path / "states.jsonl"
+        state = {"seq": 3, "sim_step": 10, "wall_time_ns": 1,
+                 "joints": [{"name": "r_gripper", "position_rad": 0.0}]}
+        p.write_text(json.dumps(state) + "\n")
+        assert ei._read_last_state(p) == state
+
+    def test_a_record_wider_than_the_initial_window_is_still_found(self, tmp_path):
+        p = tmp_path / "states.jsonl"
+        big_state = {"seq": 1, "padding": "x" * 200}
+        p.write_text(json.dumps(big_state) + "\n")
+        result = ei._read_last_state(p, tail_bytes=16)
+        assert result == big_state
+
+    def test_torn_last_line_falls_back_to_the_previous_complete_line(self, tmp_path):
+        p = tmp_path / "states.jsonl"
+        good = json.dumps({"seq": 7, "ok": True})
+        with open(p, "wb") as f:
+            f.write((good + "\n").encode())
+            f.write(b'{"seq": 8, "torn": tr')  # partial write, no closing brace
+        result = ei._read_last_state(p)
+        assert result == {"seq": 7, "ok": True}
+
+    def test_torn_last_line_survives_a_tiny_tail_window_too(self, tmp_path):
+        """The fragment nearest the seek point is dropped on every retry,
+        not just the first -- a torn write must not be mistaken for the
+        deliberately-clipped fragment at a small window's boundary."""
+        p = tmp_path / "states.jsonl"
+        good = json.dumps({"seq": 7, "ok": True})
+        with open(p, "wb") as f:
+            f.write((good + "\n").encode())
+            f.write(b'{"seq": 8, "torn": tr')
+        result = ei._read_last_state(p, tail_bytes=4)
+        assert result == {"seq": 7, "ok": True}
+
+    def test_empty_file_returns_none(self, tmp_path):
+        p = tmp_path / "states.jsonl"
+        p.write_text("")
+        assert ei._read_last_state(p) is None
+
+    def test_missing_file_returns_none(self, tmp_path):
+        assert ei._read_last_state(tmp_path / "does_not_exist.jsonl") is None
+
+    def test_bounded_read_does_not_pull_in_the_whole_large_file(
+            self, tmp_path, monkeypatch):
+        """The point of F1: a 20 Hz poll against a large states.jsonl must
+        cost a bounded read, not a whole-file read that grows with the run.
+        Patches `open` only inside the `e1_identity` module's own namespace
+        (module-global lookup shadows the builtin there, nowhere else), so
+        pytest's own I/O is untouched."""
+        p = tmp_path / "states.jsonl"
+        filler = "\n".join(json.dumps({"seq": i}) for i in range(20_000))
+        p.write_text(filler + "\n" + json.dumps({"seq": 999999}) + "\n")
+        file_size = p.stat().st_size
+        assert file_size > 200_000  # sanity: this is the large file F1 is about
+
+        class _CountingFile:
+            def __init__(self, f):
+                self._f = f
+                self.total_read = 0
+
+            def seek(self, *a, **kw):
+                return self._f.seek(*a, **kw)
+
+            def read(self, n=-1):
+                data = self._f.read(n)
+                self.total_read += len(data)
+                return data
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                self._f.close()
+                return False
+
+        import builtins
+        real_builtin_open = builtins.open
+        opened = []
+
+        def spy_open(path, mode="r", *a, **kw):
+            f = real_builtin_open(path, mode, *a, **kw)
+            if mode == "rb":
+                wrapped = _CountingFile(f)
+                opened.append(wrapped)
+                return wrapped
+            return f
+
+        monkeypatch.setattr(ei, "open", spy_open, raising=False)
+
+        result = ei._read_last_state(p, tail_bytes=1024)
+
+        assert result == {"seq": 999999}
+        assert len(opened) == 1
+        assert opened[0].total_read < file_size / 2

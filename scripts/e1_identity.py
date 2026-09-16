@@ -186,23 +186,53 @@ def _extends_chain(path: pathlib.Path) -> List[pathlib.Path]:
     return chain
 
 
-def _read_last_state(states_path: pathlib.Path) -> Optional[dict]:
-    """The last well-formed JSON line of a states.jsonl -- tolerant of a
-    torn last line from a concurrent writer (line-buffered, but a reader
-    can still catch a partial flush)."""
+#: Read at most this many trailing bytes per attempt when hunting for the
+#: last state line (F1, PR #118 review) -- a >=20 Hz poll against a
+#: multi-hundred-MB states.jsonl must not cost a whole-file read on every
+#: call. Grown geometrically within a single call when the window turns
+#: out to hold no complete line (a state record wider than the window, or
+#: nothing but a torn final write), so a single oversized record still
+#: terminates instead of falling back to reading everything unconditionally.
+_TAIL_READ_BYTES = 64 * 1024
+
+
+def _read_last_state(
+    states_path: pathlib.Path, tail_bytes: int = _TAIL_READ_BYTES,
+) -> Optional[dict]:
+    """The last well-formed JSON line of a states.jsonl, read from the TAIL
+    of the file rather than the whole thing. Tolerant of a torn last line
+    from a concurrent writer (line-buffered, but a reader can still catch a
+    partial flush): the fragment nearest our seek point is dropped, since a
+    seek mid-file can only ever land inside a line, never at a boundary the
+    writer chose, and the true last line -- torn or not -- is always the
+    one furthest from that seek point.
+    """
     try:
-        data = states_path.read_bytes()
+        size = states_path.stat().st_size
     except OSError:
         return None
-    for raw in reversed(data.splitlines()):
-        raw = raw.strip()
-        if not raw:
-            continue
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-    return None
+    window = min(tail_bytes, size) if size else 0
+    try:
+        with open(states_path, "rb") as f:
+            while True:
+                f.seek(size - window)
+                data = f.read(window)
+                lines = data.split(b"\n")
+                if size - window > 0:
+                    lines = lines[1:]
+                for raw in reversed(lines):
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        return json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                if window >= size:
+                    return None
+                window = min(size, window * 2)
+    except OSError:
+        return None
 
 
 def _live_run_dirs(
@@ -491,6 +521,7 @@ def require_compliance(
     compliant: bool = False,
     timeout_s: float = 3.0,
     max_state_age_s: float = 0.5,
+    min_cmd_seq: Optional[int] = None,
     read_last_state: Callable[[pathlib.Path], Optional[dict]] = _read_last_state,
     now_ns: Callable[[], int] = time.monotonic_ns,
     sleep: Callable[[float], None] = time.sleep,
@@ -501,6 +532,31 @@ def require_compliance(
     `compliant == <expected>` on a FRESH sample, or `timeout_s` elapses.
 
     Never sends anything, never retries motion, never touches tolerances.
+
+    Timing/sequence contract (F2, PR #118 review)
+    -----------------------------------------------
+    `max_state_age_s` alone proves the sample is CURRENT, not that it
+    postdates any particular call -- compliance that already held before
+    `turn_on` (e.g. it persisted through a reset) can satisfy a fresh
+    sample by coincidence. `min_cmd_seq` closes that gap: pass
+    `state["cmd_seq"]` (see `native_mujoco.protocol.State.cmd_seq`, the
+    last-*applied* command sequence) read from the run directory
+    IMMEDIATELY BEFORE the `turn_on`/`turn_off` call this check is gating.
+    A sample is only accepted once its own `cmd_seq` has advanced STRICTLY
+    PAST that baseline -- i.e. the server has applied at least one command
+    submitted after the baseline was captured.
+
+    A `cmd_seq` newer than the baseline is NECESSARY but not on its own
+    SUFFICIENT proof that it was specifically the gated call's command that
+    landed -- any command from any sender advances the same counter, so a
+    concurrent unrelated command would also satisfy it. It is the
+    combination of all three checks -- `min_cmd_seq` (something new was
+    applied), freshness (the sample is current, not a stale disk read),
+    and the per-joint `compliant` match (the actual effect is present) --
+    that ties the evidence to the current attempt; none of the three is
+    load-bearing alone. `min_cmd_seq=None` (the default) skips this check
+    entirely, keeping every pre-F2 caller's contract unchanged and relying
+    on the freshness window alone, as before.
     """
     run_dir_path = pathlib.Path(run_dir)
     states_path = run_dir_path / "states.jsonl"
@@ -523,13 +579,46 @@ def require_compliance(
             if isinstance(wall_time_ns, (int, float)):
                 age_s = abs(now_ns() - wall_time_ns) / 1e9
             fresh = age_s <= max_state_age_s
+
+            if min_cmd_seq is not None:
+                state_cmd_seq = state.get("cmd_seq")
+                if not isinstance(state_cmd_seq, (int, float)):
+                    bad.append(
+                        f"state has no numeric cmd_seq to compare against "
+                        f"min_cmd_seq={min_cmd_seq} -- refusing to treat it "
+                        "as evidence of the current attempt")
+                elif state_cmd_seq <= min_cmd_seq:
+                    bad.append(
+                        f"cmd_seq={state_cmd_seq} has not advanced past the "
+                        f"pre-call baseline (min_cmd_seq={min_cmd_seq}) -- "
+                        "this sample may predate the current turn_on/"
+                        "turn_off attempt")
+
             server_joints = {j.get("name"): j for j in state.get("joints", [])}
             for name in joints:
                 entry = server_joints.get(name)
                 if entry is None:
                     bad.append(f"{name}: not in the last state sample")
                     continue
-                entry_compliant = bool(entry.get("compliant"))
+                raw_compliant = entry.get("compliant")
+                if not isinstance(raw_compliant, bool):
+                    # F3, PR #118 review: an absent/null/non-bool
+                    # `compliant` must never be coerced to False ("stiff").
+                    # A state stream that does not report compliance at all
+                    # must not be able to pass a compliant=False gate by
+                    # accident -- fail closed for every requested joint.
+                    per_joint[name] = {
+                        "compliant": None,
+                        "effort": entry.get("effort"),
+                        "seq": state.get("seq"),
+                        "sim_step": state.get("sim_step"),
+                    }
+                    bad.append(
+                        f"{name}: compliant field is missing or not a bool "
+                        f"({raw_compliant!r}) -- refusing to treat unknown "
+                        "compliance as stiff")
+                    continue
+                entry_compliant = raw_compliant
                 per_joint[name] = {
                     "compliant": entry_compliant,
                     "effort": entry.get("effort"),
