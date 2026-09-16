@@ -1,0 +1,14 @@
+plan_S1a.json repo_sha==merge: True required_sha==3d7fc74: True merge_time: 2026-09-16T02:20:18Z margin: 5.0 unflown: 4
+    setup_a RAISE_TO_SIDE dur_s 59.6 == expected: True
+    flight_a LOWER_TO_REST dur_s 37.4 == expected: True
+plan_S1b.json repo_sha==merge: True required_sha==3d7fc74: True merge_time: 2026-09-16T02:20:18Z margin: 5.0 unflown: 4
+    flight_b PLACE_ROUTE dur_s 64.1 == expected: True
+plan_S1c.json repo_sha==merge: True required_sha==3d7fc74: True merge_time: 2026-09-16T02:20:18Z margin: 5.0 unflown: 4
+    setup_c PLACE_ROUTE dur_s 64.1 == expected: True
+    flight_c LIFT_TO_PRESENT dur_s 34.1 == expected: True
+cell1: REPO = "/Users/terrancehamilton/reachy-1-2-sim-issue116"; GENERATED_AT_SHA = "eb34238f6aae6bb9cc14dd901abc31a677e9b0d5"
+cell1: REQUIRED_SHA = "3d7fc744f81eae14c39b70f22fab3c95fd02626d"; MERGE_TIME_ISO = "2026-09-16T02:20:18Z"
+cell1: LEAD_IN_S = 3.0; COMPLIANCE_TIMEOUT_S = 3.0; CYCLE = "S1a"
+cell1: CTRL = pathlib.Path("/Users/terrancehamilton/e1-stage1-retry-2026-09-15/control"); RECORD_ROOT = "/Users/terrancehamilton/e1-stage1-retry-2026-09-15/e
+cell1: SCENE = "/Users/terrancehamilton/reachy-1-2-sim-issue116/scenes/e1_boards/B4_pool_box_1_r2c3.yaml"
+kernelspec: e1venv

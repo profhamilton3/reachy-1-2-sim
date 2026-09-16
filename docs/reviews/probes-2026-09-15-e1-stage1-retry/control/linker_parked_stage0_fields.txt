@@ -1,0 +1,10 @@
+identity.manifest.contacts_tracked : True
+manifest.contacts_tracked : True
+settled_pose_check : {'pool_box_1': {'yaml_xyz': [0.4318, -0.1524, 0.76], 'stream_xyz': [0.4318000055188594, -0.15240000937153184, 0.7599550413200046], 'dxy_m': 1.087581801750653e-08, 'dz_m': 4.495867999543268e-05, 'ok': 
+displacement_m : {'pool_box_2': 3.6371202452362043e-10, 'foam_block': 4.002448143067782e-10, 'pool_cyl_2': 3.6156814836580074e-10, 'soda_can': 3.546100363725428e-10, 'pool_cyl_1': 3.4707831055491864e-10, 'blue_cylinde
+contacts : []
+contacts_recorded : True
+contacts_window : {'seq_lo': 4087, 'seq_hi': 4240, 'wall_lo_ns': 185924937409750, 'wall_hi_ns': 185928012496541, 'states_in_window': 154, 'states_with_contacts_key': 154, 'reset_in_window': False, 'covered': True, 'seq
+contacts_window.states_with_contacts_key : 154
+contacts_window.covered : True
+contacts_window.seq_contiguous : True

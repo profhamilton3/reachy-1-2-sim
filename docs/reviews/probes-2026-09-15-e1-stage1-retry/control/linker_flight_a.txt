@@ -1,0 +1,2 @@
+Wrote /Users/terrancehamilton/reachy-1-2-sim-issue116/runs/route_clearance_LOWER_TO_REST_20260916T053354Z.link.json: contacts=0 (evidence on 1873/1873 states, reset_in_window=False)
+linker exit=0

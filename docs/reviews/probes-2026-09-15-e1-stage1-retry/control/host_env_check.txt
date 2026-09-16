@@ -1,0 +1,8 @@
+C2: 3.12.14 reachy-sdk 0.7.0
+C3 selftest: selftest: 11/11 passed
+C3 imports: ok
+C4 kernelspec: 
+C5 REACHY_IP=[] REACHY_ENABLE_MOTION=[]
+C6 docker compose: Docker Compose version v5.3.1
+  e1venv                        /private/tmp/claude-501/-Users-terrancehamilton-IITG-Reachy-Project/2ab0d1ac-fe72-429c-a2d9-192d80cab2b5/scratchpad/e1venv/share/jupyter/kernels/e1venv
+  python3                       /private/tmp/claude-501/-Users-terrancehamilton-IITG-Reachy-Project/2ab0d1ac-fe72-429c-a2d9-192d80cab2b5/scratchpad/e1venv/share/jupyter/kernels/python3

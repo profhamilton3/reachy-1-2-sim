@@ -1,0 +1,30 @@
+{
+  "format_version": 1,
+  "started_at": "2026-09-16T05:22:29.862817+00:00",
+  "code_sha": "eb34238f6aae6bb9cc14dd901abc31a677e9b0d5",
+  "code_sha_dirty": false,
+  "model_path": "/Users/terrancehamilton/reachy-1-2-sim-issue116/native_mujoco/model/reachy_1_2.xml",
+  "model_sha256": "618ef2499f6207d5e9e72f8b9a4e538b0521008afc1a80f3ecfbab22ab35abb4",
+  "scene_path": "/Users/terrancehamilton/reachy-1-2-sim-issue116/scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+  "scene_sha256": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+  "scene_revision": "initial",
+  "mujoco_version": "3.11.0",
+  "python_version": "3.14.0 (v3.14.0:ebf955df7a8, Oct  7 2025, 08:20:14) [Clang 16.0.0 (clang-1600.0.26.6)]",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "protocol_version": 1,
+  "calibration_provenance": "measured_2026_08_27",
+  "depth_enabled": false,
+  "seg_enabled": false,
+  "contacts_tracked": true,
+  "effects": {
+    "blur_sigma": 0.0,
+    "noise_std": 0.0,
+    "drop_probability": 0.0,
+    "latency_ms": 0.0
+  },
+  "seeds": [],
+  "total_steps": null,
+  "total_duration_s": null,
+  "state_count": 0,
+  "command_count": 0
+}

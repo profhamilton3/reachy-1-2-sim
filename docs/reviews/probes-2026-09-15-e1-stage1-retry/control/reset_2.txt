@@ -1,0 +1,2 @@
+reset gen=2 ack=2 resets_recorded 1->2 sim_step 304430->540
+reset exit=0
