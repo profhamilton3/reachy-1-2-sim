@@ -69,4 +69,4 @@ Proposed durable copy: `~/e1-evidence-archive/e1-stage1-retry-2026-09-15.tar.zst
 asset on a `evidence/e1-stage1-retry-2026-09-15` tag of the repo
 (GitHub release assets, ≤ 2 GB each) and/or to the project's Google Drive
 evidence folder. Verify any copy with `shasum -a 256 -c SHA256SUMS`
-inside the extracted tree (124 entries; `SHA256SUMS` itself excluded). Archive sha256: `2bb7c25b150963167eb4097736adaed9ea5f1db4372ddb31050acfddd0d7e1d7` (74.6 MB).
+inside the extracted tree (124 entries; `SHA256SUMS` itself excluded). The archive's own sha256 is in its `.sha256` sidecar and in the evidence PR description (not embedded here, to keep the tree's hashes self-consistent).
