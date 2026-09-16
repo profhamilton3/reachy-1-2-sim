@@ -9,6 +9,7 @@ notebook is ever executed as a whole, no Docker.
 """
 
 import ast
+import inspect
 import json
 import os
 import subprocess
@@ -22,8 +23,11 @@ import pytest
 
 _HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(_HERE, "../../scripts"))
+sys.path.insert(0, os.path.join(_HERE, "../../src"))
 
 from e1_stage1 import make_cycle_notebook, plan, provenance  # noqa: E402
+import e1_tail_check  # noqa: E402
+from reachy_ai.motion import rig_routes  # noqa: E402
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -124,15 +128,81 @@ def test_generated_motion_cell_contains_the_gate(cycle, repo_two_commits, tmp_pa
             f"route call for {route_fn} not nested inside an `if ...chk.ok...`:\n{src}")
 
 
-# ── Section 5 (W3): plan durations and notebook constants ──────────────────
+# ── Section 5 (W3/M1): plan durations, derived from the route tables ───────
+#
+# PR #120 review, M1: the old `ROUTE_BUDGET_S` was a single 20.0s pinned to
+# every route, "rounded up" from an aborted flight's elapsed time, and the
+# only test here (`test_plan_durations_cover_the_gate`) checked durations
+# against that same wrong number rather than against the routes themselves
+# -- it could not have caught the bug it was meant to guard. These replace
+# it with tests against `rig_routes`' waypoint chains and `plan.py`'s own
+# named timing terms.
 
-def test_plan_durations_cover_the_gate():
+def test_parked_tail_matches_e1_tail_check_default():
+    """`plan.PARKED_TAIL_S` exists so the tail window is a visible budget
+    term; it is only honest if it actually agrees with the checker that
+    enforces it."""
+    default_window_s = (
+        inspect.signature(e1_tail_check.check).parameters["window_s"].default)
+    assert plan.PARKED_TAIL_S == default_window_s
+
+
+@pytest.mark.parametrize("route", sorted(plan.ROUTE_BUDGET_S))
+def test_route_budget_covers_the_nominal_waypoint_chain(route):
+    nominal = sum(wp.seconds for wp in getattr(rig_routes, route))
+    assert plan.ROUTE_BUDGET_S[route] >= nominal
+
+
+@pytest.mark.parametrize("route", sorted(plan.ROUTE_BUDGET_S))
+def test_route_budget_matches_its_own_derivation(route):
+    """Not a magic number: recomputes plan.py's own formula (nominal +
+    settle overhead + one-waypoint retry allowance) from the route table
+    and the runner's retry/settle constants, so a change to either changes
+    this expectation along with the budget instead of drifting from it."""
+    waypoints = getattr(rig_routes, route)
+    nominal = sum(wp.seconds for wp in waypoints)
+    runner = plan.ROUTE_RUNNER[route]
+    settle = (plan._RIG_MOTION_FLY_ROUTE_SETTLE_S * len(waypoints)
+              if runner == "rig_motion_fly_route" else 0.0)
+    retry_worst = plan.RUNNER_RETRY_WORST_S[runner]
+    assert plan.ROUTE_BUDGET_S[route] == pytest.approx(nominal + settle + retry_worst)
+
+
+def test_route_budget_is_not_full_worst_case_for_multi_waypoint_routes():
+    """Guards the deliberate, documented choice in plan.py: the retry term
+    budgets ONE bad waypoint, not every waypoint retrying to its worst
+    case (which would run some routes past three minutes). A single-
+    waypoint route has no "every other waypoint" to be smaller than, so
+    it is excluded rather than asserted equal by coincidence."""
+    for route, budget in plan.ROUTE_BUDGET_S.items():
+        waypoints = getattr(rig_routes, route)
+        if len(waypoints) <= 1:
+            continue
+        runner = plan.ROUTE_RUNNER[route]
+        settle = (plan._RIG_MOTION_FLY_ROUTE_SETTLE_S * len(waypoints)
+                  if runner == "rig_motion_fly_route" else 0.0)
+        full_worst_case = (sum(wp.seconds for wp in waypoints) + settle
+                           + plan.RUNNER_RETRY_WORST_S[runner] * len(waypoints))
+        assert budget < full_worst_case
+
+
+def test_route_budgets_exceed_the_old_pinned_20s():
+    """The bug this section replaces: every route shared a flat 20.0s
+    budget, verified only against itself. Every derived budget below must
+    clear that floor -- if a future change to the route tables or runner
+    policy ever brought one back down to 20s or under, that is the
+    regression this guards."""
+    for route, budget in plan.ROUTE_BUDGET_S.items():
+        assert budget > 20.0
+
+
+def test_leg_duration_covers_lead_in_compliance_budget_and_parked_tail():
     for cycle, legs in plan.CYCLES.items():
         durations = plan.cycle_durations(cycle)
         for leg in legs:
             assert durations[leg.name] >= (
                 plan.LEAD_IN_S + plan.COMPLIANCE_TIMEOUT_S
-                + plan.ROUTE_BUDGET_S[leg.route])
+                + plan.ROUTE_BUDGET_S[leg.route] + plan.PARKED_TAIL_S)
 
 
 @pytest.mark.parametrize("cycle", sorted(plan.CYCLES))
@@ -202,6 +272,36 @@ def test_generate_refuses_evidence_dir_under_docs_reviews(repo_two_commits):
             "S1a", repo=str(repo),
             evidence_dir=str(repo / "docs" / "reviews" / "sneaky"),
             required_sha=first)
+
+
+def test_generate_refuses_evidence_dir_anywhere_inside_repo(repo_two_commits):
+    """M3, PR #120 review: not just docs/reviews/ -- any evidence dir
+    inside --repo leaves untracked artifacts that dirty `git status
+    --porcelain` in the server's own checkout, which the runtime binding
+    check correctly (but mysteriously, until this) refuses on."""
+    repo, first, second = repo_two_commits
+    with pytest.raises(make_cycle_notebook.GenerationRefused):
+        make_cycle_notebook.generate(
+            "S1a", repo=str(repo),
+            evidence_dir=str(repo / "some_other_subdir" / "evidence"),
+            required_sha=first)
+    with pytest.raises(make_cycle_notebook.GenerationRefused):
+        make_cycle_notebook.generate(
+            "S1a", repo=str(repo), evidence_dir=str(repo), required_sha=first)
+
+
+@pytest.mark.parametrize("cycle", sorted(plan.CYCLES))
+def test_binding_cell_passes_generated_at_sha(cycle, repo_two_commits, tmp_path):
+    """W4 note 1, PR #120 review: the binding cell must compare the
+    server's code_sha against the exact tree the notebook was generated
+    from, not just require it descend from REQUIRED_SHA."""
+    repo, first, second = repo_two_commits
+    out = make_cycle_notebook.generate(
+        cycle, repo=str(repo), evidence_dir=str(tmp_path / "evidence"),
+        required_sha=first)
+    nb = nbformat.read(str(out), as_version=4)
+    binding_src = nb.cells[2].source
+    assert "generated_at_sha=GENERATED_AT_SHA" in binding_src
 
 
 # ── Section 4: no-route-call table, exec'd offline ──────────────────────────
@@ -461,3 +561,33 @@ class TestCheckBindingProvenance:
             m, git_is_ancestor=lambda a, b: True,
             required_sha="required", merge_time_iso="2026-09-16T01:35:22Z")
         assert ok is False
+
+    # ── generated_at_sha (W4 note 1, PR #120 review) ────────────────────────
+
+    def test_accepts_when_generated_at_sha_matches_code_sha(self):
+        ok, reasons = provenance.check_binding_provenance(
+            self._ok_manifest(), git_is_ancestor=lambda a, b: True,
+            required_sha="required", merge_time_iso="2026-09-16T01:35:22Z",
+            generated_at_sha="deadbeef")
+        assert ok is True
+        assert reasons == []
+
+    def test_refuses_when_generated_at_sha_differs_from_code_sha(self):
+        """The server can be a genuine descendant of required_sha and still
+        not be the tree --repo pointed at when the notebook was generated
+        -- ancestry alone does not rule that out."""
+        ok, reasons = provenance.check_binding_provenance(
+            self._ok_manifest(), git_is_ancestor=lambda a, b: True,
+            required_sha="required", merge_time_iso="2026-09-16T01:35:22Z",
+            generated_at_sha="a_different_tree")
+        assert ok is False
+        assert any("!=" in r for r in reasons)
+
+    def test_skips_generated_at_sha_check_when_not_given(self):
+        """Backward-compatible default: callers with no generation-time
+        tree to compare against (e.g. these other unit tests) keep the
+        looser ancestry-only check."""
+        ok, reasons = provenance.check_binding_provenance(
+            self._ok_manifest(), git_is_ancestor=lambda a, b: True,
+            required_sha="required", merge_time_iso="2026-09-16T01:35:22Z")
+        assert ok is True

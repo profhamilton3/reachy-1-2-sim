@@ -19,42 +19,82 @@ If a future cycle's operator flow needs a settle-wait step, copy it from
 ## Operator flow, in order
 
 1. **Stop the native server.**
-2. **Confirm the tree is at or after `4d727c0`** (`plan.REQUIRED_SHA`) —
+2. **Confirm the tree is at or after this PR's merge** (`plan.REQUIRED_SHA`,
+   currently `3d7fc74`) —
    `git -C <server tree> merge-base --is-ancestor <REQUIRED_SHA> HEAD`.
-   A server built off an older tree never writes `cmd_seq` into `State`
-   (base server bug, fixed by `a3ee2c9`); the compliance gate would refuse
-   forever without explaining why (W4, PR #118 re-review).
-3. **Start the server from it with `--record` to a fresh `e1_server_runs`.**
-   `native_mujoco/recorder.py` now stamps the new run's `manifest.json` with
-   `code_sha` (this branch's own tree, best-effort `git rev-parse HEAD`) and
-   `code_sha_dirty` (whether that tree had uncommitted changes). A dirty or
-   unreadable tree makes the sha alone unprovable as runtime identity, so
-   the notebook's binding cell refuses on `code_sha_dirty != False` exactly
-   as it refuses on a missing `code_sha` — commit or stash before starting
-   the server for this experiment.
-4. **Confirm the new run's `manifest.json` has `code_sha` set and
+   `4d727c0` (PR #118's merge, the `cmd_seq` fix) is necessary but **not**
+   sufficient: `native_mujoco/recorder.py` did not stamp `code_sha` into
+   the manifest until `3d7fc74`, this PR's own first commit. A server tree
+   at exactly `4d727c0` runs a `recorder.py` with no `code_sha` field at
+   all, and the binding cell's honest "manifest has no code_sha" refusal
+   reads like a mystery STOP for that reason alone (PR #120 review, M2) —
+   `3d7fc74` is a descendant of `4d727c0`, so requiring it still implies
+   the `cmd_seq` fix.
+3. **Choose an evidence directory outside this repo's checkout entirely**
+   (not a subdirectory of it, and not under any other repo's `docs/reviews/`
+   either). `_code_provenance()` runs `git status --porcelain` in the
+   server's own tree; `start_sim.sh` creates `$REACHY_SIM_RECORD` (and
+   `leg.sh`'s `--record-root`) before the server starts, and an untracked
+   directory anywhere inside the checkout — `e1_server_runs/` is not
+   gitignored — makes `git status --porcelain` non-empty, which makes
+   `code_sha_dirty: true` on every run, which the binding cell refuses
+   (correctly, but for a reason nothing here used to say — PR #120 review,
+   M3). `make_cycle_notebook`'s generator now refuses at generation time,
+   with nothing written, if `--evidence-dir` is inside `--repo`.
+4. **Start the server from that tree with `--record` pointed at the chosen
+   evidence directory.** `native_mujoco/recorder.py` stamps the new run's
+   `manifest.json` with `code_sha` (this branch's own tree, best-effort
+   `git rev-parse HEAD`) and `code_sha_dirty` (whether that tree had
+   uncommitted changes). A dirty or unreadable tree makes the sha alone
+   unprovable as runtime identity, so the notebook's binding cell refuses
+   on `code_sha_dirty != False` exactly as it refuses on a missing
+   `code_sha` — commit or stash before starting the server for this
+   experiment.
+5. **Confirm the new run's `manifest.json` has `code_sha` set and
    `code_sha_dirty: false`.**
-5. **Only then generate the notebook:**
+6. **Only then generate the notebook, with `--repo` pointed at the exact
+   checkout the server in step 4 is running from** — not merely a clone at
+   the same commit:
    ```
    python -m scripts.e1_stage1.make_cycle_notebook S1a \
        --repo /path/to/reachy-1-2-sim \
        --evidence-dir /path/to/a/new/evidence/directory
    ```
-   The generator itself refuses (no files written) if `--repo`'s `HEAD`
-   does not descend from `4d727c0`.
-6. Run the operator's per-leg loop (`leg.sh <repo> <evidence-dir> <cycle>
+   The generator refuses (no files written) if `--repo`'s `HEAD` does not
+   descend from `plan.REQUIRED_SHA`, or if `--evidence-dir` is under
+   `docs/reviews/` or anywhere inside `--repo` (step 3). It also embeds
+   `--repo`'s HEAD as `GENERATED_AT_SHA`; the generated notebook's binding
+   cell requires the server's `code_sha` to equal `GENERATED_AT_SHA`
+   **exactly**, not merely descend from `REQUIRED_SHA` — so a server
+   running a different tree than the one `--repo` pointed at (even a
+   related one) fails closed at binding time instead of silently (PR #120
+   review, W4 note 1).
+7. Run the operator's per-leg loop (`leg.sh <repo> <evidence-dir> <cycle>
    <leg-name> <ROUTE> <TAIL_TARGET>` per leg; `reset.sh` between cycles) and
    drive the generated notebook by hand, writing `go_<leg>` markers as each
    gate passes. `leg.sh` reads each leg's duration from
    `plan_<cycle>.json` (written alongside the notebook) rather than a
    positional argument.
 
-Step 4's requirement is new relative to PR #117's flow, which had no way to
+   **Run `leg.sh` (and the notebook kernel) from the documented host SDK
+   environment ("e1venv", `reachy_sdk` 0.7.0), not the system Python** (M4,
+   PR #120 review): `measure_route_clearance.py` imports `reachy_sdk`,
+   which the system `python3` does not have, so a bare `python3` exits
+   non-zero on the first leg. Set `E1_PYTHON` to the venv's interpreter
+   before calling `leg.sh`:
+   ```
+   export E1_PYTHON=/path/to/e1venv/bin/python3
+   ```
+   and select the `e1venv` kernel for the generated notebook (its
+   `kernelspec` names it, but the kernel itself has to exist on the
+   operator's Jupyter).
+
+Step 5's requirement is new relative to PR #117's flow, which had no way to
 prove which tree the server ran from at all (W4). The notebook's binding
 cell (after `verify_simulator_identity`) re-checks the manifest at runtime:
-`code_sha` present and clean, a descendant of `4d727c0`, and
-`manifest.started_at` after `4d727c0`'s merge (`2026-09-16T01:35:22Z`,
-`plan.MERGE_TIME_ISO`). Either failure writes `binding_FAIL_<cycle>` and
+`code_sha` present, clean, a descendant of `REQUIRED_SHA`, equal to
+`GENERATED_AT_SHA`, and `manifest.started_at` after `REQUIRED_SHA`'s commit
+time (`plan.MERGE_TIME_ISO`). Any failure writes `binding_FAIL_<cycle>` and
 every leg in the cycle becomes `not_eligible` -- no motion is attempted.
 
 ## Already-stiff arm -- read-only investigation (assignment section 6)

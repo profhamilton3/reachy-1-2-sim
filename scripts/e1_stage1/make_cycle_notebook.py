@@ -16,7 +16,17 @@ Writes <evidence-dir>/e1_stage1_<cycle>.ipynb and
 <evidence-dir>/plan_<cycle>.json. Refuses, with nothing written, if
 `--repo`'s HEAD does not descend from `plan.REQUIRED_SHA` (W4): a native
 server built off an older tree never writes `cmd_seq` into `State`, and the
-gate would refuse forever without explaining why.
+gate would refuse forever without explaining why. Also refuses if
+`--evidence-dir` is under `docs/reviews/` or anywhere inside `--repo`
+itself (M3, PR #120 review): runtime artifacts written under it would
+dirty the server's own checkout.
+
+`--repo` must point at the exact checkout the native server is running
+from, not merely a tree that happens to descend from `plan.REQUIRED_SHA`
+(W4 note 1): the generated notebook's binding cell now requires the
+server's manifest `code_sha` to equal this call's `--repo` HEAD exactly,
+not just be a descendant of it, so a server on a different (even if
+related) tree fails closed at binding time rather than silently.
 """
 from __future__ import annotations
 
@@ -104,7 +114,7 @@ if ident.run_dir:
         manifest = json.loads(manifest_path.read_text())
 def _git_is_ancestor(a, b):
     return subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor", a, b]).returncode == 0
-prov_ok, prov_reasons = provenance.check_binding_provenance(manifest, git_is_ancestor=_git_is_ancestor, required_sha=REQUIRED_SHA, merge_time_iso=MERGE_TIME_ISO)
+prov_ok, prov_reasons = provenance.check_binding_provenance(manifest, git_is_ancestor=_git_is_ancestor, required_sha=REQUIRED_SHA, merge_time_iso=MERGE_TIME_ISO, generated_at_sha=GENERATED_AT_SHA)
 d["provenance_ok"] = prov_ok; d["provenance_reasons"] = prov_reasons
 print(json.dumps(d, indent=2, default=str))
 BINDING_OK = bool(ident.ok) and prov_ok
@@ -194,6 +204,17 @@ def generate(cycle: str, *, repo: str, evidence_dir: str,
     if "docs/reviews" in evidence_dir.replace("\\", "/"):
         raise GenerationRefused(
             f"--evidence-dir {evidence_dir!r} must not be under docs/reviews/")
+
+    repo_path = pathlib.Path(repo).resolve()
+    evidence_path_check = pathlib.Path(evidence_dir).resolve()
+    if evidence_path_check == repo_path or repo_path in evidence_path_check.parents:
+        raise GenerationRefused(
+            f"--evidence-dir {evidence_dir!r} is inside --repo {repo!r} -- "
+            "untracked runtime artifacts written under it (recorder runs, "
+            "logs, the plan/notebook themselves) would show up in `git "
+            "status --porcelain` and make the server's own code_sha_dirty "
+            "true on every run (PR #120 review, M3); use a directory "
+            "outside the repo's checkout entirely")
 
     sha_proc = run_git(["-C", repo, "rev-parse", "HEAD"])
     if sha_proc.returncode != 0:
