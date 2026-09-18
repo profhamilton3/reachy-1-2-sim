@@ -1,0 +1,112 @@
+{
+ "log": "recorder_logs/route_clearance_LOWER_TO_REST_20260915T174409Z.json",
+ "sidecar": "recorder_logs/route_clearance_LOWER_TO_REST_20260915T174409Z.link.json",
+ "route": "LOWER_TO_REST",
+ "schema_version": 3,
+ "n_samples": 60,
+ "span_s": 2.956,
+ "identity": {
+  "ok": true,
+  "reasons": [],
+  "run_dir": "/Users/terrancehamilton/reachy-1-2-sim-e1/docs/reviews/probes-2026-09-15-e1-tabletop-sim/e1_server_runs/run_20260915_173758",
+  "joint_agreement_deg_max": 0.0031318841234053707,
+  "status": {
+   "backend": "mujoco-remote",
+   "frames_stale": false,
+   "left_age_ms": 29,
+   "right_age_ms": 25,
+   "left_seq": 13702,
+   "right_seq": 13702
+  }
+ },
+ "manifest_scene_sha256": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+ "server_run_dir": "/Users/terrancehamilton/reachy-1-2-sim-e1/docs/reviews/probes-2026-09-15-e1-tabletop-sim/e1_server_runs/run_20260915_173758",
+ "settled_pose_check": {
+  "pool_box_1": {
+   "yaml_xyz": [
+    0.4318,
+    -0.1524,
+    0.76
+   ],
+   "stream_xyz": [
+    0.4318000250129241,
+    -0.15240004244707014,
+    0.7599550413200046
+   ],
+   "dxy_m": 4.926865264522288e-08,
+   "dz_m": 4.495867999543268e-05,
+   "ok": true
+  }
+ },
+ "displacement_m": {
+  "pool_cyl_1": 3.554274857487783e-10,
+  "red_cube": 3.653789188717948e-10,
+  "foam_block": 4.0069331081275784e-10,
+  "blue_cylinder": 3.8875954979804775e-10,
+  "pool_cyl_2": 3.555216289295014e-10,
+  "soda_can": 3.5993038884450473e-10,
+  "pool_box_1": 3.9765377613018507e-10,
+  "pool_box_3": 3.6545159204977074e-10,
+  "pool_cyl_3": 3.5272803784629945e-10,
+  "pool_box_2": 3.6627169679047495e-10
+ },
+ "contacts_recorded": true,
+ "contacts": [],
+ "contacts_window": {
+  "seq_lo": 18397,
+  "seq_hi": 18550,
+  "wall_lo_ns": 144589497499833,
+  "wall_hi_ns": 144592573515750,
+  "states_in_window": 154,
+  "states_with_contacts_key": 154,
+  "reset_in_window": false,
+  "covered": true,
+  "seq_contiguous": true
+ },
+ "no_reshape_asserted": true,
+ "alignment_summary": {
+  "n": 60,
+  "wall_offset_s_min": -0.069885333,
+  "wall_offset_s_median": -0.048765958,
+  "wall_offset_s_max": -0.018500917,
+  "joint_residual_deg_max": 0.0044034623049496995
+ },
+ "server_side_clearance_pool_box_1_worst": {
+  "tube_m": 0.37717593330633203,
+  "tube_at_t_s": 4.1996827349066734e-08,
+  "tube_gripper_deg_at_worst": -40.15,
+  "shells_m": 0.37717593330633203,
+  "shells_at_t_s": 4.1996827349066734e-08
+ },
+ "motion_in_recording": {
+  "first_moving_t_s": null,
+  "last_moving_t_s": null,
+  "parked_tail_s": 2.96
+ },
+ "first_sample_joints_deg": {
+  "r_shoulder_pitch": -0.0,
+  "r_shoulder_roll": 0.0,
+  "r_arm_yaw": -0.0,
+  "r_elbow_pitch": -0.0,
+  "r_forearm_yaw": -0.0,
+  "r_wrist_pitch": -0.0,
+  "r_wrist_roll": 40.15,
+  "r_gripper": -40.15
+ },
+ "last_sample_joints_deg": {
+  "r_shoulder_pitch": -0.0,
+  "r_shoulder_roll": 0.0,
+  "r_arm_yaw": -0.0,
+  "r_elbow_pitch": -0.0,
+  "r_forearm_yaw": -0.0,
+  "r_wrist_pitch": -0.0,
+  "r_wrist_roll": 40.15,
+  "r_gripper": -40.15
+ },
+ "gripper_deg": {
+  "min": -40.15,
+  "max": -40.15
+ },
+ "tail_check_output": "target HOME = {\"r_shoulder_pitch\": 0.0, \"r_shoulder_roll\": 0.0, \"r_arm_yaw\": 0.0, \"r_elbow_pitch\": 0.0, \"r_forearm_yaw\": 0.0, \"r_wrist_pitch\": 0.0, \"r_wrist_roll\": 0.0, \"r_gripper\": -45.0}\ntail_samples=60 (last 3.0s)  max_gross_err_deg=0.0  max_spread_deg=0.0  r_gripper=-40.1 (target -45.0)\ngross residuals: r_shoulder_pitch=0.0, r_shoulder_roll=0.0, r_arm_yaw=0.0, r_elbow_pitch=0.0\nwrist residuals (info): r_forearm_yaw=0.0, r_wrist_pitch=0.0, r_wrist_roll=40.1\nsamples_ok=True posture_ok=True still_ok=True gripper_ok=False\nPARKED_AT_HOME=NO\n",
+ "linker_stdout": "Wrote runs/route_clearance_LOWER_TO_REST_20260915T174409Z.link.json: contacts=0 (evidence on 154/154 states, reset_in_window=False)\n"
+}

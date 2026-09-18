@@ -1,0 +1,6 @@
+# Sole copies live in this worktree until the out-of-git location is agreed
+# (see EVIDENCE.md §6). Hashes of every one of them are in SHA256SUMS.
+e1_server_runs/run_20260915_173758/states.jsonl
+e1_server_runs/run_20260915_173758/commands.jsonl
+recorder_logs/route_clearance_RAISE_TO_SIDE_20260915T174717Z.link.json
+recorder_logs/route_clearance_LOWER_TO_REST_20260915T175021Z.link.json
