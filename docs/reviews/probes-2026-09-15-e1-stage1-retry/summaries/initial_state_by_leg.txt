@@ -1,0 +1,12 @@
+leg      route           compliant before turn_on (8 joints)     gripper wrist_roll wrist_pitch  posture / start_check   after turn_on (waited)
+setup_a  RAISE_TO_SIDE   all True                                  -40.1       40.1        -0.0  home     True    compliant=False in 0.055s
+flight_a LOWER_TO_REST   all False                                 -45.0       -0.0         0.2  present  True    compliant=False in 0.053s
+flight_b PLACE_ROUTE     all False                                  -0.0        0.1         0.0  home     True    compliant=False in 0.052s
+setup_c  PLACE_ROUTE     all False                                  -0.0        0.1         0.0  home     True    compliant=False in 0.055s
+flight_c LIFT_TO_PRESENT all False                                 -44.5       30.0        -9.6  rest     True    compliant=False in 0.051s
+
+parked recordings (no turn_on; state at first sample):
+parked_stage0  compliant=all True  gripper -37.9  wrist_roll 39.8  wrist_pitch -0.0
+parked_S1a     compliant=all True  gripper -40.1  wrist_roll 40.1  wrist_pitch -0.0
+parked_S1b     compliant=all False  gripper -0.0  wrist_roll 0.1  wrist_pitch -0.0
+parked_S1c     compliant=all False  gripper -0.0  wrist_roll 0.1  wrist_pitch 0.0

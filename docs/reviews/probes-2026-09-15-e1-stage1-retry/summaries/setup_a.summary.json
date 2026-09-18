@@ -1,0 +1,878 @@
+{
+ "name": "setup_a",
+ "recorder_log": "route_clearance_RAISE_TO_SIDE_20260916T053206Z.json",
+ "recorder_report": {
+  "route": "RAISE_TO_SIDE",
+  "scene": "/Users/terrancehamilton/reachy-1-2-sim-issue116/scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+  "n_samples": 1192,
+  "realised": {
+   "tube": {
+    "red_cube": 0.9470170281877734,
+    "blue_cylinder": 0.9803671706910715,
+    "soda_can": 1.0560737659075228,
+    "foam_block": 0.7301508175633405,
+    "pool_box_1": -0.03824008505379292,
+    "pool_box_2": 0.8261177803106566,
+    "pool_box_3": 0.9134272088194657,
+    "pool_cyl_1": 0.5570124941660878,
+    "pool_cyl_2": 0.6318202578236962,
+    "pool_cyl_3": 0.7251990209521404
+   },
+   "shells": {
+    "red_cube": 1.0699314796585346,
+    "blue_cylinder": 1.1023748248062781,
+    "soda_can": 1.1766627864349553,
+    "foam_block": 0.7502754191805214,
+    "pool_box_1": 0.05502399049800416,
+    "pool_box_2": 0.9473818938431635,
+    "pool_box_3": 1.0328486018132788,
+    "pool_cyl_1": 0.5807628840910262,
+    "pool_cyl_2": 0.6549906402142744,
+    "pool_cyl_3": 0.7714847079175037
+   }
+  },
+  "realised_aperture_assumed_samples": [],
+  "realised_aperture_source": "measured per-sample r_gripper.present_position, validated; see realised_aperture_assumed_samples for any indices that instead used the safe wide-open assumption under allow_missing_aperture",
+  "planned": {
+   "tube": {
+    "red_cube": 1.2726757904479509,
+    "blue_cylinder": 1.210463497167953,
+    "soda_can": 1.1881171345708417,
+    "foam_block": 0.88095411830474,
+    "pool_box_1": -0.037188941687036584,
+    "pool_box_2": 1.090310850821304,
+    "pool_box_3": 1.0749772450451227,
+    "pool_cyl_1": 0.756784199026922,
+    "pool_cyl_2": 0.7173710081253459,
+    "pool_cyl_3": 0.7232146417241443
+   },
+   "shells": {
+    "red_cube": 1.3337600288366345,
+    "blue_cylinder": 1.3193305411459646,
+    "soda_can": 1.3014451595346461,
+    "foam_block": 0.9519968333330618,
+    "pool_box_1": 0.06256216745212823,
+    "pool_box_2": 1.1987796655466867,
+    "pool_box_3": 1.1873300109814875,
+    "pool_cyl_1": 0.8278533380183508,
+    "pool_cyl_2": 0.7877499831738577,
+    "pool_cyl_3": 0.7879078443412554
+   }
+  },
+  "planned_aperture_policy": "per FOOTPRINT_LEGS leg, the worst-case (largest-hand_radius) of that leg's two commanded ENDPOINT apertures, applied to every interpolated sample along the leg -- not a per-sample commanded value"
+ },
+ "identity": {
+  "ok": true,
+  "reasons": [],
+  "run_dir": "/Users/terrancehamilton/e1-stage1-retry-2026-09-15/e1_server_runs/run_20260916_052229",
+  "manifest": {
+   "format_version": 1,
+   "started_at": "2026-09-16T05:22:29.862817+00:00",
+   "code_sha": "eb34238f6aae6bb9cc14dd901abc31a677e9b0d5",
+   "code_sha_dirty": false,
+   "model_path": "/Users/terrancehamilton/reachy-1-2-sim-issue116/native_mujoco/model/reachy_1_2.xml",
+   "model_sha256": "618ef2499f6207d5e9e72f8b9a4e538b0521008afc1a80f3ecfbab22ab35abb4",
+   "scene_path": "/Users/terrancehamilton/reachy-1-2-sim-issue116/scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+   "scene_sha256": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+   "scene_revision": "initial",
+   "mujoco_version": "3.11.0",
+   "python_version": "3.14.0 (v3.14.0:ebf955df7a8, Oct  7 2025, 08:20:14) [Clang 16.0.0 (clang-1600.0.26.6)]",
+   "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+   "protocol_version": 1,
+   "calibration_provenance": "measured_2026_08_27",
+   "depth_enabled": false,
+   "seg_enabled": false,
+   "contacts_tracked": true,
+   "effects": {
+    "blur_sigma": 0.0,
+    "noise_std": 0.0,
+    "drop_probability": 0.0,
+    "latency_ms": 0.0
+   },
+   "seeds": [],
+   "total_steps": null,
+   "total_duration_s": null,
+   "state_count": 0,
+   "command_count": 0
+  },
+  "scene_chain_sha256": {
+   "/Users/terrancehamilton/reachy-1-2-sim-issue116/scenes/e1_boards/B4_pool_box_1_r2c3.yaml": "818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083",
+   "/Users/terrancehamilton/reachy-1-2-sim-issue116/scenes/FWDCenterLabSivaPool.yaml": "8666d92b22d9809b26accedd964a9c90714355e34537d413c2fce990fa547c5e",
+   "/Users/terrancehamilton/reachy-1-2-sim-issue116/scenes/FWDCenterLabSiva.yaml": "6c2a758c8c3f6f5aef8a29b68f53f7e5e6ab68a54f62574335af1a0a988c59bd",
+   "/Users/terrancehamilton/reachy-1-2-sim-issue116/scenes/FWDCenterLabMCC.yaml": "0a1a6d6053dda1fdc3154afeaf9115b314d3c2621904d29dabfeaeac679b108a"
+  },
+  "joint_agreement_deg": {
+   "r_shoulder_pitch": 1.3774448504516231e-16,
+   "r_shoulder_roll": 1.1850912690312684e-08,
+   "r_arm_yaw": 1.4820495725391905e-17,
+   "r_elbow_pitch": 8.547838872495249e-17,
+   "r_forearm_yaw": 2.4937374516726953e-17,
+   "r_wrist_pitch": 8.345408099757364e-16,
+   "r_wrist_roll": 0.0031354312900688797,
+   "r_gripper": 0.0031090863718787887
+  },
+  "status": {
+   "backend": "mujoco-remote",
+   "frames_stale": false,
+   "left_age_ms": 33,
+   "right_age_ms": 30,
+   "left_seq": 50007,
+   "right_seq": 50007
+  },
+  "checked_at_wall_ns": 1789536667169916000
+ },
+ "settled_pose_check": {
+  "pool_box_1": {
+   "yaml_xyz": [
+    0.4318,
+    -0.1524,
+    0.76
+   ],
+   "stream_xyz": [
+    0.4318000258990143,
+    -0.152400043950571,
+    0.7599550413200046
+   ],
+   "dxy_m": 5.101383763414755e-08,
+   "dz_m": 4.495867999543268e-05,
+   "ok": true
+  }
+ },
+ "displacement_m": {
+  "pool_box_2": 7.286287208826704e-09,
+  "pool_box_3": 7.29018377339804e-09,
+  "pool_cyl_1": 7.1856891204254625e-09,
+  "foam_block": 7.924684586526777e-09,
+  "pool_box_1": 7.913400888193767e-09,
+  "pool_cyl_2": 7.207151731222689e-09,
+  "blue_cylinder": 7.246476124742192e-09,
+  "red_cube": 7.275335046463243e-09,
+  "pool_cyl_3": 7.143170841119633e-09,
+  "soda_can": 7.247378456743564e-09
+ },
+ "contacts": [],
+ "contacts_window": {
+  "seq_lo": 25861,
+  "seq_hi": 28844,
+  "wall_lo_ns": 186360429958541,
+  "wall_hi_ns": 186420105025291,
+  "states_in_window": 2984,
+  "states_with_contacts_key": 2984,
+  "reset_in_window": false,
+  "covered": true,
+  "seq_contiguous": true
+ },
+ "torn_trailing_line": null,
+ "linker_stdout": "Wrote /Users/terrancehamilton/reachy-1-2-sim-issue116/runs/route_clearance_RAISE_TO_SIDE_20260916T053206Z.link.json: contacts=0 (evidence on 2984/2984 states, reset_in_window=False)\nlinker exit=0\n",
+ "tailcheck_stdout": "target PRESENT = {\"r_shoulder_pitch\": -70.0, \"r_shoulder_roll\": -25.0, \"r_arm_yaw\": 0.0, \"r_elbow_pitch\": -80.0, \"r_forearm_yaw\": 0.0, \"r_wrist_pitch\": 0.0, \"r_wrist_roll\": 0.0, \"r_gripper\": -45.0}\ntail_samples=60 (last 3.0s)  max_gross_err_deg=2.6  max_spread_deg=0.0  r_gripper=-45.0 (target -45.0)\ngross residuals: r_shoulder_pitch=2.6, r_shoulder_roll=0.5, r_arm_yaw=0.3, r_elbow_pitch=0.8\nwrist residuals (info): r_forearm_yaw=0.1, r_wrist_pitch=0.2, r_wrist_roll=0.0\nsamples_ok=True posture_ok=True still_ok=True gripper_ok=True\nPARKED_AT_PRESENT=yes\ntailcheck exit=0 (mode=end)\n",
+ "notebook_leg": {
+  "leg": "setup_a",
+  "route": "RAISE_TO_SIDE",
+  "tool": "primitives.raise_to_side",
+  "cycle": "S1a",
+  "go": "ready",
+  "recorder_status": "ready",
+  "start_check": {
+   "kind": "PLACE_ROUTE_start",
+   "ok": true,
+   "why": "",
+   "posture_of": "home",
+   "pose": {
+    "r_shoulder_pitch": -0.0,
+    "r_shoulder_roll": 0.0,
+    "r_arm_yaw": -0.0,
+    "r_elbow_pitch": -0.0,
+    "r_forearm_yaw": -0.0,
+    "r_wrist_pitch": -0.0,
+    "r_wrist_roll": 40.1,
+    "r_gripper": -40.1
+   }
+  },
+  "t_start_mono_ns": 186363595588833,
+  "t_start_wall_ns": 1789536670275699000,
+  "compliance_check": {
+   "ok": true,
+   "reasons": [],
+   "per_joint": {
+    "r_shoulder_pitch": {
+     "compliant": false,
+     "effort": -1.2041522088315598e-17,
+     "seq": 26021,
+     "sim_step": 192070
+    },
+    "r_shoulder_roll": {
+     "compliant": false,
+     "effort": -5.347331169499139e-11,
+     "seq": 26021,
+     "sim_step": 192070
+    },
+    "r_arm_yaw": {
+     "compliant": false,
+     "effort": 7.607221857288393e-21,
+     "seq": 26021,
+     "sim_step": 192070
+    },
+    "r_elbow_pitch": {
+     "compliant": false,
+     "effort": -4.054132441263766e-18,
+     "seq": 26021,
+     "sim_step": 192070
+    },
+    "r_forearm_yaw": {
+     "compliant": false,
+     "effort": 8.175218541336272e-21,
+     "seq": 26021,
+     "sim_step": 192070
+    },
+    "r_wrist_pitch": {
+     "compliant": false,
+     "effort": -3.1117960978317264e-18,
+     "seq": 26021,
+     "sim_step": 192070
+    },
+    "r_wrist_roll": {
+     "compliant": false,
+     "effort": -1.463511978272436e-09,
+     "seq": 26021,
+     "sim_step": 192070
+    },
+    "r_gripper": {
+     "compliant": false,
+     "effort": 5.565821581399177e-09,
+     "seq": 26021,
+     "sim_step": 192070
+    }
+   },
+   "waited_s": 0.054612125,
+   "last_state_age_s": 0.02114625
+  },
+  "outcome": "returned",
+  "returned": null,
+  "phases": [],
+  "t_end_mono_ns": 186396800483416,
+  "t_end_wall_ns": 1789536703480791000,
+  "elapsed_s": 33.204894583,
+  "end_pose": {
+   "r_shoulder_pitch": -68.5,
+   "r_shoulder_roll": -24.7,
+   "r_arm_yaw": 0.1,
+   "r_elbow_pitch": -79.5,
+   "r_forearm_yaw": -0.0,
+   "r_wrist_pitch": 0.1,
+   "r_wrist_roll": 0.0,
+   "r_gripper": -45.0
+  }
+ },
+ "clearance_by_link": {
+  "route": "RAISE_TO_SIDE",
+  "role": "motion",
+  "n_samples": 1192,
+  "aperture_assumed_samples": 0,
+  "planned": {
+   "tube": {
+    "upper_arm": {
+     "red_cube": 1.3337600288366345,
+     "blue_cylinder": 1.3193305411459646,
+     "soda_can": 1.3522996517157995,
+     "foam_block": 0.9666304622186076,
+     "pool_box_1": 0.20888041088262768,
+     "pool_box_2": 1.1987796655466867,
+     "pool_box_3": 1.2390933313693215,
+     "pool_cyl_1": 0.8278533380183508,
+     "pool_cyl_2": 0.8439259248937016,
+     "pool_cyl_3": 0.9019581569747771
+    },
+    "forearm": {
+     "red_cube": 1.3387599951812117,
+     "blue_cylinder": 1.3219802240047258,
+     "soda_can": 1.3303018071803727,
+     "foam_block": 0.9605117577464399,
+     "pool_box_1": 0.06256216745212823,
+     "pool_box_2": 1.2003983119847317,
+     "pool_box_3": 1.2114686965228791,
+     "pool_cyl_1": 0.8279148744019842,
+     "pool_cyl_2": 0.8020616731008838,
+     "pool_cyl_3": 0.8079053599001738
+    },
+    "hand": {
+     "red_cube": 1.2726757904479509,
+     "blue_cylinder": 1.210463497167953,
+     "soda_can": 1.1881171345708417,
+     "foam_block": 0.88095411830474,
+     "pool_box_1": -0.037188941687036584,
+     "pool_box_2": 1.090310850821304,
+     "pool_box_3": 1.0749772450451227,
+     "pool_cyl_1": 0.756784199026922,
+     "pool_cyl_2": 0.7173710081253459,
+     "pool_cyl_3": 0.7232146417241443
+    }
+   },
+   "shells": {
+    "upper_arm": {
+     "red_cube": 1.3337600288366345,
+     "blue_cylinder": 1.3193305411459646,
+     "soda_can": 1.3522996517157995,
+     "foam_block": 0.9666304622186076,
+     "pool_box_1": 0.20888041088262768,
+     "pool_box_2": 1.1987796655466867,
+     "pool_box_3": 1.2390933313693215,
+     "pool_cyl_1": 0.8278533380183508,
+     "pool_cyl_2": 0.8439259248937016,
+     "pool_cyl_3": 0.9019581569747771
+    },
+    "forearm": {
+     "red_cube": 1.3387599951812117,
+     "blue_cylinder": 1.3219802240047258,
+     "soda_can": 1.3303018071803727,
+     "foam_block": 0.9605117577464399,
+     "pool_box_1": 0.06256216745212823,
+     "pool_box_2": 1.2003983119847317,
+     "pool_box_3": 1.2114686965228791,
+     "pool_cyl_1": 0.8279148744019842,
+     "pool_cyl_2": 0.8020616731008838,
+     "pool_cyl_3": 0.8079053599001738
+    },
+    "thumb": {
+     "red_cube": 1.3872924115200624,
+     "blue_cylinder": 1.331971449320431,
+     "soda_can": 1.3165346519173238,
+     "foam_block": 0.9519968333330618,
+     "pool_box_1": 0.07376192686753824,
+     "pool_box_2": 1.2084808200467634,
+     "pool_box_3": 1.199619961998882,
+     "pool_cyl_1": 0.8329043653065985,
+     "pool_cyl_2": 0.7877499831738577,
+     "pool_cyl_3": 0.7879078443412554
+    },
+    "thumb_pad": {
+     "red_cube": 1.3828081703503425,
+     "blue_cylinder": 1.3222284416193946,
+     "soda_can": 1.3014451595346461,
+     "foam_block": 1.023606236518167,
+     "pool_box_1": 0.07645959628596607,
+     "pool_box_2": 1.2010942814908105,
+     "pool_box_3": 1.1873300109814875,
+     "pool_cyl_1": 0.9022909164313733,
+     "pool_cyl_2": 0.8453761722955281,
+     "pool_cyl_3": 0.8313469389028475
+    },
+    "finger": {
+     "red_cube": 1.3973162464754652,
+     "blue_cylinder": 1.3359122450943366,
+     "soda_can": 1.3138095267252303,
+     "foam_block": 0.9969393087848305,
+     "pool_box_1": 0.10754212062779714,
+     "pool_box_2": 1.2142278914223377,
+     "pool_box_3": 1.1990068358088848,
+     "pool_cyl_1": 0.8812447757584402,
+     "pool_cyl_2": 0.8240625406059593,
+     "pool_cyl_3": 0.8044594698232649
+    },
+    "wrist_ball": {
+     "red_cube": 1.3780662005250548,
+     "blue_cylinder": 1.3342108588278172,
+     "soda_can": 1.3323018042244872,
+     "foam_block": 0.9676447598812207,
+     "pool_box_1": 0.06670367317286634,
+     "pool_box_2": 1.2101867653046838,
+     "pool_box_3": 1.2134686917719073,
+     "pool_cyl_1": 0.8434748395937084,
+     "pool_cyl_2": 0.8040616658124464,
+     "pool_cyl_3": 0.8099053185118318
+    }
+   }
+  },
+  "realised_all": {
+   "tube": {
+    "upper_arm": {
+     "red_cube": 1.2618326130100752,
+     "blue_cylinder": 1.2779830690442497,
+     "soda_can": 1.3380804138699967,
+     "foam_block": 0.8856754821428791,
+     "pool_box_1": 0.1938216562223062,
+     "pool_box_2": 1.1555589214007087,
+     "pool_box_3": 1.2257261976047056,
+     "pool_cyl_1": 0.7639389197203318,
+     "pool_cyl_2": 0.8059972951490122,
+     "pool_cyl_3": 0.8828501095518186
+    },
+    "forearm": {
+     "red_cube": 1.1591106735889907,
+     "blue_cylinder": 1.1849628848236518,
+     "soda_can": 1.25259857941743,
+     "foam_block": 0.8157246162841756,
+     "pool_box_1": 0.05502399049800416,
+     "pool_box_2": 1.0375624832935832,
+     "pool_box_3": 1.1152902059024001,
+     "pool_cyl_1": 0.6522099857682587,
+     "pool_cyl_2": 0.7197899508376907,
+     "pool_cyl_3": 0.8090637428642563
+    },
+    "hand": {
+     "red_cube": 0.9470170281877734,
+     "blue_cylinder": 0.9803671706910715,
+     "soda_can": 1.0560737659075228,
+     "foam_block": 0.7301508175633405,
+     "pool_box_1": -0.03824008505379292,
+     "pool_box_2": 0.8261177803106566,
+     "pool_box_3": 0.9134272088194657,
+     "pool_cyl_1": 0.5570124941660878,
+     "pool_cyl_2": 0.6318202578236962,
+     "pool_cyl_3": 0.7251990209521404
+    }
+   },
+   "shells": {
+    "upper_arm": {
+     "red_cube": 1.2618326130100752,
+     "blue_cylinder": 1.2779830690442497,
+     "soda_can": 1.3380804138699967,
+     "foam_block": 0.8856754821428791,
+     "pool_box_1": 0.1938216562223062,
+     "pool_box_2": 1.1555589214007087,
+     "pool_box_3": 1.2257261976047056,
+     "pool_cyl_1": 0.7639389197203318,
+     "pool_cyl_2": 0.8059972951490122,
+     "pool_cyl_3": 0.8828501095518186
+    },
+    "forearm": {
+     "red_cube": 1.1591106735889907,
+     "blue_cylinder": 1.1849628848236518,
+     "soda_can": 1.25259857941743,
+     "foam_block": 0.8157246162841756,
+     "pool_box_1": 0.05502399049800416,
+     "pool_box_2": 1.0375624832935832,
+     "pool_box_3": 1.1152902059024001,
+     "pool_cyl_1": 0.6522099857682587,
+     "pool_cyl_2": 0.7197899508376907,
+     "pool_cyl_3": 0.8090637428642563
+    },
+    "thumb": {
+     "red_cube": 1.100092378030294,
+     "blue_cylinder": 1.130246196445742,
+     "soda_can": 1.2014768163424048,
+     "foam_block": 0.7502754191805214,
+     "pool_box_1": 0.06736795665842418,
+     "pool_box_2": 0.9752190467180419,
+     "pool_box_3": 1.0568463274980824,
+     "pool_cyl_1": 0.5812567764009202,
+     "pool_cyl_2": 0.6549906402142744,
+     "pool_cyl_3": 0.7714847079175037
+    },
+    "thumb_pad": {
+     "red_cube": 1.0699314796585346,
+     "blue_cylinder": 1.1023748248062781,
+     "soda_can": 1.1766627864349553,
+     "foam_block": 0.7746583008488462,
+     "pool_box_1": 0.07325742498228613,
+     "pool_box_2": 0.9473818938431635,
+     "pool_box_3": 1.0328486018132788,
+     "pool_cyl_1": 0.6018489744415841,
+     "pool_cyl_2": 0.6757503645199967,
+     "pool_cyl_3": 0.7924160908843124
+    },
+    "finger": {
+     "red_cube": 1.129783029779933,
+     "blue_cylinder": 1.1621236697807111,
+     "soda_can": 1.233715997261904,
+     "foam_block": 0.7537721315678722,
+     "pool_box_1": 0.10430580872208167,
+     "pool_box_2": 0.9993743439072543,
+     "pool_box_3": 1.0807975115639061,
+     "pool_cyl_1": 0.5807628840910262,
+     "pool_cyl_2": 0.6569262451843894,
+     "pool_cyl_3": 0.7763128617481411
+    },
+    "wrist_ball": {
+     "red_cube": 1.1611106215542506,
+     "blue_cylinder": 1.1869628388578484,
+     "soda_can": 1.2545985376377777,
+     "foam_block": 0.8177245414436073,
+     "pool_box_1": 0.05724364926059097,
+     "pool_box_2": 1.039562422525153,
+     "pool_box_3": 1.1172901492581577,
+     "pool_cyl_1": 0.654209899616667,
+     "pool_cyl_2": 0.7217898724511032,
+     "pool_cyl_3": 0.8110637021537951
+    }
+   }
+  },
+  "start_state": {
+   "r_gripper": -40.15,
+   "r_wrist_roll": 40.15,
+   "r_wrist_pitch": -0.0
+  },
+  "end_state": {
+   "r_gripper": -45.02,
+   "r_wrist_roll": -0.01,
+   "r_wrist_pitch": 0.17
+  },
+  "segments": {
+   "pre_motion": [
+    0,
+    71
+   ],
+   "moving": [
+    72,
+    730
+   ],
+   "parked_tail": [
+    731,
+    1191
+   ],
+   "t_move_start_s": 3.61,
+   "t_move_end_s": 36.5
+  },
+  "realised_pre_motion": {
+   "tube": {
+    "upper_arm": {
+     "red_cube": 1.2619580651650448,
+     "blue_cylinder": 1.27810659325,
+     "soda_can": 1.3381989315122493,
+     "foam_block": 0.958856240193904,
+     "pool_box_1": 0.37717593331003685,
+     "pool_box_2": 1.1556721755160275,
+     "pool_box_3": 1.2258331489725631,
+     "pool_cyl_1": 0.8152414734534104,
+     "pool_cyl_2": 0.8703646054907852,
+     "pool_cyl_3": 0.9623481843970735
+    },
+    "forearm": {
+     "red_cube": 1.1593696328622958,
+     "blue_cylinder": 1.1852155477369797,
+     "soda_can": 1.252838730423265,
+     "foam_block": 0.8157246162841756,
+     "pool_box_1": 0.38266088502312645,
+     "pool_box_2": 1.037801540363676,
+     "pool_box_3": 1.1155130420920747,
+     "pool_cyl_1": 0.6522099857682587,
+     "pool_cyl_2": 0.7197899508376907,
+     "pool_cyl_3": 0.8286054404799916
+    },
+    "hand": {
+     "red_cube": 0.9470170281877734,
+     "blue_cylinder": 0.9803671706910715,
+     "soda_can": 1.0560737659075228,
+     "foam_block": 0.7304946129962953,
+     "pool_box_1": 0.3775063294430372,
+     "pool_box_2": 0.8261177803106566,
+     "pool_box_3": 0.9134272088194657,
+     "pool_cyl_1": 0.5669799622092192,
+     "pool_cyl_2": 0.6345599346234922,
+     "pool_cyl_3": 0.7433754335873891
+    }
+   },
+   "shells": {
+    "upper_arm": {
+     "red_cube": 1.2619580651650448,
+     "blue_cylinder": 1.27810659325,
+     "soda_can": 1.3381989315122493,
+     "foam_block": 0.958856240193904,
+     "pool_box_1": 0.37717593331003685,
+     "pool_box_2": 1.1556721755160275,
+     "pool_box_3": 1.2258331489725631,
+     "pool_cyl_1": 0.8152414734534104,
+     "pool_cyl_2": 0.8703646054907852,
+     "pool_cyl_3": 0.9623481843970735
+    },
+    "forearm": {
+     "red_cube": 1.1593696328622958,
+     "blue_cylinder": 1.1852155477369797,
+     "soda_can": 1.252838730423265,
+     "foam_block": 0.8157246162841756,
+     "pool_box_1": 0.38266088502312645,
+     "pool_box_2": 1.037801540363676,
+     "pool_box_3": 1.1155130420920747,
+     "pool_cyl_1": 0.6522099857682587,
+     "pool_cyl_2": 0.7197899508376907,
+     "pool_cyl_3": 0.8286054404799916
+    },
+    "thumb": {
+     "red_cube": 1.100092378030294,
+     "blue_cylinder": 1.130246196445742,
+     "soda_can": 1.2014768163424048,
+     "foam_block": 0.771883244594435,
+     "pool_box_1": 0.47471792968992643,
+     "pool_box_2": 0.9752190467180419,
+     "pool_box_3": 1.0568463274980824,
+     "pool_cyl_1": 0.607526990040906,
+     "pool_cyl_2": 0.6785389929179229,
+     "pool_cyl_3": 0.7917104552086557
+    },
+    "thumb_pad": {
+     "red_cube": 1.0699314796585346,
+     "blue_cylinder": 1.1023748248062781,
+     "soda_can": 1.1766627864349553,
+     "foam_block": 0.8337837257221938,
+     "pool_box_1": 0.5226586686995082,
+     "pool_box_2": 0.9473818938431635,
+     "pool_box_3": 1.0328486018132788,
+     "pool_cyl_1": 0.6627098715976845,
+     "pool_cyl_2": 0.7307276396453904,
+     "pool_cyl_3": 0.8400513929639247
+    },
+    "finger": {
+     "red_cube": 1.129783029779933,
+     "blue_cylinder": 1.1621236697807111,
+     "soda_can": 1.233715997261904,
+     "foam_block": 0.7592213848078441,
+     "pool_box_1": 0.5291943418708467,
+     "pool_box_2": 0.9993743439072543,
+     "pool_box_3": 1.0807975115639061,
+     "pool_cyl_1": 0.5855897175088342,
+     "pool_cyl_2": 0.6612396002320179,
+     "pool_cyl_3": 0.7800076202833015
+    },
+    "wrist_ball": {
+     "red_cube": 1.16136958091251,
+     "blue_cylinder": 1.1872155018525685,
+     "soda_can": 1.2548386887197127,
+     "foam_block": 0.8177245414436073,
+     "pool_box_1": 0.46473623775809303,
+     "pool_box_2": 1.039801479676817,
+     "pool_box_3": 1.1175129855222068,
+     "pool_cyl_1": 0.654209899616667,
+     "pool_cyl_2": 0.7217898724511032,
+     "pool_cyl_3": 0.830605372027741
+    }
+   }
+  },
+  "realised_moving": {
+   "tube": {
+    "upper_arm": {
+     "red_cube": 1.2618326130100752,
+     "blue_cylinder": 1.2779830690442497,
+     "soda_can": 1.3380804138699967,
+     "foam_block": 0.8856754821428791,
+     "pool_box_1": 0.1938216562223062,
+     "pool_box_2": 1.1555589214007087,
+     "pool_box_3": 1.2257261976047056,
+     "pool_cyl_1": 0.7639389197203318,
+     "pool_cyl_2": 0.8059972951490122,
+     "pool_cyl_3": 0.8828501095518186
+    },
+    "forearm": {
+     "red_cube": 1.1591106735889907,
+     "blue_cylinder": 1.1849628848236518,
+     "soda_can": 1.25259857941743,
+     "foam_block": 0.8157246162841756,
+     "pool_box_1": 0.05502399049800416,
+     "pool_box_2": 1.0375624832935832,
+     "pool_box_3": 1.1152902059024001,
+     "pool_cyl_1": 0.6522099857682587,
+     "pool_cyl_2": 0.7197899508376907,
+     "pool_cyl_3": 0.8090637428642563
+    },
+    "hand": {
+     "red_cube": 0.9478485047626886,
+     "blue_cylinder": 0.9812019015817706,
+     "soda_can": 1.0568900820164546,
+     "foam_block": 0.7301508175633405,
+     "pool_box_1": -0.03824008505379292,
+     "pool_box_2": 0.8268779268975063,
+     "pool_box_3": 0.9141590673627182,
+     "pool_cyl_1": 0.5570124941660878,
+     "pool_cyl_2": 0.6318202578236962,
+     "pool_cyl_3": 0.7251990209521404
+    }
+   },
+   "shells": {
+    "upper_arm": {
+     "red_cube": 1.2618326130100752,
+     "blue_cylinder": 1.2779830690442497,
+     "soda_can": 1.3380804138699967,
+     "foam_block": 0.8856754821428791,
+     "pool_box_1": 0.1938216562223062,
+     "pool_box_2": 1.1555589214007087,
+     "pool_box_3": 1.2257261976047056,
+     "pool_cyl_1": 0.7639389197203318,
+     "pool_cyl_2": 0.8059972951490122,
+     "pool_cyl_3": 0.8828501095518186
+    },
+    "forearm": {
+     "red_cube": 1.1591106735889907,
+     "blue_cylinder": 1.1849628848236518,
+     "soda_can": 1.25259857941743,
+     "foam_block": 0.8157246162841756,
+     "pool_box_1": 0.05502399049800416,
+     "pool_box_2": 1.0375624832935832,
+     "pool_box_3": 1.1152902059024001,
+     "pool_cyl_1": 0.6522099857682587,
+     "pool_cyl_2": 0.7197899508376907,
+     "pool_cyl_3": 0.8090637428642563
+    },
+    "thumb": {
+     "red_cube": 1.1003264653622336,
+     "blue_cylinder": 1.1304775721331182,
+     "soda_can": 1.201697220546459,
+     "foam_block": 0.7502754191805214,
+     "pool_box_1": 0.06736795665842418,
+     "pool_box_2": 0.9754268673691933,
+     "pool_box_3": 1.057038650161506,
+     "pool_cyl_1": 0.5812567764009202,
+     "pool_cyl_2": 0.6549906402142744,
+     "pool_cyl_3": 0.7714847079175037
+    },
+    "thumb_pad": {
+     "red_cube": 1.070201367538964,
+     "blue_cylinder": 1.1026484546028916,
+     "soda_can": 1.1769251054897079,
+     "foam_block": 0.7746583008488462,
+     "pool_box_1": 0.07325742498228613,
+     "pool_box_2": 0.9476028742651653,
+     "pool_box_3": 1.0330515811511585,
+     "pool_cyl_1": 0.6018489744415841,
+     "pool_cyl_2": 0.6757503645199967,
+     "pool_cyl_3": 0.7924160908843124
+    },
+    "finger": {
+     "red_cube": 1.1299702577055382,
+     "blue_cylinder": 1.1623047768527868,
+     "soda_can": 1.2338871492723513,
+     "foam_block": 0.7537721315678722,
+     "pool_box_1": 0.10430580872208167,
+     "pool_box_2": 0.9995502996401783,
+     "pool_box_3": 1.08096040833707,
+     "pool_cyl_1": 0.5807628840910262,
+     "pool_cyl_2": 0.6569262451843894,
+     "pool_cyl_3": 0.7763128617481411
+    },
+    "wrist_ball": {
+     "red_cube": 1.1611106215542506,
+     "blue_cylinder": 1.1869628388578484,
+     "soda_can": 1.2545985376377777,
+     "foam_block": 0.8177245414436073,
+     "pool_box_1": 0.05724364926059097,
+     "pool_box_2": 1.039562422525153,
+     "pool_box_3": 1.1172901492581577,
+     "pool_cyl_1": 0.654209899616667,
+     "pool_cyl_2": 0.7217898724511032,
+     "pool_cyl_3": 0.8110637021537951
+    }
+   }
+  },
+  "realised_parked_tail": {
+   "tube": {
+    "upper_arm": {
+     "red_cube": 1.424486214456863,
+     "blue_cylinder": 1.424189200615118,
+     "soda_can": 1.4521911718912373,
+     "foam_block": 1.0133999552915405,
+     "pool_box_1": 0.21784619500649874,
+     "pool_box_2": 1.315217919711732,
+     "pool_box_3": 1.3446080974169128,
+     "pool_cyl_1": 0.8935797162846371,
+     "pool_cyl_2": 0.8966241691164448,
+     "pool_cyl_3": 0.939894673293829
+    },
+    "forearm": {
+     "red_cube": 1.4583483900408127,
+     "blue_cylinder": 1.4352498875722133,
+     "soda_can": 1.4571912283936095,
+     "foam_block": 1.0183999736709906,
+     "pool_box_1": 0.2228461148025653,
+     "pool_box_2": 1.3210718816475526,
+     "pool_box_3": 1.3496081528744537,
+     "pool_cyl_1": 0.8985797584789257,
+     "pool_cyl_2": 0.901624165415328,
+     "pool_cyl_3": 0.9448946252936025
+    },
+    "hand": {
+     "red_cube": 1.5420049682321966,
+     "blue_cylinder": 1.5017202891309196,
+     "soda_can": 1.503641843680471,
+     "foam_block": 1.130420662890591,
+     "pool_box_1": 0.2690126740473944,
+     "pool_box_2": 1.4051484076533156,
+     "pool_box_3": 1.4136769787856833,
+     "pool_cyl_1": 1.0307563039949494,
+     "pool_cyl_2": 1.0103234798793015,
+     "pool_cyl_3": 1.024082528752402
+    }
+   },
+   "shells": {
+    "upper_arm": {
+     "red_cube": 1.424486214456863,
+     "blue_cylinder": 1.424189200615118,
+     "soda_can": 1.4521911718912373,
+     "foam_block": 1.0133999552915405,
+     "pool_box_1": 0.21784619500649874,
+     "pool_box_2": 1.315217919711732,
+     "pool_box_3": 1.3446080974169128,
+     "pool_cyl_1": 0.8935797162846371,
+     "pool_cyl_2": 0.8966241691164448,
+     "pool_cyl_3": 0.939894673293829
+    },
+    "forearm": {
+     "red_cube": 1.4583483900408127,
+     "blue_cylinder": 1.4352498875722133,
+     "soda_can": 1.4571912283936095,
+     "foam_block": 1.0183999736709906,
+     "pool_box_1": 0.2228461148025653,
+     "pool_box_2": 1.3210718816475526,
+     "pool_box_3": 1.3496081528744537,
+     "pool_cyl_1": 0.8985797584789257,
+     "pool_cyl_2": 0.901624165415328,
+     "pool_cyl_3": 0.9448946252936025
+    },
+    "thumb": {
+     "red_cube": 1.6273848050470856,
+     "blue_cylinder": 1.5870201952222527,
+     "soda_can": 1.5885358070102096,
+     "foam_block": 1.1979937390491047,
+     "pool_box_1": 0.3523631591541857,
+     "pool_box_2": 1.490480974948078,
+     "pool_box_3": 1.4986592680647397,
+     "pool_cyl_1": 1.1013389963206697,
+     "pool_cyl_2": 1.0807630198765514,
+     "pool_cyl_3": 1.094033534452596
+    },
+    "thumb_pad": {
+     "red_cube": 1.6850950872534034,
+     "blue_cylinder": 1.6388417458253821,
+     "soda_can": 1.6336858627509196,
+     "foam_block": 1.289425940751035,
+     "pool_box_1": 0.4232217943327809,
+     "pool_box_2": 1.5477448377393321,
+     "pool_box_3": 1.5504964125264655,
+     "pool_cyl_1": 1.195610202750452,
+     "pool_cyl_2": 1.1679524969427495,
+     "pool_cyl_3": 1.1722823327509975
+    },
+    "finger": {
+     "red_cube": 1.7001272356067116,
+     "blue_cylinder": 1.6573939216707665,
+     "soda_can": 1.6557669181601626,
+     "foam_block": 1.2574134486160964,
+     "pool_box_1": 0.4264438828793099,
+     "pool_box_2": 1.5629511275326478,
+     "pool_box_3": 1.5685458592677397,
+     "pool_cyl_1": 1.1664091678965305,
+     "pool_cyl_2": 1.1428609184720184,
+     "pool_cyl_3": 1.151896684968965
+    },
+    "wrist_ball": {
+     "red_cube": 1.6125599904230632,
+     "blue_cylinder": 1.5722753169444112,
+     "soda_can": 1.5741968781946818,
+     "foam_block": 1.2009756749363378,
+     "pool_box_1": 0.3395676899822738,
+     "pool_box_2": 1.4757034304448806,
+     "pool_box_3": 1.4842320070861683,
+     "pool_cyl_1": 1.1013113096965559,
+     "pool_cyl_2": 1.0808784926099844,
+     "pool_cyl_3": 1.0946375506539217
+    }
+   }
+  }
+ },
+ "start_state": {
+  "r_gripper": -40.15,
+  "r_wrist_roll": 40.15,
+  "r_wrist_pitch": -0.0
+ },
+ "end_state": {
+  "r_gripper": -45.02,
+  "r_wrist_roll": -0.01,
+  "r_wrist_pitch": 0.17
+ }
+}

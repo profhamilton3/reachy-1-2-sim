@@ -1,0 +1,13 @@
+final /status: {"backend": "mujoco-remote", "frames_stale": false, "left_age_ms": 28, "right_age_ms": 25, "left_seq": 62576, "right_seq": 62576}
+final states.jsonl lines:    67781, commands.jsonl lines:     4637, resets: 3
+ Container reachy-1-2-sim Stopping 
+ Container reachy-1-2-sim Stopped 
+ Container reachy-1-2-sim Removing 
+ Container reachy-1-2-sim Removed 
+ Network reachy-1-2-sim-issue116_default Removing 
+ Network reachy-1-2-sim-issue116_default Removed 
+native server pid 60465 -> SIGTERM
+8765 after: [] 50051: [] containers: []
+2026-09-15 22:45:07,782 websockets.server INFO connection closed
+2026-09-15 22:45:07,783 reachy12.mujoco.server INFO Client ('127.0.0.1', 60035) disconnected
+2026-09-15 22:45:07,783 reachy12.mujoco.server INFO Handler exited for ('127.0.0.1', 60035)

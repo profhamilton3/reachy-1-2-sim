@@ -1,0 +1,2 @@
+Wrote /Users/terrancehamilton/reachy-1-2-sim-issue116/runs/route_clearance_RAISE_TO_SIDE_20260916T053206Z.link.json: contacts=0 (evidence on 2984/2984 states, reset_in_window=False)
+linker exit=0
