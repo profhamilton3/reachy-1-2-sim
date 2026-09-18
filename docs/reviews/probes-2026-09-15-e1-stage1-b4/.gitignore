@@ -1,0 +1,5 @@
+e1_server_runs/*/states.jsonl
+e1_server_runs/*/commands.jsonl
+control/aborted_start_1/*/states.jsonl
+control/aborted_start_1/*/commands.jsonl
+recorder_logs/route_clearance_RAISE_TO_SIDE_20260915T211619Z.link.json
