@@ -149,3 +149,276 @@ does `reachy.turn_on("r_arm")` still advance `cmd_seq`, and can that make
 noted in the assignment's verified facts; `mujoco_remote_backend.py` and
 `fake_reachy_server.py` read from this tree at `4d727c0`. No SDK was
 instantiated and no server was started to answer this section.)
+
+## Stage 2 additions (decision note `outputs/e1-stage2-decision-2026-09-15.md`)
+
+Stage 1 flew one board (B4) once. Stage 2 flies three boards, 18 cycles
+each (6 repetitions of shapes `a`/`b`/`c`), so this package gained the
+identity and preparation machinery Stage 1 never needed. Nothing below
+changes a guard, margin, tolerance, route, or stop rule -- it is
+generator/shell tooling, same as everything above.
+
+### Board parameterization
+
+`plan.BOARDS` (`B4`/`B1`/`B2` -> `scenes/e1_boards/<file>.yaml`) is the one
+place a board id maps to a scene path. `make_cycle_notebook.generate`
+(legacy, defaults to `board="B4"`), `generate_repetition`, and
+`generate_stage0` all resolve the scene through `plan.board_scene_rel`,
+freeze the result into `plan_<identity>.json` as `scene_rel`, and
+`leg.sh`/`parked.sh` read it from there (or, for `parked.sh`, resolve it
+directly via `--board`) rather than carrying an independent path literal.
+`B3`/`B5` (never authorized for Stage 2) and `B6` (the
+deliberately-unflyable incident board) are refused by name with a reason,
+not silently treated as "unknown" -- including from the CLI: `--board`
+does not restrict argparse `choices`, so an unauthorized board reaches
+`plan.board_scene_rel`'s reasoned `ValueError` (which `main()` prints as
+`REFUSED: ...`) instead of a generic "invalid choice" (PR #124 review,
+M4).
+
+For `generate`'s default `board="B4"`, the generated `SCENE` literal is
+byte-identical to Stage 1's pre-Stage-2 hard-coded string
+(`test_legacy_generate_defaults_to_b4_scene_unchanged`). The rest of
+`generate`'s cell 2 is not byte-identical: it now imports `gating` and
+delegates `wait_for` to `gating.wait_for` (same poll order and behaviour
+as the inline closure it replaced), and `plan_S1a.json` gains `board`/
+`scene_rel` keys with no existing value changed. "Byte-identical" applied
+only to the `SCENE` string, not the whole notebook (PR #124 review, M4).
+
+### Repetition-aware identity (decision note §6 item 2)
+
+Stage 1's leg names (`setup_a`, `flight_a`, ...) were fixed strings --
+fine for one cycle per shape ever generated. Stage 2 flies six
+repetitions of each shape per board; reusing those names would reuse
+`go_<leg>`/`<leg>_done`/`recorder_<leg>.log` marker names too, so a second
+repetition could find the first repetition's leftover `go_setup_a`
+already on disk and fire its motion cell without a fresh operator signal.
+`plan.stage2_legs(board, shape, rep)` gives every leg a name built from
+`plan.cycle_id(board, shape, rep)` (`S2-<board>-<shape>-r<rep>`), so every
+marker is unique by construction. The same is true of Stage 0's own armon
+leg: `plan.stage0_armon_leg_name(board, session)` builds
+`stage0-<board>-<session>-armon` -- before this fix every Stage 0
+notebook used the fixed names `go_armon`/`recorder_armon.log`/
+`armon_done`, so one board's leftover Stage 0 markers could satisfy a
+*different* board's armon cell and fire `turn_on` with no fresh operator
+signal and no recorder running (PR #124 review, M1).
+
+`make_cycle_notebook.generate_repetition`/`generate_stage0` refuse,
+before writing anything, if this identity's plan file or any of its
+legs' markers already exist in the evidence directory (a stale marker
+from a crashed prior attempt, not just a plan file, is enough to refuse),
+and if the evidence directory has already recorded a *different* session
+id for this board (`control/e1_stage2_sessions.json` -- one server
+session per board, per decision note §5). Every one of these checks is
+read-only and runs before any file is written; the session ledger itself
+is recorded last, right before the notebook/plan files, under a file
+lock with an atomic (`os.replace`) write and a re-check inside the lock,
+so a refused call never reserves a session or dirties the evidence
+directory, and two concurrent calls naming different sessions for the
+same board can never both win (PR #124 review, M2).
+
+### Policy A: Stage 0 arm-on, and the per-cycle start-variant gate (decision note §4)
+
+`turn_on("r_arm")` is **not** treated as motion-free here, even though
+going stiff pins `goal_position` to `present_position` for each joint (see
+the already-stiff-arm investigation above) -- the only way to know nothing
+moved is to record it and check, not to assert it. `make_cycle_notebook
+.generate_stage0(board, session, ...)` generates a small, once-per-board-
+session notebook (`armon_cell_source`) that runs `turn_on("r_arm")` +
+`require_compliance` gated exactly like a leg (go-marker, recorder,
+baseline `cmd_seq`) but calls no route function at all, and is recorded
+via the same `leg.sh` chain (its leg name is the identity-scoped
+`plan.stage0_armon_leg_name(board, session)`, a key in that notebook's own
+`plan_stage0-<board>-<session>.json` -- note the hyphens, not
+underscores).
+
+**The exact `leg.sh` invocation for the armon recording** (M5, corrected
+by the 2026-09-16 re-review's R1 -- `HOME` was wrong here, see below):
+
+```
+E1_PYTHON=<e1venv python> scripts/e1_stage1/leg.sh <repo> <evidence-dir> \
+    stage0-<board>-<session> stage0-<board>-<session>-armon \
+    RAISE_TO_SIDE INIT end
+```
+
+`RAISE_TO_SIDE` there is a clearance-table label only -- nothing in the
+armon cell can fly it (`test_armon_cell_never_calls_any_route_function`).
+`end` mode is required: it is the only mode in which a failed tail check
+writes `control/stop`; in `start` mode the check is merely informational.
+
+**`INIT` is a dedicated Stage 0 initialization acceptance check
+(`e1_tail_check.check_init`), not a posture target, and it is distinct
+from the post-reset stiff-zero gate below.** The invocation used to name
+`HOME` here, on the theory that "did the arm hold still" could piggyback
+on an existing posture target. It cannot: `e1_tail_check.check(...,
+"HOME")` requires the last sample's `r_gripper` within `GRIPPER_TOL_DEG`
+(3°) of `rig_routes.HOME`'s own `r_gripper` target, `OPEN = -45.0°`
+(`rig_routes.pose()`: "gripper open unless told otherwise"). But on a
+fresh, compliant server the gripper is still sagging toward the
+keyframe-sag pose during the recording (decision note §3: ~65 s to
+settle; the armon recording is 14 s), so it sits somewhere in
+`[-40°, 0°]` throughout -- disjoint from `HOME`'s `[-48°, -42°]` window.
+`HOME` in `end` mode was therefore unpassable by construction: every
+Stage 1 parked `HOME` tail check on a comparably fresh arm failed on
+exactly this criterion (2026-09-16 re-review, R1), which meant the
+documented invocation stopped the board session before cycle 1, every
+time.
+
+`INIT` allows that sag: Stage 0's `turn_on` pins `goal_position` to
+wherever the arm already is (see the already-stiff-arm investigation
+above), which does not forbid the arm moving *before* that instant, only
+require it settled *after*. `check_init` asks two questions instead of a
+posture match: is the recording's final `window_s` (default 3 s, the
+same window `PARKED_TAIL_S` reserves for it) still, and does the
+recording's own linked evidence pass the shared experiment-acceptance
+gate (`scripts/experiment_gate.py`, below -- complete evidence, no
+recorded contact, every tracked board object within displacement
+tolerance). It requires no first-to-last invariance -- the lead-in sag is
+exactly the motion such a requirement would have to forbid, and Stage 0
+has no preceding established pose to be invariant relative to; that is
+what this step establishes. `INIT` does **not** assert stiff-zero
+(`plan.classify_start_variant` applied to `rig_routes.HOME` itself
+returns `None`, matching neither variant, by construction -- and
+`check_init` looks at stillness and contact evidence, never gripper
+angle, so it cannot be conflated with `stiff-zero` either). Stage 0's
+`turn_on` only has to prove the arm settled while going stiff; it is
+what makes the *following* reset settle to stiff-zero rather than sag to
+keyframe-sag (decision note §3), not something that asserts stiff-zero
+itself. Whether stiff-zero was actually reached is checked separately,
+per cycle, by the parked-recording gate below -- and, since the
+2026-09-16 re-review's R2, by a fresh-sample compliance check as well
+(below).
+
+Every cycle's *preceding* parked recording is verified with
+`start_variant.py` (invoked from the promoted `parked.sh`, below): it
+classifies the recording's last sample with `plan.classify_start_variant`
+into `"stiff-zero"`, `"keyframe-sag"`, or neither, and embeds the cycle id
+(`--cycle`) it is being recorded for into
+`control/start_variant_<cycle>.json`. `parked.sh` STOPs unless the
+classification is *exactly* `"stiff-zero"` -- under policy A,
+`"keyframe-sag"` means Stage 0's `turn_on` did not hold (motors off,
+server restarted, or Stage 0 skipped) and must prevent motion the same as
+matching neither variant (PR #124 review, M3; this was previously an open
+policy question -- the code now enforces policy A's own text literally).
+
+**The generated Stage 2 cycle notebook enforces this gate itself**, not
+only `parked.sh` at recording time: the binding cell (once per cycle,
+before any leg is eligible) calls `plan.start_variant_gate(CTRL, CYCLE)`,
+which requires `control/start_variant_<CYCLE>.json` to exist, parse, be
+bound to *this* cycle (not a stale or wrong-cycle file), and independently
+re-classify its own recorded `pose` to `stiff-zero` -- the declared
+`start_variant` field is never trusted verbatim. Missing, corrupt,
+wrong-cycle, or non-stiff-zero (including `keyframe-sag`) evidence folds
+into `PREV_OK`, so every leg's `go = wait_for(...) if PREV_OK else
+"not_eligible"` short-circuits and no `turn_on`/route call is reachable
+that cycle. This gate is Stage 2-only: legacy `generate` and
+`generate_stage0` do not carry it (Stage 0 is what *establishes*
+stiff-zero for the first cycle; there is no preceding parked recording
+for it to check).
+
+**A stiff-zero posture alone does not prove the arm is currently
+stiff** (2026-09-16 re-review, R2): `plan.start_variant_gate` reads only
+joint angles, and a *compliant* arm reads "zero within 1°" for part of
+its settle window too -- it starts at the reset keyframe (every joint at
+0) and sags toward keyframe-sag over ~65 s (decision note §3), so early
+in that sag it is still within stiff-zero's 1° tolerance, and a
+`parked.sh` recording taken in that window would read the same as a
+genuinely stiff arm. So the binding cell also runs a fresh-sample
+compliance check, right alongside the posture gate above, before any
+cycle command:
+
+```python
+COMPLIANCE_CHECK = e1_identity.require_compliance(
+    ident.run_dir, R.R_JOINTS, compliant=False, timeout_s=COMPLIANCE_TIMEOUT_S)
+PREV_OK = PREV_OK and START_VARIANT_OK and COMPLIANCE_CHECK.ok
+```
+
+No `min_cmd_seq` -- nothing has been commanded yet this cycle, so this is
+a freshness-window read of whatever the server is reporting right now,
+not proof tied to a specific command the way the per-leg post-`turn_on`
+check is. `require_compliance`'s existing fail-closed contract does the
+rest: a missing sample, a non-bool `compliant` field (state stream not
+reporting compliance at all), a stale sample (older than
+`max_state_age_s`), or a sample that explicitly reports `compliant=True`
+for any of the 8 `R_JOINTS` all refuse. Folded into `PREV_OK` alongside
+`START_VARIANT_OK`, so neither this cycle's `turn_on` nor its route call
+is reachable without both the posture evidence and a fresh stiff reading
+agreeing.
+
+### Experiment-acceptance gate (2026-09-16 re-review, R3)
+
+`leg.sh`/`parked.sh` always ran the linker (`scripts/link_e1_flight.py`)
+and STOPped on a non-zero exit, but a non-zero linker exit only means the
+contact *evidence* is missing or malformed (`contacts_recorded` could not
+be computed). A recording whose evidence was complete and said a contact
+happened, or that a board moved during the flight, still reached `LEG
+ok`/`PARKED ok`: `contacts_recorded=True` is a completeness verdict, not
+a no-contact verdict, and nothing read `contacts`/`displacement_m`
+themselves anywhere in the chain (the decision note's own gate/stop rows
+for this were never enforced).
+
+`scripts/experiment_gate.py` closes that gap -- one shared check, called
+by `leg.sh`, `parked.sh`, and `e1_tail_check.check_init` (Stage 0's own
+acceptance check) alike, right after the linker succeeds:
+
+* **evidence invalid** (missing sidecar, unparseable, not tied to THIS
+  recording by its `log` field, or not the shape a successful linker run
+  produces) -- refuse; the gate cannot tell whether the experiment was
+  clean.
+* **experiment not accepted** -- the evidence is valid and complete, and
+  it says either a contact happened (`contacts` non-empty) or some
+  tracked board object moved more than 1 mm
+  (`experiment_gate.DISPLACEMENT_TOL_M`) between the first and last
+  sample -- refuse; the experiment it describes is rejected.
+* **accepted** -- evidence valid, no contact, every tracked object's
+  displacement finite and within tolerance.
+
+Either kind of refusal is a STOP, unconditionally -- unlike the tail
+check, the gate does not go informational in `start` mode: a recorded
+contact or a disturbed board is a safety fact about the leg that just
+flew, independent of its position in the cycle. `leg.sh`/`parked.sh` both
+archive the recording to `recorder_logs/` *before* calling the gate, so a
+rejected recording's log and sidecar are preserved for review, not lost
+to the STOP -- evidence validity and experiment acceptance are
+deliberately kept distinct (see the module's docstring): `evaluate()`
+never writes to the sidecar or the log, only reads them.
+
+### `parked.sh` promoted into the package (decision note §6 item 3)
+
+C3 parked recordings used to live only in each evidence directory's own
+`control/tools/parked.sh` (hand-copied, PR #117's shape). `parked.sh` is
+now versioned here, board-parameterized (`--board`, resolved via
+`plan.board_scene_rel`, not a hard-coded path), and runs the
+`start_variant.py` check described above after its (informational,
+`mode=start`) tail check. Usage:
+
+```
+parked.sh <repo> <evidence-dir> <name> <board> <route-label> <cycle>
+```
+
+`<route-label>` is the upcoming cycle's first leg route -- the recorder's
+planned-vs-realised clearance reference only; nothing is flown regardless
+of its value, same as Stage 1's parked recordings. `<cycle>` (PR #124
+review, M3) is the upcoming Stage 2 cycle id this recording will
+authorize (e.g. `S2-B4-a-r3`) and must match the `CYCLE` variable baked
+into that cycle's generated notebook -- it binds the evidence file
+(`start_variant_<cycle>.json`) independent of `<name>`, which remains
+free-form for the recorder log's own filename. Re-recording for a cycle
+that already has `start_variant_<cycle>.json` is refused (no re-fly, no
+recovery -- decision note §5).
+
+### CLI summary
+
+```
+# Legacy Stage 1 (unchanged):
+python -m scripts.e1_stage1.make_cycle_notebook S1a --repo <repo> --evidence-dir <dir>
+
+# Stage 2, one repetition:
+python -m scripts.e1_stage1.make_cycle_notebook \
+    --board B4 --shape a --rep 3 --session <session-id> \
+    --repo <repo> --evidence-dir <dir>
+
+# Stage 2, Stage 0 arm-on setup (once per board/session, before reset #1):
+python -m scripts.e1_stage1.make_cycle_notebook \
+    --stage0 --board B4 --session <session-id> \
+    --repo <repo> --evidence-dir <dir>
+```
