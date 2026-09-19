@@ -1,0 +1,15 @@
+LEG S2-B1-b-r2-flight ok: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_PLACE_ROUTE_20260919T093617Z.json
+leg.sh exit=0
+EXPERIMENT_ACCEPTED=yes
+gate exit=0
+tail_samples=60 (last 3.0s)  max_gross_err_deg=0.3  max_spread_deg=0.0  r_gripper=-45.0 (target -45.0)
+PARKED_AT_REST=yes
+tailcheck exit=0 (mode=end)
+contacts=0 (evidence on 3209/3209 states, reset_in_window=False)
+{'outcome': 'returned', 'elapsed_s': 33.611264166, 'returned': ['GRIP_SHUT', 'BACK', 'CURL', 'CURL_HIGH', 'TUCK', 'SWING_1', 'SWING_2', 'SWING_3', 'HOVER', 'REST_SHUT', 'REST']}
+start_check: True home
+compliance: True
+phases: ['GRIP_SHUT', 'BACK', 'CURL', 'CURL_HIGH', 'TUCK', 'SWING_1', 'SWING_2', 'SWING_3', 'HOVER', 'REST_SHUT', 'REST']
+end_pose: {'r_shoulder_pitch': -39.9, 'r_shoulder_roll': -9.8, 'r_arm_yaw': 0.0, 'r_elbow_pitch': -45.3, 'r_forearm_yaw': -0.0, 'r_wrist_pitch': -9.8, 'r_wrist_roll': 30.0, 'r_gripper': -44.9}
+recorder_logs: 28 files
+no stop marker

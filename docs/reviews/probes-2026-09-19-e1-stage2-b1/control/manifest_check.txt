@@ -1,0 +1,13 @@
+# manifest check 2026-09-19T09:04:06Z
+code_sha: e6c30b74e09c38e616dee0819a7e205d12c5853e
+code_sha_dirty: False
+contacts_tracked: True
+scene_path: /Users/terrancehamilton/reachy-1-2-sim-stage2/scenes/e1_boards/B1_evidence.yaml
+scene_sha256: f577fc47616ab1b4d68e0173c1adec6d1110039372f0f68bed31e7f7d6715346
+scene: None
+python: None
+mujoco: None
+started_at: 2026-09-19T09:03:42.202122+00:00
+model_sha256: 618ef2499f6207d5e9e72f8b9a4e538b0521008afc1a80f3ecfbab22ab35abb4
+keys: ['calibration_provenance', 'code_sha', 'code_sha_dirty', 'command_count', 'contacts_tracked', 'depth_enabled', 'effects', 'format_version', 'model_path', 'model_sha256', 'mujoco_version', 'platform', 'protocol_version', 'python_version', 'scene_path', 'scene_revision', 'scene_sha256', 'seeds', 'seg_enabled', 'started_at', 'state_count', 'total_duration_s', 'total_steps']
+expected code_sha e6c30b74e09c38e616dee0819a7e205d12c5853e; expected scene sha f577fc47616ab1b4d68e0173c1adec6d1110039372f0f68bed31e7f7d6715346

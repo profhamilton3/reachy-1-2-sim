@@ -1,0 +1,1 @@
+LEG S2-B1-a-r5-flight ok: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_LOWER_TO_REST_20260919T103410Z.json

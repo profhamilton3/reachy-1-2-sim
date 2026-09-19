@@ -1,0 +1,1 @@
+PARKED S2-B1-b-r4-parked ok, cycle S2-B1-b-r4 stiff-zero: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_PLACE_ROUTE_20260919T101144Z.json
