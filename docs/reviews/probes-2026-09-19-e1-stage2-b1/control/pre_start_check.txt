@@ -1,0 +1,9 @@
+# pre-start check 2026-09-19T09:03:27Z
+worktree HEAD e6c30b74e09c38e616dee0819a7e205d12c5853e porcelain=[] .env=0
+docker containers: arionyx-postgis:Exited (0) 5 days ago determined_bardeen:Exited (0) 7 weeks ago 
+listeners 8765/50051/8080: 0
+procs mjpython/recorder: 0
+disk: 123Gi free of 926Gi
+E1_PYTHON=~/e1venv/bin/python 3.12.14 0.7.0 1.62.2 4.25.3 1.26.4 7.17.1
+REACHY_IP/REACHY_ENABLE_MOTION unset in operator shell
+sw: 26.6.2 arm64; docker 29.6.2; mjpython /Library/Frameworks/Python.framework/Versions/3.14/bin/mjpython

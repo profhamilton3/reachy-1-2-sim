@@ -1,0 +1,1 @@
+LEG S2-B1-c-r2-flight ok: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_LIFT_TO_PRESENT_20260919T094248Z.json

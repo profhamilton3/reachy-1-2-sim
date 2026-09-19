@@ -1,0 +1,15 @@
+LEG S2-B1-a-r5-flight ok: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_LOWER_TO_REST_20260919T103410Z.json
+leg.sh exit=0
+EXPERIMENT_ACCEPTED=yes
+gate exit=0
+tail_samples=61 (last 3.0s)  max_gross_err_deg=0.6  max_spread_deg=0.0  r_gripper=-44.4 (target -45.0)
+PARKED_AT_REST=yes
+tailcheck exit=0 (mode=end)
+contacts=0 (evidence on 1873/1873 states, reset_in_window=False)
+{'outcome': 'returned', 'elapsed_s': 6.702275167, 'returned': ['REST_SHUT', 'REST']}
+start_check: True present
+compliance: True
+phases: ['REST_SHUT', 'REST']
+end_pose: {'r_shoulder_pitch': -39.8, 'r_shoulder_roll': -9.9, 'r_arm_yaw': -0.1, 'r_elbow_pitch': -45.6, 'r_forearm_yaw': -0.0, 'r_wrist_pitch': -9.6, 'r_wrist_roll': 30.0, 'r_gripper': -44.4}
+recorder_logs: 72 files
+no stop marker

@@ -1,0 +1,15 @@
+=== S2-B1-c-r6 C1 reset gen 18 (2026-09-19T11:19:42Z) ===
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json,sys; print(json.loads(sys.stdin.read())['sim_step'])
+                           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 348, in decode
+    raise JSONDecodeError("Extra data", s, end)
+json.decoder.JSONDecodeError: Extra data: line 2 column 1 (char 5862)
+reset gen=18 ack=18 resets_recorded 17->18 sim_step 282740->
+/Users/terrancehamilton/e1-stage2-B1-s1-2026-09-19/control/tools/reset.sh: line 24: [: : integer expression expected
+STOP: reset 18 not verified
+reset exit=9

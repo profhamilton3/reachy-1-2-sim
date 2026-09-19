@@ -1,0 +1,2 @@
+Wrote /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_LIFT_TO_PRESENT_20260919T105325Z.link.json: contacts=0 (evidence on 1708/1708 states, reset_in_window=False)
+linker exit=0

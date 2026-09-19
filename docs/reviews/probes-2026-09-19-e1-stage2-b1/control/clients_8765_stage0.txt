@@ -1,0 +1,6 @@
+COMMAND     PID             USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+com.docke 22292 terrancehamilton   79u  IPv4 0x4c5ec5366454d6de      0t0  TCP 127.0.0.1:59479->127.0.0.1:8765 (ESTABLISHED)
+mjpython  48843 terrancehamilton    6u  IPv4 0x1e3544d1eabd1832      0t0  TCP *:8765 (LISTEN)
+mjpython  48843 terrancehamilton   14u  IPv4 0x9bbdf3457c6db80b      0t0  TCP 127.0.0.1:8765->127.0.0.1:59479 (ESTABLISHED)
+root        13 26.0  1.2 2326032 102008 pts/0  Sl   09:03   0:02 python3 /opt/fake_reachy_server.py
+root        15  2.8  0.3 384244 28416 pts/0    S    09:03   0:00 python3 /opt/web/camera_server.py --host 0.0.0.0 --port 8080
