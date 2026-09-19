@@ -23,6 +23,13 @@ import experiment_gate as gate  # noqa: E402
 
 
 def _write_sidecar(tmp_path, log_name="flight.json", **fields):
+    """Writes a sidecar with the full shape a successful `link_e1_flight`
+    run guarantees -- including `scene.board_object_ids` and
+    `contacts_window.reset_in_window` (#126) -- so a test that overrides
+    only `displacement_m`/`contacts` still exercises a fully-valid
+    baseline. `board_object_ids` defaults to `displacement_m`'s own keys
+    so an override of one alone still passes #126's coverage check unless
+    a test deliberately sets `scene` to something that does not."""
     log_path = tmp_path / log_name
     log_path.write_text("{}")
     sidecar = {
@@ -30,8 +37,14 @@ def _write_sidecar(tmp_path, log_name="flight.json", **fields):
         "contacts_recorded": True,
         "contacts": [],
         "displacement_m": {},
+        "contacts_window": {"reset_in_window": False},
     }
     sidecar.update(fields)
+    if "scene" not in sidecar:
+        disp = sidecar.get("displacement_m")
+        sidecar["scene"] = {
+            "board_object_ids": list(disp) if isinstance(disp, dict) else [],
+        }
     log_path.with_suffix(".link.json").write_text(json.dumps(sidecar))
     return log_path
 
@@ -143,6 +156,158 @@ class TestEvidenceValidity:
         res = gate.evaluate(str(log_path))
         assert res["evidence_ok"] is False
         assert res["accepted"] is None
+
+
+class TestResetInWindow:
+    """#126: `contacts_window.reset_in_window` must be the exact value
+    `False`. A mid-recording scene reset makes the window's contact and
+    displacement attribution suspect (see
+    `link_e1_flight.contacts_in_flight_window`'s docstring), so anything
+    else -- `True`, a missing key, or a malformed `contacts_window` --
+    must refuse, not just a truthy check."""
+
+    def test_reset_in_window_true_refuses(self, tmp_path):
+        log_path = _write_sidecar(
+            tmp_path, contacts_window={"reset_in_window": True})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+        assert res["accepted"] is None
+        assert res["ok"] is False
+        assert "reset_in_window" in res["evidence_reason"]
+
+    def test_missing_reset_in_window_key_refuses(self, tmp_path):
+        log_path = _write_sidecar(tmp_path, contacts_window={})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+        assert "reset_in_window" in res["evidence_reason"]
+
+    def test_missing_contacts_window_key_refuses(self, tmp_path):
+        log_path = _write_sidecar(tmp_path)
+        sidecar_path = log_path.with_suffix(".link.json")
+        sidecar = json.loads(sidecar_path.read_text())
+        del sidecar["contacts_window"]
+        sidecar_path.write_text(json.dumps(sidecar))
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+
+    @pytest.mark.parametrize("contacts_window", [None, [], "false", 1])
+    def test_contacts_window_not_an_object_refuses(self, tmp_path, contacts_window):
+        log_path = _write_sidecar(tmp_path, contacts_window=contacts_window)
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+
+    @pytest.mark.parametrize("bad", [None, "false", "False", 0, 1, "0"])
+    def test_malformed_reset_in_window_refuses(self, tmp_path, bad):
+        log_path = _write_sidecar(
+            tmp_path, contacts_window={"reset_in_window": bad})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+        assert res["accepted"] is None
+
+    def test_explicit_false_does_not_block_acceptance(self, tmp_path):
+        log_path = _write_sidecar(
+            tmp_path, contacts=[], displacement_m={},
+            contacts_window={"reset_in_window": False, "states_in_window": 4})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is True
+        assert res["accepted"] is True
+        assert res["ok"] is True
+
+    def test_reset_in_window_checked_even_when_experiment_would_otherwise_be_rejected(self, tmp_path):
+        """A reset alone must refuse, regardless of what the (suspect)
+        contacts/displacement fields say -- the point is that those
+        fields are not to be trusted once reset_in_window is true."""
+        log_path = _write_sidecar(
+            tmp_path,
+            contacts=[{"arm_geom": "r_hand_tube", "object_id": "pool_box_1"}],
+            contacts_window={"reset_in_window": True})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+        assert res["accepted"] is None
+
+
+class TestBoardDisplacementCoverage:
+    """#126: every id `scene.board_object_ids` names must have its own
+    `displacement_m` entry. `displacement_m` is only ever populated for
+    objects that appear in BOTH the first and last aligned server state
+    (`link_e1_flight.build_base_sidecar`); a board object that dropped out
+    of tracking is simply absent from the dict, and reading that as "0 mm
+    displaced" (the old behaviour) hides exactly the kind of gap the gate
+    exists to catch."""
+
+    def test_missing_scene_key_refuses(self, tmp_path):
+        log_path = _write_sidecar(tmp_path)
+        sidecar_path = log_path.with_suffix(".link.json")
+        sidecar = json.loads(sidecar_path.read_text())
+        del sidecar["scene"]
+        sidecar_path.write_text(json.dumps(sidecar))
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+
+    @pytest.mark.parametrize("scene", [None, [], "B4", 1])
+    def test_scene_not_an_object_refuses(self, tmp_path, scene):
+        log_path = _write_sidecar(tmp_path, scene=scene)
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+
+    @pytest.mark.parametrize("board_object_ids", [None, "pool_box_1", {"pool_box_1": True}, [1, 2]])
+    def test_board_object_ids_not_a_list_of_strings_refuses(self, tmp_path, board_object_ids):
+        log_path = _write_sidecar(
+            tmp_path, scene={"board_object_ids": board_object_ids})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+        assert res["accepted"] is None
+
+    def test_board_object_missing_from_displacement_refuses(self, tmp_path):
+        log_path = _write_sidecar(
+            tmp_path, contacts=[],
+            displacement_m={"pool_box_1": 0.0002},
+            scene={"board_object_ids": ["pool_box_1", "pool_box_2"]})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+        assert res["accepted"] is None
+        assert "pool_box_2" in res["evidence_reason"]
+
+    def test_board_object_missing_from_displacement_refuses_even_when_contacts_present(self, tmp_path):
+        """Missing evidence refuses outright -- it is not folded into the
+        (accepted=False) contact rejection path."""
+        log_path = _write_sidecar(
+            tmp_path,
+            contacts=[{"arm_geom": "r_hand_tube", "object_id": "pool_box_1"}],
+            displacement_m={},
+            scene={"board_object_ids": ["pool_box_1"]})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is False
+        assert res["accepted"] is None
+
+    def test_every_board_object_covered_is_accepted(self, tmp_path):
+        log_path = _write_sidecar(
+            tmp_path, contacts=[],
+            displacement_m={"pool_box_1": 0.0002, "pool_box_2": 0.0003},
+            scene={"board_object_ids": ["pool_box_1", "pool_box_2"]})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is True
+        assert res["accepted"] is True
+
+    def test_extra_non_board_displacement_entries_do_not_block_acceptance(self, tmp_path):
+        """`displacement_m` may legitimately carry more objects than the
+        leaf board names (anything tracked in server state); only full
+        coverage of `board_object_ids` is required, not an exact match."""
+        log_path = _write_sidecar(
+            tmp_path, contacts=[],
+            displacement_m={"pool_box_1": 0.0002, "some_other_tracked_obj": 0.0003},
+            scene={"board_object_ids": ["pool_box_1"]})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is True
+        assert res["accepted"] is True
+
+    def test_empty_board_object_ids_requires_no_coverage(self, tmp_path):
+        log_path = _write_sidecar(
+            tmp_path, contacts=[], displacement_m={},
+            scene={"board_object_ids": []})
+        res = gate.evaluate(str(log_path))
+        assert res["evidence_ok"] is True
+        assert res["accepted"] is True
 
 
 class TestExperimentAcceptance:

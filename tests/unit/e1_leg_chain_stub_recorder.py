@@ -31,6 +31,13 @@ Test-controlled via environment variables (all optional):
                           non-JSON text -- malformed evidence.
   E1_TEST_NO_RUN_DIR     if "1", no run directory/states.jsonl is written
                           at all -- missing evidence.
+  E1_TEST_RESET_MID_FLIGHT  if "1", `sim_step` is made to drop back to 0
+                          partway through states.jsonl -- a scene reset
+                          mid-recording (#126's `reset_in_window`).
+  E1_TEST_OMIT_OBJECT    if "1", the tracked board object is left out of
+                          every state's `objects` list -- it is never
+                          tracked, so it has no displacement_m entry
+                          (#126's board-coverage requirement).
 """
 import argparse
 import json
@@ -65,7 +72,7 @@ def synth_samples(seconds, *, hz=20.0, t0_wall_ns=1_000_000_000_000,
 
 
 def build_run_dir(root, samples, *, object_id, contact_at_s, displace_m,
-                  corrupt_line=None):
+                  corrupt_line=None, reset_mid_flight=False, omit_object=False):
     run = pathlib.Path(root) / "run_test"
     run.mkdir(parents=True, exist_ok=True)
     (run / "manifest.json").write_text(json.dumps({"contacts_tracked": True}))
@@ -76,6 +83,9 @@ def build_run_dir(root, samples, *, object_id, contact_at_s, displace_m,
     step = 0
     w = t0 - 200_000_000
     hi = t_end + 200_000_000
+    n_states = int((hi - w) / 20_000_000) + 1
+    reset_at_index = n_states // 2
+    i = 0
     while w <= hi:
         t_rel = (w - t0) / 1e9
         k = min(max(int(round(t_rel * 20)), 0), len(samples) - 1)
@@ -86,15 +96,22 @@ def build_run_dir(root, samples, *, object_id, contact_at_s, displace_m,
         contacts = []
         if contact_at_s is not None and abs(t_rel - contact_at_s) < 0.011:
             contacts = [{"arm_geom": "r_hand_tube", "object_id": object_id}]
+        objects = [] if omit_object else [
+            {"object_id": object_id, "pos_xyz": pos, "quat_wxyz": [1, 0, 0, 0]}]
+        # A real mid-recording scene reset restarts `sim_step` at 0 (the
+        # same counter `contacts_in_flight_window` inspects for
+        # `reset_in_window` -- see its own docstring); `seq`/`wall_time_ns`
+        # stay monotonic regardless, exactly like the real server.
+        step_field = 0 if (reset_mid_flight and i >= reset_at_index) else step
         lines.append(json.dumps({
-            "seq": seq, "sim_step": step, "cmd_seq": 1, "wall_time_ns": w,
+            "seq": seq, "sim_step": step_field, "cmd_seq": 1, "wall_time_ns": w,
             "joints": joints,
-            "objects": [{"object_id": object_id, "pos_xyz": pos,
-                        "quat_wxyz": [1, 0, 0, 0]}],
+            "objects": objects,
             "contacts": contacts,
         }))
         seq += 1
         step += 1
+        i += 1
         w += 20_000_000
     if corrupt_line is not None and 0 <= corrupt_line < len(lines):
         lines[corrupt_line] = "{not json"
@@ -122,6 +139,8 @@ def main():
     no_run_dir = os.environ.get("E1_TEST_NO_RUN_DIR") == "1"
     corrupt_line = os.environ.get("E1_TEST_CORRUPT_LINE")
     corrupt_line = int(corrupt_line) if corrupt_line else None
+    reset_mid_flight = os.environ.get("E1_TEST_RESET_MID_FLIGHT") == "1"
+    omit_object = os.environ.get("E1_TEST_OMIT_OBJECT") == "1"
 
     root = pathlib.Path(args.record_root)
     root.mkdir(parents=True, exist_ok=True)
@@ -140,7 +159,9 @@ def main():
     else:
         run_dir = build_run_dir(root, samples, object_id=object_id,
                                 contact_at_s=contact_at_s, displace_m=displace_m,
-                                corrupt_line=corrupt_line)
+                                corrupt_line=corrupt_line,
+                                reset_mid_flight=reset_mid_flight,
+                                omit_object=omit_object)
 
     fake_ident = types.SimpleNamespace(
         as_dict=lambda: {"ok": True}, manifest={"contacts_tracked": True},

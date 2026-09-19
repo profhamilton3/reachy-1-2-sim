@@ -29,9 +29,17 @@ experiment acceptance are two distinct questions, both fail-closed:
     sidecar is missing, unparseable, not an object, not tied to THIS
     recording (`sidecar['log']` names a different log -- a hand-copied
     or stale sidecar), or its `contacts_recorded`/`contacts`/
-    `displacement_m` fields are not the shape a successful linker run
-    guarantees. `evaluate()` cannot tell whether the experiment was
-    clean, so it refuses.
+    `displacement_m`/`scene`/`contacts_window` fields are not the shape a
+    successful linker run guarantees. This now also includes (#126, filed
+    against the 2026-09-18 re-review): `contacts_window.reset_in_window`
+    is anything other than the exact value `False` (a mid-recording scene
+    reset makes contact/displacement attribution suspect -- see
+    `link_e1_flight.contacts_in_flight_window`'s docstring), or
+    `displacement_m` has no entry for some id `scene.board_object_ids`
+    names (a board object silently dropped by the alignment intersection
+    used to read as zero displacement instead of missing evidence).
+    `evaluate()` cannot tell whether the experiment was clean, so it
+    refuses.
   * experiment not accepted (`evidence_ok=True`, `accepted=False`) --
     the evidence is valid and complete, and it says either a contact
     happened (`contacts` non-empty) or some tracked object moved more
@@ -132,6 +140,32 @@ def evaluate(log_path) -> Dict[str, Any]:
                             f"{sidecar.get('contacts_recorded')!r}, not True "
                             "-- contact evidence is missing or incomplete")
 
+    # #126: `contacts_in_flight_window`'s own docstring says a mid-window
+    # scene reset ("`sim_step` decreases between consecutive states")
+    # means "any clearance/contact attribution here should be treated as
+    # suspect" -- but nothing downstream ever read `reset_in_window`
+    # before this, so a reset mid-recording still reached `LEG ok` as
+    # long as `contacts_recorded` was otherwise complete. Only the exact
+    # value `False` is trusted; `True`, a missing key, or a malformed
+    # `contacts_window` all refuse the same way missing contact evidence
+    # does -- this is a trustworthiness gate on the evidence, not a verdict
+    # about the experiment, so it lives with the other evidence_ok checks.
+    contacts_window = sidecar.get("contacts_window")
+    if not isinstance(contacts_window, dict):
+        return _result(
+            ok=False, evidence_ok=False, sidecar_path=sidecar_path,
+            evidence_reason=f"sidecar 'contacts_window' is "
+                            f"{type(contacts_window).__name__}, expected an "
+                            "object")
+    reset_in_window = contacts_window.get("reset_in_window")
+    if reset_in_window is not False:
+        return _result(
+            ok=False, evidence_ok=False, sidecar_path=sidecar_path,
+            evidence_reason="contacts_window.reset_in_window="
+                            f"{reset_in_window!r}, not False -- a scene reset "
+                            "mid-recording makes contact and displacement "
+                            "attribution suspect")
+
     contacts = sidecar.get("contacts")
     if not isinstance(contacts, list):
         return _result(
@@ -151,6 +185,38 @@ def evaluate(log_path) -> Dict[str, Any]:
                 ok=False, evidence_ok=False, sidecar_path=sidecar_path,
                 evidence_reason=f"sidecar 'displacement_m[{oid!r}]'={d!r} is "
                                 "not a finite number")
+
+    # #126: `displacement_m` is only ever keyed by objects the intersection
+    # of `objects_at_first_sample`/`objects_at_last_sample` happened to
+    # cover (`build_base_sidecar`) -- a board object that dropped out of
+    # server state (never tracked, fell off table, wrong scene) is simply
+    # ABSENT from `displacement_m`, and the old `max(displacement.values())`
+    # over whatever keys existed silently read that as zero displacement.
+    # Every object `scene.board_object_ids` names is required to have its
+    # own displacement entry; a gap here is missing evidence, not a clean
+    # board, so it refuses rather than being folded into the accept/reject
+    # judgment below.
+    scene = sidecar.get("scene")
+    if not isinstance(scene, dict):
+        return _result(
+            ok=False, evidence_ok=False, sidecar_path=sidecar_path,
+            evidence_reason=f"sidecar 'scene' is {type(scene).__name__}, "
+                            "expected an object")
+    board_object_ids = scene.get("board_object_ids")
+    if not isinstance(board_object_ids, list) or not all(
+            isinstance(oid, str) for oid in board_object_ids):
+        return _result(
+            ok=False, evidence_ok=False, sidecar_path=sidecar_path,
+            evidence_reason="sidecar 'scene.board_object_ids' is "
+                            f"{board_object_ids!r}, expected a list of strings")
+    missing_displacement = [oid for oid in board_object_ids if oid not in displacement]
+    if missing_displacement:
+        return _result(
+            ok=False, evidence_ok=False, sidecar_path=sidecar_path,
+            evidence_reason="displacement_m has no entry for board object(s) "
+                            f"{missing_displacement!r} -- every "
+                            "scene.board_object_ids entry needs displacement "
+                            "evidence")
 
     # Evidence is complete and well-formed from here on; judge the
     # experiment it describes.

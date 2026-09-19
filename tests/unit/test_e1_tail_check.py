@@ -101,7 +101,13 @@ def _synthetic_settling(pose, seconds=14.0, still_from_s=6.0, drift_deg_per_s=6.
 
 def _write_log_and_sidecar(tmp_path, samples, *, sidecar_present=True,
                             contacts_recorded=True, corrupt_sidecar=False,
-                            contacts=(), displacement_m=None, log_name=None):
+                            contacts=(), displacement_m=None, log_name=None,
+                            board_object_ids=None, reset_in_window=False):
+    """`board_object_ids` defaults to `displacement_m`'s own keys and
+    `reset_in_window` defaults to `False` (#126) -- the shape a
+    successful `link_e1_flight` run always produces -- so a caller that
+    only sets `displacement_m`/`contacts` still gets a sidecar the gate
+    can evaluate past its evidence-validity checks."""
     log_path = tmp_path / "flight.json"
     log_path.write_text(json.dumps({"samples": samples}))
     if sidecar_present:
@@ -109,11 +115,17 @@ def _write_log_and_sidecar(tmp_path, samples, *, sidecar_present=True,
         if corrupt_sidecar:
             sidecar_path.write_text("{not json")
         else:
+            displacement_m = displacement_m if displacement_m is not None else {}
+            board_object_ids = (
+                list(displacement_m) if board_object_ids is None
+                else board_object_ids)
             sidecar_path.write_text(json.dumps({
                 "log": log_name if log_name is not None else log_path.name,
                 "contacts_recorded": contacts_recorded,
                 "contacts": list(contacts),
-                "displacement_m": displacement_m if displacement_m is not None else {},
+                "displacement_m": displacement_m,
+                "scene": {"board_object_ids": board_object_ids},
+                "contacts_window": {"reset_in_window": reset_in_window},
             }))
     return log_path
 

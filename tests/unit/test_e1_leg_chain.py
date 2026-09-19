@@ -196,6 +196,109 @@ class TestLegShDisplacedBoard:
         assert "LEG test-leg ok" in result.stdout
 
 
+class TestLegShResetInWindow:
+    """#126: a scene reset mid-recording (`sim_step` drops back to 0
+    inside the contact window) must STOP through the real gate step, the
+    same as a recorded contact or a displaced board -- the reset makes
+    the window's own contact/displacement evidence suspect, so it is
+    refused rather than trusted."""
+
+    def test_stops_and_never_prints_leg_ok(self, tmp_path, fake_python):
+        result, evidence_dir = _run_leg(
+            tmp_path, fake_python, E1_TEST_RESET_MID_FLIGHT="1")
+        assert result.returncode != 0
+        assert "LEG test-leg ok" not in result.stdout
+        assert (evidence_dir / "control/stop").exists()
+        stop_text = (evidence_dir / "control/stop").read_text()
+        assert "experiment gate" in stop_text
+
+    def test_gate_output_names_reset_in_window(self, tmp_path, fake_python):
+        result, evidence_dir = _run_leg(
+            tmp_path, fake_python, E1_TEST_RESET_MID_FLIGHT="1")
+        gate_txt = (evidence_dir / "control/gate_test-leg.txt").read_text()
+        assert "EXPERIMENT_ACCEPTED=NO" in gate_txt
+        assert "reset_in_window" in gate_txt
+
+    def test_gate_stops_regardless_of_mode(self, tmp_path, fake_python):
+        result, evidence_dir = _run_leg(
+            tmp_path, fake_python, mode="start", E1_TEST_RESET_MID_FLIGHT="1")
+        assert result.returncode != 0
+        assert "LEG test-leg ok" not in result.stdout
+        assert (evidence_dir / "control/stop").exists()
+
+    def test_evidence_is_still_archived(self, tmp_path, fake_python):
+        result, evidence_dir = _run_leg(
+            tmp_path, fake_python, E1_TEST_RESET_MID_FLIGHT="1")
+        archived = list((evidence_dir / "recorder_logs").glob("*.link.json"))
+        assert archived
+        doc = json.loads(archived[0].read_text())
+        assert doc["contacts_window"]["reset_in_window"] is True
+
+    def test_no_reset_does_not_trigger_this_refusal(self, tmp_path, fake_python):
+        """Control: the same chain without the reset reaches `LEG ok`, so
+        the STOP above is attributable to `reset_in_window` and not to
+        some other side effect of the stub."""
+        result, evidence_dir = _run_leg(tmp_path, fake_python)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "LEG test-leg ok" in result.stdout
+
+
+class TestLegShMissingBoardDisplacement:
+    """#126: a board object present in the leaf board's own
+    `scene.board_object_ids` but never tracked in server state (so it has
+    no `displacement_m` entry) must STOP -- the old gate silently read the
+    missing key as zero displacement instead of missing evidence."""
+
+    def test_stops_and_never_prints_leg_ok(self, tmp_path, fake_python):
+        result, evidence_dir = _run_leg(
+            tmp_path, fake_python, E1_TEST_OMIT_OBJECT="1")
+        assert result.returncode != 0
+        assert "LEG test-leg ok" not in result.stdout
+        assert (evidence_dir / "control/stop").exists()
+        stop_text = (evidence_dir / "control/stop").read_text()
+        assert "experiment gate" in stop_text
+
+    def test_gate_output_names_the_missing_object(self, tmp_path, fake_python):
+        result, evidence_dir = _run_leg(
+            tmp_path, fake_python, E1_TEST_OMIT_OBJECT="1")
+        gate_txt = (evidence_dir / "control/gate_test-leg.txt").read_text()
+        assert "EXPERIMENT_ACCEPTED=NO" in gate_txt
+        assert "pool_box_1" in gate_txt
+
+    def test_evidence_is_still_archived(self, tmp_path, fake_python):
+        result, evidence_dir = _run_leg(
+            tmp_path, fake_python, E1_TEST_OMIT_OBJECT="1")
+        archived = list((evidence_dir / "recorder_logs").glob("*.link.json"))
+        assert archived
+        doc = json.loads(archived[0].read_text())
+        assert "pool_box_1" not in doc["displacement_m"]
+        assert "pool_box_1" in doc["scene"]["board_object_ids"]
+
+
+class TestParkedShResetInWindowAndBoardCoverage:
+    """Both scripts share the same gate call -- `parked.sh`'s own
+    docstring says a disturbed board during a parked interval "must STOP
+    the same as during a flight leg", and #126 applies equally here."""
+
+    def test_reset_in_window_stops(self, tmp_path, fake_python):
+        result, evidence_dir = _run_parked(
+            tmp_path, fake_python, cycle="S2-TEST-parked-reset-r1",
+            E1_TEST_RESET_MID_FLIGHT="1")
+        assert result.returncode != 0
+        assert "PARKED test-parked ok" not in result.stdout
+        assert (evidence_dir / "control/stop").exists()
+        assert "experiment gate" in (evidence_dir / "control/stop").read_text()
+
+    def test_missing_board_displacement_stops(self, tmp_path, fake_python):
+        result, evidence_dir = _run_parked(
+            tmp_path, fake_python, cycle="S2-TEST-parked-nodisp-r1",
+            E1_TEST_OMIT_OBJECT="1")
+        assert result.returncode != 0
+        assert "PARKED test-parked ok" not in result.stdout
+        assert (evidence_dir / "control/stop").exists()
+        assert "experiment gate" in (evidence_dir / "control/stop").read_text()
+
+
 class TestLegShMissingOrMalformedEvidence:
 
     def test_no_run_directory_at_all_stops(self, tmp_path, fake_python):
