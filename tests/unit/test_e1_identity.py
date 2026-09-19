@@ -10,6 +10,7 @@ socket, server, or SDK connection is ever opened.
 import json
 import math
 import os
+import signal
 import sys
 import types
 
@@ -704,6 +705,67 @@ class TestRequireCompliance:
         assert result.ok is False
         assert any("no numeric cmd_seq" in r for r in result.reasons)
 
+    def test_min_cmd_seq_rejects_a_bool_cmd_seq(self):
+        """H3 (issue #119): `isinstance(True, (int, float))` is True, so a
+        `cmd_seq` of `True`/`False` must not be accepted as a numeric
+        sequence value -- match F3's `not isinstance(x, bool)` strictness."""
+        now, now_ns, sleep = self._ticking_clock()
+        state = {
+            "seq": 5, "sim_step": 200, "wall_time_ns": now["ns"],
+            "cmd_seq": True,
+            "joints": [{"name": n, "compliant": False, "effort": 1.0}
+                       for n in R.R_JOINTS],
+        }
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5, min_cmd_seq=0,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=sleep,
+        )
+        assert result.ok is False
+        assert any("no numeric cmd_seq" in r for r in result.reasons)
+
+    def test_min_cmd_seq_rejects_nan(self):
+        """H3 (issue #119): `NaN <= min_cmd_seq` is always False, so before
+        the `math.isfinite` guard a `cmd_seq` of `NaN` looked "advanced past
+        the baseline" no matter what `min_cmd_seq` was -- a silent bypass of
+        the F2 sequence check."""
+        now, now_ns, sleep = self._ticking_clock()
+        state = {
+            "seq": 5, "sim_step": 200, "wall_time_ns": now["ns"],
+            "cmd_seq": float("nan"),
+            "joints": [{"name": n, "compliant": False, "effort": 1.0}
+                       for n in R.R_JOINTS],
+        }
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5, min_cmd_seq=3,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=sleep,
+        )
+        assert result.ok is False
+        assert any("no numeric cmd_seq" in r for r in result.reasons)
+
+    def test_min_cmd_seq_rejects_infinity(self):
+        """H3 (issue #119): `math.isfinite` also rejects `Infinity`, which
+        -- like `NaN` -- would otherwise always satisfy `> min_cmd_seq`
+        regardless of the actual baseline."""
+        now, now_ns, sleep = self._ticking_clock()
+        state = {
+            "seq": 5, "sim_step": 200, "wall_time_ns": now["ns"],
+            "cmd_seq": float("inf"),
+            "joints": [{"name": n, "compliant": False, "effort": 1.0}
+                       for n in R.R_JOINTS],
+        }
+        result = ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5, min_cmd_seq=3,
+            read_last_state=lambda p: state, now_ns=now_ns,
+            sleep=sleep,
+        )
+        assert result.ok is False
+        assert any("no numeric cmd_seq" in r for r in result.reasons)
+
     def test_min_cmd_seq_default_none_keeps_old_behaviour(self):
         """Not passing min_cmd_seq at all must behave exactly as before F2
         -- freshness plus per-joint compliance is still sufficient."""
@@ -893,8 +955,47 @@ class TestReadLastStateTailReading:
 
         monkeypatch.setattr(ei, "open", spy_open, raising=False)
 
-        result = ei._read_last_state(p, tail_bytes=1024)
+        tail_bytes = 1024
+        result = ei._read_last_state(p, tail_bytes=tail_bytes)
 
         assert result == {"seq": 999999}
         assert len(opened) == 1
-        assert opened[0].total_read < file_size / 2
+        # H2 (issue #119): pin what the docstring actually claims -- a
+        # bounded read, not merely "less than half the file". One
+        # doubling is allowed (the initial window may miss a line
+        # boundary), but no more.
+        assert opened[0].total_read <= 2 * tail_bytes
+
+    def test_tail_bytes_zero_does_not_spin_forever(self, tmp_path):
+        """H1 (issue #119): before the clamp, `tail_bytes=0` pinned
+        `window` at 0 forever -- `min(size, 0*2) == 0` and `0 >= size` is
+        false for any non-empty file, so the loop never terminated. Use a
+        custom exception for the hang detector, not `TimeoutError`: it is
+        an `OSError` subclass, and `_read_last_state`'s own `except
+        OSError` would silently swallow it."""
+        p = tmp_path / "states.jsonl"
+        p.write_text(json.dumps({"seq": 1}) + "\n")
+
+        class _Hung(Exception):
+            pass
+
+        def _on_alarm(signum, frame):
+            raise _Hung("tail_bytes=0 did not terminate")
+
+        old_handler = signal.signal(signal.SIGALRM, _on_alarm)
+        signal.alarm(2)
+        try:
+            result = ei._read_last_state(p, tail_bytes=0)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+        assert result == {"seq": 1}
+
+    def test_negative_tail_bytes_does_not_raise(self, tmp_path):
+        """H1 (issue #119): before the clamp, `tail_bytes<0` reached
+        `f.read()` with a negative count, which raises `ValueError` (not
+        the `OSError` this function fails closed on) and propagates."""
+        p = tmp_path / "states.jsonl"
+        p.write_text(json.dumps({"seq": 1}) + "\n")
+        result = ei._read_last_state(p, tail_bytes=-1)
+        assert result == {"seq": 1}
