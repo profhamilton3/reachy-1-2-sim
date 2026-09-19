@@ -206,7 +206,14 @@ def _read_last_state(
     seek mid-file can only ever land inside a line, never at a boundary the
     writer chose, and the true last line -- torn or not -- is always the
     one furthest from that seek point.
+
+    `tail_bytes` is clamped to at least 1 (H1, issue #119): `tail_bytes=0`
+    would otherwise pin `window` at 0 forever (`min(size, 0*2) == 0` and
+    `0 >= size` is false for any non-empty file), and `tail_bytes<0` would
+    reach `f.read()` with a negative count and raise `ValueError` instead
+    of the `OSError` this function otherwise fails closed on.
     """
+    tail_bytes = max(1, tail_bytes)
     try:
         size = states_path.stat().st_size
     except OSError:
@@ -557,6 +564,14 @@ def require_compliance(
     load-bearing alone. `min_cmd_seq=None` (the default) skips this check
     entirely, keeping every pre-F2 caller's contract unchanged and relying
     on the freshness window alone, as before.
+
+    Bridge-restart caveat (H4, issue #119): `cmd_seq` is the bridge's own
+    counter (`mujoco_remote_backend.py`'s `_cmd_seq`), which resets to 0
+    when the container restarts, while the native server's `_cmd_seq`
+    baseline keeps its old, higher value. After a container restart,
+    `require_compliance(min_cmd_seq=<old high>)` fails closed until the
+    new counter overtakes that stale baseline -- read that as a bridge
+    restart, not a physics fault.
     """
     run_dir_path = pathlib.Path(run_dir)
     states_path = run_dir_path / "states.jsonl"
@@ -582,7 +597,9 @@ def require_compliance(
 
             if min_cmd_seq is not None:
                 state_cmd_seq = state.get("cmd_seq")
-                if not isinstance(state_cmd_seq, (int, float)):
+                if not (isinstance(state_cmd_seq, (int, float))
+                        and not isinstance(state_cmd_seq, bool)
+                        and math.isfinite(state_cmd_seq)):
                     bad.append(
                         f"state has no numeric cmd_seq to compare against "
                         f"min_cmd_seq={min_cmd_seq} -- refusing to treat it "
