@@ -76,6 +76,14 @@ If a future cycle's operator flow needs a settle-wait step, copy it from
    `plan_<cycle>.json` (written alongside the notebook) rather than a
    positional argument.
 
+   `leg.sh` takes an optional 7th argument, `MODE` (`start` or `end`,
+   default `end`), carried over from PR #117 for pre-flight parked
+   recordings: in `start` mode a failed tail check is informational only
+   and does not write `control/stop`. **Never pass `start` for a flown
+   leg** -- omit the argument (or pass `end` explicitly) so an overrun at
+   the end of an actual flight still writes `control/stop` rather than
+   being silently logged and ignored.
+
    **Run `leg.sh` (and the notebook kernel) from the documented host SDK
    environment ("e1venv", `reachy_sdk` 0.7.0), not the system Python** (M4,
    PR #120 review): `measure_route_clearance.py` imports `reachy_sdk`,
@@ -96,6 +104,50 @@ cell (after `verify_simulator_identity`) re-checks the manifest at runtime:
 `GENERATED_AT_SHA`, and `manifest.started_at` after `REQUIRED_SHA`'s commit
 time (`plan.MERGE_TIME_ISO`). Any failure writes `binding_FAIL_<cycle>` and
 every leg in the cycle becomes `not_eligible` -- no motion is attempted.
+
+## When to regenerate
+
+A generated notebook and its `plan_<cycle>.json` bake in `GENERATED_AT_SHA`,
+`REPO`, the evidence directory, and each leg's `dur_s`. All of the following
+invalidate that snapshot -- regenerate (step 6) before continuing:
+
+1. **The server checkout's `HEAD` moves** -- a pull, checkout, commit, or
+   stash pop in the tree the server is running from. Regenerating alone
+   after a pull is **not enough**: `code_sha` is captured once, at server
+   start (step 4), so the server must also be **restarted** from the moved
+   tree. Cell 1 refuses if the kernel's own tree no longer matches
+   `GENERATED_AT_SHA`; cell 2 (the binding cell) refuses if the server's
+   `code_sha` no longer matches it either -- but only a server restart
+   fixes the second one.
+2. **`plan.py` changes** -- any edit to the budgets or timing constants
+   (`ROUTE_BUDGET_S` and everything it is derived from). `leg.sh` reads
+   each leg's `dur_s` from `plan_<cycle>.json`, written at generation time,
+   not from `plan.py` directly, so a `plan.py` change has no effect on an
+   already-generated notebook until it is regenerated.
+3. **The evidence directory moves** -- `--evidence-dir`'s absolute path is
+   baked into the generated notebook and `plan_<cycle>.json`.
+4. **`plan.REQUIRED_SHA` changes merge method.** `REQUIRED_SHA`
+   (currently `3d7fc74`) is a commit on the PR branch that this tooling's
+   generation-time and binding-time checks both require as an ancestor. A
+   merge commit or a fast-forward keeps that commit in `main`'s history, so
+   generation continues to work after the PR lands -- this repo's
+   convention is merge-commit merges, and this tooling assumes it. A
+   **squash or rebase merge does not**: it replaces `3d7fc74` with a new
+   commit that does not contain it, so every generation call refuses
+   ("`<repo> HEAD <sha> does not contain 3d7fc74`") until `REQUIRED_SHA`
+   and `MERGE_TIME_ISO` in `plan.py` are re-pointed at the new merge
+   commit and its landing time. If this repo's merge convention ever
+   changes, update `plan.py`'s constants as part of that change, not
+   after the first mystery refusal.
+
+Cosmetic note on the refusal text: the strict-equality check's message
+(`provenance.check_binding_provenance`) always reads "regenerate against
+the server's actual tree", worded for the case where the notebook is
+stale. When the mismatch is the other way around -- the server is running
+an older or different tree than the one `--repo` pointed at when the
+notebook was generated -- the right action is to **restart the server**
+from the tree `--repo` names, not to regenerate again; regenerating just
+produces a second notebook the same server still won't satisfy.
 
 ## Already-stiff arm -- read-only investigation (assignment section 6)
 

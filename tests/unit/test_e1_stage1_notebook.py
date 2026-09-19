@@ -27,7 +27,8 @@ sys.path.insert(0, os.path.join(_HERE, "../../src"))
 
 from e1_stage1 import make_cycle_notebook, plan, provenance  # noqa: E402
 import e1_tail_check  # noqa: E402
-from reachy_ai.motion import rig_routes  # noqa: E402
+from reachy_ai.motion import primitives, rig_routes  # noqa: E402
+from reachy_ai.tasks import rig_motion  # noqa: E402
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -166,6 +167,80 @@ def test_route_budget_matches_its_own_derivation(route):
               if runner == "rig_motion_fly_route" else 0.0)
     retry_worst = plan.RUNNER_RETRY_WORST_S[runner]
     assert plan.ROUTE_BUDGET_S[route] == pytest.approx(nominal + settle + retry_worst)
+
+
+# ── #122: tie ROUTE_BUDGET_S to the runners, not to plan.py's own mirror ───
+#
+# `test_route_budget_matches_its_own_derivation` above recomputes
+# ROUTE_BUDGET_S from plan.py's OWN mirrored constants
+# (_RIG_MOTION_FLY_ROUTE_SETTLE_S, RUNNER_RETRY_WORST_S, ...). If
+# rig_motion.fly_route's defaults or primitives.converge's re-stream step
+# ever drift from those mirrored constants, that test stays green -- it is
+# only comparing plan.py to itself. This drives the real runner functions
+# with a stub arm and a fake clock instead, so a change to the runners'
+# actual timing fails here independently of plan.py's constants.
+
+class _StubJoint:
+    def __init__(self, present_position):
+        self.present_position = present_position
+
+
+class _StubArm:
+    """Every joint starts far from every waypoint's target, so nothing
+    reads as converged before the scripted mover snaps it there."""
+
+    def __init__(self):
+        for name in rig_routes.R_JOINTS:
+            setattr(self, name, _StubJoint(-9999.0))
+
+
+def _scripted_mover(clock, bad_pose, calls):
+    """A `move`/`_stream` stand-in: advances a fake clock by `duration` and
+    snaps every joint in `pose` to its target -- immediately for every
+    waypoint except `bad_pose`, which converges only on its 7th call (the
+    initial move plus all 6 retry passes: one waypoint's full worst case,
+    matching `plan.RUNNER_RETRY_WORST_S`). `bad_pose` must be the route's
+    FIRST waypoint: a later one can share guard-joint values with an
+    already-snapped earlier waypoint (e.g. LOWER_TO_REST's REST is
+    REST_SHUT with only the gripper changed) and read as converged before
+    this mover ever snaps it."""
+
+    def mover(arm, pose, duration):
+        clock[0] += duration
+        is_bad = pose == bad_pose
+        if is_bad:
+            calls[0] += 1
+        if not is_bad or calls[0] >= 7:
+            for name, value in pose.items():
+                getattr(arm, name).present_position = value
+
+    return mover
+
+
+@pytest.mark.parametrize("route", sorted(plan.ROUTE_RUNNER))
+def test_route_budget_matches_the_real_runner_elapsed_time(route, monkeypatch):
+    """Behavioural form preferred by issue #122: drive
+    `rig_motion.fly_route`/`primitives.fly` for real, with `time.sleep`
+    patched to the same fake clock, and assert the elapsed time equals
+    `plan.ROUTE_BUDGET_S[route]` -- not plan.py's own formula."""
+    waypoints = getattr(rig_routes, route)
+    runner = plan.ROUTE_RUNNER[route]
+    clock = [0.0]
+    mover = _scripted_mover(clock, waypoints[0].pose, [0])
+    arm = _StubArm()
+
+    if runner == "rig_motion_fly_route":
+        monkeypatch.setattr(
+            rig_motion.time, "sleep",
+            lambda s: clock.__setitem__(0, clock[0] + s))
+        rig_motion.fly_route(arm, waypoints, move=mover)
+    elif runner == "primitives_fly":
+        monkeypatch.setattr(primitives, "_stream", mover)
+        primitives.fly(arm, waypoints)
+    else:
+        pytest.fail(f"no stub wired for runner {runner!r}")
+
+    assert clock[0] == pytest.approx(plan.ROUTE_BUDGET_S[route])
 
 
 def test_route_budget_is_not_full_worst_case_for_multi_waypoint_routes():
