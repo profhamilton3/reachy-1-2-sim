@@ -1,0 +1,33 @@
+date_utc=2026-09-19T04:40:23Z
+--- supervisorctl status ---
+camera-ros-publisher             RUNNING   pid 17, uptime 0:00:45
+camera-web-server                RUNNING   pid 15, uptime 0:00:45
+fluxbox                          RUNNING   pid 193, uptime 0:00:44
+joint-state-bridge               RUNNING   pid 14, uptime 0:00:45
+jupyterlab                       RUNNING   pid 20, uptime 0:00:45
+novnc                            RUNNING   pid 12, uptime 0:00:45
+reachy-sdk-server                RUNNING   pid 13, uptime 0:00:45
+robot-state-publisher            RUNNING   pid 16, uptime 0:00:45
+rviz2                            RUNNING   pid 19, uptime 0:00:45
+scene-marker-publisher           RUNNING   pid 18, uptime 0:00:45
+x11vnc                           RUNNING   pid 195, uptime 0:00:44
+xvfb                             RUNNING   pid 9, uptime 0:00:45
+--- container env (backend/scene/executor) ---
+REACHY_SIM_SCENE_FILE=/opt/scenes/e1_boards/B4_pool_box_1_r2c3.yaml
+REACHY_PANEL_EXECUTOR=0
+REACHY_SIM_BACKEND=mujoco-remote
+--- host connections to :8765 (native server clients) ---
+COMMAND     PID             USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+com.docke 22292 terrancehamilton  201u  IPv4 0xa6831bedfc05f602      0t0  TCP 127.0.0.1:56714->127.0.0.1:8765 (ESTABLISHED)
+mjpython  41727 terrancehamilton   14u  IPv4 0xa90a5564e7cffc12      0t0  TCP 127.0.0.1:8765->127.0.0.1:56714 (ESTABLISHED)
+--- host connections to :50051 (SDK gRPC clients) ---
+COMMAND     PID             USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+--- native server client log lines ---
+2026-09-18 21:39:30,582 websockets.server INFO connection open
+2026-09-18 21:39:30,582 reachy12.mujoco.server INFO Client connected from ('127.0.0.1', 56709)
+2026-09-18 21:39:37,311 websockets.server INFO connection closed
+2026-09-18 21:39:37,312 reachy12.mujoco.server INFO Client ('127.0.0.1', 56709) disconnected
+2026-09-18 21:39:40,353 websockets.server INFO connection open
+2026-09-18 21:39:40,353 reachy12.mujoco.server INFO Client connected from ('127.0.0.1', 56714)
+2026-09-18 21:40:08,916 websockets.server INFO connection rejected (426 Upgrade Required)
+2026-09-18 21:40:08,917 websockets.server INFO connection closed

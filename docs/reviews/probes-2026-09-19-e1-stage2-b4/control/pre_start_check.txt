@@ -1,0 +1,17 @@
+date_utc=2026-09-19T04:39:07Z
+--- docker ps -a ---
+arionyx-postgis	Exited (0) 5 days ago	postgis/postgis:16-3.4
+determined_bardeen	Exited (0) 7 weeks ago	8ba1b17c3e20
+--- port 8765 ---
+free
+--- port 50051 ---
+free
+--- disk ---
+/dev/disk3s5   926Gi   774Gi   131Gi    86%    2.6M  1.4G    0%   /System/Volumes/Data
+--- docker daemon ---
+29.6.2 Docker Desktop
+--- compose config (backend/scene/executor as the worktree would run them) ---
+    container_name: reachy-1-2-sim
+      REACHY_PANEL_EXECUTOR: "0"
+      REACHY_SIM_BACKEND: mujoco-remote
+      REACHY_SIM_SCENE_FILE: /opt/scenes/tabletop_demo.yaml

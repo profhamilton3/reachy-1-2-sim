@@ -1,0 +1,9 @@
+states: 49948 | gaps >1s: 1
+gap 25.1s  sim_step 58700->58710  seq 39375->39376  cmd_seq 4473->4473
+  pose before: {'r_shoulder_pitch': -39.67, 'r_shoulder_roll': -9.7, 'r_arm_yaw': -0.02, 'r_elbow_pitch': -45.81, 'r_forearm_yaw': -0.03, 'r_wrist_pitch': -9.41, 'r_wrist_roll': 30.03, 'r_gripper': -42.63}
+  pose after : {'r_shoulder_pitch': -39.67, 'r_shoulder_roll': -9.7, 'r_arm_yaw': -0.02, 'r_elbow_pitch': -45.81, 'r_forearm_yaw': -0.03, 'r_wrist_pitch': -9.41, 'r_wrist_roll': 30.03, 'r_gripper': -42.63}
+  max |delta| deg: 0.0
+  compliant before: {False} after: {False}
+  wall before/after (UTC ns): 367702027159375 367727106557708
+commands within gap window (+/-): 0
+last state now: {'sim_step': 164430, 'seq': 49948, 'cmd_seq': 4473} {'r_shoulder_pitch': -39.67, 'r_shoulder_roll': -9.7, 'r_arm_yaw': -0.02, 'r_elbow_pitch': -45.81, 'r_forearm_yaw': -0.03, 'r_wrist_pitch': -9.41, 'r_wrist_roll': 30.03, 'r_gripper': -42.63}
