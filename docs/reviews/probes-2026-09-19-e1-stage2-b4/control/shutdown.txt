@@ -1,0 +1,20 @@
+date_utc=2026-09-19T07:32:59Z
+ Container reachy-1-2-sim Stopping 
+ Container reachy-1-2-sim Stopped 
+ Container reachy-1-2-sim Removing 
+ Container reachy-1-2-sim Removed 
+ Network reachy-1-2-sim-stage2_default Removing 
+ Network reachy-1-2-sim-stage2_default Removed 
+--- native server ---
+server pid=41727
+8765 free
+50051 free
+--- caffeinate ---
+caffeinate stopped
+--- docker ps -a ---
+no reachy container
+--- manifest closed? ---
+{'state_count': 0, 'command_count': 0, 'total_steps': None, 'total_duration_s': None}
+2026-09-19 00:33:04,661 websockets.server INFO connection closed
+2026-09-19 00:33:04,661 reachy12.mujoco.server INFO Client ('127.0.0.1', 57020) disconnected
+2026-09-19 00:33:04,661 reachy12.mujoco.server INFO Handler exited for ('127.0.0.1', 57020)
