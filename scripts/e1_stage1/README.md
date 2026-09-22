@@ -97,6 +97,34 @@ If a future cycle's operator flow needs a settle-wait step, copy it from
    `kernelspec` names it, but the kernel itself has to exist on the
    operator's Jupyter).
 
+   **`reset.sh`'s verification contract:** `reset.sh` snapshots the run's
+   last state and current reset count (`reset_verify.py snapshot`) before
+   sending the sentinel request, then, once the ack poll matches, demands
+   *fresh evidence of the requested reset* (`reset_verify.py verify`)
+   before printing `reset gen=... ok` and returning 0: (1) the ack equals
+   the requested generation; (2) `commands.jsonl`'s reset count is
+   *exactly* one more than the snapshot's (two resets is ambiguous
+   evidence of *this* one, not sufficient), and that new reset line's
+   `sim_step` is an `int` at or after the snapshot's; (3) the last
+   *complete* state (read from the tail, tolerant of a torn last line
+   from the server's concurrent ~20 Hz writer) has `seq`/`wall_time_ns`
+   strictly past the snapshot's and `sim_step` restarted below both the
+   snapshot's and the reset line's; (4) that state is live -- recorded
+   within `max_state_age_s` (default 1.0 s) of now. It polls for up to
+   `--timeout-s` (10 s default; override with `RESET_VERIFY_TIMEOUT_S`/
+   `RESET_VERIFY_POLL_S`, an env knob like `E1_PYTHON`, not a new
+   positional argument) before giving up. Any check that doesn't hold --
+   malformed JSON, a `bool`/`NaN` where an `int` is required, a missing
+   or stale sample -- writes `STOP: reset <gen> not verified: <reason>`
+   to `control/stop` and exits 9, with one of a fixed set of reasons
+   (`ack mismatch`, `reset not recorded`, `more than one reset recorded`,
+   `reset line malformed`, `no complete state`, `state malformed:
+   <field>`, `state not fresh`, `sim_step not restarted`, `state stale
+   (age ...)`). **A stop from this step is a stop, exactly as before --
+   there is no retry**, and this change only makes the read of the
+   evidence robust to the server's own concurrent writing; it does not
+   make the verification more permissive.
+
 Step 5's requirement is new relative to PR #117's flow, which had no way to
 prove which tree the server ran from at all (W4). The notebook's binding
 cell (after `verify_simulator_identity`) re-checks the manifest at runtime:
