@@ -7,10 +7,15 @@ write and the ack poll) -- without a container, so the test runs the real
 `reset.sh` end to end (`bash scripts/e1_stage1/reset.sh ...`) with no
 Docker, server, or SDK.
 
-Recognizes only the two command strings `reset.sh` builds (matched by
-substring on argv's last element, `sh -c`'s script); anything else exits
-1, so an unexpected caller shows up as a Docker failure rather than a
-silent no-op.
+Recognizes only the two invocations `reset.sh` makes, by substring match
+over the full argv (not just the last element): the request-publish call
+now reads (E1 Stage 2 B2 s1 reset 1 fix, 2026-09-22) `sh -c 'SCRIPT' sh
+"$GEN"` -- `$GEN` is a trailing positional argument, not interpolated
+into the `-c` script text, so it is `sys.argv[-1]` directly rather than
+regex-extracted from the script string as before. The ack-read call is
+unchanged (`sh -c 'cat ...'`, a single string containing
+`reachy_reset_ack`). Anything else exits 1, so an unexpected caller shows
+up as a Docker failure rather than a silent no-op.
 
 Controlled by environment variables (all required except the mode):
   FAKE_DOCKER_RUN_DIR   the native-server run dir reset.sh operates on.
@@ -29,6 +34,12 @@ Controlled by environment variables (all required except the mode):
                                   it outlives this process) to grow
                                   states.jsonl with a torn tail while
                                   `verify` polls, and acks immediately.
+                         "publish_fail" -- the request-publish call itself
+                                  exits non-zero (simulating a dropped
+                                  `docker compose exec`, not a sentinel
+                                  race): nothing is appended, no ack is
+                                  written, and reset.sh must STOP without
+                                  ever polling for an ack.
   FAKE_DOCKER_SNAPSHOT_STEP  the sim_step the test's fixture snapshot was
                          written with (default 5000) -- the reset line
                          and post-reset states are built relative to it
@@ -37,7 +48,6 @@ Controlled by environment variables (all required except the mode):
 """
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -67,11 +77,13 @@ def main() -> int:
     mode = os.environ.get("FAKE_DOCKER_MODE", "ok")
     snapshot_step = int(os.environ.get("FAKE_DOCKER_SNAPSHOT_STEP", "5000"))
 
-    cmd = sys.argv[-1] if len(sys.argv) > 1 else ""
+    argv = sys.argv[1:]
+    joined = " ".join(argv)
 
-    if "reachy_reset_request" in cmd:
-        match = re.search(r"echo (\S+) >", cmd)
-        gen = match.group(1) if match else ""
+    if "reachy_reset_request" in joined:
+        gen = argv[-1] if argv else ""
+        if mode == "publish_fail":
+            return 3
         if mode in ("ok", "torn_growing"):
             with open(os.path.join(run_dir, "commands.jsonl"), "a") as f:
                 f.write(json.dumps(
@@ -90,7 +102,7 @@ def main() -> int:
             f.write(gen)
         return 0
 
-    if "reachy_reset_ack" in cmd:
+    if "reachy_reset_ack" in joined:
         try:
             with open(ack_file) as f:
                 sys.stdout.write(f.read())

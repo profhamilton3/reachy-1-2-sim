@@ -474,6 +474,38 @@ class TestResetShEndToEnd:
                          result.stdout.strip())
         assert not (evidence_dir / "control/stop").exists()
 
+    def test_multi_digit_gen_published_whole(self, tmp_path, fake_docker):
+        """Regression for the atomic-publish fix (E1 Stage 2 B2 s1 reset 1,
+        2026-09-22): `$GEN` now reaches the container as a trailing
+        positional argument to `sh`, not interpolated into the `-c`
+        script text -- a multi-digit generation (the real B1/B2 sessions
+        run gens up to 18) must arrive whole, not truncated or split by
+        the new argv-based passing."""
+        result, evidence_dir, _ = self._run(tmp_path, fake_docker, mode="ok", gen="18")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert re.match(r"^reset gen=18 ack=18 resets_recorded 0->1 sim_step 5000->\d+$",
+                         result.stdout.strip())
+        assert not (evidence_dir / "control/stop").exists()
+
+    def test_publish_failure_stops_before_ack_poll(self, tmp_path, fake_docker):
+        """The new `pub_rc` check (reset.sh, atomic-publish fix): if the
+        request-publish call itself fails (container exec dropped, not a
+        sentinel race), reset.sh STOPs immediately with a specific reason
+        and never enters the 30x0.5s ack-poll loop -- distinct from
+        `ack mismatch`, which only happens after polling. Bounded
+        wall-clock assertion proves it didn't just poll-then-timeout by
+        coincidence."""
+        t0 = time.monotonic()
+        result, evidence_dir, _ = self._run(
+            tmp_path, fake_docker, mode="publish_fail", gen="13", timeout_s=0.3)
+        elapsed = time.monotonic() - t0
+        assert result.returncode == 9
+        stop_text = (evidence_dir / "control/stop").read_text()
+        assert "STOP: reset 13 not verified: request publish failed (rc=3)" in stop_text
+        assert elapsed < 5.0, (
+            f"took {elapsed:.1f}s -- looks like it fell through to the "
+            f"15s ack-poll loop instead of stopping immediately")
+
     def test_existing_stop_marker_refuses_at_top_unchanged(self, tmp_path, fake_docker):
         evidence_dir = tmp_path / "evidence"
         (evidence_dir / "control").mkdir(parents=True, exist_ok=True)
