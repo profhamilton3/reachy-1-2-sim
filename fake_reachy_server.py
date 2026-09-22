@@ -56,6 +56,7 @@ from kinematic_backend import (
 )
 
 from mujoco_remote_backend import KinematicBridge, MujocoRemoteBackend
+from reset_watcher import reset_watcher
 
 _BACKEND_ENV = "REACHY_SIM_BACKEND"
 _MUJOCO_LEFT_JPG  = pathlib.Path("/tmp/reachy_left.jpg")
@@ -65,9 +66,6 @@ _SCENE_OVERRIDES = os.environ.get(
 )
 _INTERACTIVE_STATE = os.environ.get(
     "REACHY_SIM_INTERACTIVE_STATE", "/tmp/reachy_interactive_state.json"
-)
-_RESET_REQUEST = os.environ.get(
-    "REACHY_SIM_RESET_REQUEST", "/tmp/reachy_reset_request"
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [fake-reachy] %(message)s")
@@ -133,39 +131,6 @@ def interactive_state_writer(remote, path: str = _INTERACTIVE_STATE, hz: float =
             os.replace(tmp, path)
         except Exception:
             pass
-        time.sleep(period)
-
-
-_RESET_ACK = os.environ.get("REACHY_SIM_RESET_ACK", "/tmp/reachy_reset_ack")
-
-
-def reset_watcher(remote, path: str = _RESET_REQUEST, hz: float = 10.0) -> None:
-    """Trigger an acknowledged physics reset when a client drops a sentinel file.
-
-    Reads an optional generation token from the request file, calls the backend's
-    acknowledged reset (which blocks until the native server's reset_ack arrives),
-    then writes the generation to /tmp/reachy_reset_ack so the client can confirm
-    completion without relying on a fixed sleep.
-    """
-    period = 1.0 / hz
-    req_path = pathlib.Path(path)
-    ack_path = pathlib.Path(_RESET_ACK)
-    while True:
-        try:
-            if req_path.exists():
-                gen = req_path.read_text().strip()
-                req_path.unlink(missing_ok=True)
-                event = remote.request_reset()
-                ok = event.wait(timeout=6.0)
-                if not ok:
-                    log.warning("reset_watcher: reset ack timed out")
-                # Write the ack generation (even on timeout so the demo doesn't hang).
-                try:
-                    ack_path.write_text(gen)
-                except OSError:
-                    pass
-        except Exception:
-            log.debug("reset_watcher error", exc_info=True)
         time.sleep(period)
 
 
