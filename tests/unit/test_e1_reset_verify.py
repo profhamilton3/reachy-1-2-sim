@@ -93,7 +93,7 @@ def _make_run_dir(tmp_path, *, name="run_001", snapshot_seq=1000,
     """One run dir with only the pre-reset snapshot state on disk."""
     run_dir = tmp_path / name
     run_dir.mkdir()
-    wall_ns = snapshot_wall_ns if snapshot_wall_ns is not None else time.time_ns()
+    wall_ns = snapshot_wall_ns if snapshot_wall_ns is not None else time.monotonic_ns()
     (run_dir / "commands.jsonl").write_text("")
     (run_dir / "states.jsonl").write_text(
         _state_line(snapshot_seq, snapshot_step, wall_ns))
@@ -113,7 +113,7 @@ class TestNormalVerification:
 
         (run_dir / "commands.jsonl").write_text(_reset_line(50010))
         with (run_dir / "states.jsonl").open("a") as f:
-            f.write(_state_line(1001, 10, time.time_ns()))
+            f.write(_state_line(1001, 10, time.monotonic_ns()))
 
         result = rv.verify(run_dir, "3", "3", snap, timeout_s=2.0, poll_s=0.05)
         assert result == {
@@ -131,7 +131,7 @@ class TestNormalVerification:
 
         (run_dir / "commands.jsonl").write_text(_reset_line(50010))
         with (run_dir / "states.jsonl").open("a") as f:
-            f.write(_state_line(1001, 10, time.time_ns()))
+            f.write(_state_line(1001, 10, time.monotonic_ns()))
 
         out = subprocess.run(
             [sys.executable, str(_REPO / "scripts/e1_stage1/reset_verify.py"),
@@ -152,8 +152,8 @@ class TestTornTrailingLine:
         snap = rv.snapshot(run_dir)
         (run_dir / "commands.jsonl").write_text(_reset_line(50010))
         with (run_dir / "states.jsonl").open("a") as f:
-            f.write(_state_line(1001, 10, time.time_ns()))
-            torn = _state_line(1002, 20, time.time_ns())
+            f.write(_state_line(1001, 10, time.monotonic_ns()))
+            torn = _state_line(1002, 20, time.monotonic_ns())
             f.write(torn[: len(torn) // 2])  # no trailing newline, cut mid-joints
 
         result = rv.verify(run_dir, "4", "4", snap, timeout_s=2.0, poll_s=0.05)
@@ -164,7 +164,7 @@ class TestTornTrailingLine:
         snap = rv.snapshot(run_dir)
         (run_dir / "commands.jsonl").write_text(_reset_line(50010))
         with (run_dir / "states.jsonl").open("a") as f:
-            torn = _state_line(1001, 10, time.time_ns())
+            torn = _state_line(1001, 10, time.monotonic_ns())
             f.write(torn[: len(torn) // 2])  # the ONLY post-reset write, and it's torn
 
         with pytest.raises(rv.VerifyFailed) as exc:
@@ -189,12 +189,12 @@ class TestConcurrentWriter:
             seq, sim_step = 1001, 10
             with open(states_path, "a") as f:
                 for _ in range(40):
-                    f.write(_state_line(seq, sim_step, time.time_ns()))
+                    f.write(_state_line(seq, sim_step, time.monotonic_ns()))
                     f.flush()
                     seq += 1
                     sim_step += 1
                     time.sleep(0.008)  # >100 Hz
-                torn = _state_line(seq, sim_step, time.time_ns())
+                torn = _state_line(seq, sim_step, time.monotonic_ns())
                 f.write(torn[: len(torn) // 2])
                 f.flush()
 
@@ -250,7 +250,7 @@ class TestMalformedEvidence:
         snap = rv.snapshot(run_dir)
         (run_dir / "commands.jsonl").write_text(_reset_line(5010))
         with (run_dir / "states.jsonl").open("a") as f:
-            f.write(_state_line_raw(True, 10, time.time_ns()))  # "seq": true
+            f.write(_state_line_raw(True, 10, time.monotonic_ns()))  # "seq": true
 
         with pytest.raises(rv.VerifyFailed) as exc:
             rv.verify(run_dir, "6", "6", snap, timeout_s=0.3, poll_s=0.05)
@@ -273,7 +273,7 @@ class TestMalformedEvidence:
         # contains the reset marker (counts as +1) but is not valid JSON
         (run_dir / "commands.jsonl").write_text('{"type":"reset","seed":null,"sim_step":\n')
         with (run_dir / "states.jsonl").open("a") as f:
-            f.write(_state_line(1001, 10, time.time_ns()))
+            f.write(_state_line(1001, 10, time.monotonic_ns()))
 
         with pytest.raises(rv.VerifyFailed) as exc:
             rv.verify(run_dir, "6", "6", snap, timeout_s=0.3, poll_s=0.05)
@@ -331,14 +331,14 @@ class TestStaleOrInsufficientEvidence:
         (run_dir / "commands.jsonl").write_text(_reset_line(5010))
         with (run_dir / "states.jsonl").open("a") as f:
             # fresh seq/wall_time_ns, but sim_step did NOT restart (>= snapshot)
-            f.write(_state_line(1001, 5005, time.time_ns()))
+            f.write(_state_line(1001, 5005, time.monotonic_ns()))
 
         with pytest.raises(rv.VerifyFailed) as exc:
             rv.verify(run_dir, "7", "7", snap, timeout_s=0.3, poll_s=0.05)
         assert exc.value.reason == "sim_step not restarted"
 
     def test_state_stale(self, tmp_path):
-        now = time.time_ns()
+        now = time.monotonic_ns()
         run_dir = _make_run_dir(
             tmp_path, snapshot_seq=1000, snapshot_step=5000,
             snapshot_wall_ns=now - 20_000_000_000)
@@ -352,6 +352,52 @@ class TestStaleOrInsufficientEvidence:
             rv.verify(run_dir, "7", "7", snap, timeout_s=0.3, poll_s=0.05,
                       max_state_age_s=1.0)
         assert exc.value.reason.startswith("state stale (age ")
+
+    def test_wall_time_ns_clock_contract(self, tmp_path):
+        """Pins the clock `wall_time_ns` is actually measured on --
+        `time.monotonic_ns()`, matching `native_mujoco/protocol.py`'s
+        `_now_ns()` and `e1_identity.verify_identity`'s `now_ns` default
+        (issue #130 B1: comparing it against `time.time_ns()` made every
+        state look ~decades stale). A future regression back to wall-clock
+        in either `reset_verify.verify`'s default `now_ns` or a fixture
+        here must fail this test."""
+        run_dir = _make_run_dir(tmp_path, snapshot_seq=1000, snapshot_step=5000)
+        snap = rv.snapshot(run_dir)
+        (run_dir / "commands.jsonl").write_text(_reset_line(5010))
+
+        # A fresh, correctly monotonic-stamped state verifies.
+        with (run_dir / "states.jsonl").open("a") as f:
+            f.write(_state_line(1001, 10, time.monotonic_ns()))
+        result = rv.verify(run_dir, "7", "7", snap, timeout_s=0.3, poll_s=0.05)
+        assert result["sim_step_after"] == 10
+
+        # A stale monotonic-stamped state fails "state stale", not a crash.
+        now = time.monotonic_ns()
+        run_dir2 = _make_run_dir(tmp_path, name="run_002",
+                                  snapshot_seq=1000, snapshot_step=5000,
+                                  snapshot_wall_ns=now - 20_000_000_000)
+        snap2 = rv.snapshot(run_dir2)
+        (run_dir2 / "commands.jsonl").write_text(_reset_line(5010))
+        with (run_dir2 / "states.jsonl").open("a") as f:
+            f.write(_state_line(1001, 10, now - 10_000_000_000))
+        with pytest.raises(rv.VerifyFailed) as exc2:
+            rv.verify(run_dir2, "7", "7", snap2, timeout_s=0.3, poll_s=0.05,
+                      max_state_age_s=1.0)
+        assert exc2.value.reason.startswith("state stale (age ")
+
+        # An epoch (time.time_ns()) stamped state -- what a "fix" back to
+        # wall-clock would write -- must also fail "state stale": on this
+        # host the two clocks differ by decades, so it can never look fresh.
+        run_dir3 = _make_run_dir(tmp_path, name="run_003",
+                                  snapshot_seq=1000, snapshot_step=5000)
+        snap3 = rv.snapshot(run_dir3)
+        (run_dir3 / "commands.jsonl").write_text(_reset_line(5010))
+        with (run_dir3 / "states.jsonl").open("a") as f:
+            f.write(_state_line(1001, 10, time.time_ns()))
+        with pytest.raises(rv.VerifyFailed) as exc3:
+            rv.verify(run_dir3, "7", "7", snap3, timeout_s=0.3, poll_s=0.05,
+                      max_state_age_s=1.0)
+        assert exc3.value.reason.startswith("state stale (age ")
 
 
 # ── F. Real reset.sh end to end ─────────────────────────────────────────
@@ -387,7 +433,7 @@ class TestResetShEndToEnd:
         run_dir.mkdir()
         (run_dir / "commands.jsonl").write_text("")
         (run_dir / "states.jsonl").write_text(
-            _state_line(1, snapshot_step, time.time_ns()))
+            _state_line(1, snapshot_step, time.monotonic_ns()))
         ack_file = tmp_path / "ack.txt"
         ack_file.write_text("")
 
@@ -435,7 +481,7 @@ class TestResetShEndToEnd:
         run_dir = tmp_path / "run_001"
         run_dir.mkdir()
         (run_dir / "commands.jsonl").write_text("")
-        (run_dir / "states.jsonl").write_text(_state_line(1, 5000, time.time_ns()))
+        (run_dir / "states.jsonl").write_text(_state_line(1, 5000, time.monotonic_ns()))
         ack_file = tmp_path / "ack.txt"
         ack_file.write_text("")
 

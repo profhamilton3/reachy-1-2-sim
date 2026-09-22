@@ -44,12 +44,12 @@ def main() -> int:
     seq, sim_step = int(start_seq), int(start_step)
     with open(states_path, "a") as f:
         for _ in range(int(count)):
-            f.write(_state_line(seq, sim_step, time.time_ns()))
+            f.write(_state_line(seq, sim_step, time.monotonic_ns()))
             f.flush()
             seq += 1
             sim_step += 1
             time.sleep(float(interval_s))
-        torn = _state_line(seq, sim_step, time.time_ns())
+        torn = _state_line(seq, sim_step, time.monotonic_ns())
         f.write(torn[: len(torn) // 2])
         f.flush()
     return 0

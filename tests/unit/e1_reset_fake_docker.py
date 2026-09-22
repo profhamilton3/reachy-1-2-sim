@@ -80,7 +80,7 @@ def main() -> int:
                     separators=(",", ":")) + "\n")
         if mode == "ok":
             with open(os.path.join(run_dir, "states.jsonl"), "a") as f:
-                f.write(_state_line(1_000_001, 10, time.time_ns()))
+                f.write(_state_line(1_000_001, 10, time.monotonic_ns()))
         elif mode == "torn_growing":
             subprocess.Popen(
                 [sys.executable, _GROWTH_WRITER,

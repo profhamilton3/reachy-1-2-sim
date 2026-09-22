@@ -25,7 +25,7 @@ import json
 import pathlib
 import sys
 import time
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _SCRIPTS = _HERE.parent
@@ -100,7 +100,8 @@ def snapshot(run_dir: pathlib.Path) -> dict:
 
 
 def _evaluate(
-    run_dir: pathlib.Path, snap: dict, max_state_age_s: float,
+    run_dir: pathlib.Path, snap: dict, max_state_age_s: float, *,
+    now_ns: Callable[[], int] = time.monotonic_ns,
 ) -> Tuple[bool, Optional[str], Optional[dict]]:
     """One (non-polling) attempt. Returns `(ok, reason, result)`; `result`
     is set only when `ok` is True."""
@@ -129,7 +130,9 @@ def _evaluate(
         return False, exc.reason, None
 
     # Fresh evidence: a sample recorded strictly after the snapshot, by
-    # both the server's monotonic sequence and its own wall clock.
+    # both the server's monotonic sequence and its `wall_time_ns` field
+    # (which, despite the name, is also `time.monotonic_ns()` --
+    # `native_mujoco/protocol.py`'s `_now_ns()`, same as `e1_identity`).
     if not (seq > snap["seq"] and wall_time_ns > snap["wall_time_ns"]):
         return False, "state not fresh", None
     # ...whose step counter actually restarted -- below the snapshot AND
@@ -137,7 +140,7 @@ def _evaluate(
     # still-in-flight reset can't pass as evidence of this one.
     if not (sim_step < snap["sim_step"] and sim_step < reset_sim_step):
         return False, "sim_step not restarted", None
-    age_s = abs(time.time_ns() - wall_time_ns) / 1e9
+    age_s = abs(now_ns() - wall_time_ns) / 1e9
     if age_s > max_state_age_s:
         return False, f"state stale (age {age_s:.3f}s)", None
 
@@ -151,12 +154,13 @@ def verify(
     run_dir: pathlib.Path, gen: str, ack: str, snap: dict, *,
     timeout_s: float = DEFAULT_TIMEOUT_S, poll_s: float = DEFAULT_POLL_S,
     max_state_age_s: float = DEFAULT_MAX_STATE_AGE_S,
+    now_ns: Callable[[], int] = time.monotonic_ns,
 ) -> dict:
     if ack != gen:
         raise VerifyFailed("ack mismatch")
     deadline = time.monotonic() + timeout_s
     while True:
-        ok, reason, result = _evaluate(run_dir, snap, max_state_age_s)
+        ok, reason, result = _evaluate(run_dir, snap, max_state_age_s, now_ns=now_ns)
         if ok:
             return result
         if reason in _TERMINAL_REASONS or time.monotonic() >= deadline:
