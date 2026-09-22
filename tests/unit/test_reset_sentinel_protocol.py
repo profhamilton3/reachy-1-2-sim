@@ -20,6 +20,18 @@ The fix has two independent parts, both covered here:
      `TestCreateBeforeWriteRace`) -- a second, independent guard that
      holds even against a non-atomic publisher.
 
+B1 (PR #135 review, 2026-09-22): the first version of this file shipped
+with `VALID_GEN_RE = ^[0-9]+$`, digit-only, which silently broke
+`reset_scene()` in both training notebooks -- they publish
+`uuid.uuid4().hex` (32 lowercase hex chars), not a decimal counter, and
+the module's own claim that they were "unaffected" was false: a uuid
+token just sat on disk forever, never consumed, never acked. The regex
+is now a bounded opaque-token shape (`^[0-9A-Za-z]{1,64}$`), compatible
+with both reset.sh's decimal gens and the notebooks' uuid-hex tokens;
+`TestValidRequest` covers both formats through the real watcher, and
+`TestMalformedRequests` still covers empty/whitespace/oversized/
+embedded-control-byte input, which the wider charset does not accept.
+
 Deterministic and offline throughout -- no server, no SDK, no Docker,
 no grpc (unlike `fake_reachy_server.py`, `reset_watcher.py` is
 dependency-light stdlib only, exactly so this suite can exercise it
@@ -29,6 +41,7 @@ test) are bounded, fast, and assert invariants rather than exact timing,
 so they are not the sole evidence for any claim here -- every property
 they demonstrate is also pinned by a plain, non-threaded test above it.
 """
+import logging
 import os
 import pathlib
 import re
@@ -36,6 +49,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 
 import pytest
 
@@ -75,13 +89,14 @@ class TestMalformedRequests:
         "",              # the exact B2 s1 bug: a read landing pre-write
         "   ",           # whitespace only
         "\n",
-        "abc",
-        "18abc",
-        "-1",
+        "-1",            # '-' outside the bounded-alnum charset
         "1.5",
         "1 8",
         "18\n19",        # two lines -- a torn concatenation of two gens
         "\x00",
+        "a" * 65,        # one over the 64-char cap (oversized)
+        "1" * 65,
+        "18abc def",     # alnum substrings either side of a space
     ], ids=repr)
     def test_never_triggers_reset_or_ack(self, tmp_path, raw):
         req = tmp_path / "reachy_reset_request"
@@ -117,13 +132,83 @@ class TestMalformedRequests:
         assert rw.reset_watcher_step(remote, req, ack) is None
         assert remote.reset_calls == 0
 
+    def test_exactly_64_chars_is_valid_65_is_not(self, tmp_path):
+        """Pins the length-cap boundary explicitly rather than leaving it
+        implicit in the 65-char oversized case above."""
+        req = tmp_path / "reachy_reset_request"
+        ack = tmp_path / "reachy_reset_ack"
+        remote = _FakeRemote()
+
+        req.write_text("a" * 64)
+        assert rw.reset_watcher_step(remote, req, ack) == "a" * 64
+        assert remote.reset_calls == 1
+
+        req.write_text("a" * 65)
+        assert rw.reset_watcher_step(remote, req, ack) is None
+        assert remote.reset_calls == 1, "oversized token must not consume"
+
+    def test_ignored_nonempty_malformed_content_warns_once_per_value(
+            self, tmp_path, monkeypatch, caplog):
+        """B1 follow-up: a broken/misconfigured publisher writing invalid
+        content must be visible in the log (warning, not silent debug),
+        but repeated polls of the SAME bad value must not flood it -- an
+        empty read (the ordinary truncate-then-write window) stays at
+        debug either way."""
+        monkeypatch.setattr(rw, "_WARNED_MALFORMED", set())
+        req = tmp_path / "reachy_reset_request"
+        ack = tmp_path / "reachy_reset_ack"
+        remote = _FakeRemote()
+
+        req.write_text("bad value!")
+        with caplog.at_level(logging.WARNING, logger="reset_watcher"):
+            for _ in range(5):
+                assert rw.reset_watcher_step(remote, req, ack) is None
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1, (
+            "5 polls of the same malformed value must log exactly one "
+            f"warning, not {len(warnings)} (flooding)")
+        assert "bad value!" in warnings[0].getMessage()
+        assert remote.reset_calls == 0
+
+    def test_empty_read_never_warns(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.setattr(rw, "_WARNED_MALFORMED", set())
+        req = tmp_path / "reachy_reset_request"
+        ack = tmp_path / "reachy_reset_ack"
+        remote = _FakeRemote()
+
+        req.write_text("")
+        with caplog.at_level(logging.DEBUG, logger="reset_watcher"):
+            rw.reset_watcher_step(remote, req, ack)
+        assert not any(
+            r.levelno == logging.WARNING for r in caplog.records), (
+            "an empty read is the ordinary truncate-then-write window, "
+            "not a signal worth a warning")
+
+    def test_distinct_malformed_values_each_warn(
+            self, tmp_path, monkeypatch, caplog):
+        monkeypatch.setattr(rw, "_WARNED_MALFORMED", set())
+        req = tmp_path / "reachy_reset_request"
+        ack = tmp_path / "reachy_reset_ack"
+        remote = _FakeRemote()
+
+        with caplog.at_level(logging.WARNING, logger="reset_watcher"):
+            for raw in ("bad one", "bad two", "bad three"):
+                req.write_text(raw)
+                assert rw.reset_watcher_step(remote, req, ack) is None
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 3
+
 
 # ── B. Deterministic: a valid generation is consumed exactly once,
 #    correctly ─────────────────────────────────────────────────────────
 
 class TestValidRequest:
 
-    @pytest.mark.parametrize("gen", ["1", "18", "007", "0"])
+    @pytest.mark.parametrize("gen", [
+        "1", "18", "007", "0",                    # reset.sh's decimal gens
+        "a3f9c2b1e4d5460a9b7c3f2e1d0a5b6c",         # notebooks' uuid.uuid4().hex shape
+        "ABCDEF0123456789",                        # uppercase hex still matches alnum
+    ])
     def test_consumed_and_acked(self, tmp_path, gen):
         req = tmp_path / "reachy_reset_request"
         ack = tmp_path / "reachy_reset_ack"
@@ -146,6 +231,25 @@ class TestValidRequest:
         remote = _FakeRemote()
         assert rw.reset_watcher_step(remote, req, ack) == "18"
         assert ack.read_text() == "18"
+
+    def test_real_uuid4_hex_token_round_trips_through_the_watcher(
+            self, tmp_path):
+        """B1: the exact token shape `reset_scene()` in both
+        notebooks/*_training.ipynb publishes (`uuid.uuid4().hex`), driven
+        through the actual `reset_watcher_step`, not a hand-picked
+        hex-looking string -- this is what silently broke under the
+        original digit-only `VALID_GEN_RE`."""
+        req = tmp_path / "reachy_reset_request"
+        ack = tmp_path / "reachy_reset_ack"
+        remote = _FakeRemote()
+        for _ in range(20):  # several independent random draws
+            gen = uuid.uuid4().hex
+            req.write_text(gen)
+            result = rw.reset_watcher_step(remote, req, ack)
+            assert result == gen
+            assert ack.read_text() == gen
+            assert not req.exists()
+        assert remote.reset_calls == 20
 
     def test_ack_timeout_still_publishes_ack(self, tmp_path):
         """`event.wait` returning False (reset ack never arrived from the

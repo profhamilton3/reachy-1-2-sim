@@ -28,9 +28,23 @@ reset.sh now publishes atomically (temp file + same-directory rename --
 see its own header), and this module never acts on anything that doesn't
 read back as a complete, valid generation (`VALID_GEN_RE`) -- so it is
 safe even against a non-atomic publisher (scripts/demo_control_panel.py,
-notebooks/*_training.ipynb still write the old way and are unaffected: an
-empty/partial read is simply left for a later poll instead of being
+notebooks/*_training.ipynb still write the old way, an empty/partial
+read from either is simply left for a later poll instead of being
 treated as "no request, discard it").
+
+`VALID_GEN_RE` is deliberately not digit-only: reset.sh and
+demo_control_panel.py publish decimal counters (`str(N)` /
+`str(time.monotonic_ns())`), but both notebooks/*_training.ipynb publish
+`uuid.uuid4().hex` (32 lowercase hex chars) instead -- a real producer,
+not a hypothetical one, and PR #135 as first merged (`88c31d2`)
+restricted the regex to `^[0-9]+$`, which silently broke the notebooks'
+`reset_scene()` handshake (uuid tokens were read back, never matched,
+and left on disk forever -- no reset, no ack, nothing above `debug`).
+The regex now accepts any bounded alphanumeric token so it validates
+*shape* (non-empty, no embedded whitespace/control bytes, no
+torn-together concatenation of two generations, capped length) rather
+than a specific producer's format -- see the B1 finding in the PR #135
+review for the "notebooks unaffected" claim this corrects.
 """
 from __future__ import annotations
 
@@ -43,17 +57,29 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+# Distinct non-empty malformed values already warned about, so a stuck or
+# broken publisher (e.g. writing something outside VALID_GEN_RE on every
+# poll) logs once per distinct bad value instead of flooding at 10 Hz.
+_WARNED_MALFORMED: set = set()
+
 REQUEST_PATH = os.environ.get(
     "REACHY_SIM_RESET_REQUEST", "/tmp/reachy_reset_request"
 )
 ACK_PATH = os.environ.get("REACHY_SIM_RESET_ACK", "/tmp/reachy_reset_ack")
 
-# A published generation is always the plain non-negative-integer string
-# reset.sh's $GEN argument is (scripts/e1_stage1/plan.py's Stage 2 gens,
-# 1..N). Anything else -- empty, a partial read from a writer caught
-# mid-write, or garbage -- must never trigger a physics reset or an
-# acknowledgement a caller's generation match could be satisfied by.
-VALID_GEN_RE = re.compile(r"^[0-9]+$")
+# A published generation is a bounded, opaque token: either the decimal
+# counter string reset.sh's $GEN argument (scripts/e1_stage1/plan.py's
+# Stage 2 gens, 1..N) and demo_control_panel.py's
+# str(time.monotonic_ns()) both are, or the uuid.uuid4().hex (32
+# lowercase hex chars) both notebooks/*_training.ipynb publish. This
+# module never interprets the token, only matches it back on the ack, so
+# it doesn't need to know which producer sent it -- just that a read is a
+# complete, plausible token and not an empty/partial/torn one. Anything
+# outside the charset (whitespace, control bytes, a second generation
+# concatenated onto this one) or the length cap must never trigger a
+# physics reset or an acknowledgement a caller's generation match could
+# be satisfied by.
+VALID_GEN_RE = re.compile(r"^[0-9A-Za-z]{1,64}$")
 
 
 def atomic_write_text(path: pathlib.Path, text: str) -> None:
@@ -91,7 +117,15 @@ def reset_watcher_step(
         return None
     gen = raw.strip()
     if not VALID_GEN_RE.match(gen):
-        log.debug("reset_watcher: ignoring empty/malformed request %r", raw)
+        if gen and gen not in _WARNED_MALFORMED:
+            # Non-empty and invalid: either a broken/misconfigured
+            # publisher or a read caught mid-write by a non-atomic
+            # writer. An empty read (the ordinary truncate-then-write
+            # window) stays at debug -- it's expected, not a signal.
+            _WARNED_MALFORMED.add(gen)
+            log.warning("reset_watcher: ignoring malformed request %r", raw)
+        else:
+            log.debug("reset_watcher: ignoring empty/malformed request %r", raw)
         return None
     req_path.unlink(missing_ok=True)
     event = remote.request_reset()
