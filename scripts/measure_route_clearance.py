@@ -177,19 +177,36 @@ conservative there, but is NOT conservative for shells, whose narrowest
 link (`finger`) is closest to an object when the aperture is SHUT, the
 opposite of the aperture `hand_radius` calls worst; root-caused
 2026-09-22, `outputs/analysis-2026-09-22-b2s2-finger-clearance-root-cause.md`).
+The shells correction changes PER-LINK values only (`planned_clearance_by_link`);
+whole-hand shells `report()`/`planned_clearance` output is unchanged on
+every scene shipped in this repo -- e.g. B2's LOWER_TO_REST, where
+`thumb_pad` at 2.11 cm binds before `finger`'s corrected 3.37 cm ever
+would (issue #137, priority 2).
 
 ## Route scope in `report()`
 
 `FOOTPRINT_LEGS` is the live guard's own scope (`panel_executor`'s
 footprint check) and is never widened here. A realised log that flew a
-route's FULL sequence from its rest posture (e.g. a "setup" recording that
-starts at HOME, not at `FOOTPRINT_LEGS`'s own first waypoint) is not
+route's FULL sequence from its departure posture (e.g. a "setup" recording
+that starts at HOME, not at `FOOTPRINT_LEGS`'s own first waypoint) is not
 comparable to a `FOOTPRINT_LEGS`-scoped planned value -- the realised worst
 sample can fall on a waypoint the footprint never included (see the same
 analysis doc's §4). Pass `full_route=True` to `report()` (or
 `waypoints=full_route_poses(route)` to `planned_clearance` directly) when
 the recording being compared flew the whole named route, not just its
 footprint.
+
+`full_route` is a Python-API-only parameter -- there is no `--full-route`
+CLI flag, and `main()` never passes it. `main()` records whatever motion
+is flown during its `--duration` window, but the report it prints is
+ALWAYS `FOOTPRINT_LEGS`-scoped. That printed report is therefore not a
+valid plan-vs-realised comparison for a whole-route recording that
+starts at HOME -- e.g. the E1 campaign's PLACE_ROUTE (HOME->REST) and
+RAISE_TO_SIDE (HOME->PRESENT) legs, which `scripts/e1_stage1/leg.sh`
+records through `main()` -- where the realised worst can fall on a
+waypoint the footprint omits. Re-score such a saved log OFFLINE with
+`report(..., full_route=True)` from the Python API (issue #137,
+priority 2; explicit CLI report-scope selection is issue #139).
 
 Usage (operator flies the route by hand during --duration):
     export REACHY_SIM_RECORD_CLEARANCE=1
@@ -303,10 +320,12 @@ PLANNED_APERTURE_POLICY = (
     "two commanded ENDPOINT apertures, applied to every interpolated "
     "sample -- exact, because hand_radius is monotonic in aperture. shells "
     "instead interpolates the aperture per sample, in lockstep with the arm "
-    "joints, matching what smooth_move actually commands -- holding shells "
-    "at an endpoint understated its worst case (finger is closest to the "
-    "table fully SHUT, not at the tube rule's worst-case OPEN); see "
-    "planned_clearance's own docstring and "
+    "joints, matching what the SDK's own goto(..., MINIMUM_JERK) trajectory "
+    "actually commands (rig_motion.sdk_move, primitives._stream) -- every "
+    "joint, gripper included, scaled by the same s(t) from the previous "
+    "goal -- holding shells at an endpoint understated its worst case "
+    "(finger is closest to the table fully SHUT, not at the tube rule's "
+    "worst-case OPEN); see planned_clearance's own docstring and "
     "outputs/analysis-2026-09-22-b2s2-finger-clearance-root-cause.md"
 )
 
@@ -627,7 +646,7 @@ def realised_clearance(
 
 #: Full flown waypoint sequence for each named route, starting pose
 #: included -- what a "setup"-style recording actually flies (the whole
-#: named route from its own rest posture), as distinct from
+#: named route from its own departure posture), as distinct from
 #: `FOOTPRINT_LEGS`'s scoped-down subset (the live guard's own footprint,
 #: `panel_executor._footprint_refusal` -- never widened here). Each route's
 #: start pose is the posture the notebook and `rig_routes` already document
@@ -671,8 +690,10 @@ def _lerp(a: float, b: float, i: int, steps: int) -> float:
     """`a` to `b` at step `i` of `steps` (endpoints included, `i` in
     `range(steps)`) -- the exact fraction `joint_path` uses for the arm
     joints, so a gripper value computed this way stays in lockstep with
-    them, matching what `smooth_move` actually commands (every joint in a
-    pose, gripper included, driven by the same fraction `t` each tick)."""
+    them, matching what the SDK's own `goto(..., MINIMUM_JERK)` trajectory
+    actually commands (`rig_motion.sdk_move`, `primitives._stream`) --
+    every joint in a pose, gripper included, scaled by the same fraction
+    `t` from the previous goal each tick."""
     return a + (i / (steps - 1)) * (b - a)
 
 
@@ -702,6 +723,17 @@ def _shells_leg_samples(waypoints: Sequence[Dict[str, float]], steps: int):
 
 _LEG_SAMPLES_BY_HAND = {"tube": _tube_leg_samples, "shells": _shells_leg_samples}
 
+#: The capsule names `link_capsules(hand=...)` can ever return, for each
+#: hand model -- see that function's own docstring. Used by
+#: `planned_clearance_by_link` to raise on an unrecognised `link` instead
+#: of silently returning `{}`, which used to be indistinguishable from "this
+#: route has no FOOTPRINT_LEGS entry" (issue #137, priority 2).
+_CAPSULE_NAMES_BY_HAND: Dict[str, frozenset] = {
+    "tube": frozenset({"upper_arm", "forearm", "hand"}),
+    "shells": frozenset({"upper_arm", "forearm", "thumb", "thumb_pad",
+                         "finger", "wrist_ball"}),
+}
+
 
 def _resolve_waypoints(
     route: str, waypoints: Optional[Sequence[Dict[str, float]]],
@@ -725,8 +757,22 @@ def planned_clearance_by_link(
     section 9). `hand="tube"` is accepted but not very meaningful: tube has
     only one hand capsule (``"hand"``), so filtering to a link name there
     either returns `planned_clearance`'s own tube numbers unchanged (that
-    link) or nothing (any other name).
+    link) or raises (any other name -- see below).
+
+    Raises `ValueError` if `hand` is not `"tube"`/`"shells"`, or if `link`
+    is not one of the capsule names `link_capsules(hand=hand)` can ever
+    produce (`_CAPSULE_NAMES_BY_HAND`) -- checked up front, before
+    resolving `waypoints`, so a typo'd link name (e.g. ``"fingers"``) is
+    never confused with "this route has no FOOTPRINT_LEGS entry", which is
+    the only remaining case `{}` means (issue #137, priority 2).
     """
+    valid_links = _CAPSULE_NAMES_BY_HAND.get(hand)
+    if valid_links is None:
+        raise ValueError(f"hand must be 'tube' or 'shells', got {hand!r}")
+    if link not in valid_links:
+        raise ValueError(
+            f"{link!r} is not a capsule name link_capsules(hand={hand!r}) "
+            f"ever returns -- expected one of {sorted(valid_links)}")
     resolved = _resolve_waypoints(route, waypoints)
     if resolved is None:
         return {}
@@ -764,8 +810,10 @@ def planned_clearance(
       is, so its own worst endpoint really is the worst point anywhere on
       the leg -- holding it constant is exact, not an approximation.
     * ``shells``: the aperture is interpolated per sample, in lockstep with
-      the arm joints (the same fraction `smooth_move` drives every
-      commanded joint, gripper included, by). Shells' `finger` capsule
+      the arm joints (the same fraction the SDK's own `goto(...,
+      MINIMUM_JERK)` trajectory drives every commanded joint, gripper
+      included, by -- `rig_motion.sdk_move`, `primitives._stream`). Shells'
+      `finger` capsule
       swings about the thumb's X axis as the gripper opens and closes, and
       is NOT monotonically closer to an object at either extreme -- on
       `LOWER_TO_REST`, `finger` is closest to the table at the fully SHUT
@@ -820,12 +868,13 @@ def report(
     provenance" section.
 
     `full_route=True` compares `realised` against `full_route_poses(route)`
-    (the whole named route from its own rest posture) instead of
+    (the whole named route from its own departure posture) instead of
     `FOOTPRINT_LEGS`'s guard-scoped subset -- pass this when `samples` is a
     recording of the entire route (e.g. a "setup" flight from HOME), not
     just its footprint-scoped leg. See the module docstring's "Route scope
-    in report()" section. `planned_route_scope` in the result says which
-    one was actually used.
+    in report()" section, including why this is a Python-API-only
+    parameter with no CLI flag. `planned_route_scope` in the result says
+    which one was actually used.
     """
     scene = SceneModel.from_yaml(scene_path)
     q7_and_gripper, assumed = validated_samples(
@@ -844,7 +893,7 @@ def report(
         "planned_aperture_policy": PLANNED_APERTURE_POLICY,
         "planned_route_scope": (
             "full_route_poses(route) -- the whole named route from its own "
-            "rest posture" if full_route else
+            "departure posture" if full_route else
             "FOOTPRINT_LEGS[route] -- the live guard's own footprint-scoped "
             "subset"),
     }

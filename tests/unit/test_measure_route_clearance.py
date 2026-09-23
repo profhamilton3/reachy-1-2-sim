@@ -29,7 +29,7 @@ from reachy_ai.motion.kinematics import (  # noqa: E402
     joint_path,
     link_capsules,
 )
-from reachy_ai.scene.awareness import SceneModel  # noqa: E402
+from reachy_ai.scene.awareness import SceneModel, SceneObject  # noqa: E402
 
 _SCENE_PATH = os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml")
 
@@ -703,10 +703,17 @@ class TestReportingOnASyntheticLog:
         """Ties `planned_aperture_policy`'s SHELLS claim -- the aperture is
         interpolated per sample in lockstep with the arm joints, not held at
         a leg-endpoint -- to real numbers, computed independently of
-        `planned_clearance` (a link_capsules call per interpolated sample,
-        not a call into the function under test)."""
+        `planned_clearance_by_link` (a link_capsules call per interpolated
+        sample, not a call into the function under test).
+
+        Uses the B2 scene and `link="finger"`, not the generic pool scene
+        this test used before (issue #137 review): on the pool scene
+        `finger` never binds, so this test passed under the endpoint-rule
+        bug AND under the hold-at-start mutation alike -- it never actually
+        exercised the interpolation policy. B2 is the scene where `finger`
+        does bind (see TestB2S2FingerClearanceRootCause below)."""
         route = "LOWER_TO_REST"
-        scene = SceneModel.from_yaml(_SCENE_PATH)
+        scene = SceneModel.from_yaml(_B2_SCENE_PATH)
         waypoints = R.FOOTPRINT_LEGS[route]
         steps = 13
 
@@ -719,17 +726,20 @@ class TestReportingOnASyntheticLog:
                 t = i / (steps - 1)
                 gripper_deg = a["r_gripper"] + t * (
                     b["r_gripper"] - a["r_gripper"])
-                caps = link_capsules(q, "right", gripper_deg, hand="shells")
+                caps = [c for c in
+                       link_capsules(q, "right", gripper_deg, hand="shells")
+                       if c[0] == "finger"]
                 for oid, c in scene.clearances(caps).items():
                     worst = out.get(oid)
                     if worst is None or c.distance < worst:
                         out[oid] = c.distance
 
-        actual = mrc.planned_clearance(route, steps, scene)
+        actual = mrc.planned_clearance_by_link(
+            route, steps, scene, "finger", hand="shells")
         for oid in out:
-            assert actual["shells"][oid] == pytest.approx(out[oid]), (
+            assert actual[oid] == pytest.approx(out[oid]), (
                 f"planned_aperture_policy's shells claim doesn't match "
-                f"planned_clearance's real behaviour for {oid}")
+                f"planned_clearance_by_link's real behaviour for {oid}")
 
 
 class TestBackwardCompatibilityWithSchemaVersion1Logs:
@@ -1032,3 +1042,339 @@ class TestB2S2FingerClearanceRootCause:
         assert "shells" in mrc.PLANNED_APERTURE_POLICY
         assert "ENDPOINT" in mrc.PLANNED_APERTURE_POLICY
         assert "interpolat" in mrc.PLANNED_APERTURE_POLICY
+
+
+# ── Issue #137 follow-up (mutation gaps found reviewing PR #136, 59f471a) ──
+#
+# Review found two of the existing regression tests above pass under
+# mutations that would reintroduce the original bugs:
+#
+#   (a) holding shells' aperture at each leg's START value (instead of
+#       interpolating) still passes every test, because the real B2
+#       LOWER_TO_REST worst finger sample (3.37 cm) sits at REST_SHUT,
+#       which is itself a LEG BOUNDARY -- the leg that starts there already
+#       evaluates the SHUT aperture at its own first sample. A mutation
+#       catcher needs the worst sample strictly INSIDE a leg, where
+#       neither a start-held nor an endpoint-held aperture ever looks.
+#   (b) switching tube to the same per-sample interpolation shells uses
+#       also passes every test, because on the real routes/scenes tube's
+#       own worst sample already sits at the leg's worst-hand_radius
+#       endpoint (mathematically guaranteed there, by hand_radius's own
+#       monotonicity -- see `planned_clearance`'s docstring) -- so nothing
+#       here happens to probe an INTERIOR arm position where the two
+#       policies would actually disagree.
+#
+# Both classes below build a synthetic two-pose "leg" and a small tracked
+# probe object placed at that leg's own true-worst sample -- computed once,
+# offline, from the real geometry (`link_capsules`), independent of
+# `planned_clearance`/`planned_clearance_by_link` -- then pin three
+# independently-computed numbers against each other (true interpolation,
+# hold-at-start, worst-endpoint) before checking which one the function
+# under test actually reproduces. Verified 2026-09-22 by applying
+# mutations of `_shells_leg_samples`/`_tube_leg_samples` matching (a)/(b)
+# above IN PLACE to scripts/measure_route_clearance.py (the fixed file
+# backed up to a scratch copy and restored from it before commit): both
+# mutations move the reported clearance by centimeters, not
+# floating-point noise (outputs/handoff-2026-09-22-issue-137-tests.md).
+
+
+class TestShellsAperturePolicyCatchesAnInteriorMinimum:
+    """Priority 1, finding (a): a synthetic leg whose worst `finger` sample
+    is strictly inside it, not at either endpoint."""
+
+    #: A fixed REST arm pose; the "leg" is degenerate in ARM position (both
+    #: ends are the same q7) and spans the gripper's FULL commanded range --
+    #: isolating the aperture policy from any arm-position effect, so the
+    #: only thing that can move the worst sample around is the aperture
+    #: itself.
+    _POSE_A = {**{j: R.REST[j] for j in R.ARM7},
+              "r_gripper": _GRIPPER_SHUT_LIMIT_DEG}
+    _POSE_B = {**{j: R.REST[j] for j in R.ARM7},
+              "r_gripper": _GRIPPER_OPEN_LIMIT_DEG}
+    _STEPS = 200
+
+    def _probe_scene(self):
+        """B2's own objects, plus one small synthetic tracked sphere placed
+        at the `finger` capsule's own aperture-sweep position roughly
+        opposite the sweep's centroid -- the interior sample the sweep
+        actually passes closest to, found once by direct inspection of
+        `link_capsules`, not by calling anything under test."""
+        base = SceneModel.from_yaml(_B2_SCENE_PATH)
+        q7 = [R.REST[j] for j in R.ARM7]
+        n = self._STEPS
+        p0s = []
+        for i in range(n):
+            t = i / (n - 1)
+            g = (self._POSE_A["r_gripper"]
+                + t * (self._POSE_B["r_gripper"] - self._POSE_A["r_gripper"]))
+            (_name, p0, _p1, _rad) = [
+                c for c in link_capsules(q7, "right", g, hand="shells")
+                if c[0] == "finger"][0]
+            p0s.append(p0)
+        cx = sum(p[0] for p in p0s) / n
+        cy = sum(p[1] for p in p0s) / n
+        cz = sum(p[2] for p in p0s) / n
+        mx, my, mz = p0s[n // 2]
+        dx, dy, dz = mx - cx, my - cy, mz - cz
+        dn = math.sqrt(dx * dx + dy * dy + dz * dz)
+        offset = 0.02
+        center = (mx + offset * dx / dn, my + offset * dy / dn,
+                  mz + offset * dz / dn)
+        probe = SceneObject(id="probe_finger", kind="sphere", center=center,
+                            size=(0.006, 0.006, 0.006), dynamic=True,
+                            tracked=True)
+        return SceneModel(base.frame_id, list(base.objects.values()) + [probe],
+                          table_id=None)
+
+    def _worst_at_constant_gripper(self, scene, path, g_const):
+        best = None
+        for q in path:
+            caps = [c for c in link_capsules(q, "right", g_const, hand="shells")
+                    if c[0] == "finger"]
+            d = scene.clearances(caps)["probe_finger"].distance
+            if best is None or d < best:
+                best = d
+        return best
+
+    def _worst_interpolated(self, scene, path):
+        steps = len(path)
+        best = None
+        for i, q in enumerate(path):
+            t = i / (steps - 1)
+            g = (self._POSE_A["r_gripper"]
+                + t * (self._POSE_B["r_gripper"] - self._POSE_A["r_gripper"]))
+            caps = [c for c in link_capsules(q, "right", g, hand="shells")
+                    if c[0] == "finger"]
+            d = scene.clearances(caps)["probe_finger"].distance
+            if best is None or d < best:
+                best = d
+        return best
+
+    def test_worst_finger_sample_is_strictly_interior_to_the_leg(self, mrc):
+        """Ground truth, independent of the function under test: a dense
+        per-sample scan finds its minimum strictly between the two
+        endpoints -- the shape neither a start-held nor an endpoint-held
+        aperture can ever reproduce."""
+        scene = self._probe_scene()
+        qa = [self._POSE_A[j] for j in R.ARM7]
+        qb = [self._POSE_B[j] for j in R.ARM7]
+        path = joint_path(qa, qb, steps=self._STEPS)
+        best, best_i = None, None
+        for i, q in enumerate(path):
+            t = i / (self._STEPS - 1)
+            g = (self._POSE_A["r_gripper"]
+                + t * (self._POSE_B["r_gripper"] - self._POSE_A["r_gripper"]))
+            caps = [c for c in link_capsules(q, "right", g, hand="shells")
+                    if c[0] == "finger"]
+            d = scene.clearances(caps)["probe_finger"].distance
+            if best is None or d < best:
+                best, best_i = d, i
+        assert 0 < best_i < self._STEPS - 1, (
+            "the probe must sit where the aperture sweep's true worst "
+            "sample is strictly inside the leg, not at either endpoint -- "
+            f"got index {best_i} of {self._STEPS - 1}")
+
+    def test_planned_clearance_by_link_matches_interpolation_not_the_wrong_rules(
+            self, mrc):
+        """The actual assertion issue #137 asked for: `planned_clearance_by_link`
+        must match the true (dense, independently-computed) interpolated
+        worst case -- and that true worst must be strictly TIGHTER (a
+        smaller, more conservative number) than what either the
+        hold-at-start mutation or the old tube-style endpoint rule would
+        have reported here. Either wrong rule reporting a much LOOSER
+        clearance is exactly how a re-introduced version of the original
+        bug would look."""
+        scene = self._probe_scene()
+        qa = [self._POSE_A[j] for j in R.ARM7]
+        qb = [self._POSE_B[j] for j in R.ARM7]
+        path = joint_path(qa, qb, steps=self._STEPS)
+
+        true_worst = self._worst_interpolated(scene, path)
+        hold_at_start = self._worst_at_constant_gripper(
+            scene, path, self._POSE_A["r_gripper"])
+        old_endpoint_rule = self._worst_at_constant_gripper(
+            scene, path,
+            max(self._POSE_A["r_gripper"], self._POSE_B["r_gripper"],
+               key=hand_radius))
+
+        actual = mrc.planned_clearance_by_link(
+            "LOWER_TO_REST", self._STEPS, scene, "finger", hand="shells",
+            waypoints=(self._POSE_A, self._POSE_B))
+
+        assert actual["probe_finger"] == pytest.approx(true_worst)
+        assert true_worst < hold_at_start - 0.01, (
+            "holding aperture at the leg's start must miss this leg's "
+            "true worst sample by more than a centimetre")
+        assert true_worst < old_endpoint_rule - 0.01, (
+            "the old tube-style worst-endpoint rule must miss this leg's "
+            "true worst sample by more than a centimetre")
+
+
+class TestTubeApertureStaysPinnedToTheEndpointRule:
+    """Priority 1, finding (b): a synthetic leg where the arm actually
+    moves, with a probe placed at the interior arm position the sweep
+    passes closest to -- independent of aperture, since tube's capsule
+    POSITION never depends on gripper_deg (only its radius does; see
+    `link_capsules`'s tube branch). Pins tube to the worst-endpoint rule
+    and shows per-sample interpolation would report a much looser number
+    here."""
+
+    _POSE_A = {**{j: R.PRESENT[j] for j in R.ARM7},
+              "r_gripper": _GRIPPER_OPEN_LIMIT_DEG}
+    _POSE_B = {**{j: R.REST[j] for j in R.ARM7},
+              "r_gripper": _GRIPPER_SHUT_LIMIT_DEG}
+    _STEPS = 41
+
+    def _probe_scene(self):
+        qa = [self._POSE_A[j] for j in R.ARM7]
+        qb = [self._POSE_B[j] for j in R.ARM7]
+        path = joint_path(qa, qb, steps=self._STEPS)
+        mids = []
+        for q in path:
+            (_name, p0, p1, _rad) = [
+                c for c in link_capsules(q, "right", 0.0, hand="tube")
+                if c[0] == "hand"][0]
+            mids.append(tuple((a + b) / 2 for a, b in zip(p0, p1)))
+        n = len(mids)
+        cx = sum(m[0] for m in mids) / n
+        cy = sum(m[1] for m in mids) / n
+        cz = sum(m[2] for m in mids) / n
+        mx, my, mz = mids[n // 2]
+        dx, dy, dz = mx - cx, my - cy, mz - cz
+        dn = math.sqrt(dx * dx + dy * dy + dz * dz)
+        offset = 0.20
+        center = (mx + offset * dx / dn, my + offset * dy / dn,
+                  mz + offset * dz / dn)
+        probe = SceneObject(id="probe_tube", kind="sphere", center=center,
+                            size=(0.006, 0.006, 0.006), dynamic=True,
+                            tracked=True)
+        return SceneModel("pedestal", [probe], table_id=None)
+
+    def _worst_at_constant_gripper(self, scene, path, g_const):
+        best = None
+        for q in path:
+            caps = [c for c in link_capsules(q, "right", g_const, hand="tube")
+                    if c[0] == "hand"]
+            d = scene.clearances(caps)["probe_tube"].distance
+            if best is None or d < best:
+                best = d
+        return best
+
+    def _worst_interpolated(self, scene, path):
+        steps = len(path)
+        best = None
+        for i, q in enumerate(path):
+            t = i / (steps - 1)
+            g = (self._POSE_A["r_gripper"]
+                + t * (self._POSE_B["r_gripper"] - self._POSE_A["r_gripper"]))
+            caps = [c for c in link_capsules(q, "right", g, hand="tube")
+                    if c[0] == "hand"]
+            d = scene.clearances(caps)["probe_tube"].distance
+            if best is None or d < best:
+                best = d
+        return best
+
+    def test_geometric_closest_sample_is_strictly_interior(self, mrc):
+        """Ground truth, independent of the function under test: the
+        segment's own closest approach to the probe (aperture aside, since
+        tube's position never depends on it) sits strictly inside the leg
+        -- so a rule that only ever looks at the two endpoints is checking
+        the wrong place unless it happens to also be conservative there."""
+        scene = self._probe_scene()
+        qa = [self._POSE_A[j] for j in R.ARM7]
+        qb = [self._POSE_B[j] for j in R.ARM7]
+        path = joint_path(qa, qb, steps=self._STEPS)
+        best, best_i = None, None
+        for i, q in enumerate(path):
+            caps = [c for c in link_capsules(q, "right", 0.0, hand="tube")
+                    if c[0] == "hand"]
+            d = scene.clearances(caps)["probe_tube"].distance
+            if best is None or d < best:
+                best, best_i = d, i
+        assert 0 < best_i < self._STEPS - 1
+
+    def test_planned_clearance_matches_the_endpoint_rule_not_interpolation(
+            self, mrc):
+        scene = self._probe_scene()
+        qa = [self._POSE_A[j] for j in R.ARM7]
+        qb = [self._POSE_B[j] for j in R.ARM7]
+        path = joint_path(qa, qb, steps=self._STEPS)
+
+        a_r = hand_radius(self._POSE_A["r_gripper"], self._POSE_A["r_wrist_roll"])
+        b_r = hand_radius(self._POSE_B["r_gripper"], self._POSE_B["r_wrist_roll"])
+        worst_gripper = (self._POSE_A["r_gripper"] if a_r >= b_r
+                         else self._POSE_B["r_gripper"])
+
+        endpoint_worst = self._worst_at_constant_gripper(scene, path, worst_gripper)
+        interpolated_worst = self._worst_interpolated(scene, path)
+
+        actual = mrc.planned_clearance(
+            "LOWER_TO_REST", self._STEPS, scene,
+            waypoints=(self._POSE_A, self._POSE_B))
+
+        assert actual["tube"]["probe_tube"] == pytest.approx(endpoint_worst)
+        # Per-sample interpolation would report a much LOOSER (larger)
+        # clearance here -- proof a switch to it would be a real
+        # regression against this leg, not a no-op the way it is on every
+        # route/scene this repo already tests against.
+        assert interpolated_worst > endpoint_worst + 0.02, (
+            "interpolation must diverge from the endpoint rule by more "
+            "than 2 cm on this leg, or the probe isn't actually interior")
+
+
+class TestPlannedClearanceByLinkRejectsUnknownLinks:
+    """Priority 2, finding 1: `planned_clearance_by_link` used to return
+    `{}` silently for a link name no capsule of `hand` ever produces (e.g.
+    a typo like `"fingers"`) -- indistinguishable from a route with no
+    `FOOTPRINT_LEGS` entry. It must raise instead."""
+
+    def test_unknown_link_name_raises_valueerror(self, mrc):
+        scene = SceneModel.from_yaml(_B2_SCENE_PATH)
+        with pytest.raises(ValueError, match="fingers"):
+            mrc.planned_clearance_by_link(
+                "LOWER_TO_REST", 13, scene, "fingers", hand="shells")
+
+    def test_shells_only_link_raises_under_hand_tube(self, mrc):
+        """`"finger"` is a real capsule name -- just never one
+        `link_capsules(hand="tube")` produces (tube has exactly one
+        capsule, `"hand"`). Must raise the same way a nonsense name does,
+        not silently return `{}`."""
+        scene = SceneModel.from_yaml(_B2_SCENE_PATH)
+        with pytest.raises(ValueError, match="finger"):
+            mrc.planned_clearance_by_link(
+                "LOWER_TO_REST", 13, scene, "finger", hand="tube")
+
+    def test_invalid_hand_raises_valueerror(self, mrc):
+        scene = SceneModel.from_yaml(_B2_SCENE_PATH)
+        with pytest.raises(ValueError, match="hand"):
+            mrc.planned_clearance_by_link(
+                "LOWER_TO_REST", 13, scene, "hand", hand="tubes")
+
+    def test_unknown_link_raises_even_when_the_route_has_no_footprint_entry(
+            self, mrc):
+        """The check is about the caller's `link` argument, not about
+        whether there happen to be any samples to check it against -- it
+        must fire before the empty-waypoints early return, not be masked
+        by it."""
+        scene = SceneModel.from_yaml(_B2_SCENE_PATH)
+        with pytest.raises(ValueError):
+            mrc.planned_clearance_by_link("WAVE", 13, scene, "fingers")
+
+    def test_every_real_capsule_name_is_accepted_for_its_own_hand(self, mrc):
+        """The other direction of the same fix: a real capsule name must
+        never be rejected -- this is a targeted refusal, not a stricter
+        allowlist that happens to break real callers."""
+        scene = SceneModel.from_yaml(_B2_SCENE_PATH)
+        for hand, names in mrc._CAPSULE_NAMES_BY_HAND.items():
+            for link in names:
+                mrc.planned_clearance_by_link(
+                    "LOWER_TO_REST", 5, scene, link, hand=hand)  # must not raise
+
+    def test_capsule_names_by_hand_matches_link_capsules_reality(self, mrc):
+        """The allowlist itself must not drift from what `link_capsules`
+        actually produces -- checked directly against a real pose on both
+        hand models, rather than trusted as a hand-maintained constant."""
+        q7 = [R.REST[j] for j in R.ARM7]
+        for hand in mrc.HAND_MODES:
+            names = {c[0] for c in link_capsules(q7, "right", -30.0, hand=hand)}
+            assert names == mrc._CAPSULE_NAMES_BY_HAND[hand]
