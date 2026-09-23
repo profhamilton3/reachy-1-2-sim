@@ -197,8 +197,11 @@ the recording being compared flew the whole named route, not just its
 footprint.
 
 `main()` accepts `--report-scope {footprint,full}` (default `footprint`,
-preserving the stdout every earlier version printed) and passes
-`report_scope == "full"` as `report()`'s `full_route` argument, via
+which keeps the same report JSON every earlier version printed --
+`planned_route_scope` was already `FOOTPRINT_LEGS[route]`'s text; stdout
+now additionally gains a `Report scope: ...` line above the JSON, on every
+run, default included) and passes `report_scope == "full"` as `report()`'s
+`full_route` argument, via
 `resolve_full_route_flag` (issue #139). `--report-scope full` is refused
 -- before recording starts, not after a flight is thrown away -- for any
 `--route` with no `full_route_poses()` sequence (WAVE, POINT_*; see
@@ -908,10 +911,10 @@ def report(
     (the whole named route from its own departure posture) instead of
     `FOOTPRINT_LEGS`'s guard-scoped subset -- pass this when `samples` is a
     recording of the entire route (e.g. a "setup" flight from HOME), not
-    just its footprint-scoped leg. See the module docstring's "Route scope
-    in report()" section, including why this is a Python-API-only
-    parameter with no CLI flag. `planned_route_scope` in the result says
-    which one was actually used.
+    just its footprint-scoped leg. `main()`'s `--report-scope full` sets
+    this argument via `resolve_full_route_flag` (issue #139); see the
+    module docstring's "Route scope in report()" section. `planned_route_scope`
+    in the result says which one was actually used.
     """
     scene = SceneModel.from_yaml(scene_path)
     q7_and_gripper, assumed = validated_samples(
@@ -956,7 +959,8 @@ def main() -> None:
     parser.add_argument(
         "--report-scope", choices=("footprint", "full"), default="footprint",
         help="which planned-route comparison the printed report uses: "
-             "'footprint' (default, preserves prior stdout) compares "
+             "'footprint' (default, keeps the same report JSON as before; "
+             "stdout gains one 'Report scope: ...' line above it) compares "
              "against FOOTPRINT_LEGS[route], the live guard's own "
              "scoped subset; 'full' compares against "
              "full_route_poses(route), the whole named route from its own "

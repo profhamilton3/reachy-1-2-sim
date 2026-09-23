@@ -1444,11 +1444,12 @@ class TestReportScopeCLI:
         monkeypatch.setattr(mrc, "report", _spy)
         return calls
 
-    def test_default_report_scope_is_footprint_and_matches_prior_stdout(
+    def test_default_report_scope_is_footprint_and_keeps_prior_report_json(
             self, monkeypatch, mrc, tmp_path, capsys):
         """No `--report-scope` at all must still forward `full_route=False`
-        and print a `FOOTPRINT_LEGS`-scoped report -- the same shape `main()`
-        printed before this flag existed."""
+        and print a `FOOTPRINT_LEGS`-scoped report -- the same report JSON
+        `main()` printed before this flag existed, though stdout now gains
+        one `Report scope: ...` line above it."""
         self._stub_common(monkeypatch, mrc, tmp_path)
         calls = self._spy_on_report(monkeypatch, mrc)
         monkeypatch.setattr(
@@ -1491,20 +1492,32 @@ class TestReportScopeCLI:
             self, monkeypatch, mrc, tmp_path, capsys):
         """Even though argparse's own `--route` choices currently prevent a
         real CLI invocation from reaching `resolve_full_route_flag`'s
-        refusal, `main()` must still refuse BEFORE calling
-        `record_joint_log` if that mapping ever raises -- proven directly by
-        making it raise, the same way `TestLazySdkConstruction` proves
-        `ReachySDK` is never constructed before the loopback refusal."""
-        monkeypatch.setenv("REACHY_SIM_RECORD_CLEARANCE", "1")
-        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+        refusal, `main()` must still refuse BEFORE calling `record_joint_log`
+        -- or ever constructing `ReachySDK` -- if that mapping ever raises.
+        Proven through the REAL `resolve_full_route_flag`, not a stub of it:
+        `_FULL_ROUTE_WAYPOINTS` is monkeypatched to drop `LOWER_TO_REST`, so
+        the mapping's own membership check refuses it. Identity is stubbed
+        to succeed (`_stub_common`) precisely so that, if the refusal were
+        removed or moved past recording, the run would proceed all the way
+        to constructing the SDK and calling `record_joint_log` instead of
+        failing for an unrelated reason -- the same ordering guarantee
+        `TestLazySdkConstruction` proves for the identity check."""
+        self._stub_common(monkeypatch, mrc, tmp_path)
+        sdk_calls = []
+        monkeypatch.setattr(
+            mrc, "ReachySDK",
+            lambda host, sdk_port: (
+                sdk_calls.append((host, sdk_port)),
+                types.SimpleNamespace(r_arm=_StubArm(R.PRESENT)))[1])
         record_calls = []
         monkeypatch.setattr(
             mrc, "record_joint_log",
             lambda *a, **kw: record_calls.append((a, kw)) or [])
         monkeypatch.setattr(
-            mrc, "resolve_full_route_flag",
-            lambda route, scope: (_ for _ in ()).throw(
-                ValueError(f"no full sequence for {route!r}")))
+            mrc, "_FULL_ROUTE_WAYPOINTS",
+            {route: waypoints
+             for route, waypoints in mrc._FULL_ROUTE_WAYPOINTS.items()
+             if route != "LOWER_TO_REST"})
         monkeypatch.setattr(
             sys, "argv",
             ["measure_route_clearance.py", "--route", "LOWER_TO_REST",
@@ -1513,8 +1526,13 @@ class TestReportScopeCLI:
         with pytest.raises(SystemExit) as exc:
             mrc.main()
         assert exc.value.code == 2
+        assert sdk_calls == [], (
+            "ReachySDK must not be constructed once report-scope full has "
+            "been refused for this route")
         assert record_calls == [], (
             "record_joint_log must not run once the report-scope mapping "
             "has refused")
-        assert "FAIL" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert ("--report-scope full is not supported for route "
+                "'LOWER_TO_REST'") in out
         assert list(tmp_path.iterdir()) == []
