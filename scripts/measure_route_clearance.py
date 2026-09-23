@@ -171,10 +171,25 @@ outright, and it can never be accepted as usable E1 data.
 actually came from: `realised_aperture_source` (the measured, per-sample
 `r_gripper` reading -- see `realised_aperture_assumed_samples` for any
 indices that instead used the assumed-open fallback) and
-`planned_aperture_policy` (the per-leg worst-case commanded ENDPOINT
-aperture applied uniformly along that leg's interpolated samples, per
-`planned_clearance` below -- not a per-sample commanded value, since the
-guard itself only ever checks leg endpoints).
+`planned_aperture_policy` (see `planned_clearance` below for the two
+models' different rules -- tube's own worst-case ENDPOINT rule is
+conservative there, but is NOT conservative for shells, whose narrowest
+link (`finger`) is closest to an object when the aperture is SHUT, the
+opposite of the aperture `hand_radius` calls worst; root-caused
+2026-09-22, `outputs/analysis-2026-09-22-b2s2-finger-clearance-root-cause.md`).
+
+## Route scope in `report()`
+
+`FOOTPRINT_LEGS` is the live guard's own scope (`panel_executor`'s
+footprint check) and is never widened here. A realised log that flew a
+route's FULL sequence from its rest posture (e.g. a "setup" recording that
+starts at HOME, not at `FOOTPRINT_LEGS`'s own first waypoint) is not
+comparable to a `FOOTPRINT_LEGS`-scoped planned value -- the realised worst
+sample can fall on a waypoint the footprint never included (see the same
+analysis doc's §4). Pass `full_route=True` to `report()` (or
+`waypoints=full_route_poses(route)` to `planned_clearance` directly) when
+the recording being compared flew the whole named route, not just its
+footprint.
 
 Usage (operator flies the route by hand during --duration):
     export REACHY_SIM_RECORD_CLEARANCE=1
@@ -284,9 +299,15 @@ REALISED_APERTURE_SOURCE = (
 #: `report()`'s explanation of where its "planned" aperture comes from --
 #: the same policy `planned_clearance` implements, in one sentence.
 PLANNED_APERTURE_POLICY = (
-    "per FOOTPRINT_LEGS leg, the worst-case (largest-hand_radius) of that "
-    "leg's two commanded ENDPOINT apertures, applied to every interpolated "
-    "sample along the leg -- not a per-sample commanded value"
+    "per leg: tube uses the worst-case (largest-hand_radius) of that leg's "
+    "two commanded ENDPOINT apertures, applied to every interpolated "
+    "sample -- exact, because hand_radius is monotonic in aperture. shells "
+    "instead interpolates the aperture per sample, in lockstep with the arm "
+    "joints, matching what smooth_move actually commands -- holding shells "
+    "at an endpoint understated its worst case (finger is closest to the "
+    "table fully SHUT, not at the tube rule's worst-case OPEN); see "
+    "planned_clearance's own docstring and "
+    "outputs/analysis-2026-09-22-b2s2-finger-clearance-root-cause.md"
 )
 
 
@@ -604,35 +625,179 @@ def realised_clearance(
     return _worst_clearance_over_samples(q7_and_gripper, scene)
 
 
+#: Full flown waypoint sequence for each named route, starting pose
+#: included -- what a "setup"-style recording actually flies (the whole
+#: named route from its own rest posture), as distinct from
+#: `FOOTPRINT_LEGS`'s scoped-down subset (the live guard's own footprint,
+#: `panel_executor._footprint_refusal` -- never widened here). Each route's
+#: start pose is the posture the notebook and `rig_routes` already document
+#: it departing from: HOME for the two routes that leave the rail pocket,
+#: REST/PRESENT for the ones that start already on the board or at the side
+#: pose. See `full_route_poses`.
+_FULL_ROUTE_START_POSE: Dict[str, Dict[str, float]] = {
+    "PLACE_ROUTE": R.HOME,
+    "RAISE_TO_SIDE": R.HOME,
+    "STOW_ROUTE": R.REST,
+    "STOW_FROM_SIDE": R.PRESENT,
+    "LOWER_TO_REST": R.PRESENT,
+    "LIFT_TO_PRESENT": R.REST,
+}
+
+#: The named `Waypoint` sequence each route actually commands after its
+#: start pose (`_FULL_ROUTE_START_POSE`) -- the full sequence, not
+#: `FOOTPRINT_LEGS`'s subset.
+_FULL_ROUTE_WAYPOINTS: Dict[str, Tuple] = {
+    "PLACE_ROUTE": R.PLACE_ROUTE,
+    "RAISE_TO_SIDE": R.RAISE_TO_SIDE,
+    "STOW_ROUTE": R.STOW_ROUTE,
+    "STOW_FROM_SIDE": R.STOW_FROM_SIDE,
+    "LOWER_TO_REST": R.LOWER_TO_REST,
+    "LIFT_TO_PRESENT": R.LIFT_TO_PRESENT,
+}
+
+
+def full_route_poses(route: str) -> Tuple[Dict[str, float], ...]:
+    """The whole commanded pose sequence for `route`, start pose included --
+    what a recording that flew the entire named route (not just
+    `FOOTPRINT_LEGS`'s guard-scoped subset) actually commands. Raises
+    `KeyError` for a route with no measured full sequence (WAVE, POINT_*),
+    same as indexing `FOOTPRINT_LEGS` directly would.
+    """
+    return (_FULL_ROUTE_START_POSE[route],) + tuple(
+        w.pose for w in _FULL_ROUTE_WAYPOINTS[route])
+
+
+def _lerp(a: float, b: float, i: int, steps: int) -> float:
+    """`a` to `b` at step `i` of `steps` (endpoints included, `i` in
+    `range(steps)`) -- the exact fraction `joint_path` uses for the arm
+    joints, so a gripper value computed this way stays in lockstep with
+    them, matching what `smooth_move` actually commands (every joint in a
+    pose, gripper included, driven by the same fraction `t` each tick)."""
+    return a + (i / (steps - 1)) * (b - a)
+
+
+def _tube_leg_samples(waypoints: Sequence[Dict[str, float]], steps: int):
+    """(q7, gripper_deg) samples along `waypoints`'s legs under tube's own
+    worst-ENDPOINT aperture rule -- see `planned_clearance`'s docstring."""
+    for a, b in zip(waypoints, waypoints[1:]):
+        qa = [a[j] for j in R.ARM7]
+        qb = [b[j] for j in R.ARM7]
+        gripper_deg = max(a["r_gripper"], b["r_gripper"], key=hand_radius)
+        for q in joint_path(qa, qb, steps=steps):
+            yield q, gripper_deg
+
+
+def _shells_leg_samples(waypoints: Sequence[Dict[str, float]], steps: int):
+    """(q7, gripper_deg) samples along `waypoints`'s legs with the aperture
+    interpolated per sample, in lockstep with the arm joints -- see
+    `planned_clearance`'s docstring."""
+    for a, b in zip(waypoints, waypoints[1:]):
+        qa = [a[j] for j in R.ARM7]
+        qb = [b[j] for j in R.ARM7]
+        path = joint_path(qa, qb, steps=steps)
+        for i, q in enumerate(path):
+            gripper_deg = _lerp(a["r_gripper"], b["r_gripper"], i, steps)
+            yield q, gripper_deg
+
+
+_LEG_SAMPLES_BY_HAND = {"tube": _tube_leg_samples, "shells": _shells_leg_samples}
+
+
+def _resolve_waypoints(
+    route: str, waypoints: Optional[Sequence[Dict[str, float]]],
+) -> Optional[Sequence[Dict[str, float]]]:
+    if waypoints is not None:
+        return waypoints
+    return R.FOOTPRINT_LEGS.get(route)
+
+
+def planned_clearance_by_link(
+    route: str, n_samples: int, scene: SceneModel, link: str, *,
+    hand: str = "shells", waypoints: Optional[Sequence[Dict[str, float]]] = None,
+) -> Dict[str, float]:
+    """Like `planned_clearance`, but the worst-case is over a SINGLE named
+    link's own capsule (e.g. ``"finger"``) rather than the worst over every
+    capsule of `hand` together. Reusable per-link breakdown for exactly the
+    kind of question E1 stage-2 sessions needed answered ad hoc, per
+    session, in throwaway evidence-dir tooling -- this is the one, shared,
+    tested version, meant to replace those (see
+    `outputs/analysis-2026-09-22-b2s2-finger-clearance-root-cause.md`,
+    section 9). `hand="tube"` is accepted but not very meaningful: tube has
+    only one hand capsule (``"hand"``), so filtering to a link name there
+    either returns `planned_clearance`'s own tube numbers unchanged (that
+    link) or nothing (any other name).
+    """
+    resolved = _resolve_waypoints(route, waypoints)
+    if resolved is None:
+        return {}
+    steps = max(2, n_samples)
+    worst: Dict[str, float] = {}
+    for q7, gripper_deg in _LEG_SAMPLES_BY_HAND[hand](resolved, steps):
+        caps = [c for c in link_capsules(q7, "right", gripper_deg, hand=hand)
+                if c[0] == link]
+        for oid, c in scene.clearances(caps).items():
+            if worst.get(oid) is None or c.distance < worst[oid]:
+                worst[oid] = c.distance
+    return worst
+
+
 def planned_clearance(
-    route: str, n_samples: int, scene: SceneModel,
+    route: str, n_samples: int, scene: SceneModel, *,
+    waypoints: Optional[Sequence[Dict[str, float]]] = None,
 ) -> Dict[str, Dict[str, float]]:
     """Worst per-link clearance the COMMANDED path implies, sampled
-    `n_samples` times per leg of `route`'s own `FOOTPRINT_LEGS` entry -- the
-    same joint-space line `fly_route` actually commands. Routes with no
-    `FOOTPRINT_LEGS` entry (WAVE, POINT) return empty per-hand dicts: there
-    is nothing here to compare a realised log against for them.
+    `n_samples` times per leg of `waypoints` (default: `route`'s own
+    `FOOTPRINT_LEGS` entry) -- the same joint-space line `fly_route`
+    actually commands. Pass `waypoints=full_route_poses(route)` to compare
+    against the whole named route instead of the guard's footprint-scoped
+    subset (see the module docstring's "Route scope in report()"). Routes
+    with no `FOOTPRINT_LEGS` entry and no explicit `waypoints` (WAVE, POINT)
+    return empty per-hand dicts: there is nothing here to compare a
+    realised log against for them.
+
+    The two hand models use DIFFERENT aperture policies along each leg,
+    because they disagree on which endpoint is worse:
+
+    * ``tube``: the worst-case (largest-`hand_radius`) of the leg's two
+      commanded ENDPOINT apertures, held constant across every interpolated
+      sample on the leg. `hand_radius` is monotonic in how open the tube
+      is, so its own worst endpoint really is the worst point anywhere on
+      the leg -- holding it constant is exact, not an approximation.
+    * ``shells``: the aperture is interpolated per sample, in lockstep with
+      the arm joints (the same fraction `smooth_move` drives every
+      commanded joint, gripper included, by). Shells' `finger` capsule
+      swings about the thumb's X axis as the gripper opens and closes, and
+      is NOT monotonically closer to an object at either extreme -- on
+      `LOWER_TO_REST`, `finger` is closest to the table at the fully SHUT
+      aperture, the opposite of what `hand_radius` calls worst-case. Only
+      `finger` depends on aperture at all (`thumb`, `thumb_pad` and
+      `wrist_ball` ride the thumb frame); holding shells at the tube rule's
+      endpoint silently skips every SHUT sample in between, which is
+      exactly the bug root-caused 2026-09-22 (see
+      `outputs/analysis-2026-09-22-b2s2-finger-clearance-root-cause.md`).
     """
-    if route not in R.FOOTPRINT_LEGS:
+    resolved = _resolve_waypoints(route, waypoints)
+    if resolved is None:
         return {hand: {} for hand in HAND_MODES}
-    waypoints = R.FOOTPRINT_LEGS[route]
     steps = max(2, n_samples)
 
-    def samples():
-        for a, b in zip(waypoints, waypoints[1:]):
-            qa = [a[j] for j in R.ARM7]
-            qb = [b[j] for j in R.ARM7]
-            gripper_deg = max(a["r_gripper"], b["r_gripper"], key=hand_radius)
-            for q in joint_path(qa, qb, steps=steps):
-                yield q, gripper_deg
-
-    return _worst_clearance_over_samples(samples(), scene)
+    out: Dict[str, Dict[str, float]] = {}
+    for hand in HAND_MODES:
+        worst: Dict[str, float] = {}
+        for q7, gripper_deg in _LEG_SAMPLES_BY_HAND[hand](resolved, steps):
+            caps = link_capsules(q7, "right", gripper_deg, hand=hand)
+            for oid, c in scene.clearances(caps).items():
+                if worst.get(oid) is None or c.distance < worst[oid]:
+                    worst[oid] = c.distance
+        out[hand] = worst
+    return out
 
 
 def report(
     samples: List[Dict], route: str, scene_path: str, *,
     schema_version: int = LOG_SCHEMA_VERSION,
     allow_missing_aperture: bool = False,
+    full_route: bool = False,
 ) -> Dict:
     """The full report: realised vs planned, both hand models, for `route`
     against `scene_path`'s own object poses (as loaded -- this script has no
@@ -653,11 +818,20 @@ def report(
     `planned_aperture_policy` name, in plain text, where each half's
     aperture actually comes from -- see the module docstring's "Aperture
     provenance" section.
+
+    `full_route=True` compares `realised` against `full_route_poses(route)`
+    (the whole named route from its own rest posture) instead of
+    `FOOTPRINT_LEGS`'s guard-scoped subset -- pass this when `samples` is a
+    recording of the entire route (e.g. a "setup" flight from HOME), not
+    just its footprint-scoped leg. See the module docstring's "Route scope
+    in report()" section. `planned_route_scope` in the result says which
+    one was actually used.
     """
     scene = SceneModel.from_yaml(scene_path)
     q7_and_gripper, assumed = validated_samples(
         samples, schema_version=schema_version,
         allow_missing_aperture=allow_missing_aperture)
+    waypoints = full_route_poses(route) if full_route else None
     return {
         "route": route,
         "scene": scene_path,
@@ -665,8 +839,14 @@ def report(
         "realised": _worst_clearance_over_samples(q7_and_gripper, scene),
         "realised_aperture_assumed_samples": assumed,
         "realised_aperture_source": REALISED_APERTURE_SOURCE,
-        "planned": planned_clearance(route, len(samples), scene),
+        "planned": planned_clearance(route, len(samples), scene,
+                                      waypoints=waypoints),
         "planned_aperture_policy": PLANNED_APERTURE_POLICY,
+        "planned_route_scope": (
+            "full_route_poses(route) -- the whole named route from its own "
+            "rest posture" if full_route else
+            "FOOTPRINT_LEGS[route] -- the live guard's own footprint-scoped "
+            "subset"),
     }
 
 
