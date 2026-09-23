@@ -196,17 +196,26 @@ analysis doc's §4). Pass `full_route=True` to `report()` (or
 the recording being compared flew the whole named route, not just its
 footprint.
 
-`full_route` is a Python-API-only parameter -- there is no `--full-route`
-CLI flag, and `main()` never passes it. `main()` records whatever motion
-is flown during its `--duration` window, but the report it prints is
-ALWAYS `FOOTPRINT_LEGS`-scoped. That printed report is therefore not a
-valid plan-vs-realised comparison for a whole-route recording that
-starts at HOME -- e.g. the E1 campaign's PLACE_ROUTE (HOME->REST) and
-RAISE_TO_SIDE (HOME->PRESENT) legs, which `scripts/e1_stage1/leg.sh`
-records through `main()` -- where the realised worst can fall on a
-waypoint the footprint omits. Re-score such a saved log OFFLINE with
-`report(..., full_route=True)` from the Python API (issue #137,
-priority 2; explicit CLI report-scope selection is issue #139).
+`main()` accepts `--report-scope {footprint,full}` (default `footprint`,
+preserving the stdout every earlier version printed) and passes
+`report_scope == "full"` as `report()`'s `full_route` argument, via
+`resolve_full_route_flag` (issue #139). `--report-scope full` is refused
+-- before recording starts, not after a flight is thrown away -- for any
+`--route` with no `full_route_poses()` sequence (WAVE, POINT_*; see
+`resolve_full_route_flag`). The printed report always names its own scope
+plainly: `planned_route_scope` in the JSON result, echoed as a
+`Report scope: ...` line above it.
+
+`scripts/e1_stage1/leg.sh` (the E1 campaign) does not pass
+`--report-scope`, so it still gets `footprint` by default -- its
+whole-route legs (PLACE_ROUTE, RAISE_TO_SIDE, both starting at HOME,
+recorded through `main()`) still print a `FOOTPRINT_LEGS`-scoped report,
+the same mis-scoping issue #137 root-caused, where the realised worst can
+fall on a waypoint the footprint omits. Wiring `leg.sh`/`plan.py` to pass
+`--report-scope full` for those legs is its own decision, out of issue
+#139's scope. Until then, re-score a saved log OFFLINE with
+`report(..., full_route=True)` from the Python API (issue #137, priority
+2), or re-run `main()` by hand with `--report-scope full`.
 
 Usage (operator flies the route by hand during --duration):
     export REACHY_SIM_RECORD_CLEARANCE=1
@@ -686,6 +695,34 @@ def full_route_poses(route: str) -> Tuple[Dict[str, float], ...]:
         w.pose for w in _FULL_ROUTE_WAYPOINTS[route])
 
 
+def resolve_full_route_flag(route: str, report_scope: str) -> bool:
+    """Map `main()`'s `--report-scope` CLI choice to `report()`'s
+    `full_route` bool for `route`, refusing a `"full"` request `route` has
+    no `full_route_poses()` sequence for instead of letting it fail later
+    with a bare `KeyError` (issue #139).
+
+    Raises `ValueError` (never `KeyError`) naming `route` and the supported
+    set if `report_scope == "full"` but `route not in _FULL_ROUTE_WAYPOINTS`
+    -- today that is WAVE/POINT_* (see `full_route_poses`'s own docstring).
+    `main()`'s own `--route` choices are `sorted(R.FOOTPRINT_LEGS)`, which
+    happens to equal `_FULL_ROUTE_WAYPOINTS`'s keys today, so the CLI itself
+    cannot currently reach this refusal -- this function checks membership
+    directly rather than assume that will always hold (and is what the
+    refusal's own unit tests call directly, since argparse's `choices`
+    restriction on `--route` can't be exercised with an out-of-choices
+    route string). Called by `main()` before recording starts, so a bad
+    `--report-scope full --route <no-full-sequence>` combination is refused
+    up front, not after a flight is thrown away.
+    """
+    if report_scope == "full" and route not in _FULL_ROUTE_WAYPOINTS:
+        raise ValueError(
+            f"--report-scope full is not supported for route {route!r} -- "
+            "full_route_poses() has no full-route sequence for it (only "
+            f"{sorted(_FULL_ROUTE_WAYPOINTS)} do). Use --report-scope "
+            "footprint (the default) instead.")
+    return report_scope == "full"
+
+
 def _lerp(a: float, b: float, i: int, steps: int) -> float:
     """`a` to `b` at step `i` of `steps` (endpoints included, `i` in
     `range(steps)`) -- the exact fraction `joint_path` uses for the arm
@@ -916,6 +953,16 @@ def main() -> None:
     parser.add_argument("--host", default=os.environ.get("REACHY_IP", "localhost"))
     parser.add_argument("--port", type=int, default=50051)
     parser.add_argument("--route", required=True, choices=sorted(R.FOOTPRINT_LEGS))
+    parser.add_argument(
+        "--report-scope", choices=("footprint", "full"), default="footprint",
+        help="which planned-route comparison the printed report uses: "
+             "'footprint' (default, preserves prior stdout) compares "
+             "against FOOTPRINT_LEGS[route], the live guard's own "
+             "scoped subset; 'full' compares against "
+             "full_route_poses(route), the whole named route from its own "
+             "departure posture -- refused for a route with no full "
+             "sequence (WAVE, POINT_*). See report()'s full_route "
+             "parameter and resolve_full_route_flag.")
     parser.add_argument("--scene", default=str(
         _HERE.parent / "scenes" / "FWDCenterLabSivaPool.yaml"))
     parser.add_argument("--duration", type=float, default=15.0,
@@ -934,6 +981,12 @@ def main() -> None:
         help="the container camera server's /status endpoint (issue #40), "
              "used to confirm the bridge backend is mujoco-remote")
     args = parser.parse_args()
+
+    try:
+        full_route = resolve_full_route_flag(args.route, args.report_scope)
+    except ValueError as exc:
+        print(f"FAIL: {exc}")
+        sys.exit(2)
 
     if not args.record_root:
         print("FAIL: --record-root is required (or set REACHY_SIM_RECORD) "
@@ -1026,7 +1079,8 @@ def main() -> None:
                 print(f"  - {oid}: {check}")
         sys.exit(3)
 
-    result = report(samples, args.route, args.scene)
+    result = report(samples, args.route, args.scene, full_route=full_route)
+    print(f"Report scope: {result['planned_route_scope']}")
     print(json.dumps(result, indent=2))
 
 
