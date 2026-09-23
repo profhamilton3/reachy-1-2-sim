@@ -197,14 +197,16 @@ the recording being compared flew the whole named route, not just its
 footprint.
 
 `full_route` is a Python-API-only parameter -- there is no `--full-route`
-CLI flag, and `main()` never passes it. That is deliberate, not an
-oversight: `main()`'s own recording only ever flies a route's
-`FOOTPRINT_LEGS`-scoped subset (an operator flying the live guard's own
-footprint), so `full_route=True` would never be the right comparison for
-its own stdout report. The flag exists for OFFLINE re-scoring of an
-already-saved "setup"-style log against the whole named route -- called
-from the Python API directly (a notebook cell, a throwaway analysis
-script), not from this script's own CLI (issue #137, priority 2).
+CLI flag, and `main()` never passes it. `main()` records whatever motion
+is flown during its `--duration` window, but the report it prints is
+ALWAYS `FOOTPRINT_LEGS`-scoped. That printed report is therefore not a
+valid plan-vs-realised comparison for a whole-route recording that
+starts at HOME -- e.g. the E1 campaign's PLACE_ROUTE (HOME->REST) and
+RAISE_TO_SIDE (HOME->PRESENT) legs, which `scripts/e1_stage1/leg.sh`
+records through `main()` -- where the realised worst can fall on a
+waypoint the footprint omits. Re-score such a saved log OFFLINE with
+`report(..., full_route=True)` from the Python API (issue #137,
+priority 2; explicit CLI report-scope selection is issue #139).
 
 Usage (operator flies the route by hand during --duration):
     export REACHY_SIM_RECORD_CLEARANCE=1

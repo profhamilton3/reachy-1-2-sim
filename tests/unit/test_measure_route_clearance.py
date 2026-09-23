@@ -1070,9 +1070,11 @@ class TestB2S2FingerClearanceRootCause:
 # `planned_clearance`/`planned_clearance_by_link` -- then pin three
 # independently-computed numbers against each other (true interpolation,
 # hold-at-start, worst-endpoint) before checking which one the function
-# under test actually reproduces. Verified 2026-09-22 against scratch
+# under test actually reproduces. Verified 2026-09-22 by applying
 # mutations of `_shells_leg_samples`/`_tube_leg_samples` matching (a)/(b)
-# above: both mutations move the reported clearance by centimeters, not
+# above IN PLACE to scripts/measure_route_clearance.py (the fixed file
+# backed up to a scratch copy and restored from it before commit): both
+# mutations move the reported clearance by centimeters, not
 # floating-point noise (outputs/handoff-2026-09-22-issue-137-tests.md).
 
 
