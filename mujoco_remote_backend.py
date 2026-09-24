@@ -106,7 +106,9 @@ class MujocoRemoteBackend:
 
     def __init__(self, url: str = _MUJOCO_URL) -> None:
         self._url = url
-        self._lock = threading.Lock()
+        # Re-entrant: _send drains the pending queue and builds the command
+        # under one hold, and _build_command/latest_snapshot take it too.
+        self._lock = threading.RLock()
         self._snapshot = RemoteSnapshot()
         self._conn_state = ConnectionState.CONNECTING
         self._cmd_seq = 0
@@ -117,6 +119,25 @@ class MujocoRemoteBackend:
         # that flips in→out→in before the next send tick wants the final state.
         self._pending_zoom: Optional[str] = None
         self._last_target: Optional[List[float]] = None
+        # The goal each joint REPORTS (per protocol index): the latest goal the
+        # bridge accepted, whether or not it has been sent yet.  None = no goal
+        # known, which reports the present position.  Reporting the present
+        # position unconditionally was the bug: reachy_sdk caches the reported
+        # goal, starts every goto from it, and could echo it back as a setpoint.
+        self._reported_goal: List[Optional[float]] = [None] * len(JOINT_DEFS)
+        # The last compliance value this bridge SENT per joint (None = none
+        # since the baseline).  A state saying "compliant" can arrive after a
+        # stiffening command was sent; this keeps that stale flag from moving
+        # the joint's target.
+        self._cmd_compliant: List[Optional[bool]] = [None] * len(JOINT_DEFS)
+        # Seeding the command baseline.  The native server starts, and restarts
+        # after every reset, with each goal equal to the current pose
+        # (sync_targets_to_current), so the bridge's baseline is the pose of the
+        # first state of a session or the first post-reset state.
+        self._seed_pending = True
+        self._awaiting_reset = False
+        self._reset_ack_step: Optional[int] = None
+        self._last_sim_step: Optional[int] = None
         self._shutdown = threading.Event()
         self._reconnect_count = 0
 
@@ -133,6 +154,13 @@ class MujocoRemoteBackend:
         # Reset acknowledgement (Gate 8-D).
         self._pending_reset_id: Optional[str] = None
         self._reset_ack_event: threading.Event = threading.Event()
+        # True once a real reset_ack matching _pending_reset_id has arrived,
+        # False once the timeout aborts it, None while a reset is still in
+        # flight (or none was ever requested).  _reset_ack_event alone can't
+        # carry this: _on_reset_timeout also sets it, so a caller that only
+        # checks "is the event set" cannot tell a genuine ack from a refused
+        # or unacknowledged reset (B1) -- wait_for_reset() checks this too.
+        self._reset_ok: Optional[bool] = None
         # Timeout for waiting on a reset ack (seconds).
         self._reset_timeout: float = float(
             os.environ.get("REACHY_SIM_RESET_TIMEOUT_S", "5.0")
@@ -150,15 +178,32 @@ class MujocoRemoteBackend:
         with self._lock:
             self._pending_reset = True
             self._pending_reset_id = rid
-            self._last_target = None    # re-seed goals from the post-reset pose
+            # A command still queued (not yet built/sent) belongs to the
+            # pre-reset baseline -- the native server drops it too (#116).
+            # Only commands submitted AFTER this point are held and sent
+            # onto the post-reset pose (B2: these used to survive and be
+            # replayed, and reported, against the wrong baseline).
+            self._pending_cmds = []
+            # Re-seed goals from the post-reset pose.  Commands wait for it.
+            self._unseed_locked()
+            self._awaiting_reset = True
+            self._reset_ack_step = None
             self._conn_state = ConnectionState.RESETTING
+            self._reset_ok = None
         self._reset_ack_event.clear()
         return self._reset_ack_event
 
     def wait_for_reset(self, timeout: Optional[float] = None) -> bool:
-        """Block until a reset_ack is received.  Returns True on success."""
+        """Block until a reset_ack arrives or the reset is aborted.
+
+        Returns True only when a real reset_ack matching the request was
+        received -- never on a timeout/abort, even though that also sets
+        the event (so waiters don't hang; see _on_reset_timeout).
+        """
         t = timeout if timeout is not None else self._reset_timeout
-        return self._reset_ack_event.wait(timeout=t)
+        self._reset_ack_event.wait(timeout=t)
+        with self._lock:
+            return self._reset_ok is True
 
     # ── Public API (same shape as KinematicBackend) ───────────────────────
 
@@ -178,10 +223,48 @@ class MujocoRemoteBackend:
     def submit_command(self, cmd: JointCommand) -> None:
         with self._lock:
             self._pending_cmds.append(cmd)
+            self._accept_goal_locked(cmd)
 
     def submit_commands(self, cmds: List[JointCommand]) -> None:
         with self._lock:
             self._pending_cmds.extend(cmds)
+            for cmd in cmds:
+                self._accept_goal_locked(cmd)
+
+    def _accept_goal_locked(self, cmd: JointCommand) -> None:
+        idx = self._uid_to_idx.get(cmd.uid)
+        if idx is not None and cmd.goal_position is not None:
+            self._reported_goal[idx] = float(cmd.goal_position)
+
+    def _unseed_locked(self) -> None:
+        """Forget every commanded and reported goal; the next baseline state re-seeds them."""
+        self._last_target = None
+        self._reported_goal = [None] * len(JOINT_DEFS)
+        self._cmd_compliant = [None] * len(JOINT_DEFS)
+        self._seed_pending = True
+
+    def _seed_locked(self, positions: Dict[int, float]) -> None:
+        """Baseline = this state's pose, with any goal still waiting to be sent on top."""
+        base = [0.0] * len(JOINT_DEFS)
+        for idx, pos in positions.items():
+            base[idx] = pos
+        self._last_target = list(base)
+        self._reported_goal = list(base)
+        for cmd in self._pending_cmds:
+            self._accept_goal_locked(cmd)
+        self._seed_pending = False
+        self._awaiting_reset = False
+        self._reset_ack_step = None
+
+    def _joint_is_compliant_locked(self, idx: int) -> bool:
+        """Compliant by the native state, and not since stiffened by this bridge."""
+        if self._cmd_compliant[idx] is False:
+            return False
+        uid = self._idx_to_uid.get(idx)
+        for s in self._snapshot.joints.values():
+            if s.uid == uid:
+                return s.compliant
+        return False
 
     def request_zoom(self, level: str) -> None:
         """Ask the native server to change the camera zoom level (R12-605).
@@ -225,18 +308,49 @@ class MujocoRemoteBackend:
         finally:
             loop.close()
 
-    def _on_reset_timeout(self) -> None:
-        """Called from the asyncio event loop when a reset_ack does not arrive in time."""
+    def _on_reset_timeout(self, rid: Optional[str] = None) -> None:
+        """Called from the asyncio event loop when a reset_ack does not arrive in time.
+
+        Gated on `_pending_reset_id` (and, when known, the specific request id
+        this timer was scheduled for) -- NOT on `_conn_state`, and (N1, PR #141
+        re-review) NOT on `_awaiting_reset` either.  `_awaiting_reset` is
+        cleared by `_seed_locked` as soon as the first post-reset state
+        arrives, which under real traffic can happen well before its own
+        genuine reset_ack (the native server queues states and acks
+        separately).  Gating the timeout on it made this a no-op whenever
+        that state won the race, so a reset whose ack was then lost outright
+        would stay unresolved (`_reset_ok=None`) forever instead of settling
+        to a bounded failure.  `_pending_reset_id` alone is still correct: it
+        is cleared ONLY by a matching ack or a firing timeout, so a
+        stale/mismatched timer (an earlier reset a reconnect or a later reset
+        already resolved) still can't abort a different, still-pending reset.
+        `rid=None` (manual/legacy call) matches whatever reset is pending.
+        """
         with self._lock:
-            if self._conn_state == ConnectionState.RESETTING:
+            if (self._pending_reset_id is not None
+                    and (rid is None or self._pending_reset_id == rid)):
                 log.error(
                     "Reset ack timed out after %.1f s — entering ABORTED state",
                     self._reset_timeout,
                 )
                 self._conn_state = ConnectionState.ABORTED
                 self._pending_reset_id = None
-        # Signal waiters so they don't hang; they can check connection_state.
-        self._reset_ack_event.set()
+                self._reset_ok = False
+                # Whether the reset happened is unknown: take the very next
+                # state as the baseline rather than waiting on a reset that
+                # may never show (_track_goals_locked's post_reset check
+                # includes `not self._awaiting_reset`).  Goals stay unseeded
+                # (present) until that state arrives.  Idempotent: the state
+                # may already have cleared this (see above), and the timeout
+                # must still settle `_reset_ok` to False either way.
+                self._awaiting_reset = False
+                # Signal waiters so they don't hang; they can check
+                # connection_state and wait_for_reset()'s return value (not
+                # just that the event fired).  Scoped to the abort branch: a
+                # stale/mismatched timer (an earlier reset a reconnect or a
+                # later reset already resolved) must not wake a waiter on a
+                # DIFFERENT, still-genuinely-pending reset early.
+                self._reset_ack_event.set()
 
     async def _connect_loop(self) -> None:
         import websockets
@@ -274,6 +388,13 @@ class MujocoRemoteBackend:
                  ack.get("sim_fps", 0), ack.get("camera_fps", 0))
         with self._lock:
             self._conn_state = ConnectionState.READY
+            # A new session may be a new native process whose goals are its
+            # current pose.  Never replay the previous session's targets to it:
+            # re-seed from this session's first state.
+            self._unseed_locked()
+            self._awaiting_reset = False
+            self._reset_ack_step = None
+            self._last_sim_step = None
 
         last_hb = time.monotonic()
 
@@ -303,13 +424,41 @@ class MujocoRemoteBackend:
 
                 elif mtype == "reset_ack":
                     req_id = msg.get("request_id", "")
+                    matched = False
                     with self._lock:
-                        if (self._conn_state == ConnectionState.RESETTING
+                        # Matched on _pending_reset_id alone, not
+                        # _conn_state and (N1, PR #141 re-review) not
+                        # _awaiting_reset either.
+                        #
+                        # Not _conn_state: _ingest_state flips _conn_state
+                        # back to READY on any state message (including a
+                        # pre-reset one that keeps arriving while a reset is
+                        # refused/delayed), so a real ack can land well after
+                        # _conn_state has already left RESETTING.
+                        #
+                        # Not _awaiting_reset: the native server queues
+                        # states and acks separately, so the first post-reset
+                        # state can arrive and seed the baseline -- which
+                        # clears _awaiting_reset via _seed_locked -- before
+                        # its OWN genuine ack does.  Gating the match on
+                        # _awaiting_reset made that ordering fall into the
+                        # "unexpected" branch below and leave a successful
+                        # reset's _reset_ok stuck at None forever (N1).
+                        # _pending_reset_id is cleared ONLY here or by a
+                        # firing timeout, so it alone is still sufficient to
+                        # refuse a stale/mismatched/duplicate/late
+                        # (post-timeout) ack: those never carry the current
+                        # pending id.
+                        if (self._pending_reset_id is not None
                                 and req_id == self._pending_reset_id):
+                            if self._awaiting_reset:
+                                self._reset_ack_step = int(msg.get("sim_step", 0))
                             self._conn_state = ConnectionState.READY
                             self._pending_reset_id = None
-                            # _last_target is already None; it will be re-seeded
-                            # from the post-reset pose on the next command.
+                            self._reset_ok = True
+                            matched = True
+                            # _last_target is already None; it is re-seeded from
+                            # the first post-reset state (see _ingest_state).
                             log.info(
                                 "Reset ack received (id=%s sim_step=%s)",
                                 req_id, msg.get("sim_step"),
@@ -319,7 +468,16 @@ class MujocoRemoteBackend:
                                 "Unexpected reset_ack id=%s (expected %s)",
                                 req_id, self._pending_reset_id,
                             )
-                    self._reset_ack_event.set()
+                    # Only a matched ack wakes a waiter.  An unmatched/late
+                    # one must not set the event early for a DIFFERENT,
+                    # still-genuinely-pending reset -- that waiter would then
+                    # read _reset_ok=None and report failure for its OWN,
+                    # still-in-flight reset (PR #141 re-review, Non-blocking
+                    # #1).  A matched-but-late (post-timeout) ack can't reach
+                    # here at all: the timeout already cleared
+                    # _pending_reset_id, so it falls into the else branch too.
+                    if matched:
+                        self._reset_ack_event.set()
 
                 elif mtype == "shutdown":
                     log.info("Server sent shutdown: %s", msg.get("reason", ""))
@@ -337,20 +495,27 @@ class MujocoRemoteBackend:
                     reset_id = self._pending_reset_id if do_reset else None
                     if do_reset:
                         self._pending_reset = False
-                    # Hold commands during reset — keep them in _pending_cmds.
-                    if not resetting:
+                    # Hold commands during reset — keep them in _pending_cmds —
+                    # and until a baseline state has seeded the goals, so a
+                    # command is never built on a pre-reset or previous-session
+                    # pose.  Drained and built under this one hold, so a goal
+                    # accepted meanwhile is never overwritten by the build.
+                    built = None
+                    if not resetting and self._last_target is not None and self._pending_cmds:
                         cmds = list(self._pending_cmds)
                         self._pending_cmds.clear()
-                    else:
-                        cmds = []
+                        built = self._build_command(cmds)
 
                 if do_reset and reset_id:
                     await ws.send(json.dumps(
                         {"type": "reset", "request_id": reset_id}
                     ))
-                    # Schedule a timeout: if no ack in time, abort.
+                    # Schedule a timeout: if no ack in time, abort.  Bound to
+                    # this specific request id so a stale timer from an
+                    # earlier reset (e.g. one a reconnect already resolved)
+                    # can never abort a later, unrelated one.
                     asyncio.get_event_loop().call_later(
-                        self._reset_timeout, self._on_reset_timeout
+                        self._reset_timeout, self._on_reset_timeout, reset_id
                     )
 
                 # R12-605: forward a requested zoom level.  Sent outside the
@@ -364,8 +529,8 @@ class MujocoRemoteBackend:
                     ))
                     log.info("Zoom command forwarded: %s", zoom)
 
-                if cmds:
-                    target, compliant, speed, torque = self._build_command(cmds)
+                if built is not None:
+                    target, compliant, speed, torque = built
                     self._cmd_seq += 1
                     cmd_msg = {
                         "type": "joint_command",
@@ -401,6 +566,7 @@ class MujocoRemoteBackend:
                 position_rad=float(j.get("position_rad", 0.0)),
                 velocity_rad_s=float(j.get("velocity_rad_s", 0.0)),
                 effort=float(j.get("effort", 0.0)),
+                compliant=bool(j.get("compliant", False)),
             )
             joints[name] = sample
 
@@ -443,9 +609,39 @@ class MujocoRemoteBackend:
             objects=objects,
             interactive=interactive,
         )
+        positions = {self._uid_to_idx[s.uid]: s.position_rad
+                     for s in joints.values() if s.uid in self._uid_to_idx}
         with self._lock:
             self._snapshot = snap
             self._conn_state = ConnectionState.READY
+            self._track_goals_locked(snap.sim_step, positions, joints)
+
+    def _track_goals_locked(self, sim_step: int, positions: Dict[int, float],
+                            joints: Dict[str, RemoteJointSample]) -> None:
+        # sim_step only rises within an episode and restarts at 0 on a native
+        # reset, so a step that does not rise marks the first post-reset state
+        # -- whoever asked for the reset.  The reset_ack alone cannot: the
+        # native server queues states and acks separately, so pre-reset states
+        # can still arrive after the ack.
+        restarted = self._last_sim_step is not None and sim_step <= self._last_sim_step
+        self._last_sim_step = sim_step
+        if restarted and not self._seed_pending:
+            self._unseed_locked()
+        if self._seed_pending:
+            post_reset = (not self._awaiting_reset or restarted
+                          or (self._reset_ack_step is not None
+                              and sim_step <= self._reset_ack_step))
+            if positions and post_reset:
+                self._seed_locked(positions)
+            return
+        # A compliant joint's native goal tracks its pose, so its target does
+        # too: stiffening it later holds it where it is instead of snapping it
+        # back to a goal from before it went compliant.
+        for s in joints.values():
+            idx = self._uid_to_idx.get(s.uid)
+            if idx is not None and s.compliant and self._cmd_compliant[idx] is not False:
+                self._last_target[idx] = s.position_rad
+                self._reported_goal[idx] = s.position_rad
 
     def _ingest_camera_frame(self, msg: dict) -> None:
         cam = msg.get("camera", "")
@@ -477,36 +673,65 @@ class MujocoRemoteBackend:
         # their commanded goal.  (Seeding from current positions instead let
         # unspecified joints — e.g. the neck — ratchet toward wherever gravity
         # had dragged them, since every arm command re-sent their sagging
-        # position as the goal.)  First call seeds from the current pose.
-        if self._last_target is None:
-            with self._lock:
-                snap = self._snapshot
-            self._last_target = [0.0] * 21
-            for name, sample in snap.joints.items():
-                idx = self._uid_to_idx.get(sample.uid)
-                if idx is not None:
-                    self._last_target[idx] = sample.position_rad
-        target = list(self._last_target)
+        # position as the goal.)  _send only builds once a baseline state has
+        # seeded _last_target; a direct call before that seeds from the
+        # current snapshot, as it always has.
+        with self._lock:
+            if self._last_target is None:
+                positions = {self._uid_to_idx[s.uid]: s.position_rad
+                             for s in self._snapshot.joints.values()
+                             if s.uid in self._uid_to_idx}
+                self._seed_locked(positions)
+            present = {self._uid_to_idx[s.uid]: s.position_rad
+                       for s in self._snapshot.joints.values()
+                       if s.uid in self._uid_to_idx}
+            target = list(self._last_target)
 
-        compliant: List[Optional[bool]] = [None] * 21
-        speed: List[Optional[float]] = [None] * 21
-        torque: List[Optional[float]] = [None] * 21
+            compliant: List[Optional[bool]] = [None] * 21
+            speed: List[Optional[float]] = [None] * 21
+            torque: List[Optional[float]] = [None] * 21
+            goal_later = {self._uid_to_idx.get(c.uid) for c in self._pending_cmds
+                          if c.goal_position is not None}
 
-        for cmd in cmds:
-            idx = self._uid_to_idx.get(cmd.uid)
-            if idx is None:
-                continue
-            if cmd.goal_position is not None:
-                target[idx] = float(cmd.goal_position)
-            if cmd.compliant is not None:
-                compliant[idx] = bool(cmd.compliant)
-            if cmd.speed_limit is not None:
-                speed[idx] = float(cmd.speed_limit)
-            if cmd.torque_limit is not None:
-                torque[idx] = float(cmd.torque_limit)
+            for k, cmd in enumerate(cmds):
+                idx = self._uid_to_idx.get(cmd.uid)
+                if idx is None:
+                    continue
+                if cmd.goal_position is not None:
+                    target[idx] = float(cmd.goal_position)
+                if cmd.compliant is not None:
+                    compliant[idx] = bool(cmd.compliant)
+                    # Stiffening a compliant joint with no goal holds it where
+                    # it is -- what the SDK's own turn_on assumes when it sets
+                    # its local goal to the present position -- rather than
+                    # driving it back to a target from before it went
+                    # compliant.  An already-stiff joint keeps its target.
+                    if (cmd.compliant is False and cmd.goal_position is None
+                            and self._joint_is_compliant_locked(idx) and idx in present):
+                        target[idx] = present[idx]
+                        later = any(c.goal_position is not None
+                                    and self._uid_to_idx.get(c.uid) == idx
+                                    for c in cmds[k + 1:])
+                        if not later and idx not in goal_later:
+                            self._reported_goal[idx] = present[idx]
+                    self._cmd_compliant[idx] = bool(cmd.compliant)
+                if cmd.speed_limit is not None:
+                    speed[idx] = float(cmd.speed_limit)
+                if cmd.torque_limit is not None:
+                    torque[idx] = float(cmd.torque_limit)
 
-        self._last_target = list(target)
-        return target, compliant, speed, torque
+            self._last_target = list(target)
+            return target, compliant, speed, torque
+
+    def reported_goals(self) -> List[float]:
+        """Per protocol index, the goal each joint reports: the latest accepted
+        goal, else the present position."""
+        with self._lock:
+            present = {self._uid_to_idx[s.uid]: s.position_rad
+                       for s in self._snapshot.joints.values()
+                       if s.uid in self._uid_to_idx}
+            return [g if g is not None else present.get(i, 0.0)
+                    for i, g in enumerate(self._reported_goal)]
 
     # ── SimulationSnapshot bridge (for fake_reachy_server compatibility) ─
 
@@ -517,17 +742,22 @@ class MujocoRemoteBackend:
         matching exactly what KinematicBackend.latest_snapshot() returns — so
         FakeJointService and state_file_writer work with either backend.
         """
-        remote = self.latest_snapshot()
+        with self._lock:
+            remote = self.latest_snapshot()
+            goals = self.reported_goals()
         joints: Dict[str, JointSample] = {}
         seen_names: set = set()
 
         for name, s in remote.joints.items():
             seen_names.add(name)
+            idx = self._uid_to_idx.get(s.uid)
             joints[name] = JointSample(
                 name=name,
                 uid=s.uid,
                 present_position=s.position_rad,
-                goal_position=s.position_rad,
+                # The goal the joint was last given (see _reported_goal), not
+                # its present position.
+                goal_position=goals[idx] if idx is not None else s.position_rad,
                 present_speed=s.velocity_rad_s,
                 present_load=s.effort,
                 temperature=35.0,
