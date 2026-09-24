@@ -249,7 +249,20 @@ def test_goto_starts_from_last_goal_not_present(make_rig):
     first2 = _arm(_commands(rig.stub, a2, b2)[0])
     assert max(abs(x - y) for x, y in zip(last1, _rad(HOVERISH))) < 1e-3, \
         "the first goto did not end on its goal"
-    allow = _skew(last1, _rad(REST_SHUTISH), 1.0)
+    # N2 (PR #141 re-review, 2026-09-24): _skew's own tolerance is TOL
+    # (1e-5 rad) for a joint _skew judges to have barely moved yet at
+    # `lag` -- that is only float32-round-trip margin, no allowance for
+    # scheduling jitter in when this test's OWN observer (not the bridge)
+    # samples the first logged command.  A measured run failed one such
+    # joint at 1.055e-05 rad against a 1.0006e-05 rad bound, a 5% overshoot
+    # on an assertion meant to catch a ~1e-2 rad sag (100x END_TOL) --
+    # i.e. real jitter, not the bug.  Flooring the bound at END_TOL
+    # (1e-4 rad) keeps the movement-based term for joints that actually
+    # move (it already exceeds END_TOL there) while giving barely-moving
+    # joints the same justified floor test_kinematic_backend_through_the_
+    # same_path's B3 fix uses, with the same 100x margin below the sag
+    # this test targets.
+    allow = [max(a, END_TOL) for a in _skew(last1, _rad(REST_SHUTISH), 1.0)]
     worst = max(range(8), key=lambda k: abs(first2[k] - last1[k]) - allow[k])
     assert abs(first2[worst] - last1[worst]) < allow[worst], (
         f"C1: the second goto started {math.degrees(first2[worst] - last1[worst]):+.3f} deg "

@@ -311,18 +311,23 @@ class MujocoRemoteBackend:
     def _on_reset_timeout(self, rid: Optional[str] = None) -> None:
         """Called from the asyncio event loop when a reset_ack does not arrive in time.
 
-        Gated on `_awaiting_reset` (and, when known, the specific request id
-        this timer was scheduled for) -- NOT on `_conn_state`.  Under real
-        traffic `_ingest_state` flips `_conn_state` back to READY on every
-        state message, including a pre-reset one that arrives while a reset
-        is refused (B1): a `_conn_state == RESETTING` check is almost never
-        still true by the time this fires, so the timeout silently never ran,
-        `_awaiting_reset` stayed True forever, nothing ever re-seeded, and
-        every subsequent command was held in `_pending_cmds` without bound.
+        Gated on `_pending_reset_id` (and, when known, the specific request id
+        this timer was scheduled for) -- NOT on `_conn_state`, and (N1, PR #141
+        re-review) NOT on `_awaiting_reset` either.  `_awaiting_reset` is
+        cleared by `_seed_locked` as soon as the first post-reset state
+        arrives, which under real traffic can happen well before its own
+        genuine reset_ack (the native server queues states and acks
+        separately).  Gating the timeout on it made this a no-op whenever
+        that state won the race, so a reset whose ack was then lost outright
+        would stay unresolved (`_reset_ok=None`) forever instead of settling
+        to a bounded failure.  `_pending_reset_id` alone is still correct: it
+        is cleared ONLY by a matching ack or a firing timeout, so a
+        stale/mismatched timer (an earlier reset a reconnect or a later reset
+        already resolved) still can't abort a different, still-pending reset.
         `rid=None` (manual/legacy call) matches whatever reset is pending.
         """
         with self._lock:
-            if (self._awaiting_reset and self._pending_reset_id is not None
+            if (self._pending_reset_id is not None
                     and (rid is None or self._pending_reset_id == rid)):
                 log.error(
                     "Reset ack timed out after %.1f s — entering ABORTED state",
@@ -335,7 +340,9 @@ class MujocoRemoteBackend:
                 # state as the baseline rather than waiting on a reset that
                 # may never show (_track_goals_locked's post_reset check
                 # includes `not self._awaiting_reset`).  Goals stay unseeded
-                # (present) until that state arrives.
+                # (present) until that state arrives.  Idempotent: the state
+                # may already have cleared this (see above), and the timeout
+                # must still settle `_reset_ok` to False either way.
                 self._awaiting_reset = False
                 # Signal waiters so they don't hang; they can check
                 # connection_state and wait_for_reset()'s return value (not
@@ -417,21 +424,39 @@ class MujocoRemoteBackend:
 
                 elif mtype == "reset_ack":
                     req_id = msg.get("request_id", "")
+                    matched = False
                     with self._lock:
-                        # Recorded and matched on _awaiting_reset + the id
-                        # alone, not _conn_state: _ingest_state flips
-                        # _conn_state back to READY on any state message
-                        # (including a pre-reset one that keeps arriving
-                        # while a reset is refused/delayed), so a real ack
-                        # can land well after _conn_state has already left
-                        # RESETTING.  A _conn_state-gated check would then
-                        # log this as "unexpected" and never clear
-                        # _pending_reset_id/_awaiting_reset for a genuine ack.
-                        if self._awaiting_reset and req_id == self._pending_reset_id:
-                            self._reset_ack_step = int(msg.get("sim_step", 0))
+                        # Matched on _pending_reset_id alone, not
+                        # _conn_state and (N1, PR #141 re-review) not
+                        # _awaiting_reset either.
+                        #
+                        # Not _conn_state: _ingest_state flips _conn_state
+                        # back to READY on any state message (including a
+                        # pre-reset one that keeps arriving while a reset is
+                        # refused/delayed), so a real ack can land well after
+                        # _conn_state has already left RESETTING.
+                        #
+                        # Not _awaiting_reset: the native server queues
+                        # states and acks separately, so the first post-reset
+                        # state can arrive and seed the baseline -- which
+                        # clears _awaiting_reset via _seed_locked -- before
+                        # its OWN genuine ack does.  Gating the match on
+                        # _awaiting_reset made that ordering fall into the
+                        # "unexpected" branch below and leave a successful
+                        # reset's _reset_ok stuck at None forever (N1).
+                        # _pending_reset_id is cleared ONLY here or by a
+                        # firing timeout, so it alone is still sufficient to
+                        # refuse a stale/mismatched/duplicate/late
+                        # (post-timeout) ack: those never carry the current
+                        # pending id.
+                        if (self._pending_reset_id is not None
+                                and req_id == self._pending_reset_id):
+                            if self._awaiting_reset:
+                                self._reset_ack_step = int(msg.get("sim_step", 0))
                             self._conn_state = ConnectionState.READY
                             self._pending_reset_id = None
                             self._reset_ok = True
+                            matched = True
                             # _last_target is already None; it is re-seeded from
                             # the first post-reset state (see _ingest_state).
                             log.info(
@@ -443,7 +468,16 @@ class MujocoRemoteBackend:
                                 "Unexpected reset_ack id=%s (expected %s)",
                                 req_id, self._pending_reset_id,
                             )
-                    self._reset_ack_event.set()
+                    # Only a matched ack wakes a waiter.  An unmatched/late
+                    # one must not set the event early for a DIFFERENT,
+                    # still-genuinely-pending reset -- that waiter would then
+                    # read _reset_ok=None and report failure for its OWN,
+                    # still-in-flight reset (PR #141 re-review, Non-blocking
+                    # #1).  A matched-but-late (post-timeout) ack can't reach
+                    # here at all: the timeout already cleared
+                    # _pending_reset_id, so it falls into the else branch too.
+                    if matched:
+                        self._reset_ack_event.set()
 
                 elif mtype == "shutdown":
                     log.info("Server sent shutdown: %s", msg.get("reason", ""))
