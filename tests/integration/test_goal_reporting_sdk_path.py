@@ -570,7 +570,13 @@ def test_new_client_mid_run_starts_from_last_goal(make_rig):
     rig_motion.sdk_move(second.r_arm, REST_SHUTISH, 0.6)
     time.sleep(0.12)
     first = _arm(_commands(rig.stub, a)[0])
-    allow = _skew(_rad(HOVERISH), _rad(REST_SHUTISH), 0.6)
+    # NB2 (PR #141 re-review, 2026-09-24, issue #142): same justification as
+    # N2's fix to test_goto_starts_from_last_goal_not_present above -- _skew's
+    # own TOL (1e-5 rad) floor is only float32-round-trip margin, with no
+    # allowance for this test's own sampling jitter. Failed 1/20 isolated
+    # runs at aa83903 (assert at this line). Flooring at END_TOL (1e-4 rad)
+    # keeps the same 100x margin below the ~1e-2 rad sag this test targets.
+    allow = [max(a, END_TOL) for a in _skew(_rad(HOVERISH), _rad(REST_SHUTISH), 0.6)]
     assert all(abs(x - y) < e for x, y, e in zip(first, _rad(HOVERISH), allow))
 
 
