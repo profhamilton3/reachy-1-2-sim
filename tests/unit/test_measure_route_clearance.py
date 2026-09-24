@@ -1378,3 +1378,161 @@ class TestPlannedClearanceByLinkRejectsUnknownLinks:
         for hand in mrc.HAND_MODES:
             names = {c[0] for c in link_capsules(q7, "right", -30.0, hand=hand)}
             assert names == mrc._CAPSULE_NAMES_BY_HAND[hand]
+
+
+class TestResolveFullRouteFlag:
+    """`resolve_full_route_flag` (issue #139): the pure mapping `main()`
+    uses to turn `--report-scope` into `report()`'s `full_route` bool,
+    tested directly against every route rather than only through the CLI --
+    `main()`'s own `--route` argparse `choices` are `sorted(R.FOOTPRINT_LEGS)`,
+    which today equals `_FULL_ROUTE_WAYPOINTS`'s keys exactly, so a real CLI
+    invocation can never reach the refusal below (see the function's own
+    docstring); calling the function directly with "WAVE" (a real route with
+    no `FOOTPRINT_LEGS`/full-route entry, already used the same way by
+    `TestPlannedClearanceByLinkRejectsUnknownLinks` above) is what actually
+    exercises it."""
+
+    def test_footprint_scope_never_raises_regardless_of_route(self, mrc):
+        assert mrc.resolve_full_route_flag("LOWER_TO_REST", "footprint") is False
+        assert mrc.resolve_full_route_flag("WAVE", "footprint") is False
+
+    def test_full_scope_maps_true_for_every_route_with_a_full_sequence(self, mrc):
+        for route in mrc._FULL_ROUTE_WAYPOINTS:
+            assert mrc.resolve_full_route_flag(route, "full") is True
+
+    def test_full_scope_refuses_a_route_with_no_full_sequence(self, mrc):
+        with pytest.raises(ValueError, match="WAVE"):
+            mrc.resolve_full_route_flag("WAVE", "full")
+
+    def test_refusal_message_names_the_supported_routes(self, mrc):
+        with pytest.raises(ValueError) as exc:
+            mrc.resolve_full_route_flag("WAVE", "full")
+        for route in sorted(mrc._FULL_ROUTE_WAYPOINTS):
+            assert route in str(exc.value)
+
+
+class TestReportScopeCLI:
+    """`main()`'s `--report-scope` flag end to end (issue #139): default
+    compatibility, explicit full-route forwarding into `report()`, argparse
+    validation, and that an unsupported combination is refused before
+    `record_joint_log` ever runs -- the same ordering guarantee
+    `TestLazySdkConstruction` already proves for the identity check."""
+
+    def _stub_common(self, monkeypatch, mrc, tmp_path):
+        monkeypatch.setenv("REACHY_SIM_RECORD_CLEARANCE", "1")
+        monkeypatch.setattr(mrc, "RUNS_DIR", tmp_path)
+        monkeypatch.setattr(
+            mrc, "ReachySDK",
+            lambda host, sdk_port: types.SimpleNamespace(
+                r_arm=_StubArm(R.PRESENT)))
+        _stub_identity_ok(monkeypatch, mrc)
+        monkeypatch.setattr(
+            mrc.link_e1_flight, "build_base_sidecar",
+            lambda **kw: {"settled_pose_check": {}})
+
+    def _spy_on_report(self, monkeypatch, mrc):
+        """Wraps the real `report()` so its own behaviour (already covered
+        elsewhere) still runs and main() completes normally, while
+        recording the kwargs each call actually received."""
+        calls = []
+        orig_report = mrc.report
+
+        def _spy(*args, **kwargs):
+            calls.append(kwargs)
+            return orig_report(*args, **kwargs)
+
+        monkeypatch.setattr(mrc, "report", _spy)
+        return calls
+
+    def test_default_report_scope_is_footprint_and_keeps_prior_report_json(
+            self, monkeypatch, mrc, tmp_path, capsys):
+        """No `--report-scope` at all must still forward `full_route=False`
+        and print a `FOOTPRINT_LEGS`-scoped report -- the same report JSON
+        `main()` printed before this flag existed, though stdout now gains
+        one `Report scope: ...` line above it."""
+        self._stub_common(monkeypatch, mrc, tmp_path)
+        calls = self._spy_on_report(monkeypatch, mrc)
+        monkeypatch.setattr(
+            sys, "argv",
+            ["measure_route_clearance.py", "--route", "LOWER_TO_REST",
+             "--duration", "0.05", "--record-root", str(tmp_path)])
+        mrc.main()
+        assert calls == [{"full_route": False}]
+        out = capsys.readouterr().out
+        assert "Report scope: FOOTPRINT_LEGS[route]" in out
+
+    def test_report_scope_full_forwards_full_route_true(
+            self, monkeypatch, mrc, tmp_path, capsys):
+        self._stub_common(monkeypatch, mrc, tmp_path)
+        calls = self._spy_on_report(monkeypatch, mrc)
+        monkeypatch.setattr(
+            sys, "argv",
+            ["measure_route_clearance.py", "--route", "LOWER_TO_REST",
+             "--report-scope", "full", "--duration", "0.05",
+             "--record-root", str(tmp_path)])
+        mrc.main()
+        assert calls == [{"full_route": True}]
+        out = capsys.readouterr().out
+        assert "Report scope: full_route_poses(route)" in out
+
+    def test_invalid_report_scope_value_is_rejected_by_argparse(
+            self, monkeypatch, mrc, tmp_path, capsys):
+        monkeypatch.setenv("REACHY_SIM_RECORD_CLEARANCE", "1")
+        monkeypatch.setattr(
+            sys, "argv",
+            ["measure_route_clearance.py", "--route", "LOWER_TO_REST",
+             "--report-scope", "bogus", "--duration", "0.05",
+             "--record-root", str(tmp_path)])
+        with pytest.raises(SystemExit) as exc:
+            mrc.main()
+        assert exc.value.code == 2
+        assert "report-scope" in capsys.readouterr().err
+
+    def test_main_rejects_an_unsupported_full_route_request_before_recording(
+            self, monkeypatch, mrc, tmp_path, capsys):
+        """Even though argparse's own `--route` choices currently prevent a
+        real CLI invocation from reaching `resolve_full_route_flag`'s
+        refusal, `main()` must still refuse BEFORE calling `record_joint_log`
+        -- or ever constructing `ReachySDK` -- if that mapping ever raises.
+        Proven through the REAL `resolve_full_route_flag`, not a stub of it:
+        `_FULL_ROUTE_WAYPOINTS` is monkeypatched to drop `LOWER_TO_REST`, so
+        the mapping's own membership check refuses it. Identity is stubbed
+        to succeed (`_stub_common`) precisely so that, if the refusal were
+        removed or moved past recording, the run would proceed all the way
+        to constructing the SDK and calling `record_joint_log` instead of
+        failing for an unrelated reason -- the same ordering guarantee
+        `TestLazySdkConstruction` proves for the identity check."""
+        self._stub_common(monkeypatch, mrc, tmp_path)
+        sdk_calls = []
+        monkeypatch.setattr(
+            mrc, "ReachySDK",
+            lambda host, sdk_port: (
+                sdk_calls.append((host, sdk_port)),
+                types.SimpleNamespace(r_arm=_StubArm(R.PRESENT)))[1])
+        record_calls = []
+        monkeypatch.setattr(
+            mrc, "record_joint_log",
+            lambda *a, **kw: record_calls.append((a, kw)) or [])
+        monkeypatch.setattr(
+            mrc, "_FULL_ROUTE_WAYPOINTS",
+            {route: waypoints
+             for route, waypoints in mrc._FULL_ROUTE_WAYPOINTS.items()
+             if route != "LOWER_TO_REST"})
+        monkeypatch.setattr(
+            sys, "argv",
+            ["measure_route_clearance.py", "--route", "LOWER_TO_REST",
+             "--report-scope", "full", "--duration", "0.05",
+             "--record-root", str(tmp_path)])
+        with pytest.raises(SystemExit) as exc:
+            mrc.main()
+        assert exc.value.code == 2
+        assert sdk_calls == [], (
+            "ReachySDK must not be constructed once report-scope full has "
+            "been refused for this route")
+        assert record_calls == [], (
+            "record_joint_log must not run once the report-scope mapping "
+            "has refused")
+        out = capsys.readouterr().out
+        assert ("--report-scope full is not supported for route "
+                "'LOWER_TO_REST'") in out
+        assert list(tmp_path.iterdir()) == []
