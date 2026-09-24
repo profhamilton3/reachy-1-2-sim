@@ -198,19 +198,53 @@ def _ts() -> Timestamp:
     return Timestamp(seconds=int(t), nanos=int((t % 1) * 1e9))
 
 
-def _sample_to_proto(s: JointSample) -> joint_pb2.JointState:
-    return joint_pb2.JointState(
-        name=s.name,
-        uid=UInt32Value(value=s.uid),
-        present_position=FloatValue(value=s.present_position),
-        present_speed=FloatValue(value=s.present_speed),
-        present_load=FloatValue(value=s.present_load),
-        temperature=FloatValue(value=s.temperature),
-        compliant=BoolValue(value=s.compliant),
-        goal_position=FloatValue(value=s.goal_position),
-        speed_limit=FloatValue(value=s.speed_limit),
-        torque_limit=FloatValue(value=s.torque_limit),
-    )
+#: JointField enum name -> JointState field.  PID is not modelled here.
+_JOINT_FIELDS = {
+    "NAME": "name",
+    "UID": "uid",
+    "PRESENT_POSITION": "present_position",
+    "PRESENT_SPEED": "present_speed",
+    "PRESENT_LOAD": "present_load",
+    "TEMPERATURE": "temperature",
+    "COMPLIANT": "compliant",
+    "GOAL_POSITION": "goal_position",
+    "SPEED_LIMIT": "speed_limit",
+    "TORQUE_LIMIT": "torque_limit",
+}
+_ALL_FIELDS = frozenset(_JOINT_FIELDS.values())
+
+
+def _requested_fields(requested) -> frozenset:
+    """The JointState fields a request asked for.
+
+    Honoured, not ignored: reachy_sdk's 100 Hz stream asks for the present
+    position, speed and load only, and caches every field it receives.  Sending
+    goal_position and compliant on that stream as well overwrote the SDK's own
+    last-written goal with whatever the backend reported -- under mujoco-remote
+    the present pose -- so goto started from where the arm had sagged to, and a
+    goal written just before a state update was sent as the present pose.
+    ALL, or an empty list (older callers), means every field; NONE means none.
+    """
+    names = {joint_pb2.JointField.Name(f) for f in requested}
+    if not names or "ALL" in names:
+        return _ALL_FIELDS
+    return frozenset(_JOINT_FIELDS[n] for n in names if n in _JOINT_FIELDS)
+
+
+def _sample_to_proto(s: JointSample, fields: frozenset = _ALL_FIELDS) -> joint_pb2.JointState:
+    values = {
+        "name": s.name,
+        "uid": UInt32Value(value=s.uid),
+        "present_position": FloatValue(value=s.present_position),
+        "present_speed": FloatValue(value=s.present_speed),
+        "present_load": FloatValue(value=s.present_load),
+        "temperature": FloatValue(value=s.temperature),
+        "compliant": BoolValue(value=s.compliant),
+        "goal_position": FloatValue(value=s.goal_position),
+        "speed_limit": FloatValue(value=s.speed_limit),
+        "torque_limit": FloatValue(value=s.torque_limit),
+    }
+    return joint_pb2.JointState(**{k: v for k, v in values.items() if k in fields})
 
 
 # ── gRPC adapters ─────────────────────────────────────────────────────────────
@@ -245,8 +279,9 @@ class FakeJointService(joint_pb2_grpc.JointServiceServicer):
     def GetJointsState(self, request, context):
         snap = self._backend.latest_snapshot()
         samples = self._resolve(request.ids, snap)
+        fields = _requested_fields(request.requested_fields)
         ids = [joint_pb2.JointId(uid=s.uid) for s in samples]
-        states = [_sample_to_proto(s) for s in samples]
+        states = [_sample_to_proto(s, fields) for s in samples]
         return joint_pb2.JointsState(ids=ids, states=states, timestamp=_ts())
 
     def StreamJointsState(self, request, context):
@@ -255,11 +290,12 @@ class FakeJointService(joint_pb2_grpc.JointServiceServicer):
         dt = 1.0 / freq
         init_snap = self._backend.latest_snapshot()
         requested_names = [s.name for s in self._resolve(request.request.ids, init_snap)]
+        fields = _requested_fields(request.request.requested_fields)
         while context.is_active():
             snap = self._backend.latest_snapshot()
             samples = [snap.joints[n] for n in requested_names if n in snap.joints]
             ids = [joint_pb2.JointId(uid=s.uid) for s in samples]
-            states = [_sample_to_proto(s) for s in samples]
+            states = [_sample_to_proto(s, fields) for s in samples]
             yield joint_pb2.JointsState(ids=ids, states=states, timestamp=_ts())
             time.sleep(dt)
 
