@@ -881,6 +881,294 @@ class TestResetAckStateOrdering:
         assert state == ConnectionState.READY
 
 
+@pytest.mark.skipif(not _WEBSOCKETS_AVAILABLE, reason="websockets not installed")
+class TestResetAckCrossRequestIsolation:
+    """Issue #142 (NB1, PR #141 re-review): only a MATCHED reset_ack may wake
+    a waiter (see `if matched: self._reset_ack_event.set()` in `_session()`).
+    An unmatched one -- a duplicate of an earlier, already-acked request, or
+    one superseded by a newer pending request -- must fall through to the
+    "Unexpected reset_ack" branch and never fire the event for whichever
+    reset is pending NOW. Reverting that `if matched:` guard (mutant 1: set
+    the event on every reset_ack) is exactly the regression these two tests
+    catch: the committed suite passed with it reverted before this file
+    existed.
+    """
+
+    def _run_duplicate_ack_stub(self, host: str, port: int, stop_event: threading.Event,
+                                 resend_delay_s: float) -> None:
+        """hello_ack, then: 1st `reset` gets a real ack immediately; 2nd
+        `reset` gets a RESEND of the 1st request's (now stale) ack first,
+        and its own genuine ack only after `resend_delay_s`."""
+        import websockets as ws_mod
+
+        async def _handler(ws):
+            raw = await ws.recv()
+            msg = json.loads(raw)
+            assert msg.get("type") == "hello"
+            await ws.send(json.dumps({
+                "type": "hello_ack", "sim_fps": 500, "camera_fps": 15, "num_joints": 21,
+            }))
+
+            def _ack(req_id, step):
+                return json.dumps({
+                    "type": "reset_ack", "request_id": req_id,
+                    "sim_step": step, "scene_revision": "stub",
+                })
+
+            first_id = None
+            async for raw in ws:
+                msg = json.loads(raw)
+                mtype = msg.get("type")
+                if mtype == "reset":
+                    req_id = msg.get("request_id", "")
+                    if first_id is None:
+                        first_id = req_id
+                        await ws.send(_ack(req_id, 0))
+                    else:
+                        await ws.send(_ack(first_id, 0))          # duplicate, stale
+                        await asyncio.sleep(resend_delay_s)
+                        await ws.send(_ack(req_id, 0))             # genuine, current
+                elif mtype in ("heartbeat", "heartbeat_ack", "joint_command"):
+                    pass
+
+        async def _serve():
+            async with ws_mod.serve(_handler, host, port):
+                await asyncio.get_event_loop().run_in_executor(None, stop_event.wait)
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_serve())
+        loop.close()
+
+    def test_duplicate_ack_does_not_wake_a_later_pending_reset(self):
+        import random
+        port = random.randint(23000, 24999)
+        host = "127.0.0.1"
+        stop_event = threading.Event()
+        server_thread = threading.Thread(
+            target=self._run_duplicate_ack_stub, args=(host, port, stop_event, 0.15),
+            daemon=True,
+        )
+        server_thread.start()
+        time.sleep(0.1)
+
+        backend = MujocoRemoteBackend(url=f"ws://{host}:{port}")
+        backend.start()
+        time.sleep(0.2)
+        try:
+            assert backend.connection_state == ConnectionState.READY
+
+            backend.request_reset()                    # A
+            assert backend.wait_for_reset(timeout=3.0) is True
+
+            event_b = backend.request_reset()           # B
+            time.sleep(0.05)   # well before resend_delay_s (0.15s)
+            assert not event_b.is_set(), \
+                "a duplicate ack for the superseded request A must not wake B's waiter"
+            ok = backend.wait_for_reset(timeout=3.0)
+            assert ok is True, "B's own genuine ack must still confirm the reset"
+        finally:
+            backend.stop()
+            stop_event.set()
+            server_thread.join(timeout=2.0)
+
+    def _run_superseded_ack_stub(self, host: str, port: int, stop_event: threading.Event,
+                                  a_ack_delay_s: float, b_ack_delay_s: float) -> None:
+        """A pre-reset baseline state, then: the 1st `reset`'s (A) genuine
+        ack is delayed; the 2nd `reset`'s (B) post-reset state is sent
+        BEFORE B's own (also delayed, but sooner-scheduled-to-land-later)
+        ack -- so A's stale ack lands while B is the pending request."""
+        import websockets as ws_mod
+
+        async def _handler(ws):
+            raw = await ws.recv()
+            msg = json.loads(raw)
+            assert msg.get("type") == "hello"
+            await ws.send(json.dumps({
+                "type": "hello_ack", "sim_fps": 500, "camera_fps": 15, "num_joints": 21,
+            }))
+
+            def _state(step):
+                return json.dumps({
+                    "type": "state", "seq": step, "sim_step": step,
+                    "sim_time_s": step * 0.02,
+                    "joints": [{"name": n, "uid": u, "position_rad": 0.0,
+                                "velocity_rad_s": 0.0, "effort": 0.0,
+                                "compliant": False}
+                               for n, u in JOINT_DEFS],
+                })
+
+            def _ack(req_id, step):
+                return json.dumps({
+                    "type": "reset_ack", "request_id": req_id,
+                    "sim_step": step, "scene_revision": "stub",
+                })
+
+            async def _delayed_send(payload, delay):
+                await asyncio.sleep(delay)
+                await ws.send(payload)
+
+            await ws.send(_state(10))   # pre-reset baseline: makes sim_step=0 below a restart
+
+            pending = []
+            async for raw in ws:
+                msg = json.loads(raw)
+                mtype = msg.get("type")
+                if mtype == "reset":
+                    req_id = msg.get("request_id", "")
+                    if not pending:
+                        pending.append(req_id)
+                        asyncio.ensure_future(_delayed_send(_ack(req_id, 0), a_ack_delay_s))
+                    else:
+                        await ws.send(_state(0))
+                        asyncio.ensure_future(_delayed_send(_ack(req_id, 0), b_ack_delay_s))
+                elif mtype in ("heartbeat", "heartbeat_ack", "joint_command"):
+                    pass
+
+        async def _serve():
+            async with ws_mod.serve(_handler, host, port):
+                await asyncio.get_event_loop().run_in_executor(None, stop_event.wait)
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_serve())
+        loop.close()
+
+    def test_superseded_ack_does_not_wake_the_newer_pending_reset(self):
+        import random
+        port = random.randint(25000, 26999)
+        host = "127.0.0.1"
+        stop_event = threading.Event()
+        server_thread = threading.Thread(
+            target=self._run_superseded_ack_stub,
+            args=(host, port, stop_event, 0.35, 0.5),
+            daemon=True,
+        )
+        server_thread.start()
+        time.sleep(0.1)
+
+        backend = MujocoRemoteBackend(url=f"ws://{host}:{port}")
+        backend.start()
+        time.sleep(0.2)
+        try:
+            assert backend.connection_state == ConnectionState.READY
+
+            backend.request_reset()               # A: its genuine ack lands at ~0.35s
+            time.sleep(0.05)
+            event_b = backend.request_reset()      # B supersedes A before A is acked
+
+            # By 0.5s: A's stale ack (~0.35s after A) and B's post-reset
+            # state (sent immediately on receipt) have both landed; B's own
+            # ack (~0.5s after B) has not.  Neither of the first two may
+            # wake B's waiter.
+            time.sleep(0.45)
+            assert not event_b.is_set(), "A's superseded ack must not wake B's waiter"
+
+            ok = backend.wait_for_reset(timeout=3.0)
+            assert ok is True, "B's own genuine ack must still confirm the reset"
+        finally:
+            backend.stop()
+            stop_event.set()
+            server_thread.join(timeout=2.0)
+
+
+@pytest.mark.skipif(not _WEBSOCKETS_AVAILABLE, reason="websockets not installed")
+class TestResetTimeoutAfterLostAck:
+    """Issue #142 (NB1, PR #141 re-review): a genuine reset whose post-reset
+    state arrives (clearing `_awaiting_reset` via `_seed_locked`) but whose
+    `reset_ack` is then lost outright must still settle to a bounded
+    failure. `_on_reset_timeout` is gated on `_pending_reset_id` alone (see
+    mujoco_remote_backend.py); re-adding `self._awaiting_reset and` to that
+    gate (mutant 2) makes it a permanent no-op once the state has already
+    cleared `_awaiting_reset` -- exactly this scenario -- so `_reset_ok`
+    never settles and `_pending_reset_id` is never cleared.
+    """
+
+    def _run_lost_ack_stub(self, host: str, port: int, stop_event: threading.Event) -> None:
+        """hello_ack, a pre-reset baseline state, then on `reset` sends only
+        the post-reset (step-drop) state -- no reset_ack, ever."""
+        import websockets as ws_mod
+
+        async def _handler(ws):
+            raw = await ws.recv()
+            msg = json.loads(raw)
+            assert msg.get("type") == "hello"
+            await ws.send(json.dumps({
+                "type": "hello_ack", "sim_fps": 500, "camera_fps": 15, "num_joints": 21,
+            }))
+
+            def _state(step):
+                return json.dumps({
+                    "type": "state", "seq": step, "sim_step": step,
+                    "sim_time_s": step * 0.02,
+                    "joints": [{"name": n, "uid": u, "position_rad": 0.0,
+                                "velocity_rad_s": 0.0, "effort": 0.0,
+                                "compliant": False}
+                               for n, u in JOINT_DEFS],
+                })
+
+            await ws.send(_state(10))
+            async for raw in ws:
+                msg = json.loads(raw)
+                mtype = msg.get("type")
+                if mtype == "reset":
+                    await ws.send(_state(0))   # genuine step drop; ack never sent
+                elif mtype in ("heartbeat", "heartbeat_ack", "joint_command"):
+                    pass
+
+        async def _serve():
+            async with ws_mod.serve(_handler, host, port):
+                await asyncio.get_event_loop().run_in_executor(None, stop_event.wait)
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_serve())
+        loop.close()
+
+    def test_post_reset_state_with_no_ack_times_out(self):
+        import random
+        port = random.randint(27000, 28999)
+        host = "127.0.0.1"
+        stop_event = threading.Event()
+        server_thread = threading.Thread(
+            target=self._run_lost_ack_stub, args=(host, port, stop_event),
+            daemon=True,
+        )
+        server_thread.start()
+        time.sleep(0.1)
+
+        backend = MujocoRemoteBackend(url=f"ws://{host}:{port}")
+        backend._reset_timeout = 0.3   # keep the test fast; the watcher's own bound is 6s
+        backend.start()
+        time.sleep(0.2)
+        try:
+            assert backend.connection_state == ConnectionState.READY
+
+            backend.request_reset()
+            started = time.monotonic()
+            ok = backend.wait_for_reset(timeout=2.0)
+            elapsed = time.monotonic() - started
+
+            assert ok is False
+            assert elapsed < 1.0, \
+                "must settle within _reset_timeout (0.3s), well before the watcher's 6s bound"
+            with backend._lock:
+                assert backend._pending_reset_id is None
+                assert backend._reset_ok is False
+
+            # Commands keep flowing on the post-reset baseline.
+            backend.submit_command(JointCommand(uid=10, goal_position=0.3))
+
+            def _drained():
+                with backend._lock:
+                    return len(backend._pending_cmds) == 0 and backend._last_target is not None
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and not _drained():
+                time.sleep(0.02)
+            assert _drained(), "commands stayed queued without bound after the lost ack"
+        finally:
+            backend.stop()
+            stop_event.set()
+            server_thread.join(timeout=2.0)
+
+
 # ── #40: frame-source sidecar ───────────────────────────────────────────────────
 
 class TestCameraFrameMeta:
