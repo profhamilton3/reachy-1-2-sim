@@ -6,9 +6,15 @@ and its own header for the fix this module implements).
 container (`fake_reachy_server.py`, mujoco-remote backend only) and polls
 for a generation token dropped at `REACHY_SIM_RESET_REQUEST` (default
 /tmp/reachy_reset_request). On a valid token it triggers an acknowledged
-physics reset and publishes the same token to `REACHY_SIM_RESET_ACK`
-(default /tmp/reachy_reset_ack) so `reset.sh` can confirm completion
-without a fixed sleep.
+physics reset and, only if the backend confirms the reset actually
+happened, publishes the same token to `REACHY_SIM_RESET_ACK` (default
+/tmp/reachy_reset_ack) so `reset.sh` and `request_reset_and_wait()` can
+confirm completion without a fixed sleep. A refused or unacknowledged
+reset (PR #141 review, B1: the native server can refuse with
+`control_held` while an execution lease is held, and keeps streaming
+state throughout) publishes nothing -- callers already bound their own
+wait and fail closed on a missing/mismatched ack rather than being told a
+reset happened that did not.
 
 Kept dependency-light (stdlib only) and separate from fake_reachy_server.py
 (which pulls in grpc/reachy_sdk_api/scipy/numpy and the rest of the fake
@@ -128,11 +134,26 @@ def reset_watcher_step(
             log.debug("reset_watcher: ignoring empty/malformed request %r", raw)
         return None
     req_path.unlink(missing_ok=True)
-    event = remote.request_reset()
-    ok = event.wait(timeout=6.0)
+    remote.request_reset()
+    # wait_for_reset() (not the bare event) is the success signal: the
+    # backend also sets the event on a timeout/abort so a waiter never
+    # hangs, so "the event fired" and "the reset actually happened" are
+    # different questions -- see MujocoRemoteBackend.wait_for_reset (B1).
+    ok = remote.wait_for_reset(timeout=6.0)
     if not ok:
-        log.warning("reset_watcher: reset ack timed out")
-    # Write the ack generation (even on timeout so the demo doesn't hang).
+        # Never publish the success token for a reset that was refused or
+        # never acknowledged: reset.sh and demo_control_panel.py's
+        # request_reset_and_wait() treat a matching ack as confirmation and
+        # move immediately, so a false ack here previously meant the caller
+        # believed the reset happened and started moving into unreset state.
+        # Both callers already bound their own wait (reset.sh's 30 x 0.5 s
+        # poll, request_reset_and_wait's `timeout`), so withholding the ack
+        # does not hang them -- they simply see it never arrive and fail
+        # closed (reset.sh's independent reset_verify.py check is the
+        # authority regardless of what this ack said).
+        log.warning("reset_watcher: reset ack timed out or was refused; "
+                    "not publishing an ack for generation %r", gen)
+        return gen
     try:
         atomic_write_text(ack_path, gen)
     except OSError:

@@ -64,11 +64,14 @@ import reset_watcher as rw  # noqa: E402
 
 class _FakeRemote:
     """Stand-in for `mujoco_remote_backend`'s reset handle: `request_reset()`
-    is the only surface `reset_watcher_step` calls, and it's already a
-    parameter of `reset_watcher`/`reset_watcher_step` for exactly this kind
-    of substitution (production passes the real `MujocoRemoteBackend`).
-    `_event` is pre-set so `event.wait(timeout=6.0)` returns immediately --
-    these tests are about the file protocol, not reset latency."""
+    and `wait_for_reset()` are the only surface `reset_watcher_step` calls,
+    and `request_reset` is already a parameter of
+    `reset_watcher`/`reset_watcher_step` for exactly this kind of
+    substitution (production passes the real `MujocoRemoteBackend`).
+    `_event` is pre-set and `wait_for_reset` reports success immediately --
+    these tests are about the file protocol, not reset latency or the
+    real backend's success/failure signalling (see `_NeverAcks` below for
+    the one test that is about the latter)."""
 
     def __init__(self):
         self.reset_calls = 0
@@ -78,6 +81,10 @@ class _FakeRemote:
     def request_reset(self):
         self.reset_calls += 1
         return self._event
+
+    def wait_for_reset(self, timeout=None):
+        self._event.wait(timeout=timeout)
+        return True
 
 
 # ── A. Deterministic: empty/malformed requests never trigger a reset or
@@ -251,11 +258,15 @@ class TestValidRequest:
             assert not req.exists()
         assert remote.reset_calls == 20
 
-    def test_ack_timeout_still_publishes_ack(self, tmp_path):
-        """`event.wait` returning False (reset ack never arrived from the
-        native server) is unrelated to the sentinel-file race: the ack is
-        still published so the demo/reset.sh poll doesn't hang forever
-        (pre-existing behavior, unchanged by this fix)."""
+    def test_ack_timeout_never_publishes_a_false_ack(self, tmp_path):
+        """PR #141 review, B1: `wait_for_reset` returning False (the reset
+        ack never arrived, or was refused) must NOT publish the success
+        token. `reset.sh` and `request_reset_and_wait()` treat a matching
+        ack as confirmation and move immediately -- a false ack here
+        previously made a refused/timed-out reset look successful and let
+        callers proceed into an unreset scene. The request is still
+        consumed (the generation is still returned) so a genuine, later
+        request isn't blocked behind an unconsumed sentinel file."""
         req = tmp_path / "reachy_reset_request"
         ack = tmp_path / "reachy_reset_ack"
         req.write_text("5")
@@ -263,15 +274,17 @@ class TestValidRequest:
         class _NeverAcks(_FakeRemote):
             def request_reset(self):
                 self.reset_calls += 1
-                return threading.Event()  # never set -> wait() times out
+                return threading.Event()  # never set
+
+            def wait_for_reset(self, timeout=None):
+                return False   # times out / refused -- never confirmed
 
         remote = _NeverAcks()
-        t0 = time.monotonic()
         result = rw.reset_watcher_step(remote, req, ack)
-        elapsed = time.monotonic() - t0
         assert result == "5"
-        assert ack.read_text() == "5"
-        assert elapsed >= 5.9, "should have waited out the 6s ack timeout"
+        assert not ack.exists(), \
+            "a reset that was never confirmed must not publish a success ack"
+        assert not req.exists(), "the request must still be consumed"
 
 
 # ── C. Deterministic reproduction of the create-before-write race, with

@@ -210,6 +210,48 @@ class TestReset:
         assert b._last_target is not None
         assert _goal(b, SP) == pytest.approx(-0.69)
 
+    def test_ack_timeout_fires_even_after_a_pre_reset_state_arrives(self):
+        """B1: real traffic keeps delivering pre-reset states while a reset
+        is refused, and _ingest_state flips _conn_state to READY on every
+        one of them -- well before the timeout fires.  A timeout gated on
+        _conn_state == RESETTING would see READY and silently never act,
+        leaving _awaiting_reset stuck True and every later command held in
+        _pending_cmds without bound.  It must still abort here, keyed on
+        _awaiting_reset/_pending_reset_id instead."""
+        b = self._commanded()
+        b.request_reset()
+        rid = b._pending_reset_id
+        _state(b, 1005, {SP: -0.695})            # still pre-reset; flips conn_state
+        assert b._conn_state.value == "ready"
+        assert b._awaiting_reset is True, "still waiting -- the ack never came"
+        b._on_reset_timeout(rid)
+        assert b._conn_state.value == "aborted"
+        assert b._awaiting_reset is False
+        assert b._reset_ok is False
+        _state(b, 1010, {SP: -0.69})              # the next state re-seeds
+        assert b._last_target is not None
+        assert _goal(b, SP) == pytest.approx(-0.69)
+
+    def test_pending_command_before_reset_is_dropped_not_replayed(self):
+        """B2: a command still queued (not yet built/sent) when a reset is
+        requested belongs to the pre-reset baseline -- the native server
+        drops it too (#116).  It must not survive to be built onto the
+        post-reset pose, or reported as the post-reset goal, unlike a
+        command submitted AFTER the reset request (held-then-sent, see
+        test_goals_waiting_to_be_sent_survive_the_reseed)."""
+        b = _backend()
+        _state(b, 1000, {SP: -0.7})
+        b.submit_command(JointCommand(uid=SP, goal_position=-0.9))   # queued, not built
+        b.request_reset()
+        with b._lock:
+            assert b._pending_cmds == [], \
+                "a command queued before the reset must not be replayed after it"
+        _state(b, 0, {SP: 0.0})                   # the post-reset pose
+        assert _goal(b, SP) == pytest.approx(0.0), \
+            "the dropped pre-reset goal must not be reported as the post-reset goal"
+        t, *_ = _build(b)
+        assert t[0] == pytest.approx(0.0)
+
     def test_a_reset_nobody_here_asked_for_still_reseeds(self):
         b = self._commanded()
         _state(b, 0, {SP: 0.0})                  # native reset by another client

@@ -59,6 +59,8 @@ from native_stub import IDX, NativeStub  # noqa: E402
 from reachy_ai.motion import rig_routes as R  # noqa: E402
 from reachy_ai.tasks import rig_motion  # noqa: E402
 
+import reset_watcher as rw  # noqa: E402
+
 pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 
 ARM8 = R.ARM7 + ("r_gripper",)
@@ -459,6 +461,62 @@ def test_live_client_goto_after_reset_without_turn_on(make_rig):
     assert all(abs(x - y) < e for x, y, e in zip(first, base, allow))
 
 
+def test_reset_refused_does_not_wedge_commands_or_falsely_ack(make_rig, tmp_path):
+    """PR #141 review, B1: the native server can refuse a reset with
+    `control_held` while an execution lease is held (the panel executor
+    takes one), sending back an error and no ack -- and it keeps streaming
+    state throughout, exactly like NativeStub with refuse_resets set. A
+    refused reset must not hold every later command forever, must not grow
+    the queue without bound, and reset_watcher must not tell a caller
+    (reset.sh, request_reset_and_wait()) that it succeeded."""
+    rig = make_rig(bias=SAG)
+    reachy = rig.client()
+    reachy.turn_on("r_arm")
+    time.sleep(0.2)
+    rig.backend._reset_timeout = 0.3   # keep the test fast
+    rig.stub.refuse_resets = True
+
+    req = tmp_path / "reset_request"
+    ack = tmp_path / "reset_ack"
+    req.write_text("41")
+    result = rw.reset_watcher_step(rig.backend, req, ack)
+
+    assert result == "41"
+    assert not ack.exists(), "a refused reset must not publish a success ack"
+    assert rig.stub.refusals >= 1
+    assert rig.backend.connection_state == mrb.ConnectionState.ABORTED
+
+    # Commands must not be held forever: once the abort clears
+    # _awaiting_reset, the next state (still streaming) re-seeds and the
+    # bridge drains _pending_cmds on its next 20 ms tick.  The goto streams
+    # at 100 Hz for its whole duration, so _pending_cmds legitimately holds
+    # a few items between send ticks while it runs -- that's normal
+    # draining, not a wedge. What the review's probe actually found was
+    # UNBOUNDED growth (every command stayed queued, forever): track the
+    # high-water mark across the goto rather than requiring exact zero at
+    # one sleep-timed instant, which is sensitive to scheduling jitter.
+    a = _ncmd(rig.stub)
+    max_pending = 0
+    deadline = time.monotonic() + 1.5
+    rig_motion.sdk_move(reachy.r_arm, REST_SHUTISH, 0.4)
+    while time.monotonic() < deadline:
+        with rig.backend._lock:
+            max_pending = max(max_pending, len(rig.backend._pending_cmds))
+        time.sleep(0.02)
+    assert _ncmd(rig.stub) > a, "commands must reach native after a refused reset"
+    assert max_pending < 20, \
+        f"_pending_cmds grew to {max_pending} -- looks wedged, not draining"
+
+    # A later, unrefused reset must still succeed and publish its ack.
+    rig.stub.refuse_resets = False
+    req2 = tmp_path / "reset_request2"
+    ack2 = tmp_path / "reset_ack2"
+    req2.write_text("42")
+    result2 = rw.reset_watcher_step(rig.backend, req2, ack2)
+    assert result2 == "42"
+    assert ack2.read_text() == "42"
+
+
 # ── reconnect ─────────────────────────────────────────────────────────────────
 
 def test_bridge_reconnect_reseeds_from_new_session(make_rig):
@@ -523,7 +581,11 @@ def test_kinematic_backend_through_the_same_path():
             assert abs(getattr(reachy.r_arm, n).present_position - HOVERISH[n]) < 1.0
         st = rig.raw().GetJointsState(joint_pb2.JointsStateRequest(
             ids=[joint_pb2.JointId(uid=13)], requested_fields=[joint_pb2.JointField.ALL])).states[0]
-        assert abs(math.degrees(st.goal_position.value) - HOVERISH["r_elbow_pitch"]) < 1e-3
+        # B3 (PR #141 review): compare in radians against END_TOL, not a
+        # hardcoded 1e-3 degrees (1.7e-5 rad) -- goto's own end-of-move
+        # residual is ~2.3e-5 rad, bigger than that bound, which made this
+        # assertion flaky. END_TOL (1e-4 rad) exists for exactly this.
+        assert abs(st.goal_position.value - math.radians(HOVERISH["r_elbow_pitch"])) < END_TOL
         assert st.compliant.value is False
     finally:
         rig.server.stop(0)

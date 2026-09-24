@@ -49,6 +49,13 @@ class NativeStub:
         self.commands: List[dict] = []    # {t, seq, target, compliant}
         self.states: List[dict] = []      # {t, sim_step, pos}
         self.resets = 0
+        # B1 test hook: make the stub behave like a native server refusing a
+        # reset because an execution lease is held -- sends an `error` and no
+        # `reset_ack`, while state broadcast (self._tick) keeps running
+        # exactly as it does for a genuine reset in flight.
+        self.refuse_resets = False
+        self.reset_error_code = "control_held"
+        self.refusals = 0
         self._conns: set = set()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stop: Optional[asyncio.Event] = None
@@ -167,14 +174,23 @@ class NativeStub:
                                               "target": list(self.target),
                                               "compliant": list(cmp_)})
                 elif t == "reset":
-                    with self.lock:          # like _reset_physics: back to the initial pose
-                        self.step = 0
-                        self.pos = list(self.initial)
-                        self.target = list(self.pos)
-                        self.resets += 1
-                    await ws.send(json.dumps({"type": "reset_ack",
-                                              "request_id": msg.get("request_id", ""),
-                                              "sim_step": 0, "scene_revision": "stub"}))
+                    with self.lock:
+                        refuse = self.refuse_resets
+                        code = self.reset_error_code
+                    if refuse:
+                        with self.lock:
+                            self.refusals += 1
+                        await ws.send(json.dumps({"type": "error", "code": code,
+                                                  "message": "execution lease held"}))
+                    else:
+                        with self.lock:      # like _reset_physics: back to the initial pose
+                            self.step = 0
+                            self.pos = list(self.initial)
+                            self.target = list(self.pos)
+                            self.resets += 1
+                        await ws.send(json.dumps({"type": "reset_ack",
+                                                  "request_id": msg.get("request_id", ""),
+                                                  "sim_step": 0, "scene_revision": "stub"}))
                 elif t == "heartbeat":
                     await ws.send(json.dumps({"type": "heartbeat_ack",
                                               "echo_ns": msg.get("sent_ns", 0)}))

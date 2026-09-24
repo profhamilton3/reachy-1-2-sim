@@ -154,6 +154,13 @@ class MujocoRemoteBackend:
         # Reset acknowledgement (Gate 8-D).
         self._pending_reset_id: Optional[str] = None
         self._reset_ack_event: threading.Event = threading.Event()
+        # True once a real reset_ack matching _pending_reset_id has arrived,
+        # False once the timeout aborts it, None while a reset is still in
+        # flight (or none was ever requested).  _reset_ack_event alone can't
+        # carry this: _on_reset_timeout also sets it, so a caller that only
+        # checks "is the event set" cannot tell a genuine ack from a refused
+        # or unacknowledged reset (B1) -- wait_for_reset() checks this too.
+        self._reset_ok: Optional[bool] = None
         # Timeout for waiting on a reset ack (seconds).
         self._reset_timeout: float = float(
             os.environ.get("REACHY_SIM_RESET_TIMEOUT_S", "5.0")
@@ -171,18 +178,32 @@ class MujocoRemoteBackend:
         with self._lock:
             self._pending_reset = True
             self._pending_reset_id = rid
+            # A command still queued (not yet built/sent) belongs to the
+            # pre-reset baseline -- the native server drops it too (#116).
+            # Only commands submitted AFTER this point are held and sent
+            # onto the post-reset pose (B2: these used to survive and be
+            # replayed, and reported, against the wrong baseline).
+            self._pending_cmds = []
             # Re-seed goals from the post-reset pose.  Commands wait for it.
             self._unseed_locked()
             self._awaiting_reset = True
             self._reset_ack_step = None
             self._conn_state = ConnectionState.RESETTING
+            self._reset_ok = None
         self._reset_ack_event.clear()
         return self._reset_ack_event
 
     def wait_for_reset(self, timeout: Optional[float] = None) -> bool:
-        """Block until a reset_ack is received.  Returns True on success."""
+        """Block until a reset_ack arrives or the reset is aborted.
+
+        Returns True only when a real reset_ack matching the request was
+        received -- never on a timeout/abort, even though that also sets
+        the event (so waiters don't hang; see _on_reset_timeout).
+        """
         t = timeout if timeout is not None else self._reset_timeout
-        return self._reset_ack_event.wait(timeout=t)
+        self._reset_ack_event.wait(timeout=t)
+        with self._lock:
+            return self._reset_ok is True
 
     # ── Public API (same shape as KinematicBackend) ───────────────────────
 
@@ -287,23 +308,42 @@ class MujocoRemoteBackend:
         finally:
             loop.close()
 
-    def _on_reset_timeout(self) -> None:
-        """Called from the asyncio event loop when a reset_ack does not arrive in time."""
+    def _on_reset_timeout(self, rid: Optional[str] = None) -> None:
+        """Called from the asyncio event loop when a reset_ack does not arrive in time.
+
+        Gated on `_awaiting_reset` (and, when known, the specific request id
+        this timer was scheduled for) -- NOT on `_conn_state`.  Under real
+        traffic `_ingest_state` flips `_conn_state` back to READY on every
+        state message, including a pre-reset one that arrives while a reset
+        is refused (B1): a `_conn_state == RESETTING` check is almost never
+        still true by the time this fires, so the timeout silently never ran,
+        `_awaiting_reset` stayed True forever, nothing ever re-seeded, and
+        every subsequent command was held in `_pending_cmds` without bound.
+        `rid=None` (manual/legacy call) matches whatever reset is pending.
+        """
         with self._lock:
-            if self._conn_state == ConnectionState.RESETTING:
+            if (self._awaiting_reset and self._pending_reset_id is not None
+                    and (rid is None or self._pending_reset_id == rid)):
                 log.error(
                     "Reset ack timed out after %.1f s — entering ABORTED state",
                     self._reset_timeout,
                 )
                 self._conn_state = ConnectionState.ABORTED
                 self._pending_reset_id = None
-                # Whether the reset happened is unknown: take the next state's
-                # pose as the baseline rather than waiting on a reset that may
-                # never show.  Goals stay unseeded (present) until then.
-                if self._seed_pending:
-                    self._awaiting_reset = False
-        # Signal waiters so they don't hang; they can check connection_state.
-        self._reset_ack_event.set()
+                self._reset_ok = False
+                # Whether the reset happened is unknown: take the very next
+                # state as the baseline rather than waiting on a reset that
+                # may never show (_track_goals_locked's post_reset check
+                # includes `not self._awaiting_reset`).  Goals stay unseeded
+                # (present) until that state arrives.
+                self._awaiting_reset = False
+                # Signal waiters so they don't hang; they can check
+                # connection_state and wait_for_reset()'s return value (not
+                # just that the event fired).  Scoped to the abort branch: a
+                # stale/mismatched timer (an earlier reset a reconnect or a
+                # later reset already resolved) must not wake a waiter on a
+                # DIFFERENT, still-genuinely-pending reset early.
+                self._reset_ack_event.set()
 
     async def _connect_loop(self) -> None:
         import websockets
@@ -378,15 +418,20 @@ class MujocoRemoteBackend:
                 elif mtype == "reset_ack":
                     req_id = msg.get("request_id", "")
                     with self._lock:
-                        # Recorded on the id alone: _ingest_state flips the
-                        # state back to READY on any state message, so the
-                        # RESETTING check below does not see every real ack.
+                        # Recorded and matched on _awaiting_reset + the id
+                        # alone, not _conn_state: _ingest_state flips
+                        # _conn_state back to READY on any state message
+                        # (including a pre-reset one that keeps arriving
+                        # while a reset is refused/delayed), so a real ack
+                        # can land well after _conn_state has already left
+                        # RESETTING.  A _conn_state-gated check would then
+                        # log this as "unexpected" and never clear
+                        # _pending_reset_id/_awaiting_reset for a genuine ack.
                         if self._awaiting_reset and req_id == self._pending_reset_id:
                             self._reset_ack_step = int(msg.get("sim_step", 0))
-                        if (self._conn_state == ConnectionState.RESETTING
-                                and req_id == self._pending_reset_id):
                             self._conn_state = ConnectionState.READY
                             self._pending_reset_id = None
+                            self._reset_ok = True
                             # _last_target is already None; it is re-seeded from
                             # the first post-reset state (see _ingest_state).
                             log.info(
@@ -431,9 +476,12 @@ class MujocoRemoteBackend:
                     await ws.send(json.dumps(
                         {"type": "reset", "request_id": reset_id}
                     ))
-                    # Schedule a timeout: if no ack in time, abort.
+                    # Schedule a timeout: if no ack in time, abort.  Bound to
+                    # this specific request id so a stale timer from an
+                    # earlier reset (e.g. one a reconnect already resolved)
+                    # can never abort a later, unrelated one.
                     asyncio.get_event_loop().call_later(
-                        self._reset_timeout, self._on_reset_timeout
+                        self._reset_timeout, self._on_reset_timeout, reset_id
                     )
 
                 # R12-605: forward a requested zoom level.  Sent outside the
