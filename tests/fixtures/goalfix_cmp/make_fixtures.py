@@ -37,6 +37,7 @@ for _p in (_REPO / "src", _REPO / "native_mujoco", _REPO):
 from reachy_ai.motion.rig_routes import R_JOINTS  # noqa: E402
 from joint_map import JOINT_TABLE  # noqa: E402
 from tools.goalfix_cmp._minjerk import s_of_tau  # noqa: E402
+from tools.goalfix_cmp._units import deg_to_rad_f32  # noqa: E402
 
 TICK_S = 0.020
 JOINT_ORDER: Tuple[str, ...] = tuple(
@@ -183,24 +184,44 @@ class FlightSim:
 
     def __init__(self, start_pose: Dict[str, float], *, seed: int = 0,
                  restream_passes: int = 0, restream_base_s: float = 0.8,
-                 settle_s: float = 0.3, skew_ms: Dict[str, float] = None):
+                 settle_s: float = 0.3, skew_ms: Dict[str, float] = None,
+                 pose_units: str = "rad"):
+        """``pose_units="deg"`` drives the simulator with real, degree-valued
+        poses (``rig_routes`` waypoints, unconverted) -- the minimum-jerk
+        interpolation itself runs in degrees, exactly as
+        ``reachy_sdk.trajectory``'s does, and every command target is
+        quantised to radians (``_units.deg_to_rad_f32``, the SAME formula
+        ``route_rad`` uses for the waypoint endpoints) at the one point it is
+        assembled into a 21-vector -- never re-derived, so a re-stream pass's
+        commanded value is bit-exact with ``route_rad(route)[k].pose_rad8``
+        (T1's C5 acceptance test). The default, ``"rad"``, is the pre-existing
+        behaviour (poses already radians, no conversion) for the local mock
+        routes existing single-mechanism tests still use."""
         self.pose = dict(start_pose)
         self.seed = seed
         self.restream_passes = restream_passes
         self.restream_base_s = restream_base_s
         self.settle_s = settle_s
         self.skew_s = {k: v / 1000.0 for k, v in (skew_ms or {}).items()}
+        if pose_units not in ("rad", "deg"):
+            raise ValueError(f"pose_units must be 'rad' or 'deg', got {pose_units!r}")
+        self._deg = pose_units == "deg"
 
-        # `_tick`/sim_step/sim_time_s restart at every reset(). `_row`,
-        # `_state_seq` and `_cmd_seq` never do: `_row` indexes state_rows
-        # for lookback/echo-source purposes (a real state seq is monotonic
-        # "for the life of the server process", never reset -- see
-        # scripts/link_e1_flight.py's own docstring), and keeping cmd_seq
-        # global too avoids ever having to disambiguate which epoch a
-        # recycled seq number belongs to.
+        # `_tick`/sim_step/sim_time_s restart at every reset(). `_row` and
+        # `_state_seq` never do: a real state seq is monotonic "for the life
+        # of the server process", never reset -- see
+        # scripts/link_e1_flight.py's own docstring. `_cmd_seq` (the BRIDGE's
+        # own outgoing numbering) restarts on `recreate()` (a new bridge
+        # process), never on `reset()` alone. `_native_cmd_seq` (what states
+        # actually REPORT) is the separate, persistent counter neither
+        # `reset()` nor `recreate()` touches -- only a command being applied
+        # does (T2/review §3.1: native's own `_cmd_seq` survives a reset,
+        # `server.py:338-351`, and is set only when a pending update is
+        # actually applied, `server.py:377`).
         self._tick = 0
         self._row = 0
         self._cmd_seq = 0
+        self._native_cmd_seq = -1
         self._state_seq = 0
         self.state_rows: List[dict] = []
         self.command_rows: List[dict] = []
@@ -210,6 +231,9 @@ class FlightSim:
         self._emit_epoch_start_state()
 
     # -- internals ----------------------------------------------------
+    def _to_rad(self, value) -> float:
+        return deg_to_rad_f32(value) if self._deg else value
+
     def _sim_time(self) -> float:
         return self._tick * TICK_S
 
@@ -218,10 +242,13 @@ class FlightSim:
 
     def _emit_command(self, target8: Dict[str, float],
                        forced: Optional[Dict[int, int]] = None) -> None:
-        """`target8`: right-arm name -> value this tick. `forced`: right-arm
-        index -> `state_rows` index to copy the (lagged) realised position
-        from, overriding the min-jerk value for that joint this tick."""
-        row_target = full21(target8)
+        """`target8`: right-arm name -> value this tick, in THIS instance's
+        `pose_units` (mode-native; converted to radians here, the one place
+        a command target is assembled). `forced`: right-arm index ->
+        `state_rows` index to copy the (lagged) realised position from,
+        overriding the min-jerk value for that joint this tick."""
+        target8_rad = {name: self._to_rad(v) for name, v in target8.items()}
+        row_target = full21(target8_rad)
         if forced:
             for jidx, src_row in forced.items():
                 src_state = self.state_rows[src_row]
@@ -237,16 +264,21 @@ class FlightSim:
         self.command_rows.append(
             command_row_joint(seq=self._cmd_seq, target_rad21=row_target))
         self._cmd_seq += 1
+        self._native_cmd_seq = self._cmd_seq - 1  # applied the same tick
 
     def _emit_epoch_start_state(self) -> None:
         """One state pushed before any command is issued this epoch --
         matches a real server, which pushes state continuously from reset
         -- so the epoch's very first command always has a genuine `t_lo`
-        (its own bracket never needs to reach into the previous epoch)."""
-        realised8 = {name: self.pose.get(name, 0.0) - _LAG_RAD[i]
+        (its own bracket never needs to reach into the previous epoch).
+        Reports `_native_cmd_seq` AS IT STANDS (carried across `reset()`
+        and `recreate()` alike, per their own docstrings) -- never a fresh
+        `-1` -- so a fixture that calls `recreate()`+`reset()` between
+        legs correctly reproduces the stale-carried-value regime T2 fixes."""
+        realised8 = {name: self._to_rad(self.pose.get(name, 0.0)) - _LAG_RAD[i]
                      for i, name in enumerate(R_JOINTS[:7])}
-        realised8["r_gripper"] = self.pose.get("r_gripper", 0.0) - _LAG_RAD[7]
-        self._append_state(realised8, cmd_seq=-1)
+        realised8["r_gripper"] = self._to_rad(self.pose.get("r_gripper", 0.0)) - _LAG_RAD[7]
+        self._append_state(realised8, cmd_seq=self._native_cmd_seq)
 
     def _append_state(self, realised8: Dict[str, float], cmd_seq: int) -> None:
         pos21 = full21(realised8)
@@ -258,7 +290,7 @@ class FlightSim:
         self._tick += 1
 
     def _emit_state(self, realised8: Dict[str, float]) -> None:
-        self._append_state(realised8, self._cmd_seq - 1 if self._cmd_seq else -1)
+        self._append_state(realised8, self._native_cmd_seq)
 
     def _tick_command_then_state(self, target8: Dict[str, float],
                                   forced: Optional[Dict[int, int]] = None) -> int:
@@ -267,18 +299,18 @@ class FlightSim:
         the emitted command's own `command_rows` index."""
         cmd_idx = len(self.command_rows)
         self._emit_command(target8, forced)
-        realised8 = {name: target8[name] - _LAG_RAD[i]
+        realised8 = {name: self._to_rad(target8[name]) - _LAG_RAD[i]
                      for i, name in enumerate(R_JOINTS[:7])}
-        realised8["r_gripper"] = target8.get("r_gripper", self.pose.get("r_gripper", 0.0)) \
-            - _LAG_RAD[7]
+        realised8["r_gripper"] = self._to_rad(
+            target8.get("r_gripper", self.pose.get("r_gripper", 0.0))) - _LAG_RAD[7]
         self._emit_state(realised8)
         return cmd_idx
 
     def _hold_ticks(self, n: int, held_pose: Dict[str, float]) -> None:
         for _ in range(n):
-            realised8 = {name: held_pose[name] - _LAG_RAD[i]
+            realised8 = {name: self._to_rad(held_pose[name]) - _LAG_RAD[i]
                          for i, name in enumerate(R_JOINTS[:7])}
-            realised8["r_gripper"] = held_pose.get("r_gripper", 0.0) - _LAG_RAD[7]
+            realised8["r_gripper"] = self._to_rad(held_pose.get("r_gripper", 0.0)) - _LAG_RAD[7]
             self._emit_state(realised8)
 
     # -- public ---------------------------------------------------------
@@ -372,10 +404,24 @@ class FlightSim:
         return self
 
     def reset(self, seed: Optional[int] = None) -> None:
+        """A native reset: `sim_step`/`sim_time_s` restart (a new epoch).
+        Neither `_cmd_seq` (the bridge's own numbering) nor
+        `_native_cmd_seq` (what states report) is touched -- `server.py`'s
+        own reset does not touch its `_cmd_seq` either (T2/review §3.1)."""
         self.command_rows.append(command_row_reset(
             seed=seed, sim_step=self._tick, wall_time_s=self._sim_time()))
-        self._tick = 0  # sim_step/sim_time_s restart; seq counters do not
+        self._tick = 0
         self._emit_epoch_start_state()
+
+    def recreate(self) -> None:
+        """A container recreate: a brand-new bridge process, so ITS OWN
+        outgoing `seq` numbering restarts -- but native's own `cmd_seq`
+        (`_native_cmd_seq` here) is untouched until the new bridge's first
+        command is applied (T2/review §3.1). Always followed by `reset()`
+        before any new command, per the plan's P2 (recreate) -> P3 (reset)
+        order; nothing is sent in between (plan §4) -- this method itself
+        sends nothing, matching that."""
+        self._cmd_seq = 0
 
     def result(self) -> FlightResult:
         return FlightResult(self.state_rows, self.command_rows,
