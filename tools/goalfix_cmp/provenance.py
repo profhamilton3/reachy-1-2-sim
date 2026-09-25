@@ -464,8 +464,12 @@ def _cli(argv: Optional[Sequence[str]] = None, runner: Optional[Runner] = None) 
 
     am = sub.add_parser("arm-map")
     am.add_argument("--arm-map", required=True, help="JSON file: list of ArmMapEntry fields")
-    am.add_argument("--expected-bridge-sha-a")
-    am.add_argument("--expected-bridge-sha-b")
+    # MB2 (merge verdict, 2026-09-25 stage-repairs assignment §3): both
+    # bridge-SHA pins are required -- optional, they let a swapped-hash
+    # arm map through silently (the bridge-SHA check is skipped
+    # entirely when both are omitted).
+    am.add_argument("--expected-bridge-sha-a", required=True)
+    am.add_argument("--expected-bridge-sha-b", required=True)
     am.add_argument("--out", required=True)
 
     cy = sub.add_parser("cycle")

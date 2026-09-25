@@ -13,7 +13,17 @@ for _p in ("../../src", "../../scripts", "../../native_mujoco", "../..", "../fix
 import make_fixtures as mf  # noqa: E402
 from tools.goalfix_cmp import evidence as ev  # noqa: E402
 from tools.goalfix_cmp import cycle as cyc  # noqa: E402
+from tools.goalfix_cmp import provenance as pv  # noqa: E402
 from tools.goalfix_cmp import summary as summ  # noqa: E402
+
+#: MB1 (merge verdict, 2026-09-25 stage-repairs assignment §3): the two
+#: A-arm tests below now supply passing gates EXPLICITLY, rather than
+#: relying on the (now fixed) gate_incomplete bug to fall through to a
+#: verdict -- a missing/incomplete gate on arm A is evidence_incomplete,
+#: never manipulated/inconclusive_baseline.
+_PASSING_GATES = dict(
+    provenance_gate=pv.GateResult(True), compliance_gate=(True, ""),
+    start_variant_gate_result=(True, "", None))
 
 
 def full_pose(**kw) -> dict:
@@ -76,7 +86,7 @@ class TestEvaluateCycle:
         result = sim.result()
         evidence = _write_and_load(tmp_path, result.state_rows, result.command_rows)
         legs = [_place_route_legspec(evidence)]
-        cv, _ = cyc.evaluate_cycle("A_c1", "A", evidence, legs)
+        cv, _ = cyc.evaluate_cycle("A_c1", "A", evidence, legs, **_PASSING_GATES)
         assert cv.verdict == cyc.VERDICT_INCONCLUSIVE_BASELINE
         assert cv.rc() == 3
 
@@ -86,10 +96,46 @@ class TestEvaluateCycle:
         result = sim.result()
         evidence = _write_and_load(tmp_path, result.state_rows, result.command_rows)
         legs = [_place_route_legspec(evidence)]
-        cv, _ = cyc.evaluate_cycle("A_c2", "A", evidence, legs)
+        cv, _ = cyc.evaluate_cycle("A_c2", "A", evidence, legs, **_PASSING_GATES)
         assert cv.verdict == cyc.VERDICT_MANIPULATED
         assert cv.rc() == 0
         assert cv.genuine_echo_count > 0
+
+    def test_a_cycle_missing_start_variant_is_evidence_incomplete(self, tmp_path):
+        """MB1/P1: an A cycle with echoes but a missing start_variant
+        gate must not authorize as `manipulated` -- rc 3, never rc 0."""
+        sim = mf.FlightSim(START, seed=4)
+        sim.fly(PLACE_ROUTE, echo_rate=0.44)
+        result = sim.result()
+        evidence = _write_and_load(tmp_path, result.state_rows, result.command_rows)
+        legs = [_place_route_legspec(evidence)]
+        cv, _ = cyc.evaluate_cycle(
+            "A_c3", "A", evidence, legs,
+            provenance_gate=pv.GateResult(True), compliance_gate=(True, ""),
+            start_variant_gate_result=None)
+        assert cv.verdict == cyc.VERDICT_EVIDENCE_INCOMPLETE
+        assert cv.rc() == 3
+
+    def test_mutation_gate_incomplete_ignored_for_a_would_authorize(self, tmp_path):
+        """Mutation (revert the A branch to check only gate_failed, as at
+        da3a81c): the SAME missing-start_variant cycle above would fall
+        through to `genuine==0 or segment_indeterminate` and authorize
+        as manipulated/inconclusive_baseline instead of reporting the
+        incomplete evidence -- verified directly against a da3a81c copy
+        of cycle.py."""
+        sim = mf.FlightSim(START, seed=4)
+        sim.fly(PLACE_ROUTE, echo_rate=0.44)
+        result = sim.result()
+        evidence = _write_and_load(tmp_path, result.state_rows, result.command_rows)
+        legs = [_place_route_legspec(evidence)]
+        cv, _ = cyc.evaluate_cycle(
+            "A_c4", "A", evidence, legs,
+            provenance_gate=pv.GateResult(True), compliance_gate=(True, ""),
+            start_variant_gate_result=None)
+        # The shipped (fixed) code disagrees with what the old
+        # gate_failed-only branch would have produced (MANIPULATED,
+        # rc 0) for this exact input.
+        assert (cv.verdict, cv.rc()) != (cyc.VERDICT_MANIPULATED, 0)
 
     def test_evidence_incomplete_on_corrupt_integrity(self, tmp_path):
         sim = mf.FlightSim(START)

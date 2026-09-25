@@ -183,17 +183,31 @@ class TestGatesThroughTheCli:
     --validation-mode -- so the CLI reads versions_<cycle>.json,
     prep_<cycle>.json and start_variant_<cycle>.json from control_dir."""
 
+    #: MB2 (merge verdict, 2026-09-25 stage-repairs assignment §3):
+    #: `validate_arm_map` now runs unconditionally (not just when the
+    #: `provenance arm-map` CLI is invoked directly) and requires a
+    #: complete, 12-rep map in `pv.ARM_MAP_ORDER`'s own order
+    #: ("ABBABAABABBA") -- rep 2 is the first 'B' slot, so these B-arm
+    #: gate tests use rep 2, not rep 1 (which the order fixes as 'A').
+    GATE_REP = 2
+    BRIDGE_SHA_A = "8c0dad2d62dde791c8912fa723b8c2b7f190e1e8"
+    BRIDGE_SHA_B = "67730a1ecf646544825fb60c00129cf46de6d307"
+
     def _write_gate_files(self, control_dir, *, host_sha="M-sha", compliant_ok=True,
                            write_start_variant=True):
-        arm_map = [{
-            "rep": 1, "arm": "B", "image_tag": "img-B", "image_id": "sha256:B",
-            "bridge_sha": "67730a1ecf646544825fb60c00129cf46de6d307",
-            "opt_hashes": {f: "b" * 64 for f in pv.EXPECTED_DIFF_FILES},
-        }]
+        arm_map = [
+            {"rep": i + 1, "arm": pv.ARM_MAP_ORDER[i],
+             "image_tag": "img-A" if pv.ARM_MAP_ORDER[i] == "A" else "img-B",
+             "image_id": "sha256:A" if pv.ARM_MAP_ORDER[i] == "A" else "sha256:B",
+             "bridge_sha": self.BRIDGE_SHA_A if pv.ARM_MAP_ORDER[i] == "A" else self.BRIDGE_SHA_B,
+             "opt_hashes": {f: ("a" * 64 if pv.ARM_MAP_ORDER[i] == "A" else "b" * 64)
+                            for f in pv.EXPECTED_DIFF_FILES}}
+            for i in range(12)
+        ]
         (control_dir / "arm_map.json").write_text(json.dumps(arm_map))
         (control_dir / f"versions_{CYCLE}.json").write_text(json.dumps({
             "host_native_kernel_sha": host_sha, "host_tree_dirty": False,
-            "bridge_arm": "B", "bridge_sha": "67730a1ecf646544825fb60c00129cf46de6d307",
+            "bridge_arm": "B", "bridge_sha": self.BRIDGE_SHA_B,
             "running_image_id": "sha256:B",
             "opt_hashes": {f: "b" * 64 for f in pv.EXPECTED_DIFF_FILES},
             "supervisor_start_times": {"bridge": 200.0},
@@ -214,8 +228,12 @@ class TestGatesThroughTheCli:
     def _run_with_gates(self, ev_dir, control_dir, arm, out, **extra):
         argv = [
             "--ev-dir", str(ev_dir), "--control-dir", str(control_dir), "--cycle", CYCLE,
-            "--rep", "1", "--arm", arm, "--arm-map", str(control_dir / "arm_map.json"),
-            "--expected-host-sha", "M-sha", "--out", str(out),
+            "--rep", str(self.GATE_REP), "--arm", arm, "--arm-map", str(control_dir / "arm_map.json"),
+            "--expected-host-sha", "M-sha",
+            "--required-supervisor-programs", "bridge",
+            "--expected-bridge-sha-a", self.BRIDGE_SHA_A,
+            "--expected-bridge-sha-b", self.BRIDGE_SHA_B,
+            "--out", str(out),
         ]
         for k, v in extra.items():
             argv += [f"--{k.replace('_', '-')}", str(v)]
@@ -250,6 +268,99 @@ class TestGatesThroughTheCli:
         rc = self._run_with_gates(ev_dir, control_dir, "B", out)
         payload = read_result(out)
         assert payload["verdict"] == cyc.VERDICT_OK, payload
+
+
+class TestMB2ProvenanceGate(TestGatesThroughTheCli):
+    """MB2 (merge verdict, 2026-09-25 stage-repairs assignment §3):
+    P3-P5c, through the shipped `cycle` CLI. Each demonstrated `rc 0`
+    at `da3a81c`; each is `rc 3`/STOP here (T6: an operator-input error
+    is `evidence_incomplete`; a data-vs-map contradiction is a failed
+    provenance gate -> STOP for B)."""
+
+    def test_p3_missing_expected_host_sha_flag_is_rc3(self, tmp_path):
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        self._write_gate_files(control_dir)
+        out = tmp_path / "out.json"
+        argv = [
+            "--ev-dir", str(ev_dir), "--control-dir", str(control_dir), "--cycle", CYCLE,
+            "--rep", str(self.GATE_REP), "--arm", "B", "--arm-map", str(control_dir / "arm_map.json"),
+            "--required-supervisor-programs", "bridge",
+            "--expected-bridge-sha-a", self.BRIDGE_SHA_A,
+            "--expected-bridge-sha-b", self.BRIDGE_SHA_B,
+            "--out", str(out),
+        ]
+        rc = cyc._cli(argv)
+        assert rc == RC_INCONCLUSIVE, read_result(out)
+
+    def test_p4_supervisor_list_mismatch_stops(self, tmp_path):
+        """The document's own supervisor_start_times key is irrelevant --
+        the CLI's `--required-supervisor-programs` names the program;
+        naming one absent from the document must fail, never derive the
+        requirement FROM the document (the P4 bug: previously
+        `list(doc["supervisor_start_times"])`, so any document passed
+        trivially)."""
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        self._write_gate_files(control_dir)
+        out = tmp_path / "out.json"
+        rc = self._run_with_gates(ev_dir, control_dir, "B", out,
+                                   **{"required_supervisor_programs": "not_in_doc"})
+        payload = read_result(out)
+        assert payload["verdict"] == cyc.VERDICT_STOP, payload
+
+    def test_p4b_missing_recreate_timestamp_stops_or_incomplete(self, tmp_path):
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        self._write_gate_files(control_dir)
+        doc_path = control_dir / f"versions_{CYCLE}.json"
+        doc = json.loads(doc_path.read_text())
+        doc.pop("recreate_timestamp")
+        doc_path.write_text(json.dumps(doc))
+        out = tmp_path / "out.json"
+        rc = self._run_with_gates(ev_dir, control_dir, "B", out)
+        assert rc in (RC_STOP, RC_INCONCLUSIVE), read_result(out)
+
+    def test_p5_arm_flag_contradicts_arm_map_stops_or_incomplete(self, tmp_path):
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        self._write_gate_files(control_dir)
+        out = tmp_path / "out.json"
+        # GATE_REP (2) is 'B' in ARM_MAP_ORDER; pass --arm A instead.
+        rc = self._run_with_gates(ev_dir, control_dir, "A", out)
+        assert rc in (RC_STOP, RC_INCONCLUSIVE), read_result(out)
+        payload = read_result(out)
+        assert payload.get("verdict") != cyc.VERDICT_MANIPULATED
+
+    def test_p5c_versions_bridge_fields_contradict_arm_map_stops(self, tmp_path):
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        self._write_gate_files(control_dir)
+        doc_path = control_dir / f"versions_{CYCLE}.json"
+        doc = json.loads(doc_path.read_text())
+        doc["bridge_arm"] = "A"
+        doc["bridge_sha"] = self.BRIDGE_SHA_A
+        doc_path.write_text(json.dumps(doc))
+        out = tmp_path / "out.json"
+        rc = self._run_with_gates(ev_dir, control_dir, "B", out)
+        payload = read_result(out)
+        assert payload["verdict"] == cyc.VERDICT_STOP, payload
+
+    def test_mutation_arm_map_validation_removed_would_authorize(self, tmp_path):
+        """Mutation (drop the `validate_arm_map`/entry cross-check block
+        entirely, falling back to the pre-MB2 `versions_<cycle>.json`
+        read as the only source of truth): the P5c fixture above would
+        pass silently, since nothing there ever reads bridge_arm/
+        bridge_sha against the map. Verified directly against a
+        `da3a81c` copy of cycle.py, which returns rc 0 `ok` for this
+        exact fixture (before MB1's own unrelated gate-completeness fix
+        even applies -- MB1 is orthogonal and was independently killed
+        in the same run)."""
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        self._write_gate_files(control_dir)
+        doc_path = control_dir / f"versions_{CYCLE}.json"
+        doc = json.loads(doc_path.read_text())
+        doc["bridge_arm"] = "A"
+        doc["bridge_sha"] = self.BRIDGE_SHA_A
+        doc_path.write_text(json.dumps(doc))
+        out = tmp_path / "out.json"
+        rc = self._run_with_gates(ev_dir, control_dir, "B", out)
+        assert rc != cyc.RC_OK
 
 
 class TestValidationModeRefusal:

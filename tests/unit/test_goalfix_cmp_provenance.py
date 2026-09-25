@@ -354,7 +354,9 @@ class TestCli:
         arm_map_path = tmp_path / "arm_map.json"
         arm_map_path.write_text(json.dumps(entries))
         out = tmp_path / "out.json"
-        rc = pv._cli(["arm-map", "--arm-map", str(arm_map_path), "--out", str(out)])
+        rc = pv._cli(["arm-map", "--arm-map", str(arm_map_path),
+                      "--expected-bridge-sha-a", BRIDGE_SHA_A,
+                      "--expected-bridge-sha-b", BRIDGE_SHA_B, "--out", str(out)])
         assert rc == RC_OK, read_result(out)
 
 

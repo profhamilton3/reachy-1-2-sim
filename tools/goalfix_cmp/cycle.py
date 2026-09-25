@@ -618,8 +618,17 @@ def evaluate_cycle(
         else:
             verdict = VERDICT_OK
     else:
+        # MB1 (merge verdict, 2026-09-25 stage-repairs assignment §3):
+        # a missing or failed gate is non-progressing for BOTH arms.
+        # The old code checked only gate_failed here, so a missing
+        # start_variant (or provenance/compliance never supplied) on an
+        # A cycle with genuine echoes silently authorized as
+        # `manipulated` (P1/P1b) instead of reporting the incomplete
+        # evidence.
         if gate_failed:
             verdict = VERDICT_STOP
+        elif gate_incomplete:
+            verdict = VERDICT_EVIDENCE_INCOMPLETE
         elif segment_indeterminate or genuine == 0:
             verdict = VERDICT_INCONCLUSIVE_BASELINE
         else:
@@ -680,6 +689,14 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--arm", choices=["A", "B"], required=True)
     p.add_argument("--arm-map")
     p.add_argument("--expected-host-sha")
+    # MB2 (merge verdict, 2026-09-25 stage-repairs assignment §3): these
+    # are OPERATOR inputs, never derived from the document under test.
+    # Not `required=True` at the argparse level -- --validation-mode
+    # legitimately has none of this (the gates do not exist for that
+    # session) -- enforced below, only when not in validation mode.
+    p.add_argument("--required-supervisor-programs", nargs="+")
+    p.add_argument("--expected-bridge-sha-a")
+    p.add_argument("--expected-bridge-sha-b")
     p.add_argument("--setup-sidecar", help="override the guessed <control-dir>/<cycle>-setup.link.json")
     p.add_argument("--flight-sidecar", help="override the guessed <control-dir>/<cycle>-flight.link.json")
     p.add_argument("--out", required=True)
@@ -719,24 +736,68 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
             "recorded here for the record and does not gate any check.")
 
         if not args.validation_mode:
-            versions_path = control_dir / f"versions_{args.cycle}.json"
-            if not versions_path.is_file():
-                provenance_gate = pv.GateResult(False, f"missing {versions_path}")
+            # MB2: every one of these is an OPERATOR input, required and
+            # never derived from the document under test. A missing
+            # operator input is the caller's own configuration error --
+            # CycleInputError (rc 3), not a "failed" gate (which would
+            # imply the DATA disagreed with a correctly-supplied check).
+            if not args.expected_host_sha:
+                raise CycleInputError("--expected-host-sha is required and must be non-empty")
+            if not args.required_supervisor_programs:
+                raise CycleInputError("--required-supervisor-programs is required and must be non-empty")
+            if not args.arm_map:
+                raise CycleInputError("--arm-map is required")
+            if not args.expected_bridge_sha_a or not args.expected_bridge_sha_b:
+                raise CycleInputError(
+                    "--expected-bridge-sha-a and --expected-bridge-sha-b are both required")
+
+            arm_map_doc = _json.loads(Path(args.arm_map).read_text())
+            arm_map_entries = [pv.ArmMapEntry(**e) for e in arm_map_doc]
+            arm_map = {e.rep: e for e in arm_map_entries}
+            map_check = pv.validate_arm_map(
+                arm_map_entries,
+                expected_bridge_sha={"A": args.expected_bridge_sha_a, "B": args.expected_bridge_sha_b})
+            entry = arm_map.get(args.rep)
+            if not map_check.ok:
+                provenance_gate = pv.GateResult(False, f"arm_map: {map_check.reason}")
+            elif entry is None:
+                provenance_gate = pv.GateResult(False, f"rep {args.rep} not in arm_map")
+            elif entry.arm != args.arm:
+                # MB2 P5/P5b: the arm is DERIVED from arm_map[rep]; a
+                # --arm that contradicts it is rejected, never silently
+                # evaluated under the operator's own (wrong) label.
+                provenance_gate = pv.GateResult(
+                    False, f"--arm {args.arm!r} contradicts arm_map[{args.rep}].arm {entry.arm!r}")
             else:
-                doc = _json.loads(versions_path.read_text())
-                arm_map_doc = _json.loads(Path(args.arm_map).read_text()) if args.arm_map else []
-                arm_map = {e["rep"]: pv.ArmMapEntry(**e) for e in arm_map_doc}
-                observed = pv.ObservedCycle(
-                    running_image_id=doc.get("running_image_id", ""),
-                    opt_hashes=doc.get("opt_hashes", {}),
-                    supervisor_start_times=doc.get("supervisor_start_times", {}),
-                    recreate_timestamp=doc.get("recreate_timestamp", 0.0),
-                    host_git_sha=doc.get("host_native_kernel_sha", ""),
-                    host_tree_dirty=bool(doc.get("host_tree_dirty", True)))
-                provenance_gate = pv.check_cycle(
-                    args.rep, arm_map, observed,
-                    expected_host_sha=args.expected_host_sha or "",
-                    required_supervisor_programs=list(doc.get("supervisor_start_times", {})))
+                versions_path = control_dir / f"versions_{args.cycle}.json"
+                if not versions_path.is_file():
+                    provenance_gate = pv.GateResult(False, f"missing {versions_path}")
+                elif "recreate_timestamp" not in _json.loads(versions_path.read_text()):
+                    provenance_gate = pv.GateResult(
+                        False, f"{versions_path}: missing recreate_timestamp")
+                else:
+                    doc = _json.loads(versions_path.read_text())
+                    # MB2 P5c: versions.bridge_arm/bridge_sha must equal
+                    # the arm_map entry -- never read before, so a
+                    # contradicting document passed silently.
+                    if doc.get("bridge_arm") != entry.arm or doc.get("bridge_sha") != entry.bridge_sha:
+                        provenance_gate = pv.GateResult(
+                            False,
+                            f"versions.bridge_arm/bridge_sha "
+                            f"({doc.get('bridge_arm')!r}/{doc.get('bridge_sha')!r}) != "
+                            f"arm_map[{args.rep}] ({entry.arm!r}/{entry.bridge_sha!r})")
+                    else:
+                        observed = pv.ObservedCycle(
+                            running_image_id=doc.get("running_image_id", ""),
+                            opt_hashes=doc.get("opt_hashes", {}),
+                            supervisor_start_times=doc.get("supervisor_start_times", {}),
+                            recreate_timestamp=doc.get("recreate_timestamp", 0.0),
+                            host_git_sha=doc.get("host_native_kernel_sha", ""),
+                            host_tree_dirty=bool(doc.get("host_tree_dirty", True)))
+                        provenance_gate = pv.check_cycle(
+                            args.rep, arm_map, observed,
+                            expected_host_sha=args.expected_host_sha,
+                            required_supervisor_programs=args.required_supervisor_programs)
 
             compliance_path = control_dir / f"prep_{args.cycle}.json"
             if compliance_path.is_file():
