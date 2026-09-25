@@ -113,9 +113,21 @@ def check_c2_c3(
     start_pose8: Dict[str, float], route: Sequence[Waypoint],
     assignment: seg.GoalAssignment,
 ) -> Tuple[CheckResult, CheckResult]:
+    """C2 keeps the tau-agreement check, WITH the report's own 0.05deg
+    near-end exemption (inverting m^-1 is ill-conditioned there). C3
+    (coordinator ruling, 2026-09-25 stage-2a rulings addendum, A2) is
+    computed independently, on RAW VALUES, with NO near-end exemption:
+    report §4 C3 ("each joint's implied tau_j never decreases") states no
+    exemption at all -- the 0.05deg exemption is stated only for C2. Since
+    the minimum-jerk profile is monotone in tau, "tau never decreases" is
+    exactly "the value never moves back away from the goal", which is
+    checkable directly with no inversion, near the ends too, and with NO
+    tolerance (float32 rounding of a monotone float64 sequence is itself
+    non-decreasing)."""
     seg_start = dict(start_pose8)
     last_goal: Optional[int] = None
     last_tau: Dict[str, float] = {}
+    last_val: Dict[str, float] = {}
     c2_fail: Optional[CheckResult] = None
     c3_fail: Optional[CheckResult] = None
 
@@ -128,6 +140,7 @@ def check_c2_c3(
         if g != last_goal:
             seg_start = start_pose8 if g == 0 else _goal8(route[g - 1])
             last_tau = {}
+            last_val = {}
         goal8 = _goal8(route[g])
 
         taus = {}
@@ -138,6 +151,14 @@ def check_c2_c3(
                 if v != a:
                     constant_violation = True
                 continue
+            # C3 (A2): raw-value monotonicity toward the goal, every
+            # sample, no near-end exemption, no tolerance.
+            if c3_fail is None and j in last_val:
+                moved_away = (v < last_val[j]) if b > a else (v > last_val[j])
+                if moved_away:
+                    c3_fail = CheckResult(
+                        "C3", False, i, f"joint {j} moved away from the goal (raw value)")
+            last_val[j] = v
             if _near_end(v, a, b):
                 continue
             taus[j] = implied_tau(a, b, v)
@@ -150,11 +171,6 @@ def check_c2_c3(
             if spread_s > C2_SKEW_TOL_S + 1e-6 and c2_fail is None:
                 c2_fail = CheckResult(
                     "C2", False, i, f"per-joint tau spread {spread_s*1000:.1f} ms > 30 ms")
-            if c3_fail is None:
-                for j, tau in taus.items():
-                    if j in last_tau and tau < last_tau[j] - 1e-9:
-                        c3_fail = CheckResult("C3", False, i, f"joint {j} tau decreased")
-                        break
             last_tau.update(taus)
 
         last_goal = g

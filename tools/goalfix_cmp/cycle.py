@@ -174,6 +174,14 @@ class LegResult:
     goto_context: List[Optional[echo.GotoContext]]
     truncated_final_line_inside_leg: bool
     duplicate_state_indices_inside: List[int] = field(default_factory=list)
+    #: A1: a command precedes the turn_on match in the leg's own span
+    #: (or no in-span command matches it at all).
+    lead_in_violation: bool = False
+    lead_in_detail: str = ""
+    #: A1: the route's own final waypoint was never determinately
+    #: reached, so the parked-tail window could not be bounded at all
+    #: (reported, never gated -- there is nothing to check).
+    parked_tail_indeterminate: bool = False
 
 
 def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
@@ -195,40 +203,77 @@ def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
         if hs is not None:
             hold_stats.append(hs)
 
-    # Q-hold ruling (2026-09-25 stage-1 rulings, §2): the lead-in
-    # (LEAD_IN_S) and parked-tail (PARKED_TAIL_S) windows, bounded by the
-    # sidecar's own aligned span at one end and this leg's first/last
-    # command at the other -- imported constants used only for the
-    # report-only duration below, never for locating or gating the
-    # window itself. Skipped (never assumed empty) when the caller built
-    # this LegSpec without a sidecar span.
-    if leg.sidecar_t_lo is not None and leg.turn_on_state_index is not None:
-        lead_in_hi = float(evidence.states.sim_time_s[leg.turn_on_state_index])
-        try:
-            es = holds.edge_window_stats(
-                goal_index=holds.LEAD_IN_GOAL_INDEX, t_lo_s=leg.sidecar_t_lo, t_hi_s=lead_in_hi,
-                epoch=epoch, last_k_target8=leg.start_pose8, evidence=evidence,
-                all_command_indices=list(idx))
-        except ValueError as exc:
-            raise CycleInputError(f"{leg.name}: lead-in window: {exc}") from exc
-        if es is not None:
-            hold_stats.append(es)
+    # Coordinator ruling (2026-09-25 stage-2a rulings addendum, A6): C6
+    # now uses the SAME settle-hold window rule Q-hold implemented for
+    # the cycle-level drift gate (§2), replacing the old structural
+    # single-sandwich check (which only ever inspected an INDETERMINATE
+    # command sandwiched between two consecutive different goals -- never
+    # a stray that R-tie/R-const now correctly assign to a real goto).
+    # Overridden here (evaluate_leg is the shipped call site that
+    # assembles the final per-leg C0-C8 table every caller, including the
+    # CLI, actually sees) rather than in pathcheck.check_c6 itself, so
+    # check_c6's existing library-level unit tests (which pass bare
+    # targets8/assignment, with no evidence/brackets) keep working
+    # unchanged.
+    c6_bad_index: Optional[int] = None
+    c6_detail = ""
+    for hs in hold_stats:
+        if hs.window.goal_index < 0:
+            continue  # lead-in/parked-tail are gated separately, not part of C6's own scope
+        if any(v != 0.0 for v in hs.target_drift.values()):
+            c6_bad_index = hs.window_command_indices[0] if hs.window_command_indices else None
+            c6_detail = f"non-carry command found inside the hold at goal {hs.window.goal_index}"
+            break
+    results["C6"] = pc.CheckResult("C6", c6_bad_index is None, c6_bad_index, c6_detail)
 
-    if leg.sidecar_t_hi is not None:
-        last_k_idx = int(idx[-1])
-        parked_lo = evidence.brackets[last_k_idx].t_hi
-        if parked_lo is not None:
-            last_k_target8 = {name: float(evidence.commands.target_rad[last_k_idx, k])
-                               for k, name in enumerate(pc.R_JOINTS)}
+    # A1 (coordinator ruling, 2026-09-25 stage-2a rulings addendum): the
+    # lead-in and parked-tail windows must be bounded by a command found
+    # BY ITS OWN PROPERTY (the turn_on present-match / the final
+    # waypoint's own assignment), never by "the leg's first/last
+    # command" -- a stray occupying that position would otherwise BECOME
+    # the boundary and vanish from the window by construction (the same
+    # defect Q-hold closed for the settle-hold windows).
+    lead_in_violation = False
+    lead_in_detail = ""
+    if leg.sidecar_t_lo is not None:
+        turn_on_match = holds.find_turn_on_command(evidence, list(idx))
+        if turn_on_match is None:
+            lead_in_violation = True
+            lead_in_detail = "no in-span command matches the turn_on present-position property"
+        else:
+            lead_in_hi = float(evidence.states.sim_time_s[turn_on_match.state_index])
             try:
                 es = holds.edge_window_stats(
-                    goal_index=holds.PARKED_TAIL_GOAL_INDEX, t_lo_s=parked_lo,
-                    t_hi_s=leg.sidecar_t_hi, epoch=epoch, last_k_target8=last_k_target8,
-                    evidence=evidence, all_command_indices=list(idx))
+                    goal_index=holds.LEAD_IN_GOAL_INDEX, t_lo_s=leg.sidecar_t_lo, t_hi_s=lead_in_hi,
+                    epoch=epoch, last_k_target8=leg.start_pose8, evidence=evidence,
+                    all_command_indices=list(idx))
             except ValueError as exc:
-                raise CycleInputError(f"{leg.name}: parked-tail window: {exc}") from exc
+                raise CycleInputError(f"{leg.name}: lead-in window: {exc}") from exc
             if es is not None:
                 hold_stats.append(es)
+            if turn_on_match.violation:
+                lead_in_violation = True
+                lead_in_detail = turn_on_match.detail
+
+    parked_tail_indeterminate = False
+    if leg.sidecar_t_hi is not None:
+        final_idx = holds.find_final_waypoint_last_command(assignment, list(idx), len(leg.route_rad))
+        if final_idx is None:
+            parked_tail_indeterminate = True
+        else:
+            parked_lo = evidence.brackets[final_idx].t_hi
+            if parked_lo is not None:
+                last_k_target8 = {name: float(evidence.commands.target_rad[final_idx, k])
+                                   for k, name in enumerate(pc.R_JOINTS)}
+                try:
+                    es = holds.edge_window_stats(
+                        goal_index=holds.PARKED_TAIL_GOAL_INDEX, t_lo_s=parked_lo,
+                        t_hi_s=leg.sidecar_t_hi, epoch=epoch, last_k_target8=last_k_target8,
+                        evidence=evidence, all_command_indices=list(idx))
+                except ValueError as exc:
+                    raise CycleInputError(f"{leg.name}: parked-tail window: {exc}") from exc
+                if es is not None:
+                    hold_stats.append(es)
 
     ctx = build_goto_context(leg.route_rad, leg.start_pose8, assignment)
 
@@ -253,7 +298,9 @@ def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
         duplicates_inside = [d for d in evidence.states.duplicate_indices if lo <= d <= hi]
 
     return LegResult(leg.name, assignment, results, hold_stats, ctx, truncated_inside,
-                      duplicates_inside)
+                      duplicates_inside, lead_in_violation=lead_in_violation,
+                      lead_in_detail=lead_in_detail,
+                      parked_tail_indeterminate=parked_tail_indeterminate)
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +514,12 @@ def evaluate_cycle(
     duplicate_inside_leg = {lr.name: lr.duplicate_state_indices_inside
                              for lr in leg_results.values() if lr.duplicate_state_indices_inside}
 
+    # A1: a stray command ahead of the real turn_on match (or no match
+    # at all) is a lead-in violation.
+    any_lead_in_violation = any(lr.lead_in_violation for lr in leg_results.values())
+    lead_in_reasons = [f"{lr.name}: lead-in violation: {lr.lead_in_detail}"
+                        for lr in leg_results.values() if lr.lead_in_violation]
+
     # T4 item 4: goto_context, built per leg, merged into one full-length
     # array so echo.classify_commands sees path coincidence for every leg.
     full_goto_context: List[Optional[echo.GotoContext]] = [None] * len(evidence.commands)
@@ -506,7 +559,7 @@ def evaluate_cycle(
     if place_leg is not None and place_lr is not None:
         metrics = compute_place_route_metrics(evidence, place_leg, place_lr, affected, scene)
 
-    reasons = list(fail_reasons) + drift_reasons
+    reasons = list(fail_reasons) + drift_reasons + lead_in_reasons
     for name in truncated_inside_leg:
         reasons.append(f"{name}: commands.jsonl's final line was truncated inside this leg")
 
@@ -557,7 +610,8 @@ def evaluate_cycle(
             reasons.append(f"{genuine} genuine echo(es) in the affected segment")
         if segment_indeterminate:
             reasons.append("affected segment is indeterminate or missing (B)")
-        if any_pathcheck_fail or genuine > 0 or any_hold_target_drift or segment_indeterminate or gate_failed:
+        if (any_pathcheck_fail or genuine > 0 or any_hold_target_drift or any_lead_in_violation
+                or segment_indeterminate or gate_failed):
             verdict = VERDICT_STOP
         elif gate_incomplete:
             verdict = VERDICT_EVIDENCE_INCOMPLETE

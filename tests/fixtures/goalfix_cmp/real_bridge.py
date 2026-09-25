@@ -193,6 +193,20 @@ class BridgeGen:
         _wait(lambda: self.backend._last_target is not None, what="post-reset baseline")
 
     def close(self) -> None:
+        # A4 (coordinator ruling, 2026-09-25 stage-2a rulings addendum):
+        # close every client's own gRPC channel (the SDK's own object,
+        # `ReachySDK._grpc_channel` -- standard grpc API, not an SDK
+        # patch) BEFORE tearing down the server/backend it talks to.
+        # Left open, each client's background `_sync_loop` thread spins
+        # a tight BlockingIOError reconnect loop against the now-dead
+        # port once the server stops -- CPU contention inside the
+        # harness that the coordinator's independent re-run traced the
+        # C2 tau-spread failures to (stalls, not bridge behaviour).
+        for c in self.clients:
+            try:
+                c._grpc_channel.close()
+            except Exception:
+                pass
         self.server.stop(0)
         self.backend.stop()
 

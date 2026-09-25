@@ -183,3 +183,56 @@ def edge_window_stats(
     return HoldStats(
         HoldWindow(goal_index, t_lo_s, t_hi_s, first_i, last_i),
         last_k_target8, target_drift, realised_drift, static_first, static_last, win_idx)
+
+
+@dataclass
+class TurnOnMatch:
+    local_index: int          # position within the leg's own command_indices list
+    global_index: int         # index into evidence.commands
+    state_index: int          # the state (F4's "present-position in force at turn_on")
+    violation: bool           # True if any command precedes this match in the span
+    detail: str = ""
+
+
+def find_turn_on_command(
+    evidence: ev.Evidence, command_indices: Sequence[int],
+) -> Optional[TurnOnMatch]:
+    """Coordinator ruling (2026-09-25 stage-1 rulings, A1): the leg's
+    ``turn_on`` command is the FIRST in-span command whose right-arm
+    target equals, on ALL 8 joints, ``float32(position)`` of the state in
+    force at its own bracket's ``t_lo`` (``hi_state_index - 1``) -- F4's
+    own property, holding on every leg of every V3 run. Any in-span
+    command found BEFORE that match is a lead-in violation. Returns
+    ``None`` if no in-span command satisfies the property at all (also a
+    violation -- the caller decides how to report it)."""
+    for local_i, gi in enumerate(command_indices):
+        b = evidence.brackets[gi]
+        if b.unplaceable or b.hi_state_index is None:
+            continue
+        state_idx = b.hi_state_index - 1
+        if state_idx < 0:
+            continue
+        target8 = evidence.commands.target_rad[gi, :8].astype(np.float32)
+        present8 = evidence.states.position_rad[state_idx, :8].astype(np.float32)
+        if np.array_equal(target8, present8):
+            return TurnOnMatch(
+                local_i, gi, state_idx, violation=(local_i > 0),
+                detail=(f"{local_i} command(s) precede the turn_on match" if local_i > 0 else ""))
+    return None
+
+
+def find_final_waypoint_last_command(
+    assignment: seg.GoalAssignment, command_indices: Sequence[int], route_len: int,
+) -> Optional[int]:
+    """Coordinator ruling (A1): the parked-tail window starts at the
+    last command ASSIGNED to the ROUTE's OWN final waypoint (index
+    ``route_len - 1``, BY ASSIGNMENT, never "the leg's last command" --
+    the same MB4-style defect this closes for the settle-hold windows).
+    Returns the GLOBAL command index, or ``None`` if the final waypoint
+    was never determinately reached (the caller must not guess a
+    substitute boundary)."""
+    final_goal = route_len - 1
+    positions = [i for i, g in enumerate(assignment.goal_index) if g == final_goal]
+    if not positions:
+        return None
+    return command_indices[positions[-1]]
