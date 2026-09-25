@@ -239,14 +239,17 @@ def check_epoch_counts(states: States, commands: Commands) -> None:
             "reset row(s) (+1)")
 
     # Each reset row's recorded sim_step must agree with the step drop it
-    # opens. A reset row ending epoch e is recorded (make_fixtures.FlightSim
-    # matches this convention exactly) at sim_step = (epoch e's last state's
-    # own sim_step) + 1 -- the tick count reached in the epoch just ended,
-    # before it is zeroed. The first state of epoch e+1 (the state
-    # immediately after the drop) locates the boundary; the check itself is
-    # against the LAST state of the epoch the reset closes, which is the
-    # only state on either side of the drop that carries a value related to
-    # the reset's own recorded step.
+    # opens: strictly after the last state recorded in the epoch it
+    # closes, and no further than one recording interval beyond it.
+    # States are recorded every `state_every` sim_steps, not every one (a
+    # real B4 s1 recording samples every 10; make_fixtures' FlightSim
+    # fixtures sample every 1) -- an exact "+1" relationship only holds
+    # when state_every==1. `state_every` is derived from the data itself
+    # (the most common consecutive-state step within the closing epoch),
+    # never hard-coded, so this holds for both. Validated against real
+    # B4 s1 data (V1): a genuine reset row recorded sim_step 7 steps
+    # (state_every=10) after the last sampled state of the epoch it
+    # closed -- an exact "+1" check rejected this valid recording.
     reset_i = 0
     for state_i in range(1, len(states)):
         if states.sim_step[state_i] < states.sim_step[state_i - 1]:
@@ -268,7 +271,14 @@ def check_epoch_counts(states: States, commands: Commands) -> None:
                     "but commands.jsonl has no matching reset row")
             recorded = commands.reset_sim_step[reset_row_index]
             last_step_of_closing_epoch = int(states.sim_step[state_i - 1])
-            if recorded is None or int(recorded) != last_step_of_closing_epoch + 1:
+            epoch_step_mask = states.epoch == closing_epoch
+            epoch_steps = states.sim_step[epoch_step_mask]
+            step_diffs = np.diff(epoch_steps)
+            step_diffs = step_diffs[step_diffs > 0]
+            state_every = int(np.min(step_diffs)) if len(step_diffs) else 1
+            ok = (recorded is not None
+                  and last_step_of_closing_epoch <= int(recorded) <= last_step_of_closing_epoch + state_every)
+            if not ok:
                 raise EvidenceError(
                     f"reset row {reset_row_index}: recorded sim_step={recorded} "
                     f"does not agree with the step drop it opens (epoch "

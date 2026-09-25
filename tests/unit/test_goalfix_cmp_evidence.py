@@ -167,6 +167,12 @@ class TestEpochsAndBrackets:
 class TestT3EpochCounting:
     """A recording whose last row is a reset must load (T3/review §3.1/M3):
     epochs are n_reset_rows + 1, and each reset row's own sim_step must
+    agree with the step drop it opens -- within the recording's own
+    sampling interval (V1, 2026-09-24): a real B4 s1 session samples
+    states every 10 sim_step (not every 1, as every synthetic fixture in
+    this file does), and its genuine reset rows land a few steps past the
+    last SAMPLED state, never exactly +1. See
+    test_reset_within_sampling_interval_not_exactly_plus_one below.
     agree with the step drop it opens."""
 
     def test_trailing_reset_row_loads(self, tmp_path):
@@ -234,6 +240,50 @@ class TestT3EpochCounting:
         correct_count = n_resets + 1
         assert buggy_count != correct_count, (
             "fixture no longer distinguishes the two counting rules")
+
+    def _downsampled_two_epoch_flight(self, *, reset_sim_step_delta: int):
+        """Two epochs, states sampled every 10th tick (like a real B4 s1
+        session), with the reset row's own sim_step offset by
+        `reset_sim_step_delta` from the exact "+1 past the last SAMPLED
+        state" the old rule assumed."""
+        sim = mf.FlightSim({j: 0.0 for j in mf.R_JOINTS})
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.3}, 2.0)])
+        first_len = len(sim.state_rows)  # snapshot the length NOW -- result()
+        # returns a live reference, not a copy, and sim keeps growing it.
+        sim.recreate()
+        sim.reset(seed=1)
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.3}, 2.0)])
+        result = sim.result()
+        first_half = list(result.state_rows[:first_len])[::10]
+        rows = first_half + list(result.state_rows[first_len:])[::10]
+        for i, r in enumerate(rows):
+            r["seq"] = i
+        last_sampled_step = first_half[-1]["sim_step"]
+        commands = [dict(c) for c in result.command_rows]
+        for c in commands:
+            if c["type"] == "reset":
+                c["sim_step"] = last_sampled_step + reset_sim_step_delta
+        return rows, commands
+
+    def test_reset_within_sampling_interval_not_exactly_plus_one(self, tmp_path):
+        """V1 (2026-09-24, real B4 s1 data): a genuine reset row can be
+        recorded several sim_steps past the last SAMPLED state (a session
+        sampling every 10 sim_step logged a reset 7 steps past the last
+        sample, and a second real case logged one exactly AT the last
+        sample) -- neither is +1. Both must load."""
+        rows, commands = self._downsampled_two_epoch_flight(reset_sim_step_delta=7)
+        mf.write_evidence(tmp_path, rows, commands)
+        ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")  # must not raise
+
+        rows0, commands0 = self._downsampled_two_epoch_flight(reset_sim_step_delta=0)
+        mf.write_evidence(tmp_path, rows0, commands0)
+        ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")  # must not raise
+
+    def test_reset_beyond_sampling_interval_is_still_evidence_incomplete(self, tmp_path):
+        rows, commands = self._downsampled_two_epoch_flight(reset_sim_step_delta=50)
+        mf.write_evidence(tmp_path, rows, commands)
+        with pytest.raises(ev.EvidenceError):
+            ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
 
 
 class TestLegFromSidecar:
