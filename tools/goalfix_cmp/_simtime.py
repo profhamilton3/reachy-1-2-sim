@@ -217,6 +217,18 @@ def bracket_commands(
             elif fg == 0 and boundary_t_lo is not None:
                 out[ci] = Bracket(epoch_i, boundary_t_lo, float(st[0]), int(sidx[0]))
             elif fg == 0:
+                # Defensive, not reachable via `evidence.load_evidence`'s own
+                # call (which always supplies `bridge_sessions` from
+                # `detect_bridge_sessions` on the SAME command/state arrays):
+                # `info.restart is False` there means this epoch's first
+                # command's own seq is strictly greater than `acc[0]`
+                # (the carried value), and seq strictly increases within a
+                # non-ambiguous epoch, so `searchsorted(acc, cmd_seq) == 0`
+                # cannot occur for ANY command once restart is False -- `acc`
+                # never decreases, so acc[0] stays below every later seq too.
+                # Kept only for a caller that hand-supplies an inconsistent
+                # `bridge_sessions`; unplaceable, never guessed at, exactly
+                # as an epoch's genuinely-first-ever command already is.
                 out[ci] = Bracket(epoch_i, None, float(st[0]), int(sidx[0]))
             else:
                 out[ci] = Bracket(
