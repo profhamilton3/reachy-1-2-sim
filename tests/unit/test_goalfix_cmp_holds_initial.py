@@ -50,10 +50,13 @@ class TestHolds:
         assert goal_index == 0  # SWING_1's hold, before HOVER begins
         assert t_hi - t_lo == pytest.approx(0.3, abs=0.02)
 
-        stats = holds.hold_window_stats(windows[0], epoch=0, target8=SWING_1_POSE, states=evd.states)
+        stats = holds.hold_window_stats(
+            windows[0], epoch=0, target8=SWING_1_POSE, evidence=evd,
+            all_command_indices=list(jc_idx))
         assert stats is not None
         # No commands during the hold -- target never moves.
         assert all(v == 0.0 for v in stats.target_drift.values())
+        assert stats.window_command_indices == []
         # Realised position is held (my fixture's constant lag offset
         # model), so drift over the window is ~0 and the static offset is
         # the known, constant lag.

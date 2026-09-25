@@ -353,11 +353,15 @@ def check_cycle(
 def write_versions_doc(
     *, host_native_kernel_sha: str, host_tree_dirty: bool, bridge_arm: str, bridge_sha: str,
     running_image_id: str, opt_hashes: Dict[str, str],
-    supervisor_start_times: Dict[str, float],
+    supervisor_start_times: Dict[str, float], recreate_timestamp: float,
 ) -> Dict[str, object]:
     """The ``versions_<cycle>.json`` payload -- every plan §3.3 field, named
-    explicitly. T6: the old version omitted the image ID, the three
-    hashes, ``bridge_arm`` and the supervisor start times entirely."""
+    explicitly, PLUS ``recreate_timestamp`` (needed to reconstruct
+    ``check_cycle``'s own staleness check -- "must be later than the
+    recreate" -- from this doc alone; not itself one of §3.3's named
+    fields, but nothing else in the doc records it). T6: the old version
+    omitted the image ID, the three hashes, ``bridge_arm`` and the
+    supervisor start times entirely."""
     return {
         "host_native_kernel_sha": host_native_kernel_sha,
         "host_tree_dirty": host_tree_dirty,
@@ -366,6 +370,7 @@ def write_versions_doc(
         "running_image_id": running_image_id,
         "opt_hashes": dict(opt_hashes),
         "supervisor_start_times": dict(supervisor_start_times),
+        "recreate_timestamp": recreate_timestamp,
     }
 
 
@@ -526,7 +531,8 @@ def _cli(argv: Optional[Sequence[str]] = None, runner: Optional[Runner] = None) 
                     host_native_kernel_sha=host_git_sha, host_tree_dirty=host_tree_dirty,
                     bridge_arm=entry.arm, bridge_sha=entry.bridge_sha,
                     running_image_id=running_image_id, opt_hashes=observed.opt_hashes,
-                    supervisor_start_times=supervisor_start_times))
+                    supervisor_start_times=supervisor_start_times,
+                    recreate_timestamp=args.recreate_timestamp))
         else:
             raise ProvenanceCliError(f"unknown subcommand {args.cmd!r}")
     except (ProvenanceCliError, OSError, json.JSONDecodeError, TypeError, KeyError) as exc:

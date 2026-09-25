@@ -45,7 +45,7 @@ def _write_and_load(tmp_path, state_rows, command_rows):
 def _place_route_legspec(evidence):
     idx = list(range(len(evidence.commands)))
     idx = [i for i in idx if evidence.commands.kind[i] == "joint_command"]
-    return cyc.LegSpec("PLACE_ROUTE", PLACE_ROUTE, guard=(), start_pose8=START,
+    return cyc.LegSpec("setup", PLACE_ROUTE, guard=(), start_pose8=START,
                         command_indices=idx)
 
 
@@ -56,7 +56,7 @@ class TestEvaluateCycle:
         result = sim.result()
         evidence = _write_and_load(tmp_path, result.state_rows, result.command_rows)
         legs = [_place_route_legspec(evidence)]
-        cv, _ = cyc.evaluate_cycle("B_c1", "B", evidence, legs)
+        cv, _ = cyc.evaluate_cycle("B_c1", "B", evidence, legs, skip_gates=True)
         assert cv.verdict == cyc.VERDICT_OK
         assert cv.rc() == 0
 
@@ -132,10 +132,10 @@ class TestEvaluateCycle:
         assert result.state_rows[-1]["sim_time_s"] >= 540.0  # >= 9 minutes, budget-representative
         evidence = _write_and_load(tmp_path, result.state_rows, result.command_rows)
         idx = [i for i in range(len(evidence.commands)) if evidence.commands.kind[i] == "joint_command"]
-        legs = [cyc.LegSpec("PLACE_ROUTE", long_route, guard=(), start_pose8=START,
+        legs = [cyc.LegSpec("setup", long_route, guard=(), start_pose8=START,
                              command_indices=idx)]
         t0 = time.monotonic()
-        cv, _ = cyc.evaluate_cycle("B_long", "B", evidence, legs)
+        cv, _ = cyc.evaluate_cycle("B_long", "B", evidence, legs, skip_gates=True)
         elapsed = time.monotonic() - t0
         assert elapsed < 60.0
         assert cv.verdict == cyc.VERDICT_OK

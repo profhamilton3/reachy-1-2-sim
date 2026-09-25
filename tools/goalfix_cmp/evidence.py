@@ -387,6 +387,40 @@ def leg_from_sidecar(label: str, sidecar: Dict[str, Any], states: States) -> Leg
                float(states.sim_time_s[fi]), float(states.sim_time_s[li]))
 
 
+def commands_in_leg(evidence: "Evidence", leg: Leg) -> List[int]:
+    """T4 item 2: the ``joint_command`` global indices belonging to
+    ``leg``, found BY BRACKET from the leg's own aligned-state span --
+    never an operator-supplied index. A command belongs to the leg if its
+    bracket's ``hi_state_index`` (the first state reporting it applied)
+    falls within ``[leg.first_state_index, leg.last_state_index]``."""
+    out = []
+    for i, kind in enumerate(evidence.commands.kind):
+        if kind != "joint_command":
+            continue
+        b = evidence.brackets[i]
+        if b.unplaceable or b.hi_state_index is None:
+            continue
+        if leg.first_state_index <= b.hi_state_index <= leg.last_state_index:
+            out.append(i)
+    return out
+
+
+def leg_turn_on_state_index(evidence: "Evidence", leg_command_indices: Sequence[int]) -> Optional[int]:
+    """T4/T7: the global STATE index of the present-position reading in
+    force at a leg's own ``turn_on`` -- "the goal set at turn_on" (plan
+    §7.1). This is the state immediately BEFORE the leg's own first
+    command was applied (its bracket's ``t_lo`` state): ``hi_state_index -
+    1``, which always holds globally (states never interleave epochs, and
+    a restart's own boundary state -- see ``_simtime.bracket_commands`` --
+    is exactly this same "last state before" position). ``None`` if the
+    leg has no (placeable) commands at all."""
+    if not leg_command_indices:
+        return None
+    first = min(leg_command_indices)
+    hi = evidence.brackets[first].hi_state_index
+    return None if hi is None else hi - 1
+
+
 def check_legs_non_overlapping(legs: Sequence[Leg]) -> None:
     """Raises ``EvidenceError`` if two legs in the same epoch overlap in
     ``sim_time_s`` -- an overlapping sidecar is evidence-incomplete, per
