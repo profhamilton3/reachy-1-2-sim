@@ -351,6 +351,135 @@ def count_pause_tripwire(states_paths: Optional[Sequence[str]] = None) -> Option
     return count
 
 
+# ---------------------------------------------------------------------------
+# F3 (merge verdict §2; 2026-09-25 pr144-f1-f6 assignment): plan §7.7's
+# FULL row set, per cycle and per arm -- MB7 (above) wired only
+# lease_acquisition/control_held_refusal/pause. The reset-ack timeout
+# (bridge AND watcher -- both land in the same per-container log, since
+# both run inside the container's fake_reachy_server process),
+# "Unexpected reset_ack" (with the A carve-out) and reset.sh's own STOP
+# were counted by count_tripwires but never reported or gated, and there
+# was no watcher/reset.sh input at all.
+#
+# Per-cycle log paths come from the CYCLE MANIFEST (F4's
+# ``cycle_<id>.json``: ``bridge_log`` -- the file for that cycle's
+# container, shared by the bridge and the watcher, so a pattern is
+# counted ONCE per file even though it serves both roles -- and
+# ``reset_record``, F5's ``reset_<gen>.txt``), never a positional list.
+# Session-level inputs stay ``--native-log``/``--states``, plus the new
+# ``--control-stop``/``--control-stop-absent`` (its ABSENCE is the normal
+# case and must be declared explicitly; its PRESENCE is a STOP).
+# ---------------------------------------------------------------------------
+
+#: The two per-cycle bridge/watcher patterns (unchanged text from
+#: TRIPWIRE_SOURCES/_TRIPWIRE_PATTERN_TEXT above) plus control_held_refusal,
+#: all read from the SAME per-cycle bridge_log file -- never double-counted
+#: by treating "bridge" and "watcher" as two separate inputs when they are
+#: the same file.
+_PER_CYCLE_BRIDGE_PATTERNS: Dict[str, str] = {
+    "reset_ack_timeout": _TRIPWIRE_PATTERN_TEXT["reset_ack_timeout"],
+    "unexpected_reset_ack": _TRIPWIRE_PATTERN_TEXT["unexpected_reset_ack"],
+    "control_held_refusal": _TRIPWIRE_PATTERN_TEXT["control_held_refusal"],
+}
+
+
+def per_cycle_reset_tripwires(control_dir, cycle_id: str, arm: str) -> Dict[str, object]:
+    """This cycle's own ``bridge_log`` (the bridge+watcher's shared
+    per-container log) and ``reset_record`` (F5's ``reset_<gen>.txt``),
+    both named by that cycle's manifest (``cycle_<cycle_id>.json``, F4) --
+    never a positional/session-level log. Raises ``SummaryCliError``
+    (mapped to rc 3) if the manifest, or either file it names, is
+    missing/malformed/unreadable. ``reset_sh_mismatch`` counts every line
+    in ``reset_record`` starting ``STOP:`` (reset.sh's own STOP prefix,
+    covering "ack mismatch or other STOP" per plan §7.7's own wording).
+    ``violated``: this cycle's OWN §7.7 rows that must STOP the session,
+    with the A carve-out for ``unexpected_reset_ack`` already applied
+    (plan §7.7: B non-zero -> STOP; A non-zero -> reported only)."""
+    from pathlib import Path as _Path
+    control_dir = _Path(control_dir)
+    manifest_path = control_dir / f"cycle_{cycle_id}.json"
+    if not manifest_path.is_file():
+        raise SummaryCliError(
+            f"cycle {cycle_id!r}: missing cycle manifest {manifest_path} "
+            "(required for §7.7 per-cycle tripwire enforcement, F3)")
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise SummaryCliError(
+            f"cycle {cycle_id!r}: malformed cycle manifest {manifest_path}: {exc}") from exc
+
+    bridge_log_name = manifest.get("bridge_log")
+    reset_record_name = manifest.get("reset_record")
+    if not bridge_log_name:
+        raise SummaryCliError(f"cycle {cycle_id!r}: manifest {manifest_path} has no bridge_log")
+    if not reset_record_name:
+        raise SummaryCliError(f"cycle {cycle_id!r}: manifest {manifest_path} has no reset_record")
+
+    bridge_text = read_log_text(str(control_dir / bridge_log_name))
+    reset_text = read_log_text(str(control_dir / reset_record_name))
+
+    counts = {name: bridge_text.lower().count(pattern)
+              for name, pattern in _PER_CYCLE_BRIDGE_PATTERNS.items()}
+    reset_sh_stop_lines = [ln for ln in reset_text.splitlines() if ln.strip().startswith("STOP:")]
+    counts["reset_sh_mismatch"] = len(reset_sh_stop_lines)
+
+    violated: List[str] = []
+    if counts["reset_ack_timeout"]:
+        violated.append("reset_ack_timeout")
+    if counts["reset_sh_mismatch"]:
+        violated.append("reset_sh_mismatch")
+    if counts["unexpected_reset_ack"] and arm == "B":
+        violated.append("unexpected_reset_ack")
+
+    return {"cycle": cycle_id, "arm": arm, **counts, "violated": violated}
+
+
+def full_tripwire_report(
+    control_dir, cycles: Sequence["tuple[str, str]"], *,
+    native_log_text: str, states_paths: Optional[Sequence[str]],
+    control_stop_present: bool,
+) -> "tuple[Dict[str, object], List[str]]":
+    """The FULL plan §7.7 report over ``cycles`` (``[(cycle_id, arm), ...]``,
+    e.g. the checkpoint's first ``n`` or ``final``'s whole session, in the
+    caller's own scope): per-cycle rows (F3, above) plus the pre-existing
+    session-level ``lease_acquisition``/``pause`` counters (MB7) and the
+    new ``control_stop_present`` check. Returns ``(report, violated)`` --
+    ``violated`` names every row (as ``"<name>@<cycle>"`` for a per-cycle
+    row, or the bare name for a session-level one) that must STOP this
+    session; arm carve-outs are already applied per cycle."""
+    per_cycle = [per_cycle_reset_tripwires(control_dir, cycle_id, arm) for cycle_id, arm in cycles]
+
+    native_counts = count_tripwires(native_log=native_log_text)
+    pause_count = count_pause_tripwire(states_paths)
+
+    violated: List[str] = []
+    for row in per_cycle:
+        violated.extend(f"{name}@{row['cycle']}" for name in row["violated"])
+    if native_counts["lease_acquisition"]:
+        violated.append("lease_acquisition")
+    if pause_count:
+        violated.append("pause")
+    if control_stop_present:
+        violated.append("control_stop_present")
+
+    report: Dict[str, object] = {
+        "per_cycle": per_cycle,
+        "reset_ack_timeout_total": sum(r["reset_ack_timeout"] for r in per_cycle),
+        "unexpected_reset_ack_total": sum(r["unexpected_reset_ack"] for r in per_cycle),
+        "control_held_refusal_total": sum(r["control_held_refusal"] for r in per_cycle),
+        "reset_sh_mismatch_total": sum(r["reset_sh_mismatch"] for r in per_cycle),
+        "lease_acquisition": {
+            "count": native_counts["lease_acquisition"],
+            "observable_scope": MB7_OBSERVABLE_SCOPE["lease_acquisition"],
+            "blind_spots": [MB7_BLIND_SPOTS["lease_acquisition"]]},
+        "pause": {
+            "count": pause_count, "observable_scope": MB7_OBSERVABLE_SCOPE["pause"],
+            "blind_spots": [MB7_BLIND_SPOTS["pause"]]},
+        "control_stop_present": control_stop_present,
+    }
+    return report, violated
+
+
 def mb7_tripwire_report(
     *, bridge_log: Optional[str] = None, native_log: Optional[str] = None,
     states_paths: Optional[Sequence[str]] = None,
@@ -586,15 +715,22 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     # not as the "evidence incomplete" it actually is -- so a missing
     # input is instead detected in the CLI body and returned as rc 3 with
     # a JSON reason (see below).
+    # F3 (merge verdict §2; 2026-09-25 pr144-f1-f6 assignment):
+    # --bridge-log is GONE -- that log is now resolved PER CYCLE from
+    # each cycle's own manifest (F4's cycle_<id>.json), never a
+    # session-level positional flag. --control-stop/--control-stop-absent
+    # are mutually exclusive and (like --native-log/--states) required in
+    # code, not at the argparse level (see the F2 comment above).
     cp = sub.add_parser("checkpoint")
     cp.add_argument("--control-dir", required=True)
     cp.add_argument("--arm-map", required=True)
     cp.add_argument("--expected-bridge-sha-a", required=True)
     cp.add_argument("--expected-bridge-sha-b", required=True)
     cp.add_argument("--n", type=int, default=4)
-    cp.add_argument("--bridge-log")
     cp.add_argument("--native-log")
     cp.add_argument("--states", nargs="+")
+    cp.add_argument("--control-stop")
+    cp.add_argument("--control-stop-absent", action="store_true")
     cp.add_argument("--out", required=True)
 
     fn = sub.add_parser("final")
@@ -604,9 +740,10 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     fn.add_argument("--expected-bridge-sha-b", required=True)
     fn.add_argument("--a-target-count", type=int, default=6)
     fn.add_argument("--a-manipulated-min", type=int, default=4)
-    fn.add_argument("--bridge-log")
     fn.add_argument("--native-log")
     fn.add_argument("--states", nargs="+")
+    fn.add_argument("--control-stop")
+    fn.add_argument("--control-stop-absent", action="store_true")
     fn.add_argument("--out", required=True)
 
     args = p.parse_args(argv)
@@ -622,52 +759,65 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         arm_map = {e.rep: e for e in arm_map_entries}
 
         # F2: tripwires are mandatory for both checkpoint and final -- a
-        # missing input (any one of the three) is rc 3 in code, never
-        # argparse's own status 2 and never a silent rc 0.
-        if args.bridge_log is None or args.native_log is None or args.states is None:
+        # missing input is rc 3 in code, never argparse's own status 2
+        # and never a silent rc 0.
+        if args.native_log is None or args.states is None:
             raise SummaryCliError(
                 "checkpoint/final require the full tripwire input set: "
-                "--bridge-log, --native-log and --states are all mandatory "
-                "(F2 -- tripwires are never opt-in)")
-        # F1 (2026-09-25 pr144-f1-f6 assignment): `args.bridge_log`/
-        # `args.native_log` are PATHS (argparse strings naming files on
-        # disk, per the --bridge-log/--native-log help text) -- at 0722476
-        # these were handed STRAIGHT to `mb7_tripwire_report` (which counts
+                "--native-log, --states and one of --control-stop/"
+                "--control-stop-absent are all mandatory "
+                "(F2/F3 -- tripwires are never opt-in)")
+        # F3: --control-stop's absence is the normal case and must be
+        # declared EXPLICITLY (--control-stop-absent) -- never inferred
+        # from simply omitting the flag, which is exactly the "missing
+        # input" case F2 rejects above, not "absent and known to be so".
+        if args.control_stop and args.control_stop_absent:
+            raise SummaryCliError(
+                "--control-stop and --control-stop-absent are mutually exclusive")
+        if not args.control_stop and not args.control_stop_absent:
+            raise SummaryCliError(
+                "checkpoint/final require exactly one of --control-stop or "
+                "--control-stop-absent (F3 -- its absence must be declared "
+                "explicitly, never assumed)")
+        from pathlib import Path as _Path
+        control_stop_present = bool(args.control_stop) and _Path(args.control_stop).is_file()
+
+        # F1 (2026-09-25 pr144-f1-f6 assignment): `args.native_log` is a
+        # PATH (an argparse string naming a file on disk) -- at 0722476
+        # this was handed STRAIGHT to `mb7_tripwire_report` (which counts
         # patterns in whatever text it is given), so the CLI counted
         # patterns in the PATH STRING itself, never the file's contents.
         # `read_log_text` is the one seam that turns a path into text; a
         # missing/unreadable/undecodable file raises `SummaryCliError`
         # (rc 3, via the except clause below), naming the path -- never
         # silently treated as empty.
-        bridge_text = read_log_text(args.bridge_log)
         native_text = read_log_text(args.native_log)
-        tripwire_report = mb7_tripwire_report(
-            bridge_log=bridge_text, native_log=native_text, states_paths=args.states)
-        tripwire_check = check_mb7_tripwires(tripwire_report)
-        if tripwire_check.missing_log:
-            raise SummaryCliError(
-                f"tripwire counter(s) missing their required log/path: "
-                f"{tripwire_check.missing_log}")
 
         if args.cmd == "checkpoint":
             verdicts, metrics, hash_mismatch = load_between_files(
                 args.control_dir, arm_map, required_reps=range(1, args.n + 1))
+            cycles = [(v.cycle, v.arm) for v in verdicts[:args.n]]
+            tripwire_report, violated = full_tripwire_report(
+                args.control_dir, cycles, native_log_text=native_text,
+                states_paths=args.states, control_stop_present=control_stop_present)
             r = checkpoint_after(verdicts, args.n, hash_mismatch=hash_mismatch)
             payload = {
                 "n_cycles": r.n_cycles, "any_stop": r.any_stop,
                 "a_inconclusive_count": r.a_inconclusive_count, "hold_idle": r.hold_idle,
                 "reason": r.reason, "any_incomplete": r.any_incomplete,
-                "missing_cycles": r.missing_cycles,
+                "missing_cycles": r.missing_cycles, "tripwires": tripwire_report,
             }
             rc = r.rc()
-            if tripwire_report is not None:
-                payload["tripwires"] = tripwire_report
-                if tripwire_check.violated and rc == RC_OK:
-                    rc = RC_STOP
-                    payload["reason"] = payload["reason"] or f"tripwire(s) violated: {tripwire_check.violated}"
+            if violated and rc == RC_OK:
+                rc = RC_STOP
+                payload["reason"] = payload["reason"] or f"tripwire(s) violated: {violated}"
             return write_result(args.out, rc, payload)
         else:
             verdicts, metrics, hash_mismatch = load_between_files(args.control_dir, arm_map)
+            cycles = [(v.cycle, v.arm) for v in verdicts]
+            tripwire_report, violated = full_tripwire_report(
+                args.control_dir, cycles, native_log_text=native_text,
+                states_paths=args.states, control_stop_present=control_stop_present)
             if hash_mismatch:
                 r = SummaryResult(len(verdicts), OUTCOME_INCOMPLETE,
                                    "one or more between_*.json files were hashed against a "
@@ -676,11 +826,10 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
                 r = aggregate(verdicts, metrics, a_target_count=args.a_target_count,
                                a_manipulated_min=args.a_manipulated_min)
             out_payload = r.as_dict()
+            out_payload["tripwires"] = tripwire_report
             rc = r.rc()
-            if tripwire_report is not None:
-                out_payload["tripwires"] = tripwire_report
-                if tripwire_check.violated and rc == RC_OK:
-                    rc = RC_STOP
+            if violated and rc == RC_OK:
+                rc = RC_STOP
             return write_result(args.out, rc, out_payload)
     except (SummaryCliError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
         return write_result(args.out, RC_INCONCLUSIVE, {"ok": False, "reason": str(exc)})
