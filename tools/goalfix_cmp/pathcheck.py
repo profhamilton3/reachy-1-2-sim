@@ -322,6 +322,11 @@ def run_all(
     ``assign_goals``'s tolerance and turn it indeterminate, silently
     hiding the very violation being tested rather than exercising the
     check's own logic."""
+    # T1 (review §3.2/M1): ``route``/``start_pose8`` must already be radians
+    # (``_units.route_rad``'s job) -- caught here, not silently mis-checked.
+    seg._assert_rad8(start_pose8, "pathcheck.run_all: start_pose8")
+    for wp in route:
+        seg._assert_rad8(_goal8(wp), f"pathcheck.run_all: route[{wp.name}]")
     targets8 = [{name: float(row[i]) for i, name in enumerate(R_JOINTS)} for row in targets21]
     if assignment is None:
         assignment = seg.assign_goals(route, start_pose8, targets8)
@@ -382,9 +387,15 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         return write_result(args.out, RC_INCONCLUSIVE, {"ok": False, "reason": str(exc)})
 
     from reachy_ai.motion import rig_routes as R
-    route = getattr(R, args.route)
+    from tools.goalfix_cmp._units import pose8_rad, route_rad
+
+    # T1 (review §3.2/M1): convert once, at this one boundary -- route_rad's
+    # whole point. `start_pose8` is still the route's nominal start (HOME/
+    # REST), not the leg's actual `turn_on` goal (M5); that wiring is T4's
+    # end-to-end `cycle` CLI, which this single-leg CLI is not.
+    route = route_rad(getattr(R, args.route))
     guard = R.CRITICAL_JOINTS if args.route == "PLACE_ROUTE" else R._PRESENT_GUARD
-    start_pose8 = R.HOME if args.route == "PLACE_ROUTE" else R.REST
+    start_pose8 = pose8_rad(R.HOME if args.route == "PLACE_ROUTE" else R.REST)
 
     jc_idx = np.nonzero(evd.commands.joint_command_mask())[0]
     jc_idx = jc_idx[(jc_idx >= args.command_start_index) & (jc_idx <= args.command_end_index)]

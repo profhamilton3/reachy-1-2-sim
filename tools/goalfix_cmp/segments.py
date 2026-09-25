@@ -23,6 +23,21 @@ if str(_REPO / "src") not in sys.path:
 
 from reachy_ai.motion.rig_routes import R_JOINTS, Waypoint  # noqa: E402
 
+#: T1 (review §3.2/M1): every pose this module sees must already be radians
+#: -- ``_units.route_rad``'s job, done once by the caller, never here. This
+#: is the "assert this where practical" the assignment asks for: it catches
+#: a raw ``rig_routes.Waypoint`` (degrees) reaching this module before it
+#: can silently mis-segment every command.
+_PLAUSIBLE_RAD_BOUND = 2.0 * 3.141592653589793
+
+
+def _assert_rad8(pose: Dict[str, float], where: str) -> None:
+    for j, v in pose.items():
+        assert abs(v) < _PLAUSIBLE_RAD_BOUND, (
+            f"{where}: {j}={v} is not a plausible radian value -- "
+            "pass a route_rad()-converted pose, never a degree one")
+
+
 #: Tight on purpose: a minimum-jerk clean flight is numerically exact, so
 #: this only needs to absorb float roundoff. A looser bound risks two
 #: closely-spaced waypoints' segments overlapping and mis-assigning real,
@@ -77,6 +92,10 @@ def assign_goals(
     ``skipped_waypoint``. A target on no known segment is left
     indeterminate (``None``) rather than guessed at -- expected on an
     echo-corrupted (A-like) leg."""
+    _assert_rad8(start_pose8, "assign_goals: start_pose8")
+    for wp in route:
+        _assert_rad8(_pose8(wp), f"assign_goals: route[{wp.name}]")
+
     n = len(targets8)
     result: List[Optional[int]] = [None] * n
     cur = 0
