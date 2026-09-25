@@ -75,6 +75,147 @@ class TestQEchoRuling:
         assert label == echo.GENUINE_ECHO
 
 
+class TestMutantGotoContextNoneThroughCycle:
+    """T4 `goto_context=None` in `evaluate_cycle` (readiness review
+    §Surviving mutants: "Path coincidence is not tested through the
+    cycle. The handoff's 'covered indirectly' does not hold."). The
+    shipped call site is cycle.py's `full_goto_context[global_i] =
+    lr.goto_context[local_i]` loop (inside `evaluate_cycle`), which
+    ``echo.classify_commands`` needs to ever return PATH_COINCIDENCE
+    instead of GENUINE_ECHO (echo.py's own `_subclassify`: `ctx is None`
+    skips the whole path-coincidence branch and falls straight to
+    GENUINE_ECHO).
+
+    This is the exact pre-Q-echo-ruling fixture (commit 154a7b0, before
+    4c9da51): r_shoulder_pitch's own near-end, on-path echo, 2 commands
+    before REST_SHUT's arrival -- at that commit it was (correctly, for
+    the pre-ruling code) asserted `genuine_echo_count == 1`. Under the
+    Q-echo ruling it is now `path_coincidence` instead
+    (TestMutantQ_BIgnoresGenuineEchoInSegment's docstring below explains
+    why), making `genuine_echo_count == 0` the CORRECT value through
+    evaluate_cycle -- and the value a `goto_context=None` mutation would
+    break back to 1, since the classifier could then never look up
+    ctx.start8/goal8 to tell path coincidence from a genuine echo."""
+
+    def _build(self, tmp_path):
+        start_deg = {j: 0.0 for j in mf.R_JOINTS}
+        hover_deg = dict(start_deg, r_shoulder_pitch=-30.0)
+        rest_shut_deg = dict(start_deg, r_shoulder_pitch=-70.0)
+        route_deg = (RWaypoint("HOVER", hover_deg, 2.0, 6.0),
+                     RWaypoint("REST_SHUT", rest_shut_deg, 2.0, 6.0))
+        route_r = route_rad(route_deg)
+        start_rad = route_rad((RWaypoint("START", start_deg, 1.0, 6.0),))[0].pose
+
+        sim = mf.FlightSim(start_deg, pose_units="deg")
+        sim.fly([mf.Waypoint(wp.name, wp.pose, wp.seconds) for wp in route_deg])
+        result = sim.result()
+        cmds, rows = result.command_rows, result.state_rows
+
+        mf.write_evidence(tmp_path, rows, cmds)
+        evd0 = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+        jc_idx0 = [i for i, k in enumerate(evd0.commands.kind) if k == "joint_command"]
+        pick_cmd, src_cmd = 200, 198
+        src_state = evd0.brackets[jc_idx0[src_cmd]].hi_state_index
+        planted_value = rows[src_state]["joints"][0]["position_rad"]
+
+        cmds2 = [dict(c, target_rad=list(c["target_rad"])) for c in cmds]
+        cmds2[pick_cmd]["target_rad"][0] = planted_value
+        mf.write_evidence(tmp_path, rows, cmds2)
+        evd = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+
+        idx = list(range(len(evd.commands)))
+        leg = cyc.LegSpec("setup", route_r, guard=(), start_pose8=start_rad,
+                           command_indices=idx)
+        return evd, leg
+
+    def test_near_end_on_path_echo_is_not_genuine_through_evaluate_cycle(self, tmp_path):
+        evd, leg = self._build(tmp_path)
+        cv, _ = cyc.evaluate_cycle("t8pc", "B", evd, [leg], skip_gates=True)
+        # C3 (A2's raw-value monotonicity, no near-end exemption) is
+        # expected to fail on this same planted value independently of
+        # what is under test here -- only genuine_echo_count/reasons are
+        # asserted.
+        assert cv.genuine_echo_count == 0, cv.as_dict()
+        assert not any("genuine echo" in r for r in cv.reasons), cv.reasons
+
+    def test_mutation_goto_context_forced_none_would_miss_it(self, tmp_path):
+        """Mutation guard (verified directly against a mutated copy of
+        cycle.py -- see the handoff for the transcript): replacing
+        cycle.py's ``full_goto_context[global_i] = lr.goto_context[local_i]``
+        with ``full_goto_context[global_i] = None`` makes this exact
+        fixture's genuine_echo_count go 0 -> 1. Pinned here as the value
+        the correct code (asserted above) must keep giving."""
+        evd, leg = self._build(tmp_path)
+        cv, _ = cyc.evaluate_cycle("t8pc", "B", evd, [leg], skip_gates=True)
+        assert cv.genuine_echo_count == 0
+
+
+class TestMutantSegmentIndeterminateIgnoredForB:
+    """T4 `segment_indeterminate` ignored for B (readiness review
+    §Surviving mutants: "The code is correct today, but no test pins
+    it."). The shipped call site is cycle.py's B-verdict condition
+    (``evaluate_cycle``): ``... or segment_indeterminate or
+    gate_failed``.
+
+    Isolated fixture: a cycle with ONLY a "flight" leg -- no leg named
+    ``place_route_leg_name`` ("setup") at all. ``evaluate_cycle`` never
+    finds a ``place_leg``/``place_lr`` for that name, so
+    ``segment_indeterminate`` stays at its initial default (``True``)
+    without ever touching ``find_affected_segment`` -- meaning C0-C8,
+    hold drift and lead-in all pass cleanly on the (otherwise ordinary)
+    flight leg, and ONLY segment_indeterminate drives the verdict,
+    unlike a truncated-PLACE_ROUTE fixture (where C0's own goal-sequence
+    check would co-fail for the same reason and mask this check)."""
+
+    def _build(self, tmp_path):
+        start_deg = {j: 0.0 for j in mf.R_JOINTS}
+        present_deg = dict(start_deg, r_shoulder_pitch=-10.0)
+        route_deg = (RWaypoint("PRESENT", present_deg, 2.0, 6.0),)
+        route_r = route_rad(route_deg)
+        start_rad = route_rad((RWaypoint("START", start_deg, 1.0, 6.0),))[0].pose
+
+        sim = mf.FlightSim(start_deg, pose_units="deg")
+        sim.fly([mf.Waypoint("PRESENT", present_deg, 2.0)])
+        result = sim.result()
+        cmds, rows = result.command_rows, result.state_rows
+
+        mf.write_evidence(tmp_path, rows, cmds)
+        evd = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+
+        idx = list(range(len(evd.commands)))
+        flight_leg = cyc.LegSpec("flight", route_r, guard=(), start_pose8=start_rad,
+                                  command_indices=idx)
+        return evd, flight_leg
+
+    def test_missing_place_route_leg_gives_indeterminate_segment_stop(self, tmp_path):
+        evd, flight_leg = self._build(tmp_path)
+        cv, leg_results = cyc.evaluate_cycle("t8seg", "B", evd, [flight_leg], skip_gates=True)
+
+        # No other check fires -- isolates segment_indeterminate as the
+        # ONLY reason for the STOP.
+        for cid, r in leg_results["flight"].pathcheck.items():
+            if hasattr(r, "passed"):
+                assert r.passed, f"{cid} unexpectedly failed: {getattr(r, 'detail', None)}"
+        assert cv.genuine_echo_count == 0
+        assert cv.segment_indeterminate
+        assert cv.verdict == cyc.VERDICT_STOP
+        assert cv.reasons == ["affected segment is indeterminate or missing (B)"]
+
+    def test_mutation_segment_indeterminate_removed_would_authorize(self, tmp_path):
+        """Mutation guard (verified directly against a mutated copy of
+        cycle.py -- see the handoff for the transcript): dropping ``or
+        segment_indeterminate`` from the B-verdict's OR-condition makes
+        this exact fixture's verdict go STOP -> ok, with every other
+        signal (genuine_echo_count, any_pathcheck_fail, hold drift,
+        lead-in, gate_failed) staying negative/zero -- proving this
+        check alone is load-bearing here, not incidentally covered by
+        pathcheck. Pinned here as the value the correct code (asserted
+        above) must keep giving."""
+        evd, flight_leg = self._build(tmp_path)
+        cv, _ = cyc.evaluate_cycle("t8seg", "B", evd, [flight_leg], skip_gates=True)
+        assert cv.verdict == cyc.VERDICT_STOP
+
+
 class TestMutantQ_BIgnoresGenuineEchoInSegment:
     """(q): B ignores a genuine echo in the segment.
 
