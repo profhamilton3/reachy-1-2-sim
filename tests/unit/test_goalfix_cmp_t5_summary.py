@@ -330,21 +330,33 @@ class TestMB7TripwiresThroughTheCli:
         assert "tripwires" not in read_result(out)
 
     def test_missing_required_log_is_rc3(self, tmp_path):
+        """The pre-F1 flag ('--bridge-log' alone, without --native-log/
+        --states): the counters that were never supplied at all are
+        `missing_log`, giving rc 3 -- unrelated to path-reading, still
+        true after F1."""
         self._write_four_clean(tmp_path)
+        bridge_log = tmp_path / "bridge_log.txt"
+        bridge_log.write_text("nothing interesting\n")
         out = tmp_path / "checkpoint_1.json"
         rc = _summ_cli(["checkpoint", "--control-dir", str(tmp_path), "--n", "4",
-                        "--bridge-log", "nothing here", "--out", str(out)], tmp_path)
+                        "--bridge-log", str(bridge_log), "--out", str(out)], tmp_path)
         assert rc == RC_INCONCLUSIVE
         assert "missing their required" in read_result(out).get("reason", "")
 
     def test_nonzero_lease_acquisition_stops_a_clean_checkpoint(self, tmp_path):
         self._write_four_clean(tmp_path)
+        bridge_log = tmp_path / "bridge_log.txt"
+        bridge_log.write_text("nothing here\n")
+        native_log = tmp_path / "native.log"
+        native_log.write_text("Execution lease granted to 'x' (mover 'x', 30s)\n")
+        states = tmp_path / "states.jsonl"
+        states.write_text("")
         out = tmp_path / "checkpoint_1.json"
         rc = _summ_cli([
             "checkpoint", "--control-dir", str(tmp_path), "--n", "4",
-            "--bridge-log", "nothing here",
-            "--native-log", "Execution lease granted to 'x' (mover 'x', 30s)",
-            "--states", "/dev/null",
+            "--bridge-log", str(bridge_log),
+            "--native-log", str(native_log),
+            "--states", str(states),
             "--out", str(out),
         ], tmp_path)
         assert rc == RC_STOP
@@ -360,3 +372,133 @@ class TestMB7TripwiresThroughTheCli:
         result = subprocess.run(["git", "show", "b53a86b:tools/goalfix_cmp/summary.py"],
                                  cwd=_HERE + "/../..", capture_output=True, text=True)
         assert "--native-log" not in result.stdout
+
+
+class TestF1TripwiresReadTheLogFiles:
+    """F1 (merge verdict review-2026-09-25-pr144-0722476-merge-verdict.md
+    §2; 2026-09-25 pr144-f1-f6 assignment): at 0722476, `summary._cli`
+    passed the --bridge-log/--native-log PATH STRING itself to
+    `mb7_tripwire_report`, which counts patterns in whatever text it is
+    given -- so a real log file's own CONTENTS were never read at all.
+    Every test here goes through the shipped `summary._cli` with real
+    files in `tmp_path`."""
+
+    def _write_between(self, control_dir, cycle, arm, verdict, metrics=None):
+        doc = {
+            "cycle": cycle, "arm": arm, "verdict": verdict, "reasons": [],
+            "genuine_echo_count": 0, "segment_indeterminate": False,
+            "metrics": metrics, "tools_sha256": cyc._package_sha256(),
+            "rc": cyc.rc_for_verdict(verdict), "validation_only": False,
+        }
+        (control_dir / f"between_{cycle}.json").write_text(json.dumps(doc))
+
+    def _write_four_clean(self, tmp_path):
+        for rep, arm in [(1, "A"), (2, "B"), (3, "B"), (4, "A")]:
+            verdict = cyc.VERDICT_MANIPULATED if arm == "A" else cyc.VERDICT_OK
+            metrics = ({"wrist_ball_delta_cm": 2.0} if arm == "A" else vars(_good_b_metrics()))
+            self._write_between(tmp_path, f"S2-B4-c-r{rep}", arm, verdict, metrics=metrics)
+
+    def _checkpoint(self, tmp_path, **logs):
+        out = tmp_path / "checkpoint_1.json"
+        argv = ["checkpoint", "--control-dir", str(tmp_path), "--n", "4", "--out", str(out)]
+        for flag, value in logs.items():
+            argv += [flag, value]
+        rc = _summ_cli(argv, tmp_path)
+        return rc, read_result(out)
+
+    def test_s3_real_bridge_log_content_is_read_and_stops(self, tmp_path):
+        """S3: a bridge log FILE containing the control_held string, for
+        a session with a B cycle -> rc 2, control_held_refusal count 1.
+        At 0722476 this counted 0 (the path string has no such text)."""
+        self._write_four_clean(tmp_path)
+        bridge_log = tmp_path / "bridge_log_r2.txt"
+        bridge_log.write_text("log.warning: Server error: [control_held] execution lease held\n")
+        native_log = tmp_path / "native.log"
+        native_log.write_text("")
+        states = tmp_path / "states.jsonl"
+        states.write_text("")
+        rc, payload = self._checkpoint(
+            tmp_path, **{"--bridge-log": str(bridge_log), "--native-log": str(native_log),
+                         "--states": str(states)})
+        assert rc == RC_STOP
+        assert payload["tripwires"]["control_held_refusal"]["count"] == 1
+
+    def test_s4_nonexistent_log_paths_give_rc3(self, tmp_path):
+        """S4: --bridge-log/--native-log naming files that do not exist
+        -> rc 3, never rc 0. At 0722476 a nonexistent path's own STRING
+        had no tripwire text in it either, so counts came back 0 and the
+        checkpoint passed at rc 0."""
+        self._write_four_clean(tmp_path)
+        rc, payload = self._checkpoint(
+            tmp_path,
+            **{"--bridge-log": str(tmp_path / "does_not_exist_bridge.log"),
+               "--native-log": str(tmp_path / "does_not_exist_native.log"),
+               "--states": str(tmp_path / "does_not_exist_states.jsonl")})
+        assert rc == RC_INCONCLUSIVE
+        assert "does_not_exist" in payload.get("reason", "")
+
+    def test_s5_path_name_matches_but_contents_are_clean(self, tmp_path):
+        """S5: the log PATH's own name contains the control_held pattern,
+        but its contents are clean -> count 0, rc 0. At 0722476 this
+        counted 1 (matching the path string), STOPping a clean session."""
+        self._write_four_clean(tmp_path)
+        bridge_log = tmp_path / "server error [control_held] but contents are clean.log"
+        bridge_log.write_text("nothing interesting here\n")
+        native_log = tmp_path / "native.log"
+        native_log.write_text("")
+        states = tmp_path / "states.jsonl"
+        states.write_text("")
+        rc, payload = self._checkpoint(
+            tmp_path, **{"--bridge-log": str(bridge_log), "--native-log": str(native_log),
+                         "--states": str(states)})
+        assert rc == RC_OK
+        assert payload["tripwires"]["control_held_refusal"]["count"] == 0
+
+    def test_empty_existing_log_counts_zero_not_missing(self, tmp_path):
+        self._write_four_clean(tmp_path)
+        bridge_log = tmp_path / "bridge_log.txt"
+        bridge_log.write_text("")  # exists, empty
+        native_log = tmp_path / "native.log"
+        native_log.write_text("")
+        states = tmp_path / "states.jsonl"
+        states.write_text("")
+        rc, payload = self._checkpoint(
+            tmp_path, **{"--bridge-log": str(bridge_log), "--native-log": str(native_log),
+                         "--states": str(states)})
+        assert rc == RC_OK
+        assert payload["tripwires"]["control_held_refusal"]["count"] == 0
+        assert payload["tripwires"]["lease_acquisition"]["count"] == 0
+
+    def test_mutation_cli_passes_path_instead_of_contents(self, tmp_path):
+        """Mutation at the shipped call site (the F1 fix's own seam):
+        `mb7_tripwire_report(bridge_log=args.bridge_log, ...)` -- the
+        PATH, not `read_log_text(args.bridge_log)`. Reproduced directly
+        (not by editing the module in-process): passing the bridge log's
+        own PATH STRING to `summ.count_tripwires` the way the pre-fix CLI
+        did shows the mismatch the fix closes."""
+        bridge_log = tmp_path / "bridge_log_r2.txt"
+        bridge_log.write_text("log.warning: Server error: [control_held] execution lease held\n")
+        # The mutant's own behaviour: hand the PATH STRING itself to the
+        # text-counting function, exactly as summary._cli did at 0722476.
+        mutant_counts = summ.count_tripwires(bridge_log=str(bridge_log))
+        assert mutant_counts["control_held_refusal"] == 0
+        # The fix's own behaviour (this test's real assertion target):
+        # reading the file's CONTENTS first.
+        fixed_counts = summ.count_tripwires(bridge_log=summ.read_log_text(str(bridge_log)))
+        assert fixed_counts["control_held_refusal"] == 1
+
+    def test_mutation_missing_file_treated_as_empty(self, tmp_path):
+        """Mutation: `read_log_text` swallows a missing file and returns
+        ``""`` instead of raising. Reproduced directly against the
+        mutant's own would-be behaviour, contrasted with the shipped
+        `read_log_text`, which must raise."""
+        missing = tmp_path / "does_not_exist.log"
+
+        def mutant_read_log_text(path):
+            from pathlib import Path as _Path
+            p = _Path(path)
+            return p.read_text() if p.is_file() else ""
+
+        assert mutant_read_log_text(str(missing)) == ""
+        with pytest.raises(summ.SummaryCliError):
+            summ.read_log_text(str(missing))

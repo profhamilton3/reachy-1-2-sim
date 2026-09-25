@@ -451,6 +451,34 @@ class SummaryCliError(RuntimeError):
     checkpoint/final call un-evaluable. Callers map this to rc=3."""
 
 
+# ---------------------------------------------------------------------------
+# F1 (2026-09-25 pr144-f1-f6 assignment): every log argument the CLI takes
+# is a PATH, never text. `count_tripwires`/`mb7_tripwire_report` above stay
+# text-in (library helpers legitimately called with text directly by their
+# own unit tests, per the assignment's own instruction) -- this is the ONE
+# seam the CLI itself must go through, so every CLI-level caller reads the
+# file's actual contents rather than (as at 0722476) handing the path
+# STRING itself to a pattern count. Kept as a small, separately named
+# function so a mutation that reverts to "pass the path" or "treat a
+# missing file as empty" has one obvious shipped call site to target.
+# ---------------------------------------------------------------------------
+
+def read_log_text(path: str) -> str:
+    """The full text of the log file at ``path``. Raises ``SummaryCliError``
+    (mapped to rc 3 by every caller), naming ``path``, when it does not
+    exist, is not a regular file, or cannot be read/decoded. An EXISTING,
+    EMPTY file is valid evidence of no matching lines and returns ``""``
+    (count 0), never an error."""
+    from pathlib import Path as _Path
+    p = _Path(path)
+    if not p.is_file():
+        raise SummaryCliError(f"log file not found or not a regular file: {path}")
+    try:
+        return p.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SummaryCliError(f"cannot read log file {path}: {exc}") from exc
+
+
 def _cycle_rep_key(cycle: str) -> int:
     m = re.search(r"r(\d+)$", cycle)
     return int(m.group(1)) if m else 0
@@ -587,11 +615,23 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         arm_map = {e.rep: e for e in arm_map_entries}
 
         # MB7: opt-in tripwire enforcement (see the argparse help above).
+        # F1 (2026-09-25 pr144-f1-f6 assignment): `args.bridge_log`/
+        # `args.native_log` are PATHS (argparse strings naming files on
+        # disk, per the --bridge-log/--native-log help text) -- at 0722476
+        # these were handed STRAIGHT to `mb7_tripwire_report` (which counts
+        # patterns in whatever text it is given), so the CLI counted
+        # patterns in the PATH STRING itself, never the file's contents.
+        # `read_log_text` is the one seam that turns a path into text; a
+        # missing/unreadable/undecodable file raises `SummaryCliError`
+        # (rc 3, via the except clause below), naming the path -- never
+        # silently treated as empty.
         tripwire_report = None
         tripwire_check = None
         if args.bridge_log is not None or args.native_log is not None or args.states is not None:
+            bridge_text = read_log_text(args.bridge_log) if args.bridge_log is not None else None
+            native_text = read_log_text(args.native_log) if args.native_log is not None else None
             tripwire_report = mb7_tripwire_report(
-                bridge_log=args.bridge_log, native_log=args.native_log, states_paths=args.states)
+                bridge_log=bridge_text, native_log=native_text, states_paths=args.states)
             tripwire_check = check_mb7_tripwires(tripwire_report)
             if tripwire_check.missing_log:
                 raise SummaryCliError(
