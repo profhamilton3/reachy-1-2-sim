@@ -164,6 +164,7 @@ class LegResult:
     hold_stats: List[holds.HoldStats]
     goto_context: List[Optional[echo.GotoContext]]
     truncated_final_line_inside_leg: bool
+    duplicate_state_indices_inside: List[int] = field(default_factory=list)
 
 
 def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
@@ -195,7 +196,20 @@ def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
         evidence.commands.truncated_final_line
         and len(idx) > 0 and int(idx.max()) == len(evidence.commands) - 1)
 
-    return LegResult(leg.name, assignment, results, hold_stats, ctx, truncated_inside)
+    # T10.4: a duplicate sim_step state (the same sim_step seen twice,
+    # e.g. a pause) INSIDE this leg's own span (bracketed by its own
+    # commands' hi_state_index) is evidence incomplete; outside any leg
+    # it is reported only (evidence.states.duplicate_indices, surfaced
+    # unconditionally in the cycle payload).
+    hi_indices = [evidence.brackets[i].hi_state_index for i in idx
+                  if evidence.brackets[i].hi_state_index is not None]
+    duplicates_inside: List[int] = []
+    if hi_indices:
+        lo, hi = min(hi_indices), max(hi_indices)
+        duplicates_inside = [d for d in evidence.states.duplicate_indices if lo <= d <= hi]
+
+    return LegResult(leg.name, assignment, results, hold_stats, ctx, truncated_inside,
+                      duplicates_inside)
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +335,7 @@ class CycleVerdict:
     metrics: Optional[CycleMetrics] = None
     checks: Dict[str, object] = field(default_factory=dict)
     unplaceable_command_indices: List[int] = field(default_factory=list)
+    duplicate_state_indices: List[int] = field(default_factory=list)
     tools_sha256: str = ""
     validation_only: bool = False
 
@@ -338,6 +353,7 @@ class CycleVerdict:
             "metrics": (vars(self.metrics) if self.metrics else None),
             "checks": self.checks,
             "unplaceable_command_indices": self.unplaceable_command_indices,
+            "duplicate_state_indices": self.duplicate_state_indices,
             "tools_sha256": self.tools_sha256,
             "validation_only": self.validation_only,
             "rc": self.rc(),
@@ -396,6 +412,8 @@ def evaluate_cycle(
 
     truncated_inside_leg = [lr.name for lr in leg_results.values()
                              if lr.truncated_final_line_inside_leg]
+    duplicate_inside_leg = {lr.name: lr.duplicate_state_indices_inside
+                             for lr in leg_results.values() if lr.duplicate_state_indices_inside}
 
     # T4 item 4: goto_context, built per leg, merged into one full-length
     # array so echo.classify_commands sees path coincidence for every leg.
@@ -475,8 +493,12 @@ def evaluate_cycle(
     if guard_note:
         checks["guard_note"] = guard_note
 
+    if duplicate_inside_leg:
+        for name, dups in duplicate_inside_leg.items():
+            reasons.append(f"{name}: duplicate sim_step state(s) inside this leg: {dups}")
+
     verdict: str
-    if truncated_inside_leg:
+    if truncated_inside_leg or duplicate_inside_leg:
         verdict = VERDICT_EVIDENCE_INCOMPLETE
     elif arm == "B":
         if genuine > 0:
@@ -500,7 +522,9 @@ def evaluate_cycle(
     cv = CycleVerdict(
         cycle, arm, verdict, reasons, genuine, segment_indeterminate,
         metrics.net_shoulder_pitch_hold_deg if metrics else None, metrics, checks,
-        list(evidence.unplaceable_command_indices), _package_sha256())
+        unplaceable_command_indices=list(evidence.unplaceable_command_indices),
+        duplicate_state_indices=list(evidence.states.duplicate_indices),
+        tools_sha256=_package_sha256())
     return cv, leg_results
 
 

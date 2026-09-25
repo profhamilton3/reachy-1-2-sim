@@ -106,3 +106,22 @@ def pose8_rad(pose_deg: Dict[str, float]) -> Dict[str, float]:
     """``route_rad`` for one bare pose dict (``rig_routes.HOME``/``REST``,
     not wrapped in a ``Waypoint``) -- a leg's start pose, for example."""
     return pose_deg8_to_rad8(pose_deg)
+
+
+# ---------------------------------------------------------------------------
+# T10.1: re-stream pass durations. Neither is exposed as a name in the
+# product code -- they are bare literals inside fly_route()/converge() --
+# so this module may not import them; per the assignment, they are
+# mirrored here ONCE, with a test
+# (test_goalfix_cmp_t10_misc.py::test_restream_literals_have_not_drifted)
+# that greps the two cited source lines so any future edit to either
+# literal fails loudly rather than silently reopening the gap.
+# ---------------------------------------------------------------------------
+
+#: reachy_ai/tasks/rig_motion.py:139 -- fly_route's own re-stream pass,
+#: `settle_pass_s * (1 + k)`, default settle_pass_s=0.8 (rig_motion.py:94).
+FLY_ROUTE_RESTREAM_BASE_S = 0.8
+
+#: reachy_ai/motion/primitives.py:555 -- converge's own re-stream pass,
+#: `0.6 * (1 + k)`.
+CONVERGE_RESTREAM_BASE_S = 0.6
