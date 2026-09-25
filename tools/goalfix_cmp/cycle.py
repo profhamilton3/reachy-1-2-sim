@@ -105,14 +105,26 @@ class LegSpec:
 
 def resolve_leg(
     evidence: ev.Evidence, sidecar_path, leg_label: str,
-    route_deg: Sequence, guard: Sequence[str],
+    route_deg: Sequence, guard: Sequence[str], *,
+    expected_route_name: Optional[str] = None,
+    expected_server_run_dir: Optional[str] = None,
 ) -> LegSpec:
     """Loads ``sidecar_path`` (a linker ``<log>.link.json``), locates the
     leg's aligned-state span (``evidence.leg_from_sidecar``), maps it to
     command indices BY BRACKET (``evidence.commands_in_leg`` -- never an
     operator-supplied index, per T4 item 2), and reads the leg's start
     pose as the goal in force at its own ``turn_on`` (T4 item 3 / M5;
-    never ``R.HOME``/``R.REST``)."""
+    never ``R.HOME``/``R.REST``).
+
+    MB2b (merge verdict, 2026-09-25 stage-repairs assignment §3; CB3):
+    ``expected_route_name``/``expected_server_run_dir`` -- when given
+    (never by default, for backward compatibility with callers that have
+    no cycle manifest at all) -- verify the sidecar's OWN ``log`` field
+    names the right route (``scripts/link_e1_flight.py``'s real sidecars
+    are named ``route_clearance_<ROUTE>_<ts>.link.json``, never the
+    guessed ``<cycle>-{setup,flight}.link.json``) and that its
+    ``server_run_dir`` matches the run this leg's evidence actually
+    came from."""
     import json
     p = Path(sidecar_path)
     if not p.is_file():
@@ -121,6 +133,19 @@ def resolve_leg(
         sidecar = json.loads(p.read_text())
     except json.JSONDecodeError as exc:
         raise CycleInputError(f"{leg_label}: malformed sidecar {p}: {exc}") from exc
+
+    if expected_route_name is not None:
+        log_name = sidecar.get("log", "")
+        if expected_route_name not in log_name:
+            raise CycleInputError(
+                f"{leg_label}: sidecar's log {log_name!r} does not name route "
+                f"{expected_route_name!r}")
+    if expected_server_run_dir is not None:
+        sc_run_dir = sidecar.get("server_run_dir")
+        if sc_run_dir is not None and sc_run_dir != expected_server_run_dir:
+            raise CycleInputError(
+                f"{leg_label}: sidecar's server_run_dir {sc_run_dir!r} != "
+                f"this cycle's own run {expected_server_run_dir!r}")
 
     leg = ev.leg_from_sidecar(leg_label, sidecar, evidence.states)
     idx = ev.commands_in_leg(evidence, leg)
@@ -741,13 +766,81 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         evd = ev.verify_and_load(args.ev_dir, args.states, args.commands, args.sha256sums)
 
         control_dir = Path(args.control_dir)
-        setup_sidecar = args.setup_sidecar or str(control_dir / f"{args.cycle}-setup.link.json")
-        flight_sidecar = args.flight_sidecar or str(control_dir / f"{args.cycle}-flight.link.json")
-        setup_leg = resolve_leg(evd, setup_sidecar, "setup", R.PLACE_ROUTE, R.CRITICAL_JOINTS)
-        flight_leg = resolve_leg(evd, flight_sidecar, "flight", R.LIFT_TO_PRESENT, R._PRESENT_GUARD)
+
+        # MB2b (merge verdict, 2026-09-25 stage-repairs assignment §3;
+        # CB3): the CONTROL DIR carries a cycle manifest
+        # (cycle_<id>.json: rep, cycle, and the setup/flight sidecar
+        # FILENAMES as the linker actually wrote them -- never the
+        # guessed <cycle>-{setup,flight}.link.json pattern, which does
+        # not match link_e1_flight.py's real naming,
+        # route_clearance_<ROUTE>_<ts>.link.json). Opt-in: a caller with
+        # no manifest (every existing synthetic fixture; --validation-
+        # mode's own V1 sessions, which have no linker manifest either)
+        # keeps the old guessed-name/--setup-sidecar/--flight-sidecar
+        # behaviour, unchanged.
+        manifest_path = control_dir / f"cycle_{args.cycle}.json"
+        manifest = None
+        if manifest_path.is_file():
+            try:
+                manifest = _json.loads(manifest_path.read_text())
+            except _json.JSONDecodeError as exc:
+                raise CycleInputError(f"malformed cycle manifest {manifest_path}: {exc}") from exc
+            if manifest.get("rep") != args.rep:
+                raise CycleInputError(
+                    f"cycle manifest rep {manifest.get('rep')!r} != --rep {args.rep!r}")
+            if manifest.get("cycle") != args.cycle:
+                raise CycleInputError(
+                    f"cycle manifest cycle {manifest.get('cycle')!r} != --cycle {args.cycle!r}")
+
+        run_dir = str(Path(args.ev_dir).resolve())
+        if manifest is not None:
+            setup_sidecar = args.setup_sidecar or str(control_dir / manifest["setup_sidecar"])
+            flight_sidecar = args.flight_sidecar or str(control_dir / manifest["flight_sidecar"])
+            setup_leg = resolve_leg(evd, setup_sidecar, "setup", R.PLACE_ROUTE, R.CRITICAL_JOINTS,
+                                     expected_route_name="PLACE_ROUTE", expected_server_run_dir=run_dir)
+            flight_leg = resolve_leg(evd, flight_sidecar, "flight", R.LIFT_TO_PRESENT, R._PRESENT_GUARD,
+                                      expected_route_name="LIFT_TO_PRESENT", expected_server_run_dir=run_dir)
+        else:
+            setup_sidecar = args.setup_sidecar or str(control_dir / f"{args.cycle}-setup.link.json")
+            flight_sidecar = args.flight_sidecar or str(control_dir / f"{args.cycle}-flight.link.json")
+            setup_leg = resolve_leg(evd, setup_sidecar, "setup", R.PLACE_ROUTE, R.CRITICAL_JOINTS)
+            flight_leg = resolve_leg(evd, flight_sidecar, "flight", R.LIFT_TO_PRESENT, R._PRESENT_GUARD)
         overlap = set(setup_leg.command_indices) & set(flight_leg.command_indices)
         if overlap:
             raise CycleInputError(f"setup and flight legs overlap at command indices {sorted(overlap)}")
+
+        if manifest is not None:
+            # "both legs lie in ONE epoch" -- MB2b's own wording. The
+            # rep <-> epoch correspondence itself has no source in the
+            # plan, report, or linker code found during this stage
+            # (grepped scripts/e1_stage1/*.py and link_e1_flight.py for
+            # any "rep"-to-"epoch" mapping; none exists) -- per the
+            # instruction not to invent a definition, that half of this
+            # item is NOT gated here and is an open question in the
+            # handoff, not silently assumed. The "one epoch" part alone
+            # (which IS fully determined by the evidence itself) is
+            # checked.
+            setup_epoch = int(evd.commands.epoch[setup_leg.command_indices[0]])
+            flight_epoch = int(evd.commands.epoch[flight_leg.command_indices[0]])
+            if setup_epoch != flight_epoch:
+                raise CycleInputError(
+                    f"setup leg (epoch {setup_epoch}) and flight leg (epoch {flight_epoch}) "
+                    "do not lie in the same epoch")
+
+            # "no leg or epoch is claimed by two cycles" -- a claims
+            # ledger shared across cycle CLI invocations against the
+            # SAME control_dir (each invocation only sees its own
+            # cycle otherwise).
+            claims_path = control_dir / "_epoch_claims.json"
+            claims = _json.loads(claims_path.read_text()) if claims_path.is_file() else {}
+            claim_key = str(setup_epoch)
+            existing = claims.get(claim_key)
+            if existing is not None and existing != args.cycle:
+                raise CycleInputError(
+                    f"epoch {setup_epoch} is already claimed by cycle {existing!r}, "
+                    f"not {args.cycle!r}")
+            claims[claim_key] = args.cycle
+            claims_path.write_text(_json.dumps(claims))
 
         # MB5 (merge verdict, 2026-09-25 stage-repairs assignment §3):
         # commands_in_leg (resolve_leg's own building block) SKIPS

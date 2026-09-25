@@ -502,3 +502,115 @@ class TestValidationModeRefusal:
         assert rc == RC_INCONCLUSIVE
         assert payload["validation_only"] is True
         assert payload["verdict"] == cyc.VERDICT_OK  # the underlying verdict is still recorded
+
+
+class TestMB2bCycleManifest:
+    """MB2b (merge verdict, 2026-09-25 stage-repairs assignment §3; CB3):
+    the control dir carries a cycle manifest naming the sidecars AS THE
+    LINKER WROTE THEM (never the guessed <cycle>-{setup,flight}.link.json
+    pattern), and the CLI verifies the sidecar's own route name and run
+    directory against it."""
+
+    def _build_linked_cycle(self, tmp_path, cycle=CYCLE, rep=1, run_dir=None):
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        # resolve_leg compares the sidecar's own server_run_dir against
+        # str(Path(--ev-dir).resolve()) -- the clean case must match
+        # that exactly; only the "wrong run dir" test overrides it.
+        if run_dir is None:
+            run_dir = str(ev_dir.resolve())
+        # Re-write the two sidecars under LINKER-real names, with "log"
+        # and "server_run_dir" (link_e1_flight.py's own fields), and
+        # remove the guessed-name files so only the manifest's own
+        # filenames resolve anything.
+        setup_sc = json.loads((control_dir / f"{cycle}-setup.link.json").read_text())
+        flight_sc = json.loads((control_dir / f"{cycle}-flight.link.json").read_text())
+        setup_name = "route_clearance_PLACE_ROUTE_20260101_000000.link.json"
+        flight_name = "route_clearance_LIFT_TO_PRESENT_20260101_000100.link.json"
+        setup_sc["log"] = setup_name.replace(".link.json", ".log")
+        setup_sc["server_run_dir"] = run_dir
+        flight_sc["log"] = flight_name.replace(".link.json", ".log")
+        flight_sc["server_run_dir"] = run_dir
+        (control_dir / setup_name).write_text(json.dumps(setup_sc))
+        (control_dir / flight_name).write_text(json.dumps(flight_sc))
+        (control_dir / f"{cycle}-setup.link.json").unlink()
+        (control_dir / f"{cycle}-flight.link.json").unlink()
+        (control_dir / f"cycle_{cycle}.json").write_text(json.dumps({
+            "rep": rep, "cycle": cycle, "setup_sidecar": setup_name, "flight_sidecar": flight_name,
+        }))
+        return ev_dir, control_dir
+
+    def _run_with_run_dir(self, ev_dir, control_dir, cycle, rep, arm, out):
+        argv = [
+            "--ev-dir", str(ev_dir), "--control-dir", str(control_dir), "--cycle", cycle,
+            "--rep", str(rep), "--arm", arm, "--out", str(out), "--validation-mode",
+        ]
+        return cyc._cli(argv)
+
+    def test_clean_manifest_resolves_and_passes(self, tmp_path):
+        ev_dir, control_dir = self._build_linked_cycle(tmp_path)
+        out = tmp_path / "out.json"
+        rc = self._run_with_run_dir(ev_dir, control_dir, CYCLE, 1, "B", out)
+        payload = read_result(out)
+        assert payload["verdict"] == cyc.VERDICT_OK, payload
+
+    def test_wrong_route_name_in_sidecar_log_is_rejected(self, tmp_path):
+        ev_dir, control_dir = self._build_linked_cycle(tmp_path)
+        manifest_path = control_dir / f"cycle_{CYCLE}.json"
+        manifest = json.loads(manifest_path.read_text())
+        # Swap the two sidecar filenames -- setup now points at the
+        # flight leg's own (LIFT_TO_PRESENT-named) sidecar.
+        manifest["setup_sidecar"], manifest["flight_sidecar"] = (
+            manifest["flight_sidecar"], manifest["setup_sidecar"])
+        manifest_path.write_text(json.dumps(manifest))
+        out = tmp_path / "out.json"
+        rc = self._run_with_run_dir(ev_dir, control_dir, CYCLE, 1, "B", out)
+        assert rc == RC_INCONCLUSIVE
+        payload = read_result(out)
+        assert "does not name route" in payload.get("reason", ""), payload
+
+    def test_wrong_server_run_dir_is_rejected(self, tmp_path):
+        ev_dir, control_dir = self._build_linked_cycle(tmp_path, run_dir="run_OTHER")
+        out = tmp_path / "out.json"
+        rc = self._run_with_run_dir(ev_dir, control_dir, CYCLE, 1, "B", out)
+        assert rc == RC_INCONCLUSIVE
+        payload = read_result(out)
+        assert "server_run_dir" in payload.get("reason", ""), payload
+
+    def test_epoch_claimed_by_two_cycles_is_rejected(self, tmp_path):
+        ev_dir, control_dir = self._build_linked_cycle(tmp_path, cycle=CYCLE, rep=1)
+        out1 = tmp_path / "out1.json"
+        rc1 = self._run_with_run_dir(ev_dir, control_dir, CYCLE, 1, "B", out1)
+        assert read_result(out1)["verdict"] == cyc.VERDICT_OK
+
+        # A second, DIFFERENT cycle id claiming the SAME evidence (same
+        # epoch) via its own manifest pointing at the SAME sidecars.
+        other_cycle = "S2-B4-c-r2"
+        manifest_path = control_dir / f"cycle_{CYCLE}.json"
+        manifest = json.loads(manifest_path.read_text())
+        (control_dir / f"cycle_{other_cycle}.json").write_text(json.dumps(
+            {**manifest, "cycle": other_cycle, "rep": 2}))
+        out2 = tmp_path / "out2.json"
+        rc2 = self._run_with_run_dir(ev_dir, control_dir, other_cycle, 2, "B", out2)
+        assert rc2 == RC_INCONCLUSIVE
+        payload2 = read_result(out2)
+        assert "already claimed" in payload2.get("reason", ""), payload2
+
+    def test_mutation_manifest_checks_removed_would_authorize(self, tmp_path):
+        """Mutation (revert to the pre-MB2b guessed-filename resolution,
+        b53a86b/227fe4c): the swapped-sidecar fixture above is not even
+        FOUND (the guessed <cycle>-{setup,flight}.link.json files were
+        deleted by this fixture), so the pre-MB2b CLI would fail
+        differently (missing sidecar) rather than detect the swap by
+        name -- verified directly against a 227fe4c copy of cycle.py."""
+        ev_dir, control_dir = self._build_linked_cycle(tmp_path)
+        manifest_path = control_dir / f"cycle_{CYCLE}.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["setup_sidecar"], manifest["flight_sidecar"] = (
+            manifest["flight_sidecar"], manifest["setup_sidecar"])
+        manifest_path.write_text(json.dumps(manifest))
+        out = tmp_path / "out.json"
+        rc = self._run_with_run_dir(ev_dir, control_dir, CYCLE, 1, "B", out)
+        # The fix rejects it for the RIGHT reason (route name), not
+        # merely because the guessed filename is absent.
+        payload = read_result(out)
+        assert "does not name route" in payload.get("reason", "")
