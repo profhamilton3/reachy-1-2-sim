@@ -43,11 +43,15 @@ def _zero_lag(monkeypatch):
 CYCLE = "S2-B4-c-r1"
 
 
-def _write_sidecar(control_dir, cycle, kind, first_seq, last_seq):
+def _write_sidecar(control_dir, cycle, kind, first_seq, last_seq, *,
+                    route_name=None, server_run_dir=None):
+    doc = {"alignment": [{"server_seq": first_seq}, {"server_seq": last_seq}]}
+    if route_name is not None:
+        doc["log"] = f"route_clearance_{route_name}_20260101_000000.log"
+    if server_run_dir is not None:
+        doc["server_run_dir"] = server_run_dir
     path = control_dir / f"{cycle}-{kind}.link.json"
-    path.write_text(json.dumps({
-        "alignment": [{"server_seq": first_seq}, {"server_seq": last_seq}],
-    }))
+    path.write_text(json.dumps(doc))
     return path
 
 
@@ -83,6 +87,67 @@ def _build_cycle(tmp_path, *, echo_rate=0.0, seed=0, home_offset_deg=0.0):
     _write_sidecar(control_dir, CYCLE, "setup", setup_first_seq, setup_last_seq)
     _write_sidecar(control_dir, CYCLE, "flight", flight_first_seq, flight_last_seq)
     return ev_dir, control_dir
+
+
+def _build_cycle_with_reset(tmp_path):
+    """F5 (2026-09-25 pr144-f1-f6 assignment): like `_build_cycle`, but
+    performs ONE `reset()` before flying either leg, so both legs land
+    in epoch 1 -- required for the reset-binding check outside
+    --validation-mode (plan §5: a real cycle's legs never run in epoch
+    0; only Stage 0, before any cycle's own reset, does). Sidecars carry
+    a real "log"/"server_run_dir" so a manifest's route/run checks pass
+    too. Returns (ev_dir, control_dir)."""
+    ev_dir = tmp_path / "ev"
+    control_dir = tmp_path / "control"
+    control_dir.mkdir()
+
+    home = dict(R.HOME)
+    sim = mf.FlightSim(home, pose_units="deg", restream_passes=1, settle_s=0.05)
+    # `__init__` already emits one state at sim_step 0; advance one tick
+    # first so the reset's own sim_step actually DROPS back to 0 (an
+    # epoch boundary is detected by a strict decrease -- 0 -> 0 is not
+    # one, and states.jsonl would then imply only 1 epoch while
+    # commands.jsonl's reset row implies 2, an epoch-count mismatch).
+    sim._hold_ticks(1, home)
+    sim.reset(seed=1)
+    setup_first_seq = sim.state_rows[-1]["seq"]  # the post-reset epoch-start state
+    sim.fly(R.PLACE_ROUTE)
+    setup_last_seq = sim.state_rows[-1]["seq"]
+
+    for _ in range(25):  # 0.5s settle, present position continuously reported
+        sim._hold_ticks(1, dict(sim.pose))
+    flight_first_seq = sim.state_rows[-1]["seq"]
+
+    sim.pose = dict(R.REST)
+    sim.fly(R.LIFT_TO_PRESENT)
+    flight_last_seq = sim.state_rows[-1]["seq"]
+
+    result = sim.result()
+    mf.write_evidence(ev_dir, result.state_rows, result.command_rows)
+    run_dir = str(ev_dir.resolve())
+    _write_sidecar(control_dir, CYCLE, "setup", setup_first_seq, setup_last_seq,
+                    route_name="PLACE_ROUTE", server_run_dir=run_dir)
+    _write_sidecar(control_dir, CYCLE, "flight", flight_first_seq, flight_last_seq,
+                    route_name="LIFT_TO_PRESENT", server_run_dir=run_dir)
+    return ev_dir, control_dir
+
+
+def _write_gate_manifest(control_dir, cycle=CYCLE, rep=2):
+    """F4/F5: the cycle manifest that TestGatesThroughTheCli (and its
+    subclasses) needs now that it is mandatory outside --validation-mode.
+    ``rep`` defaults to 2 -- TestGatesThroughTheCli.GATE_REP, the first
+    'B' slot in pv.ARM_MAP_ORDER. Pairs with `_build_cycle_with_reset`'s
+    own single reset (gen=1, resets_recorded 0->1, sim_step 0->0 -- the
+    post-reset epoch-start state's own sim_step, per
+    `mf.FlightSim.reset`)."""
+    (control_dir / f"reset_record_{cycle}.txt").write_text(
+        "reset gen=1 ack=1 resets_recorded 0->1 sim_step 0->0\n")
+    manifest = {
+        "rep": rep, "cycle": cycle,
+        "setup_sidecar": f"{cycle}-setup.link.json", "flight_sidecar": f"{cycle}-flight.link.json",
+        "reset_gen": 1, "reset_record": f"reset_record_{cycle}.txt",
+    }
+    (control_dir / f"cycle_{cycle}.json").write_text(json.dumps(manifest))
 
 
 def _run_cli(ev_dir, control_dir, arm, out, **extra):
@@ -271,6 +336,10 @@ class TestGatesThroughTheCli:
             for i in range(12)
         ]
         (control_dir / "arm_map.json").write_text(json.dumps(arm_map))
+        # F4/F5 (2026-09-25 pr144-f1-f6 assignment): the manifest is
+        # mandatory outside --validation-mode -- pairs with
+        # _build_cycle_with_reset's own single reset.
+        _write_gate_manifest(control_dir, cycle=CYCLE, rep=self.GATE_REP)
         (control_dir / f"versions_{CYCLE}.json").write_text(json.dumps({
             "host_native_kernel_sha": host_sha, "host_tree_dirty": False,
             "bridge_arm": "B", "bridge_sha": self.BRIDGE_SHA_B,
@@ -306,14 +375,14 @@ class TestGatesThroughTheCli:
         return cyc._cli(argv)
 
     def test_wrong_host_sha_stops_or_incomplete(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir, host_sha="NOT-M")
         out = tmp_path / "out.json"
         rc = self._run_with_gates(ev_dir, control_dir, "B", out)
         assert rc in (RC_STOP, RC_INCONCLUSIVE), read_result(out)
 
     def test_compliance_vector_flip_stops(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir, compliant_ok=False)
         out = tmp_path / "out.json"
         rc = self._run_with_gates(ev_dir, control_dir, "B", out)
@@ -321,14 +390,14 @@ class TestGatesThroughTheCli:
         assert payload["verdict"] == cyc.VERDICT_STOP, payload
 
     def test_missing_start_variant_gives_rc3(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir, write_start_variant=False)
         out = tmp_path / "out.json"
         rc = self._run_with_gates(ev_dir, control_dir, "B", out)
         assert rc == RC_INCONCLUSIVE, read_result(out)
 
     def test_matching_gates_pass(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         out = tmp_path / "out.json"
         rc = self._run_with_gates(ev_dir, control_dir, "B", out)
@@ -344,7 +413,7 @@ class TestMB2ProvenanceGate(TestGatesThroughTheCli):
     provenance gate -> STOP for B)."""
 
     def test_p3_missing_expected_host_sha_flag_is_rc3(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         out = tmp_path / "out.json"
         argv = [
@@ -365,7 +434,7 @@ class TestMB2ProvenanceGate(TestGatesThroughTheCli):
         requirement FROM the document (the P4 bug: previously
         `list(doc["supervisor_start_times"])`, so any document passed
         trivially)."""
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         out = tmp_path / "out.json"
         rc = self._run_with_gates(ev_dir, control_dir, "B", out,
@@ -374,7 +443,7 @@ class TestMB2ProvenanceGate(TestGatesThroughTheCli):
         assert payload["verdict"] == cyc.VERDICT_STOP, payload
 
     def test_p4b_missing_recreate_timestamp_stops_or_incomplete(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         doc_path = control_dir / f"versions_{CYCLE}.json"
         doc = json.loads(doc_path.read_text())
@@ -385,7 +454,7 @@ class TestMB2ProvenanceGate(TestGatesThroughTheCli):
         assert rc in (RC_STOP, RC_INCONCLUSIVE), read_result(out)
 
     def test_p5_arm_flag_contradicts_arm_map_stops_or_incomplete(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         out = tmp_path / "out.json"
         # GATE_REP (2) is 'B' in ARM_MAP_ORDER; pass --arm A instead.
@@ -395,7 +464,7 @@ class TestMB2ProvenanceGate(TestGatesThroughTheCli):
         assert payload.get("verdict") != cyc.VERDICT_MANIPULATED
 
     def test_p5c_versions_bridge_fields_contradict_arm_map_stops(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         doc_path = control_dir / f"versions_{CYCLE}.json"
         doc = json.loads(doc_path.read_text())
@@ -417,7 +486,7 @@ class TestMB2ProvenanceGate(TestGatesThroughTheCli):
         exact fixture (before MB1's own unrelated gate-completeness fix
         even applies -- MB1 is orthogonal and was independently killed
         in the same run)."""
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         doc_path = control_dir / f"versions_{CYCLE}.json"
         doc = json.loads(doc_path.read_text())
@@ -435,7 +504,7 @@ class TestMB6NoEscapingExceptions(TestGatesThroughTheCli):
     untranslated traceback (invariant 1)."""
 
     def test_p6a_malformed_arm_map_gives_rc3_json(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         (control_dir / "arm_map.json").write_text("{not json")
         out = tmp_path / "out.json"
@@ -444,7 +513,7 @@ class TestMB6NoEscapingExceptions(TestGatesThroughTheCli):
         assert "reason" in read_result(out)
 
     def test_p6b_arm_map_entry_missing_key_gives_rc3_json(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         arm_map_path = control_dir / "arm_map.json"
         entries = json.loads(arm_map_path.read_text())
@@ -456,7 +525,7 @@ class TestMB6NoEscapingExceptions(TestGatesThroughTheCli):
         assert "reason" in read_result(out)
 
     def test_p6c_malformed_versions_doc_gives_rc3_json(self, tmp_path):
-        ev_dir, control_dir = _build_cycle(tmp_path)
+        ev_dir, control_dir = _build_cycle_with_reset(tmp_path)
         self._write_gate_files(control_dir)
         (control_dir / f"versions_{CYCLE}.json").write_text("[")
         out = tmp_path / "out.json"
@@ -576,24 +645,32 @@ class TestMB2bCycleManifest:
         payload = read_result(out)
         assert "server_run_dir" in payload.get("reason", ""), payload
 
-    def test_epoch_claimed_by_two_cycles_is_rejected(self, tmp_path):
+    def test_no_epoch_claims_file_is_ever_written(self, tmp_path):
+        """F4 (merge verdict §2; 2026-09-25 pr144-f1-f6 assignment): the
+        old per-invocation "_epoch_claims.json" ledger WROTE into
+        --control-dir (a directory that may be evidence) -- removed.
+        Instead, this cycle's own rep/cycle/epoch/reset_gen/sidecar
+        filenames are recorded in the between_<cycle>.json OUTPUT
+        (CycleVerdict.manifest_binding), so the SUMMARY CLI (where all
+        cycles are visible) can reject a duplicate -- see
+        test_goalfix_cmp_t5_summary.py's own
+        TestF4DuplicateManifestBindingRejected. Checked here: the CLI
+        writes nothing else into --control-dir, and manifest_binding's
+        own epoch/sidecar fields are present and correct."""
         ev_dir, control_dir = self._build_linked_cycle(tmp_path, cycle=CYCLE, rep=1)
-        out1 = tmp_path / "out1.json"
-        rc1 = self._run_with_run_dir(ev_dir, control_dir, CYCLE, 1, "B", out1)
-        assert read_result(out1)["verdict"] == cyc.VERDICT_OK
-
-        # A second, DIFFERENT cycle id claiming the SAME evidence (same
-        # epoch) via its own manifest pointing at the SAME sidecars.
-        other_cycle = "S2-B4-c-r2"
-        manifest_path = control_dir / f"cycle_{CYCLE}.json"
-        manifest = json.loads(manifest_path.read_text())
-        (control_dir / f"cycle_{other_cycle}.json").write_text(json.dumps(
-            {**manifest, "cycle": other_cycle, "rep": 2}))
-        out2 = tmp_path / "out2.json"
-        rc2 = self._run_with_run_dir(ev_dir, control_dir, other_cycle, 2, "B", out2)
-        assert rc2 == RC_INCONCLUSIVE
-        payload2 = read_result(out2)
-        assert "already claimed" in payload2.get("reason", ""), payload2
+        before = sorted(p.name for p in control_dir.iterdir())
+        out = tmp_path / "out.json"
+        rc = self._run_with_run_dir(ev_dir, control_dir, CYCLE, 1, "B", out)
+        payload = read_result(out)
+        assert payload["verdict"] == cyc.VERDICT_OK, payload
+        assert payload["manifest_binding"]["epoch"] == 0
+        assert payload["manifest_binding"]["setup_sidecar"] == "route_clearance_PLACE_ROUTE_20260101_000000.link.json"
+        # F4: the old "_epoch_claims.json" is gone -- the CLI writes
+        # nothing into --control-dir except the --out it was given
+        # (which is outside control_dir here).
+        after = sorted(p.name for p in control_dir.iterdir())
+        assert after == before
+        assert "_epoch_claims.json" not in after
 
     def test_mutation_manifest_checks_removed_would_authorize(self, tmp_path):
         """Mutation (revert to the pre-MB2b guessed-filename resolution,

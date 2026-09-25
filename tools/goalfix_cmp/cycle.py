@@ -26,6 +26,7 @@ compliance and the start-variant gate are called and gated on (item 6).
 """
 from __future__ import annotations
 
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -198,6 +199,123 @@ def resolve_leg(
     }
     return LegSpec(leg_label, route_rad(route_deg), guard, idx, start_pose8, turn_on_idx,
                    sidecar_t_lo=leg.t_lo, sidecar_t_hi=leg.t_hi)
+
+
+# ---------------------------------------------------------------------------
+# F5 (merge verdict §2; 2026-09-25 pr144-f1-f6 assignment): rep <-> epoch
+# binding, sourced from the reset RECORD (plan P3: reset.sh's own output,
+# which echoes reset_verify.py verify's printed line -- never assumed).
+# ---------------------------------------------------------------------------
+
+#: The EXACT printed form of reset_verify.py verify's success line
+#: (scripts/e1_stage1/reset_verify.py:209): "reset gen=<G> ack=<A>
+#: resets_recorded <before>-><after> sim_step <s0>-><s1>". No regex
+#: leniency beyond this -- F5 requires parsing exactly this format.
+_RESET_VERIFY_LINE_RE = re.compile(
+    r"^reset gen=(?P<gen>\d+) ack=(?P<ack>\d+) resets_recorded "
+    r"(?P<before>\d+)->(?P<after>\d+) sim_step (?P<s0>\d+)->(?P<s1>\d+)$")
+
+
+def check_reset_binding(
+    evidence: ev.Evidence, control_dir: Path, manifest: dict,
+    setup_leg: "LegSpec", flight_leg: "LegSpec", *, validation_mode: bool,
+) -> Dict[str, object]:
+    """Binds this cycle's manifest to a specific reset epoch via
+    ``manifest["reset_record"]`` (F5's ``reset_<gen>.txt``, F4's
+    manifest). Checks, IN THIS ORDER, raising ``CycleInputError`` (rc 3)
+    with a specific reason on the first failure:
+
+    1. ``gen == ack == manifest.reset_gen``
+    2. ``after == before + 1``
+    3. the record contains no ``STOP:`` line
+    4. the reset row number ``after`` exists in the verified evidence
+    5. both legs' commands lie in epoch ``after``
+    6. no other reset row lies between that reset and the setup leg's
+       first command
+    7. a state in epoch ``after`` reports ``sim_step == sim_step_after``
+       (``reset_verify`` read the LAST live post-reset state, not
+       necessarily the epoch's first -- so this is checked against ANY
+       state in the epoch, never just the first)
+
+    Outside ``--validation-mode``, a missing/unreadable/unparseable
+    record is itself ``CycleInputError``. Inside ``--validation-mode``,
+    an ABSENT record (no ``reset_gen``/``reset_record`` in the manifest,
+    or the named file does not exist) is reported as
+    ``{"reset_binding": "not_supplied"}`` -- never ``"passed"`` -- and
+    does not raise; a record that IS supplied is still fully checked
+    even in ``--validation-mode``."""
+    reset_gen = manifest.get("reset_gen")
+    reset_record_name = manifest.get("reset_record")
+    if reset_gen is None or not reset_record_name:
+        if validation_mode:
+            return {"reset_binding": "not_supplied"}
+        raise CycleInputError(
+            "cycle manifest has no reset_gen/reset_record (F5, required outside "
+            "--validation-mode)")
+
+    reset_record_path = Path(control_dir) / reset_record_name
+    if not reset_record_path.is_file():
+        if validation_mode:
+            return {"reset_binding": "not_supplied"}
+        raise CycleInputError(f"missing reset record {reset_record_path}")
+    try:
+        text = reset_record_path.read_text()
+    except OSError as exc:
+        raise CycleInputError(f"cannot read reset record {reset_record_path}: {exc}") from exc
+
+    stop_lines = [ln for ln in text.splitlines() if ln.strip().startswith("STOP:")]
+    matches = [mm for ln in text.splitlines() if (mm := _RESET_VERIFY_LINE_RE.match(ln.strip()))]
+    if len(matches) != 1:
+        raise CycleInputError(
+            f"reset record {reset_record_path}: expected exactly one success line of the "
+            f"printed form 'reset gen=<G> ack=<A> resets_recorded <b>-><a> sim_step "
+            f"<s0>-><s1>', found {len(matches)}")
+    m = matches[0]
+    gen, ack = int(m["gen"]), int(m["ack"])
+    before, after = int(m["before"]), int(m["after"])
+    sim_step_after = int(m["s1"])
+
+    # 1. gen == ack == manifest.reset_gen
+    if not (gen == ack == reset_gen):
+        raise CycleInputError(
+            f"reset record: gen={gen} ack={ack} manifest.reset_gen={reset_gen} do not all agree")
+    # 2. after == before + 1
+    if after != before + 1:
+        raise CycleInputError(
+            f"reset record: resets_recorded {before}->{after} is not a +1 increment")
+    # 3. no STOP: line
+    if stop_lines:
+        raise CycleInputError(f"reset record {reset_record_path} contains STOP line(s): {stop_lines}")
+    # 4. epoch `after` exists
+    total_reset_rows = sum(1 for k in evidence.commands.kind if k == "reset")
+    if after > total_reset_rows:
+        raise CycleInputError(
+            f"reset record: epoch {after} does not exist ({total_reset_rows} reset row(s) "
+            "in the verified evidence)")
+    # 5. both legs' commands lie in epoch `after`
+    setup_epoch = int(evidence.commands.epoch[setup_leg.command_indices[0]])
+    flight_epoch = int(evidence.commands.epoch[flight_leg.command_indices[0]])
+    if setup_epoch != after or flight_epoch != after:
+        raise CycleInputError(
+            f"reset record: both legs must lie in epoch {after}; got setup epoch "
+            f"{setup_epoch}, flight epoch {flight_epoch}")
+    # 6. no other reset row between this reset and the setup leg's first command
+    reset_row_indices = [i for i, k in enumerate(evidence.commands.kind) if k == "reset"]
+    this_reset_global_index = reset_row_indices[after - 1]
+    setup_first_global = setup_leg.command_indices[0]
+    between = [i for i in reset_row_indices if this_reset_global_index < i < setup_first_global]
+    if between:
+        raise CycleInputError(
+            f"reset record: another reset row lies between this reset and the setup leg's "
+            f"first command: {between}")
+    # 7. states.jsonl has a state in epoch `after` with sim_step == sim_step_after
+    epoch_mask = evidence.states.epoch == after
+    if not any(int(sv) == sim_step_after for sv in evidence.states.sim_step[epoch_mask]):
+        raise CycleInputError(
+            f"reset record: no state in epoch {after} reports sim_step == "
+            f"{sim_step_after} (sim_step_after) -- the record and the evidence disagree")
+
+    return {"reset_binding": "ok", "reset_gen": reset_gen, "epoch": after}
 
 
 # ---------------------------------------------------------------------------
@@ -584,6 +702,14 @@ class CycleVerdict:
     #: counts, arrival errors, and the r_wrist_pitch shortfall
     #: (descriptive)" -- keyed by leg name. REPORT-ONLY.
     per_waypoint: Dict[str, List[Dict[str, object]]] = field(default_factory=dict)
+    #: F4/F5 (merge verdict §2; 2026-09-25 pr144-f1-f6 assignment): the
+    #: cycle manifest's own rep/cycle/epoch/reset_gen/sidecar filenames,
+    #: plus F5's reset-binding result -- recorded here (never written
+    #: into --control-dir, which may be evidence) so the SUMMARY CLI can
+    #: reject a duplicated epoch/reset_gen/sidecar across cycles, where
+    #: all cycles are visible. ``None`` when no manifest was used at all
+    #: (only possible in --validation-mode).
+    manifest_binding: Optional[Dict[str, object]] = None
 
     def rc(self) -> int:
         if self.validation_only:
@@ -605,6 +731,7 @@ class CycleVerdict:
             "control_genuine_echo_count": self.control_genuine_echo_count,
             "control_new_target_count": self.control_new_target_count,
             "per_waypoint": self.per_waypoint,
+            "manifest_binding": self.manifest_binding,
             "rc": self.rc(),
         }
 
@@ -892,8 +1019,14 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--required-supervisor-programs", nargs="+")
     p.add_argument("--expected-bridge-sha-a")
     p.add_argument("--expected-bridge-sha-b")
-    p.add_argument("--setup-sidecar", help="override the guessed <control-dir>/<cycle>-setup.link.json")
-    p.add_argument("--flight-sidecar", help="override the guessed <control-dir>/<cycle>-flight.link.json")
+    p.add_argument(
+        "--setup-sidecar",
+        help="--validation-mode only (F4): override the guessed "
+             "<control-dir>/<cycle>-setup.link.json")
+    p.add_argument(
+        "--flight-sidecar",
+        help="--validation-mode only (F4): override the guessed "
+             "<control-dir>/<cycle>-flight.link.json")
     p.add_argument("--out", required=True)
     p.add_argument(
         "--validation-mode", action="store_true",
@@ -916,17 +1049,20 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
 
         control_dir = Path(args.control_dir)
 
-        # MB2b (merge verdict, 2026-09-25 stage-repairs assignment §3;
-        # CB3): the CONTROL DIR carries a cycle manifest
-        # (cycle_<id>.json: rep, cycle, and the setup/flight sidecar
-        # FILENAMES as the linker actually wrote them -- never the
-        # guessed <cycle>-{setup,flight}.link.json pattern, which does
-        # not match link_e1_flight.py's real naming,
-        # route_clearance_<ROUTE>_<ts>.link.json). Opt-in: a caller with
-        # no manifest (every existing synthetic fixture; --validation-
-        # mode's own V1 sessions, which have no linker manifest either)
-        # keeps the old guessed-name/--setup-sidecar/--flight-sidecar
-        # behaviour, unchanged.
+        # F4 (merge verdict §2; 2026-09-25 pr144-f1-f6 assignment): the
+        # cycle manifest is now MANDATORY outside --validation-mode. At
+        # 0722476, a missing manifest silently fell back to a guessed
+        # sidecar name (<cycle>-{setup,flight}.link.json, which does not
+        # match link_e1_flight.py's real naming) with no route/run/epoch
+        # checks at all (G9: rc 0 `ok` on sidecars naming the wrong
+        # route and another run). The guessed-name fallback, and
+        # --setup-sidecar/--flight-sidecar (which bypass the manifest's
+        # own checks), are now confined to --validation-mode.
+        if not args.validation_mode and (args.setup_sidecar or args.flight_sidecar):
+            raise CycleInputError(
+                "--setup-sidecar/--flight-sidecar override the manifest's own route/run "
+                "checks and are only permitted in --validation-mode (F4)")
+
         manifest_path = control_dir / f"cycle_{args.cycle}.json"
         manifest = None
         if manifest_path.is_file():
@@ -940,11 +1076,18 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
             if manifest.get("cycle") != args.cycle:
                 raise CycleInputError(
                     f"cycle manifest cycle {manifest.get('cycle')!r} != --cycle {args.cycle!r}")
+        elif not args.validation_mode:
+            raise CycleInputError(
+                f"missing cycle manifest {manifest_path} (F4 -- mandatory outside "
+                "--validation-mode)")
+        # else: no manifest, --validation-mode only (V1's own sessions,
+        # which have no linker manifest) -- the guessed-name fallback
+        # below still applies, exactly as before F4, but ONLY here.
 
         run_dir = str(Path(args.ev_dir).resolve())
         if manifest is not None:
-            setup_sidecar = args.setup_sidecar or str(control_dir / manifest["setup_sidecar"])
-            flight_sidecar = args.flight_sidecar or str(control_dir / manifest["flight_sidecar"])
+            setup_sidecar = str(control_dir / manifest["setup_sidecar"])
+            flight_sidecar = str(control_dir / manifest["flight_sidecar"])
             setup_leg = resolve_leg(evd, setup_sidecar, "setup", R.PLACE_ROUTE, R.CRITICAL_JOINTS,
                                      expected_route_name="PLACE_ROUTE", expected_server_run_dir=run_dir)
             flight_leg = resolve_leg(evd, flight_sidecar, "flight", R.LIFT_TO_PRESENT, R._PRESENT_GUARD,
@@ -958,17 +1101,9 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         if overlap:
             raise CycleInputError(f"setup and flight legs overlap at command indices {sorted(overlap)}")
 
+        manifest_binding: Optional[Dict[str, object]] = None
         if manifest is not None:
-            # "both legs lie in ONE epoch" -- MB2b's own wording. The
-            # rep <-> epoch correspondence itself has no source in the
-            # plan, report, or linker code found during this stage
-            # (grepped scripts/e1_stage1/*.py and link_e1_flight.py for
-            # any "rep"-to-"epoch" mapping; none exists) -- per the
-            # instruction not to invent a definition, that half of this
-            # item is NOT gated here and is an open question in the
-            # handoff, not silently assumed. The "one epoch" part alone
-            # (which IS fully determined by the evidence itself) is
-            # checked.
+            # "both legs lie in ONE epoch" -- MB2b's own wording.
             setup_epoch = int(evd.commands.epoch[setup_leg.command_indices[0]])
             flight_epoch = int(evd.commands.epoch[flight_leg.command_indices[0]])
             if setup_epoch != flight_epoch:
@@ -976,20 +1111,26 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
                     f"setup leg (epoch {setup_epoch}) and flight leg (epoch {flight_epoch}) "
                     "do not lie in the same epoch")
 
-            # "no leg or epoch is claimed by two cycles" -- a claims
-            # ledger shared across cycle CLI invocations against the
-            # SAME control_dir (each invocation only sees its own
-            # cycle otherwise).
-            claims_path = control_dir / "_epoch_claims.json"
-            claims = _json.loads(claims_path.read_text()) if claims_path.is_file() else {}
-            claim_key = str(setup_epoch)
-            existing = claims.get(claim_key)
-            if existing is not None and existing != args.cycle:
-                raise CycleInputError(
-                    f"epoch {setup_epoch} is already claimed by cycle {existing!r}, "
-                    f"not {args.cycle!r}")
-            claims[claim_key] = args.cycle
-            claims_path.write_text(_json.dumps(claims))
+            # F5: rep <-> epoch binding, sourced from the reset RECORD.
+            reset_report = check_reset_binding(
+                evd, control_dir, manifest, setup_leg, flight_leg,
+                validation_mode=args.validation_mode)
+
+            # F4 (merge verdict §4): the old "_epoch_claims.json" ledger
+            # WROTE into --control-dir, a directory that may be
+            # evidence -- removed. Instead, this cycle's own rep/cycle/
+            # epoch/reset_gen/sidecar filenames are recorded in the
+            # between_<cycle>.json OUTPUT (via CycleVerdict.
+            # manifest_binding, below); the SUMMARY CLI rejects a
+            # duplicated epoch/reset_gen/sidecar across cycles there,
+            # where all cycles are visible (that check is stateless).
+            manifest_binding = {
+                "rep": manifest.get("rep"), "cycle": manifest.get("cycle"),
+                "epoch": setup_epoch, "reset_gen": manifest.get("reset_gen"),
+                "setup_sidecar": manifest.get("setup_sidecar"),
+                "flight_sidecar": manifest.get("flight_sidecar"),
+                **reset_report,
+            }
 
         # MB5 (merge verdict, 2026-09-25 stage-repairs assignment §3):
         # commands_in_leg (resolve_leg's own building block) SKIPS
@@ -1109,6 +1250,7 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
             provenance_gate=provenance_gate, compliance_gate=compliance_gate,
             start_variant_gate_result=start_variant_result, guard_note=guard_note,
             skip_gates=args.validation_mode)
+        cv.manifest_binding = manifest_binding
         if args.validation_mode:
             cv.validation_only = True
     except (ev.EvidenceError, IntegrityError, initial.StartVariantGateUnavailable) as exc:

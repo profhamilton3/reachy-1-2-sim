@@ -642,6 +642,14 @@ def load_between_files(
     by_rep: Dict[int, cyc.CycleVerdict] = {}
     metrics: Dict[str, CycleMetrics] = {}
     hash_mismatch = False
+    # F4 (merge verdict §2; 2026-09-25 pr144-f1-f6 assignment): "no leg
+    # or epoch is claimed by two cycles" moves HERE (stateless, all
+    # cycles visible at once) from the old per-invocation
+    # "_epoch_claims.json" ledger the cycle CLI used to write into
+    # --control-dir (a directory that may be evidence -- removed).
+    seen_epochs: Dict[object, str] = {}
+    seen_reset_gens: Dict[object, str] = {}
+    seen_sidecars: Dict[str, str] = {}
     for f in files:
         try:
             doc = json.loads(f.read_text())
@@ -669,6 +677,32 @@ def load_between_files(
         if doc.get("arm") != entry_arm:
             raise SummaryCliError(
                 f"{f.name}: arm {doc.get('arm')!r} != arm_map[{rep}].arm {entry_arm!r}")
+
+        mb = doc.get("manifest_binding")
+        if mb:
+            epoch = mb.get("epoch")
+            if epoch is not None:
+                if epoch in seen_epochs and seen_epochs[epoch] != cycle_id:
+                    raise SummaryCliError(
+                        f"{f.name}: epoch {epoch} is already claimed by cycle "
+                        f"{seen_epochs[epoch]!r}, not {cycle_id!r}")
+                seen_epochs[epoch] = cycle_id
+            reset_gen = mb.get("reset_gen")
+            if reset_gen is not None:
+                if reset_gen in seen_reset_gens and seen_reset_gens[reset_gen] != cycle_id:
+                    raise SummaryCliError(
+                        f"{f.name}: reset_gen {reset_gen} is already claimed by cycle "
+                        f"{seen_reset_gens[reset_gen]!r}, not {cycle_id!r}")
+                seen_reset_gens[reset_gen] = cycle_id
+            for sc_field in ("setup_sidecar", "flight_sidecar"):
+                sc = mb.get(sc_field)
+                if sc is not None:
+                    if sc in seen_sidecars and seen_sidecars[sc] != cycle_id:
+                        raise SummaryCliError(
+                            f"{f.name}: sidecar {sc!r} is already claimed by cycle "
+                            f"{seen_sidecars[sc]!r}, not {cycle_id!r}")
+                    seen_sidecars[sc] = cycle_id
+
         v = cyc.CycleVerdict(
             cycle_id, doc["arm"], verdict, doc.get("reasons", []),
             doc.get("genuine_echo_count", 0), doc.get("segment_indeterminate", False))
