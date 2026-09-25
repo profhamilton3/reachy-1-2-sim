@@ -93,13 +93,34 @@ def classify_commands(
     evidence: ev.Evidence,
     goto_context: Optional[Sequence[Optional[GotoContext]]] = None,
     shift_s: float = 0.0,
+    leg_turn_on_state_index: Optional[Dict[int, int]] = None,
 ) -> List[Optional[CommandResult]]:
     """One ``CommandResult`` per ``joint_command`` row in ``evidence.commands``
     (``None`` for ``reset`` rows). ``shift_s`` (e.g. ``-CONTROL_SHIFT_S``)
     reruns the same classifier against states shifted in simulation time,
     for the control rate; a shifted window reaching before its epoch's own
     start is reported as unavailable (``None`` joint results, not a false
-    "fresh")."""
+    "fresh").
+
+    ``leg_turn_on_state_index`` (T7/plan §7.1/review §3.3): maps each LEG's
+    own first command's GLOBAL index to the GLOBAL state index of the
+    present-position reading in force at that leg's own ``turn_on`` --
+    "the goal set at turn_on" the plan's rule refers to. There is one such
+    pair per leg, and a cycle's second leg (``LIFT_TO_PRESENT``, in the
+    same reset epoch as its setup leg) has one just as much as the first.
+    An exact match on a leg's own first command is START_COINCIDENCE only
+    when its source is THIS specific state -- not any state the general
+    0.5s lookback happens to turn up, which a fixture can otherwise plant
+    to look like a genuine echo or a path coincidence on the very first
+    command of a file (see the equivalence/boundary/path-coincidence
+    tests, none of which involve a real turn_on at all).
+
+    Omitted, this falls back to "the epoch's absolute first command,
+    checked against the epoch's own first state" (the pre-T7 behaviour)
+    for backward compatibility with callers that only ever classify a
+    single-leg epoch. T4's end-to-end `cycle` CLI is what supplies every
+    leg's own pair for a real multi-leg cycle.
+    """
     states = evidence.states
     commands = evidence.commands
     goto_context = goto_context or [None] * len(commands)
@@ -177,10 +198,13 @@ def classify_commands(
             src_age = float(t_hi - win_time[src_local])
             src_global = int(e_state_idx[a + src_local])
 
+            if leg_turn_on_state_index is None:
+                turn_on_state_idx = int(e_state_idx[0]) if prev is None else None
+            else:
+                turn_on_state_idx = leg_turn_on_state_index.get(i)
             label = _subclassify(
                 name=name, value=value, epoch=epoch, command_index=i,
-                is_first_command_of_epoch=(prev is None), ctx=ctx,
-                epoch_start_state_index=int(e_state_idx[0]),
+                turn_on_state_index=turn_on_state_idx, ctx=ctx,
                 src_global_index=src_global)
             result.joints[name] = JointResult(label, age_s=src_age, source_state_index=src_global)
 
@@ -190,10 +214,21 @@ def classify_commands(
 
 
 def _subclassify(*, name: str, value: float, epoch: int, command_index: int,
-                  is_first_command_of_epoch: bool, ctx: Optional[GotoContext],
-                  epoch_start_state_index: int, src_global_index: int) -> str:
-    """An exact match's subclass, per plan §7.1's table."""
-    if is_first_command_of_epoch and src_global_index == epoch_start_state_index:
+                  turn_on_state_index: Optional[int], ctx: Optional[GotoContext],
+                  src_global_index: int) -> str:
+    """An exact match's subclass, per plan §7.1's table.
+
+    T7 (review §3.3): the plan's own rule is "the first setpoint after
+    turn_on equals the goal set at turn_on" -- an exact match on a leg's
+    own first command, whose source is specifically the present-position
+    reading in force AT that leg's turn_on (turn_on itself sends no
+    joint_command; the match is against the readback that was already
+    streaming continuously right up to and through it), never any other
+    state the lookback happens to turn up. The pre-T7 rule pinned that
+    reference to the EPOCH's absolute first state unconditionally, which a
+    leg starting after any settle -- let alone a cycle's SECOND leg --
+    can never satisfy; E8 is exactly this."""
+    if turn_on_state_index is not None and src_global_index == turn_on_state_index:
         return START_COINCIDENCE
     if ctx is not None and name in ctx.start8 and name in ctx.goal8:
         a, b = ctx.start8[name], ctx.goal8[name]
