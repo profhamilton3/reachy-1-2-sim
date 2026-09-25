@@ -299,3 +299,64 @@ class TestMB3RejectNonAuthorizingEvidence:
         arm_map = {e["rep"]: pv.ArmMapEntry(**e) for e in arm_map_doc}
         with pytest.raises(summ.SummaryCliError, match="validation_only"):
             summ.load_between_files(tmp_path, arm_map, required_reps=range(1, 5))
+
+
+class TestMB7TripwiresThroughTheCli:
+    """MB7 (merge verdict, 2026-09-25 stage-repairs assignment §3):
+    checkpoint/final wired to the tripwire counters, through the shipped
+    CLI."""
+
+    def _write_between(self, control_dir, cycle, arm, verdict, metrics=None):
+        doc = {
+            "cycle": cycle, "arm": arm, "verdict": verdict, "reasons": [],
+            "genuine_echo_count": 0, "segment_indeterminate": False,
+            "metrics": metrics, "tools_sha256": cyc._package_sha256(),
+            "rc": cyc.rc_for_verdict(verdict), "validation_only": False,
+        }
+        (control_dir / f"between_{cycle}.json").write_text(json.dumps(doc))
+
+    def _write_four_clean(self, tmp_path):
+        for rep, arm in [(1, "A"), (2, "B"), (3, "B"), (4, "A")]:
+            verdict = cyc.VERDICT_MANIPULATED if arm == "A" else cyc.VERDICT_OK
+            metrics = ({"wrist_ball_delta_cm": 2.0} if arm == "A" else vars(_good_b_metrics()))
+            self._write_between(tmp_path, f"S2-B4-c-r{rep}", arm, verdict, metrics=metrics)
+
+    def test_no_log_flags_is_unaffected(self, tmp_path):
+        self._write_four_clean(tmp_path)
+        out = tmp_path / "checkpoint_1.json"
+        rc = _summ_cli(["checkpoint", "--control-dir", str(tmp_path), "--n", "4",
+                        "--out", str(out)], tmp_path)
+        assert rc == RC_OK
+        assert "tripwires" not in read_result(out)
+
+    def test_missing_required_log_is_rc3(self, tmp_path):
+        self._write_four_clean(tmp_path)
+        out = tmp_path / "checkpoint_1.json"
+        rc = _summ_cli(["checkpoint", "--control-dir", str(tmp_path), "--n", "4",
+                        "--bridge-log", "nothing here", "--out", str(out)], tmp_path)
+        assert rc == RC_INCONCLUSIVE
+        assert "missing their required" in read_result(out).get("reason", "")
+
+    def test_nonzero_lease_acquisition_stops_a_clean_checkpoint(self, tmp_path):
+        self._write_four_clean(tmp_path)
+        out = tmp_path / "checkpoint_1.json"
+        rc = _summ_cli([
+            "checkpoint", "--control-dir", str(tmp_path), "--n", "4",
+            "--bridge-log", "nothing here",
+            "--native-log", "Execution lease granted to 'x' (mover 'x', 30s)",
+            "--states", "/dev/null",
+            "--out", str(out),
+        ], tmp_path)
+        assert rc == RC_STOP
+        payload = read_result(out)
+        assert payload["tripwires"]["lease_acquisition"]["count"] == 1
+
+    def test_mutation_wiring_removed_would_ignore_the_flag(self, tmp_path):
+        """Mutation (revert to the pre-MB7 CLI, b53a86b): the same
+        nonzero-lease-acquisition fixture above is not even ACCEPTED
+        (the flags do not exist), let alone gated -- a structural
+        confirmation that the wiring is new."""
+        import subprocess
+        result = subprocess.run(["git", "show", "b53a86b:tools/goalfix_cmp/summary.py"],
+                                 cwd=_HERE + "/../..", capture_output=True, text=True)
+        assert "--native-log" not in result.stdout

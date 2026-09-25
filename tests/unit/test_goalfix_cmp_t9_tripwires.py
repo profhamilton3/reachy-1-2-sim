@@ -5,6 +5,7 @@ anything the native server logs (it logs "Execution lease granted to
 source-drift guard: each cited line is grepped from the real file, so a
 future edit that changes the wording fails this test loudly rather than
 silently reopening the gap."""
+import json
 import os
 import re
 import sys
@@ -71,12 +72,26 @@ class TestGroundedPatterns:
         assert counts["reset_ack_timeout"] is None
         assert counts["lease_acquisition"] is None
 
-    def test_ungroundable_counters_are_always_none(self):
+    def test_pause_message_stays_ungroundable_via_log_text(self):
         counts = summ.count_tripwires(
             bridge_log="anything", watcher_log="anything", native_log="anything",
             reset_sh_log="anything")
-        assert counts["control_held_refusal"] is None
         assert counts["pause_message"] is None
+
+    def test_control_held_refusal_now_groundable_via_bridge_log(self):
+        """MB7 (merge verdict, 2026-09-25 stage-repairs assignment §3;
+        owner decision (a), readiness review §4 Q2): the earlier
+        "ungroundable" claim was wrong for the bridge's OWN connection --
+        the bridge logs every server error it receives
+        (mujoco_remote_backend.py:486-488), including a native
+        control_held refusal sent to it."""
+        real_text = 'log.warning: Server error: [control_held] execution lease held'
+        counts = summ.count_tripwires(bridge_log=real_text)
+        assert counts["control_held_refusal"] == 1
+        # An unrelated bridge log still correctly counts 0, not None.
+        assert summ.count_tripwires(bridge_log="anything")["control_held_refusal"] == 0
+        # Still None only when NO bridge log is supplied at all.
+        assert summ.count_tripwires()["control_held_refusal"] is None
 
 
 class TestCheckTripwires:
@@ -124,3 +139,69 @@ class TestMutationOldPatternsRemoved:
         # ungroundable, see TRIPWIRE_SOURCES) -- so this text can never
         # cause a false positive under the fix.
         assert summ.count_tripwires()["pause_message"] is None
+
+
+class TestMB7PauseTripwire:
+    """MB7 (merge verdict, 2026-09-25 stage-repairs assignment §3): the
+    "pause" counter is states.jsonl-based, never log text."""
+
+    def _state_row(self, sim_step, paused=False):
+        return {"type": "state", "sim_step": sim_step, "paused": paused}
+
+    def _write(self, tmp_path, name, rows):
+        path = tmp_path / name
+        path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+        return str(path)
+
+    def test_missing_path_is_none_not_zero(self):
+        assert summ.count_pause_tripwire(None) is None
+        assert summ.count_pause_tripwire([]) is None
+
+    def test_clean_run_counts_zero(self, tmp_path):
+        rows = [self._state_row(i) for i in range(5)]
+        p = self._write(tmp_path, "states.jsonl", rows)
+        assert summ.count_pause_tripwire([p]) == 0
+
+    def test_paused_true_row_counts(self, tmp_path):
+        rows = [self._state_row(0), self._state_row(1, paused=True), self._state_row(2)]
+        p = self._write(tmp_path, "states.jsonl", rows)
+        assert summ.count_pause_tripwire([p]) == 1
+
+    def test_duplicate_sim_step_within_epoch_counts(self, tmp_path):
+        # A state pushed twice at the same sim_step (paused, not
+        # advancing) -- counted even when `paused` itself was never set.
+        rows = [self._state_row(0), self._state_row(1), self._state_row(1), self._state_row(2)]
+        p = self._write(tmp_path, "states.jsonl", rows)
+        assert summ.count_pause_tripwire([p]) == 1
+
+    def test_blind_spot_is_always_documented_never_folded_into_zero(self):
+        report = summ.mb7_tripwire_report(bridge_log="x", native_log="x", states_paths=None)
+        assert report["pause"]["count"] is None
+        assert report["pause"]["blind_spots"] == [summ.MB7_BLIND_SPOTS["pause"]]
+        # Even when groundable and 0, the blind spot is STILL reported.
+        report2 = summ.mb7_tripwire_report(bridge_log="x", native_log="x", states_paths=["/dev/null"])
+        assert report2["lease_acquisition"]["count"] == 0
+        assert report2["lease_acquisition"]["blind_spots"] == [summ.MB7_BLIND_SPOTS["lease_acquisition"]]
+
+    def test_check_mb7_tripwires_violated_vs_missing(self):
+        report = {
+            "lease_acquisition": {"count": 0, "observable_scope": "", "blind_spots": []},
+            "control_held_refusal": {"count": 2, "observable_scope": "", "blind_spots": []},
+            "pause": {"count": None, "observable_scope": "", "blind_spots": []},
+        }
+        r = summ.check_mb7_tripwires(report)
+        assert r.violated == ["control_held_refusal"]
+        assert r.missing_log == ["pause"]
+
+    def test_mutation_never_wired_in_would_ignore_tripwires(self, tmp_path):
+        """Mutation (never call mb7_tripwire_report/check_mb7_tripwires
+        from the checkpoint/final CLI, as at b53a86b): supplying
+        --bridge-log/--native-log/--states has NO effect on rc at all.
+        Verified directly against a b53a86b copy of summary.py, whose
+        CLI does not even accept these flags."""
+        import subprocess
+        result = subprocess.run(
+            ["git", "show", "b53a86b:tools/goalfix_cmp/summary.py"],
+            cwd=_REPO, capture_output=True, text=True)
+        assert "--bridge-log" not in result.stdout
+        assert "mb7_tripwire_report" not in result.stdout

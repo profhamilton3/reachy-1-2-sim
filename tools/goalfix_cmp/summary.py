@@ -223,15 +223,21 @@ def aggregate(
 #: bare word search. The old "lease acquisition" pattern matched nothing
 #: the native server ever logs (it logs "Execution lease granted to …",
 #: server.py:1059); "pause" was a bare substring that happened to match
-#: unrelated log noise. Both are fixed below. "control_held_refusal" and
-#: "pause_message" are kept as NAMED counters (§7.7's own table groups
-#: them with lease_acquisition under one row) but their patterns are
-#: `None`: nothing in server.py, mujoco_remote_backend.py or
-#: reset_watcher.py ever writes either concept to a log line (`code=
-#: "control_held"`, server.py:1037, is sent over the wire, never logged;
-#: the "pause" websocket message type, server.py:1091-1092, is likewise
-#: never logged) -- flagged in the handoff rather than matched against an
-#: invented string.
+#: unrelated log noise. Both are fixed below.
+#:
+#: MB7 (merge verdict, 2026-09-25 stage-repairs assignment §3; owner
+#: decision (a), readiness review §4 Q2): "control_held_refusal" WAS
+#: marked ungroundable ("no log call anywhere") -- that was wrong for the
+#: bridge's own connection. Native sends `Error(code="control_held")`
+#: without logging it (server.py:1037), but the BRIDGE logs every server
+#: error it receives on its own connection: `log.warning("Server error:
+#: [%s] %s", code, message)` (mujoco_remote_backend.py:486-488). So a
+#: refusal sent to the bridge's own connection IS in the bridge log as
+#: "Server error: [control_held]" -- groundable via `bridge_log`, same as
+#: the others. "pause_message" stays ungroundable via log TEXT (the
+#: "pause" websocket message, server.py:1091-1092, is never logged) --
+#: its own, separate, states.jsonl-based counter is `PAUSE_TRIPWIRE`
+#: below, per the owner's decision.
 TRIPWIRE_SOURCES: Dict[str, str] = {
     # "Reset ack timed out …" (mujoco_remote_backend.py:333, the bridge)
     # and "… reset ack timed out or was refused …"
@@ -249,8 +255,13 @@ TRIPWIRE_SOURCES: Dict[str, str] = {
     "reset_sh_mismatch": "reset_sh",
     # "Execution lease granted to %r (mover %r, %.0fs)" (server.py:1059).
     "lease_acquisition": "native",
-    "control_held_refusal": None,   # ungroundable -- see module docstring above
-    "pause_message": None,          # ungroundable -- see module docstring above
+    # "Server error: [%s] %s" % ("control_held", …) -- the BRIDGE's own
+    # log of a native refusal sent to ITS connection
+    # (mujoco_remote_backend.py:486-488). Refusals to any OTHER client
+    # connection are logged nowhere -- a blind spot, reported by
+    # `MB7_BLIND_SPOTS`, never assumed 0.
+    "control_held_refusal": "bridge",
+    "pause_message": None,          # ungroundable via log text -- see PAUSE_TRIPWIRE below
 }
 
 _TRIPWIRE_PATTERN_TEXT: Dict[str, str] = {
@@ -258,6 +269,27 @@ _TRIPWIRE_PATTERN_TEXT: Dict[str, str] = {
     "unexpected_reset_ack": "unexpected reset_ack",
     "reset_sh_mismatch": "stop: reset",
     "lease_acquisition": "execution lease granted to",
+    "control_held_refusal": "server error: [control_held]",
+}
+
+#: MB7's own {count, observable_scope, blind_spots} shape (assignment §3):
+#: the three counters the owner decision (a) accepts, wired into
+#: checkpoint/final. Blind spots are ALWAYS listed, never folded into a
+#: 0 count.
+MB7_OBSERVABLE_SCOPE: Dict[str, str] = {
+    "lease_acquisition": "native log: 'Execution lease granted to %r' (server.py:1059)",
+    "control_held_refusal": ("bridge log: 'Server error: [control_held]' "
+                              "(mujoco_remote_backend.py:486-488)"),
+    "pause": ("states.jsonl: rows with paused==true (server.py:863), plus "
+              "in-leg duplicate sim_step (a state pushed while paused)"),
+}
+MB7_BLIND_SPOTS: Dict[str, str] = {
+    "lease_acquisition": "a refused acquire ('lease already held') is sent only in "
+                          "control_ack and is never logged",
+    "control_held_refusal": "a refusal sent to any OTHER client connection (not the "
+                             "bridge's own) is logged nowhere",
+    "pause": "a pause that lands on a step between state pushes records no states at "
+             "all, leaving only a wall_time_ns gap -- its absence proves nothing",
 }
 
 #: B is expected 0 on every tripwire; A is expected 0 except
@@ -277,7 +309,90 @@ TRIPWIRE_SOURCE_LINES: Dict[str, tuple] = {
         ("scripts/e1_stage1/reset.sh", 50, "STOP: reset $GEN not verified"),),
     "lease_acquisition": (
         ("native_mujoco/server.py", 1059, "Execution lease granted to %r"),),
+    "control_held_refusal": (
+        ("mujoco_remote_backend.py", 486, "Server error: [%s] %s"),),
 }
+
+
+# ---------------------------------------------------------------------------
+# MB7's "pause" counter: states.jsonl-based, never log text (owner
+# decision (a), readiness review §4 Q2).
+# ---------------------------------------------------------------------------
+
+def count_pause_tripwire(states_paths: Optional[Sequence[str]] = None) -> Optional[int]:
+    """Rows with ``paused == true`` (server.py:863's own field, protocol.py
+    ``State.paused``), plus every duplicate ``sim_step`` within the SAME
+    epoch of each ``states.jsonl`` -- a state pushed while the sim is not
+    advancing shares its predecessor's ``sim_step`` exactly. ``None`` only
+    when no path was supplied at all (a missing log, per T9); the KNOWN
+    blind spot (a pause landing between two state pushes, per
+    ``MB7_BLIND_SPOTS["pause"]``) is never folded into a 0 count -- it is
+    simply unmeasurable, and is reported separately, never gated."""
+    if not states_paths:
+        return None
+    from pathlib import Path as _Path
+    count = 0
+    for p in states_paths:
+        rows = [json.loads(line) for line in _Path(p).read_text().splitlines() if line.strip()]
+        count += sum(1 for r in rows if r.get("paused") is True)
+        epoch = 0
+        seen_steps = {0: set()}
+        prev_step = None
+        for r in rows:
+            step = r.get("sim_step")
+            if prev_step is not None and step is not None and step < prev_step:
+                epoch += 1
+                seen_steps[epoch] = set()
+            if step in seen_steps[epoch]:
+                count += 1
+            else:
+                seen_steps[epoch].add(step)
+            prev_step = step
+    return count
+
+
+def mb7_tripwire_report(
+    *, bridge_log: Optional[str] = None, native_log: Optional[str] = None,
+    states_paths: Optional[Sequence[str]] = None,
+) -> Dict[str, Dict[str, object]]:
+    """MB7's own ``{count, observable_scope, blind_spots}`` shape, for
+    exactly the three counters the owner decision (a) accepts. A missing
+    required log/path gives ``count=None`` (rc 3, per the enforcement
+    rule below) -- the documented blind spot is reported regardless,
+    every time, never 0 and never omitted."""
+    counts_by_text = count_tripwires(bridge_log=bridge_log, native_log=native_log)
+    pause_count = count_pause_tripwire(states_paths)
+    raw = {
+        "lease_acquisition": counts_by_text["lease_acquisition"],
+        "control_held_refusal": counts_by_text["control_held_refusal"],
+        "pause": pause_count,
+    }
+    return {
+        name: {"count": raw[name], "observable_scope": MB7_OBSERVABLE_SCOPE[name],
+               "blind_spots": [MB7_BLIND_SPOTS[name]]}
+        for name in ("lease_acquisition", "control_held_refusal", "pause")
+    }
+
+
+@dataclass
+class MB7Enforcement:
+    #: names with count > 0 -- always a violation (STOP), for both arms:
+    #: none of these three counters has an "except" carve-out (unlike
+    #: the OLD unexpected_reset_ack).
+    violated: List[str] = field(default_factory=list)
+    #: names whose required log/path was not supplied at all.
+    missing_log: List[str] = field(default_factory=list)
+
+
+def check_mb7_tripwires(report: Dict[str, Dict[str, object]]) -> MB7Enforcement:
+    violated, missing_log = [], []
+    for name, entry in report.items():
+        c = entry.get("count")
+        if c is None:
+            missing_log.append(name)
+        elif c != 0:
+            violated.append(name)
+    return MB7Enforcement(violated, missing_log)
 
 
 def count_tripwires(
@@ -423,7 +538,7 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     import argparse
 
     from tools.goalfix_cmp import provenance as pv
-    from tools.goalfix_cmp._io import RC_INCONCLUSIVE, write_result
+    from tools.goalfix_cmp._io import RC_INCONCLUSIVE, RC_STOP, write_result
 
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -431,12 +546,20 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     # MB3 (merge verdict, 2026-09-25 stage-repairs assignment §3): BOTH
     # subcommands now require a validated arm map -- cycles are keyed
     # by rep from it, never by file count or filename sort.
+    # MB7 (merge verdict, 2026-09-25 stage-repairs assignment §3): opt-in
+    # -- omit all three and no tripwire check runs at all (unchanged
+    # behaviour for every existing caller). Supply any one of them and
+    # MB7 enforcement applies: a counter whose OWN required log/path is
+    # still missing is rc 3; any nonzero count is rc 2.
     cp = sub.add_parser("checkpoint")
     cp.add_argument("--control-dir", required=True)
     cp.add_argument("--arm-map", required=True)
     cp.add_argument("--expected-bridge-sha-a", required=True)
     cp.add_argument("--expected-bridge-sha-b", required=True)
     cp.add_argument("--n", type=int, default=4)
+    cp.add_argument("--bridge-log")
+    cp.add_argument("--native-log")
+    cp.add_argument("--states", nargs="+")
     cp.add_argument("--out", required=True)
 
     fn = sub.add_parser("final")
@@ -446,6 +569,9 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     fn.add_argument("--expected-bridge-sha-b", required=True)
     fn.add_argument("--a-target-count", type=int, default=6)
     fn.add_argument("--a-manipulated-min", type=int, default=4)
+    fn.add_argument("--bridge-log")
+    fn.add_argument("--native-log")
+    fn.add_argument("--states", nargs="+")
     fn.add_argument("--out", required=True)
 
     args = p.parse_args(argv)
@@ -460,6 +586,18 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
             raise SummaryCliError(f"arm_map: {map_check.reason}")
         arm_map = {e.rep: e for e in arm_map_entries}
 
+        # MB7: opt-in tripwire enforcement (see the argparse help above).
+        tripwire_report = None
+        tripwire_check = None
+        if args.bridge_log is not None or args.native_log is not None or args.states is not None:
+            tripwire_report = mb7_tripwire_report(
+                bridge_log=args.bridge_log, native_log=args.native_log, states_paths=args.states)
+            tripwire_check = check_mb7_tripwires(tripwire_report)
+            if tripwire_check.missing_log:
+                raise SummaryCliError(
+                    f"tripwire counter(s) missing their required log/path: "
+                    f"{tripwire_check.missing_log}")
+
         if args.cmd == "checkpoint":
             verdicts, metrics, hash_mismatch = load_between_files(
                 args.control_dir, arm_map, required_reps=range(1, args.n + 1))
@@ -470,7 +608,13 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
                 "reason": r.reason, "any_incomplete": r.any_incomplete,
                 "missing_cycles": r.missing_cycles,
             }
-            return write_result(args.out, r.rc(), payload)
+            rc = r.rc()
+            if tripwire_report is not None:
+                payload["tripwires"] = tripwire_report
+                if tripwire_check.violated and rc == RC_OK:
+                    rc = RC_STOP
+                    payload["reason"] = payload["reason"] or f"tripwire(s) violated: {tripwire_check.violated}"
+            return write_result(args.out, rc, payload)
         else:
             verdicts, metrics, hash_mismatch = load_between_files(args.control_dir, arm_map)
             if hash_mismatch:
@@ -480,7 +624,13 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
             else:
                 r = aggregate(verdicts, metrics, a_target_count=args.a_target_count,
                                a_manipulated_min=args.a_manipulated_min)
-            return write_result(args.out, r.rc(), r.as_dict())
+            out_payload = r.as_dict()
+            rc = r.rc()
+            if tripwire_report is not None:
+                out_payload["tripwires"] = tripwire_report
+                if tripwire_check.violated and rc == RC_OK:
+                    rc = RC_STOP
+            return write_result(args.out, rc, out_payload)
     except (SummaryCliError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
         return write_result(args.out, RC_INCONCLUSIVE, {"ok": False, "reason": str(exc)})
     except Exception as exc:
