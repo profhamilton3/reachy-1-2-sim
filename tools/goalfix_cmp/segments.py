@@ -71,6 +71,59 @@ def _exact_equal8(a: Dict[str, float], b: Dict[str, float]) -> bool:
     return all(a.get(j, 0.0) == b.get(j, 0.0) for j in R_JOINTS)
 
 
+def _on_segment_strict(
+    start8: Dict[str, float], goal8: Dict[str, float], value8: Dict[str, float],
+    tol_deg: float, const_ref: Dict[str, float],
+) -> bool:
+    """R-const (coordinator ruling, 2026-09-25, §1): a MOVING joint
+    (nominal ``start8[j] != goal8[j]``) still uses the tol box
+    (``_on_segment``'s behaviour). A CONSTANT joint (nominal ``start8[j]
+    == goal8[j]``, report §4 C2: "each joint with start = goal is
+    exactly constant") must equal, EXACTLY, ``const_ref[j]`` -- the
+    value that goto's own FIRST accepted setpoint gave that joint, never
+    the tol box. ``const_ref`` has no entry for a joint not yet seen in
+    this goto (the bootstrap case): the candidate value trivially passes
+    and becomes the reference for later samples of the SAME goto (the
+    caller records it). This is what stops a genuinely-moved constant
+    joint (the next waypoint's real first sample, drifted a few 1e-5 deg
+    past the ±``ON_SEGMENT_TOL_DEG`` box) from being admitted to the
+    PREVIOUS goto merely because it started at the same nominal value."""
+    tol = np.radians(tol_deg)
+    for j in R_JOINTS:
+        a, b, v = start8.get(j, 0.0), goal8.get(j, 0.0), value8.get(j, 0.0)
+        if a == b:
+            if j in const_ref:
+                if v != const_ref[j]:
+                    return False
+            elif not (a - tol <= v <= a + tol):
+                # Bootstrap: no reference established for THIS goto yet
+                # (this is either the goto's own first sample, or a
+                # candidate never before visited -- lookahead/backward
+                # scan always call with an empty `const_ref`). Nothing to
+                # compare "goto k's first setpoint" against but the
+                # nominal value itself, so this collapses to the same
+                # tol-box test a moving joint's degenerate a==b case
+                # would give -- never a free pass.
+                return False
+            continue
+        lo, hi = (a, b) if a <= b else (b, a)
+        if not (lo - tol <= v <= hi + tol):
+            return False
+    return True
+
+
+def _record_const_ref(
+    seg_start: Dict[str, float], goal8: Dict[str, float], tgt: Dict[str, float],
+    const_ref: Dict[str, float],
+) -> None:
+    """Establishes ``const_ref[j]`` from ``tgt`` for every joint constant
+    in this goto (``seg_start[j] == goal8[j]``) that has no reference
+    yet -- the goto's own first accepted setpoint, per R-const."""
+    for j in R_JOINTS:
+        if seg_start.get(j, 0.0) == goal8.get(j, 0.0):
+            const_ref.setdefault(j, tgt.get(j, 0.0))
+
+
 @dataclass
 class GoalAssignment:
     goal_index: List[Optional[int]]     # per command in `targets8`; None = indeterminate
@@ -100,20 +153,31 @@ def assign_goals(
     result: List[Optional[int]] = [None] * n
     cur = 0
     seg_start = dict(start_pose8)
+    #: R-const: `cur`'s own established constant-joint reference values
+    #: (its first accepted setpoint's values, for joints whose nominal
+    #: start == goal in THIS goto). Reset whenever `cur` changes.
+    const_ref: Dict[str, float] = {}
     violation_index: Optional[int] = None
     violation_kind: Optional[str] = None
 
     for i in range(n):
         tgt = targets8[i]
-        if cur < len(route) and _on_segment(seg_start, _pose8(route[cur]), tgt, tol_deg):
-            # Tie-break the goto boundary: a value that bit-exactly equals
-            # cur's own goal is ambiguous between "cur, still held" and
-            # "cur+1's own tau=0 anchor" (a real goto starts from the
-            # cached goal -- see pathcheck.py's C1). If the NEXT command
-            # has already moved on into cur+1's segment, THIS one was
-            # cur+1's anchor, not one more cur sample.
+        if cur < len(route) and _on_segment_strict(seg_start, _pose8(route[cur]), tgt, tol_deg, const_ref):
+            # R-tie (coordinator ruling, 2026-09-25, §1): a setpoint that
+            # bit-equals cur's own goal AND DIFFERS from the immediately
+            # preceding command belongs to cur -- it continues cur's
+            # approach. Under correct reporting, goto cur+1 starts from
+            # the PRECEDING command's value (report §4), so this setpoint
+            # cannot itself be cur+1's anchor. Only a setpoint that equals
+            # BOTH cur's goal AND the preceding command (a CARRY of an
+            # already-exact value) is ambiguous between "cur, still held"
+            # and "cur+1's own anchor" -- the lookahead tie-break applies
+            # to that carry case only.
+            prev_tgt = targets8[i - 1] if i > 0 else None
+            exact_to_goal = _exact_equal8(tgt, _pose8(route[cur]))
+            carry_of_prev = prev_tgt is not None and _exact_equal8(tgt, prev_tgt)
             if (cur + 1 < len(route) and i + 1 < n
-                    and _exact_equal8(tgt, _pose8(route[cur]))):
+                    and exact_to_goal and carry_of_prev):
                 nxt_start = _pose8(route[cur])
                 nxt_goal = _pose8(route[cur + 1])
                 nxt = targets8[i + 1]
@@ -122,9 +186,12 @@ def assign_goals(
                         and not _exact_equal8(nxt, nxt_goal)):
                     cur = cur + 1
                     seg_start = nxt_start
+                    const_ref = {}
                     result[i] = cur
+                    _record_const_ref(seg_start, _pose8(route[cur]), tgt, const_ref)
                     continue
             result[i] = cur
+            _record_const_ref(seg_start, _pose8(route[cur]), tgt, const_ref)
             continue
 
         advanced = False
@@ -133,12 +200,14 @@ def assign_goals(
             if idx >= len(route):
                 break
             candidate_start = _pose8(route[idx - 1])
-            if _on_segment(candidate_start, _pose8(route[idx]), tgt, tol_deg):
+            if _on_segment_strict(candidate_start, _pose8(route[idx]), tgt, tol_deg, {}):
                 if look > 1 and violation_index is None:
                     violation_index, violation_kind = i, SKIPPED_WAYPOINT
                 cur = idx
                 seg_start = candidate_start
+                const_ref = {}
                 result[i] = cur
+                _record_const_ref(seg_start, _pose8(route[cur]), tgt, const_ref)
                 advanced = True
                 break
         if advanced:
@@ -146,7 +215,7 @@ def assign_goals(
 
         for idx in range(0, cur):
             prior_start = start_pose8 if idx == 0 else _pose8(route[idx - 1])
-            if _on_segment(prior_start, _pose8(route[idx]), tgt, tol_deg):
+            if _on_segment_strict(prior_start, _pose8(route[idx]), tgt, tol_deg, {}):
                 if violation_index is None:
                     violation_index, violation_kind = i, EXTRA_WAYPOINT
                 result[i] = idx

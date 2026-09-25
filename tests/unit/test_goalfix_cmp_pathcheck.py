@@ -127,7 +127,21 @@ class TestC4:
         hover_idx = 1
         last = max(i for i, g in enumerate(assignment.goal_index) if g == hover_idx)
         targets21[last][0] += 0.05  # shoulder_pitch ends well short of HOVER's goal
-        results = pc.run_all(targets21, t_hi_s, START, ROUTE, guard=())
+        # R-tie (coordinator ruling, 2026-09-25 stage-1 rulings, §1):
+        # HOVER's own last two samples in this fixture are bit-identical
+        # duplicates of its exact goal, and R-tie's boundary tie-break
+        # compares an exact-goal sample against the IMMEDIATELY PRECEDING
+        # command to decide whether it is a carry. Mutating `last` in
+        # place (the line above) breaks that adjacency for the OTHER
+        # duplicate sample, which changes assign_goals' OWN
+        # re-segmentation of the following (unrelated) boundary if it is
+        # recomputed from the mutated array -- exactly the case
+        # `run_all`'s own docstring calls out ("a large enough injected
+        # violation can itself push the sample out of tolerance ...
+        # silently hiding the very violation being tested"). Passing the
+        # CLEAN assignment isolates C4's own logic, per that documented
+        # contract.
+        results = pc.run_all(targets21, t_hi_s, START, ROUTE, guard=(), assignment=assignment)
         assert not results["C4"].passed
         assert results["C4"].first_violation_index == last
 
