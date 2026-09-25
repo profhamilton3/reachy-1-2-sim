@@ -399,6 +399,14 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
 
     jc_idx = np.nonzero(evd.commands.joint_command_mask())[0]
     jc_idx = jc_idx[(jc_idx >= args.command_start_index) & (jc_idx <= args.command_end_index)]
+
+    # T2: an unplaceable command inside this leg's range is evidence
+    # incomplete, never silently skipped or gated as if it were a carry.
+    try:
+        ev.check_no_unplaceable_in_range(evd, jc_idx.tolist())
+    except ev.EvidenceError as exc:
+        return write_result(args.out, RC_INCONCLUSIVE, {"ok": False, "reason": str(exc)})
+
     targets21 = evd.commands.target_rad[jc_idx]
     t_hi_s = [evd.brackets[i].t_hi for i in jc_idx]
 

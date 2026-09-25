@@ -32,6 +32,7 @@ from joint_map import JOINT_TABLE  # noqa: E402
 from tools.goalfix_cmp._io import (  # noqa: E402
     IntegrityError, parse_sha256sums, verified,
 )
+from tools.goalfix_cmp import _simtime as st  # noqa: E402
 from tools.goalfix_cmp._simtime import (  # noqa: E402
     Bracket, assign_command_epochs, assign_state_epochs, bracket_commands,
 )
@@ -159,6 +160,7 @@ class Commands:
     compliant: List[Optional[List[Optional[bool]]]]
     epoch: np.ndarray            # the epoch each row belongs to / ends
     reset_sim_step: List[Optional[int]]  # sim_step recorded on reset rows
+    truncated_final_line: bool = False   # T10.2: flagged, not silently dropped
 
     def __len__(self) -> int:
         return len(self.kind)
@@ -179,14 +181,24 @@ def load_commands(path) -> Commands:
     for i, r in enumerate(rows):
         t = r.get("type")
         if t == "joint_command":
-            kind.append("joint_command")
-            seq.append(int(r["seq"]))
-            tgt = r["target_rad"]
-            if len(tgt) != 21:
+            # T10.3: a missing `seq` or a malformed `target_rad` is
+            # evidence-incomplete, never an uncaught KeyError/TypeError that
+            # would escape every CLI as an untranslated traceback (rc 1, no
+            # JSON -- the exact review-row bug this closes).
+            try:
+                row_seq = int(r["seq"])
+                tgt = r["target_rad"]
+                if len(tgt) != 21:
+                    raise EvidenceError(
+                        f"{path}: joint_command seq={r.get('seq')} has "
+                        f"{len(tgt)} target_rad entries, expected 21")
+                tgt_row = [float(v) for v in tgt]
+            except (KeyError, TypeError, ValueError) as exc:
                 raise EvidenceError(
-                    f"{path}: joint_command seq={r.get('seq')} has "
-                    f"{len(tgt)} target_rad entries, expected 21")
-            target_rad[i, :] = tgt
+                    f"{path}: joint_command on row {i} is malformed: {exc}") from exc
+            kind.append("joint_command")
+            seq.append(row_seq)
+            target_rad[i, :] = tgt_row
             compliant.append(r.get("compliant"))
             reset_sim_step.append(None)
         elif t == "reset":
@@ -198,21 +210,71 @@ def load_commands(path) -> Commands:
             raise EvidenceError(f"{path}: unknown command type {t!r} on row {i}")
     epoch = assign_command_epochs(kind)
     return Commands(kind, np.array(seq, dtype=np.int64), target_rad, compliant,
-                     epoch, reset_sim_step)
+                     epoch, reset_sim_step, truncated_final_line=truncated)
 
 
 def check_epoch_counts(states: States, commands: Commands) -> None:
-    """Cross-check (plan §2.2): the number of reset-derived epochs in
-    ``states`` must equal the number in ``commands``. Raises
-    ``EvidenceError`` (evidence incomplete) on a mismatch -- this is the
-    "checked against the step drop" the plan requires, not an assumption."""
+    """Cross-check (plan §2.2; T3/review §3.1/M3): the number of
+    reset-derived epochs in ``states`` must equal the number in
+    ``commands``, and each reset row's own recorded ``sim_step`` must agree
+    with the step drop it opens. Raises ``EvidenceError`` (evidence
+    incomplete) on either mismatch.
+
+    Epochs are counted as ``n_reset_rows + 1`` (T3), never
+    ``commands.epoch.max() + 1``: a reset row is stamped with the epoch it
+    ENDS (``_simtime.assign_command_epochs``), so a recording whose LAST
+    row is a reset undercounts by one under the old ``max()+1`` rule -- a
+    valid recording was rejected as evidence-incomplete for this alone (the
+    previous handoff's B1 "structural finding" was this bug, not a property
+    of the data; see T3's correction to that handoff).
+    """
     n_state_epochs = int(states.epoch.max()) + 1 if len(states) else 0
-    n_cmd_epochs = int(commands.epoch.max()) + 1 if len(commands) else 0
+    n_reset_rows = sum(1 for k in commands.kind if k == "reset")
+    n_cmd_epochs = n_reset_rows + 1 if len(commands) else 0
     if n_state_epochs != n_cmd_epochs:
         raise EvidenceError(
             "epoch count mismatch: states.jsonl implies "
             f"{n_state_epochs} epoch(s) from sim_step drops, "
-            f"commands.jsonl implies {n_cmd_epochs} from reset entries")
+            f"commands.jsonl implies {n_cmd_epochs} from {n_reset_rows} "
+            "reset row(s) (+1)")
+
+    # Each reset row's recorded sim_step must agree with the step drop it
+    # opens. A reset row ending epoch e is recorded (make_fixtures.FlightSim
+    # matches this convention exactly) at sim_step = (epoch e's last state's
+    # own sim_step) + 1 -- the tick count reached in the epoch just ended,
+    # before it is zeroed. The first state of epoch e+1 (the state
+    # immediately after the drop) locates the boundary; the check itself is
+    # against the LAST state of the epoch the reset closes, which is the
+    # only state on either side of the drop that carries a value related to
+    # the reset's own recorded step.
+    reset_i = 0
+    for state_i in range(1, len(states)):
+        if states.sim_step[state_i] < states.sim_step[state_i - 1]:
+            # states.epoch[state_i - 1] just closed; find the reset row
+            # that closes the SAME epoch (the (states.epoch[state_i-1]+1)-th
+            # reset row in file order, 0-indexed).
+            closing_epoch = int(states.epoch[state_i - 1])
+            resets_seen = 0
+            reset_row_index = None
+            for ci, kind in enumerate(commands.kind):
+                if kind == "reset":
+                    if resets_seen == closing_epoch:
+                        reset_row_index = ci
+                        break
+                    resets_seen += 1
+            if reset_row_index is None:
+                raise EvidenceError(
+                    f"states.jsonl drops sim_step after epoch {closing_epoch}, "
+                    "but commands.jsonl has no matching reset row")
+            recorded = commands.reset_sim_step[reset_row_index]
+            last_step_of_closing_epoch = int(states.sim_step[state_i - 1])
+            if recorded is None or int(recorded) != last_step_of_closing_epoch + 1:
+                raise EvidenceError(
+                    f"reset row {reset_row_index}: recorded sim_step={recorded} "
+                    f"does not agree with the step drop it opens (epoch "
+                    f"{closing_epoch}'s last state is sim_step="
+                    f"{last_step_of_closing_epoch})")
+            reset_i += 1
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +287,9 @@ class Evidence:
     commands: Commands
     brackets: List[Bracket]           # one per commands row (reset rows: unplaceable)
     unplaceable_command_indices: List[int]
+    #: T2: per-epoch bridge-restart detection (container-recreate/seq-restart
+    #: regime), keyed by epoch index.
+    bridge_sessions: Dict[int, st.BridgeSessionInfo] = field(default_factory=dict)
 
     def n_epochs(self) -> int:
         return int(self.states.epoch.max()) + 1 if len(self.states) else 0
@@ -236,9 +301,12 @@ def load_evidence(states_path, commands_path) -> Evidence:
     check_epoch_counts(states, commands)
     jc_mask = commands.joint_command_mask()
     jc_idx = np.nonzero(jc_mask)[0]
+    bridge_sessions = st.detect_bridge_sessions(
+        commands.seq[jc_idx], commands.epoch[jc_idx], states.cmd_seq, states.epoch)
     brackets_jc = bracket_commands(
         commands.seq[jc_idx], commands.epoch[jc_idx],
-        states.sim_time_s, states.cmd_seq, states.epoch)
+        states.sim_time_s, states.cmd_seq, states.epoch,
+        bridge_sessions=bridge_sessions)
     brackets: List[Optional[Bracket]] = [None] * len(commands)
     for i, b in zip(jc_idx, brackets_jc):
         brackets[i] = b
@@ -246,7 +314,24 @@ def load_evidence(states_path, commands_path) -> Evidence:
         brackets[i] = Bracket(int(commands.epoch[i]), None, None, None)
     unplaceable = [i for i, b in enumerate(brackets)
                    if commands.kind[i] == "joint_command" and b.unplaceable]
-    return Evidence(states, commands, brackets, unplaceable)  # type: ignore[arg-type]
+    return Evidence(states, commands, brackets, unplaceable,  # type: ignore[arg-type]
+                     bridge_sessions=bridge_sessions)
+
+
+def check_no_unplaceable_in_range(evidence: Evidence, command_indices: Sequence[int]) -> None:
+    """T2 (assignment §2 T2 acceptance): an unplaceable ``joint_command``
+    inside a leg or the affected segment is evidence incomplete, in every
+    CLI -- never silently classified as ``carry``/``fresh`` for gating
+    purposes. Raises ``EvidenceError`` naming every unplaceable index found,
+    not just the first."""
+    bad = [i for i in command_indices
+           if evidence.commands.kind[i] == "joint_command"
+           and evidence.brackets[i].unplaceable]
+    if bad:
+        ambiguous = [i for i in bad if evidence.brackets[i].seq_ambiguous]
+        raise EvidenceError(
+            f"unplaceable joint_command(s) inside range: {bad}"
+            + (f" ({ambiguous} seq-ambiguous)" if ambiguous else ""))
 
 
 def verify_and_load(

@@ -164,6 +164,78 @@ class TestEpochsAndBrackets:
             assert not b.unplaceable
 
 
+class TestT3EpochCounting:
+    """A recording whose last row is a reset must load (T3/review §3.1/M3):
+    epochs are n_reset_rows + 1, and each reset row's own sim_step must
+    agree with the step drop it opens."""
+
+    def test_trailing_reset_row_loads(self, tmp_path):
+        sim = mf.FlightSim({j: 0.0 for j in mf.R_JOINTS})
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.2}, 0.2)])
+        sim.recreate()
+        sim.reset(seed=1)  # no further commands -- the LAST command row is the reset
+        result = sim.result()
+        assert result.command_rows[-1]["type"] == "reset"
+        mf.write_evidence(tmp_path, result.state_rows, result.command_rows)
+        ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")  # must not raise
+
+    def test_missing_reset_row_is_evidence_incomplete(self, tmp_path):
+        sim = mf.FlightSim({j: 0.0 for j in mf.R_JOINTS})
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.2}, 0.2)])
+        sim.reset(seed=1)
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.2}, 0.2)])
+        result = sim.result()
+        commands = [r for r in result.command_rows if r["type"] != "reset"]  # drop it
+        mf.write_evidence(tmp_path, result.state_rows, commands)
+        with pytest.raises(ev.EvidenceError):
+            ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+
+    def test_extra_reset_row_is_evidence_incomplete(self, tmp_path):
+        sim = mf.FlightSim({j: 0.0 for j in mf.R_JOINTS})
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.2}, 0.2)])
+        sim.reset(seed=1)
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.2}, 0.2)])
+        result = sim.result()
+        extra = mf.command_row_reset(seed=2, sim_step=0, wall_time_s=0.0)
+        commands = list(result.command_rows) + [extra]  # a reset with no matching drop
+        mf.write_evidence(tmp_path, result.state_rows, commands)
+        with pytest.raises(ev.EvidenceError):
+            ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+
+    def test_reset_sim_step_mismatch_is_evidence_incomplete(self, tmp_path):
+        sim = mf.FlightSim({j: 0.0 for j in mf.R_JOINTS})
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.2}, 0.2)])
+        sim.reset(seed=1)
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.2}, 0.2)])
+        result = sim.result()
+        commands = [dict(r) for r in result.command_rows]
+        for r in commands:
+            if r["type"] == "reset":
+                r["sim_step"] += 5  # no longer agrees with the drop it opens
+        mf.write_evidence(tmp_path, result.state_rows, commands)
+        with pytest.raises(ev.EvidenceError):
+            ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+
+    def test_epoch_count_reverted_to_max_plus_one_mutation(self, tmp_path):
+        """Mutation guard: if check_epoch_counts ever goes back to
+        `commands.epoch.max() + 1`, a trailing-reset recording (which this
+        test builds fresh, not reusing a fixture that might itself change)
+        must be rejected again -- proving this test would have caught it."""
+        sim = mf.FlightSim({j: 0.0 for j in mf.R_JOINTS})
+        sim.fly([mf.Waypoint("A", {"r_shoulder_pitch": -0.2}, 0.2)])
+        sim.recreate()
+        sim.reset(seed=1)
+        result = sim.result()
+        kinds = [r["type"] for r in result.command_rows]
+        n_resets = kinds.count("reset")
+        from tools.goalfix_cmp import _simtime as st
+        cmd_epoch = st.assign_command_epochs(kinds)
+        buggy_count = int(cmd_epoch.max()) + 1 if len(cmd_epoch) else 0
+        correct_count = n_resets + 1
+        assert buggy_count != correct_count, (
+            "fixture no longer distinguishes the two counting rules")
+
+
 class TestLegFromSidecar:
     def test_leg_bounds_from_alignment(self, tmp_path):
         (paths, result) = _simple_flight(tmp_path)

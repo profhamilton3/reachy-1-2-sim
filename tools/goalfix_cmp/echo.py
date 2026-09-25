@@ -299,12 +299,22 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     except (ev.EvidenceError, IntegrityError) as exc:
         return write_result(args.out, RC_INCONCLUSIVE, {"ok": False, "reason": str(exc)})
 
-    results = classify_commands(evd)
-    control = classify_commands(evd, shift_s=-CONTROL_SHIFT_S)
-
     seg_idx = None
     if args.segment_start_index is not None and args.segment_end_index is not None:
         seg_idx = list(range(args.segment_start_index, args.segment_end_index + 1))
+
+    # T2: an unplaceable command in the scoped range (the segment, or the
+    # whole file if no segment was given) is evidence incomplete -- never
+    # silently classified as carry/fresh for gating purposes.
+    gate_range = seg_idx if seg_idx is not None else list(
+        np.nonzero(evd.commands.joint_command_mask())[0])
+    try:
+        ev.check_no_unplaceable_in_range(evd, gate_range)
+    except ev.EvidenceError as exc:
+        return write_result(args.out, RC_INCONCLUSIVE, {"ok": False, "reason": str(exc)})
+
+    results = classify_commands(evd)
+    control = classify_commands(evd, shift_s=-CONTROL_SHIFT_S)
 
     counts = count_labels(results, seg_idx)
     control_counts = count_labels(control, seg_idx)
