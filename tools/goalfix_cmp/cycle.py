@@ -207,6 +207,48 @@ class LegResult:
     #: reached, so the parked-tail window could not be bounded at all
     #: (reported, never gated -- there is nothing to check).
     parked_tail_indeterminate: bool = False
+    #: CB7 (readiness review, 2026-09-25 stage-repairs assignment §4):
+    #: plan §7.2's "also reported per waypoint: re-stream pass counts,
+    #: arrival errors[,] and the r_wrist_pitch shortfall (descriptive)"
+    #: -- one entry per route waypoint, REPORT-ONLY (never read by any
+    #: verdict/rc computation in this module).
+    per_waypoint: List[Dict[str, object]] = field(default_factory=list)
+
+
+def _per_waypoint_report(
+    targets8: Sequence[Dict[str, float]], route: Sequence, assignment: seg.GoalAssignment,
+) -> List[Dict[str, object]]:
+    """CB7: for each route waypoint, the re-stream pass count (plan
+    §7.2/C5's own "first exact match, then every later setpoint at that
+    goal" -- counted from the first exact arrival onward, inclusive) and
+    the arrival error per ARM7 joint in degrees (C4's own `v - b`, the
+    LAST setpoint assigned to this waypoint minus its goal, signed --
+    never reduced against C4's residual budget, since this is descriptive,
+    not a check). `r_wrist_pitch`'s own entry in `arrival_error_deg` IS
+    the "wrist-pitch shortfall" the review names alongside it -- the
+    review lists them together as one reported group, not two separate
+    formulas, and no other definition of "shortfall" appears anywhere in
+    the plan or report. `None` (never a fabricated 0) for a waypoint no
+    command was ever assigned to."""
+    report: List[Dict[str, object]] = []
+    for k, wp in enumerate(route):
+        idxs = pc._idx_for_goal(assignment, k)
+        if not idxs:
+            report.append({"name": wp.name, "restream_pass_count": 0, "arrival_error_deg": None})
+            continue
+        goal8 = pc._goal8(wp)
+        first_exact = next(
+            (i for i in idxs if pc._is_exact_goal(targets8[i], goal8)), None)
+        restream_pass_count = (
+            sum(1 for i in idxs if i >= first_exact) if first_exact is not None else 0)
+        last_i = idxs[-1]
+        arrival_error_deg = {
+            j: float(np.degrees(targets8[last_i].get(j, 0.0) - goal8.get(j, 0.0)))
+            for j in pc.ARM7}
+        report.append({
+            "name": wp.name, "restream_pass_count": restream_pass_count,
+            "arrival_error_deg": arrival_error_deg})
+    return report
 
 
 def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
@@ -325,7 +367,8 @@ def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
     return LegResult(leg.name, assignment, results, hold_stats, ctx, truncated_inside,
                       duplicates_inside, lead_in_violation=lead_in_violation,
                       lead_in_detail=lead_in_detail,
-                      parked_tail_indeterminate=parked_tail_indeterminate)
+                      parked_tail_indeterminate=parked_tail_indeterminate,
+                      per_waypoint=_per_waypoint_report(targets8, leg.route_rad, assignment))
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +504,20 @@ class CycleVerdict:
     duplicate_state_indices: List[int] = field(default_factory=list)
     tools_sha256: str = ""
     validation_only: bool = False
+    #: CB7 (readiness review, 2026-09-25 stage-repairs assignment §4):
+    #: plan §7.1's control run ("the same test is run against states
+    #: shifted -20s of simulation time... per cycle, the segment metric
+    #: is the number of genuine echoes and their fraction of new
+    #: targets"), scoped to the SAME affected segment as
+    #: genuine_echo_count -- currently computed only inside the separate
+    #: echo CLI, never reported alongside the cycle's own genuine count.
+    #: REPORT-ONLY: never read by rc()/verdict.
+    control_genuine_echo_count: Optional[int] = None
+    control_new_target_count: Optional[int] = None
+    #: CB7: plan §7.2's "also reported per waypoint: re-stream pass
+    #: counts, arrival errors, and the r_wrist_pitch shortfall
+    #: (descriptive)" -- keyed by leg name. REPORT-ONLY.
+    per_waypoint: Dict[str, List[Dict[str, object]]] = field(default_factory=dict)
 
     def rc(self) -> int:
         if self.validation_only:
@@ -479,6 +536,9 @@ class CycleVerdict:
             "duplicate_state_indices": self.duplicate_state_indices,
             "tools_sha256": self.tools_sha256,
             "validation_only": self.validation_only,
+            "control_genuine_echo_count": self.control_genuine_echo_count,
+            "control_new_target_count": self.control_new_target_count,
+            "per_waypoint": self.per_waypoint,
             "rc": self.rc(),
         }
 
@@ -574,6 +634,8 @@ def evaluate_cycle(
     genuine = 0
     segment_indeterminate = True
     affected = None
+    control_genuine_echo_count: Optional[int] = None
+    control_new_target_count: Optional[int] = None
 
     if place_leg is not None and place_lr is not None:
         affected = seg.find_affected_segment(place_lr.assignment, place_leg.route_rad,
@@ -586,6 +648,17 @@ def evaluate_cycle(
                     for i in range(affected.start_command_index, affected.end_command_index + 1)]
                 counts = echo.count_labels(echo_results, seg_global_indices)
                 genuine = counts.genuine_echo
+
+                # CB7 (readiness review, 2026-09-25 stage-repairs
+                # assignment §4): plan §7.1's control run, scoped to the
+                # SAME affected segment -- REPORT-ONLY, never read below.
+                control_results = echo.classify_commands(
+                    evidence, full_goto_context, shift_s=-echo.CONTROL_SHIFT_S,
+                    leg_turn_on_state_index=leg_turn_on_map)
+                control_counts = echo.count_labels(control_results, seg_global_indices)
+                control_genuine_echo_count = control_counts.genuine_echo
+                control_new_target_count = (
+                    sum(control_counts.as_dict().values()) - control_counts.carry)
 
     metrics = None
     if place_leg is not None and place_lr is not None:
@@ -671,7 +744,10 @@ def evaluate_cycle(
         metrics.net_shoulder_pitch_hold_deg if metrics else None, metrics, checks,
         unplaceable_command_indices=list(evidence.unplaceable_command_indices),
         duplicate_state_indices=list(evidence.states.duplicate_indices),
-        tools_sha256=_package_sha256())
+        tools_sha256=_package_sha256(),
+        control_genuine_echo_count=control_genuine_echo_count,
+        control_new_target_count=control_new_target_count,
+        per_waypoint={lr.name: lr.per_waypoint for lr in leg_results.values()})
     return cv, leg_results
 
 
