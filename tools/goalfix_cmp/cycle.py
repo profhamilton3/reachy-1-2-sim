@@ -103,6 +103,43 @@ class LegSpec:
     sidecar_t_hi: Optional[float] = None
 
 
+def load_verified_scene(sidecar_path):
+    """CB1 (merge verdict, 2026-09-25 stage-repairs assignment §4): loads
+    the ``SceneModel`` named by the setup sidecar's own ``scene.path``
+    (as ``scripts/link_e1_flight.py``'s ``build_base_sidecar`` writes it),
+    after RE-hashing that same ``extends`` chain -- via
+    ``scripts/e1_identity.py``'s own ``_extends_chain``/``_sha256_file``
+    (imported, never reimplemented) -- and confirming it still matches
+    the sidecar's own recorded ``scene.chain_sha256``. A missing
+    ``scene`` block, a missing scene file, or ANY chain hash mismatch is
+    ``CycleInputError`` (rc 3), never a silently-loaded, possibly-stale
+    scene."""
+    import json as _json
+
+    import e1_identity  # noqa: E402  (scripts/ is on sys.path, see the module header)
+
+    p = Path(sidecar_path)
+    sidecar = _json.loads(p.read_text())
+    scene_block = sidecar.get("scene") or {}
+    scene_path_str = scene_block.get("path")
+    if not scene_path_str:
+        raise CycleInputError(f"sidecar {p} has no scene.path")
+    scene_path = Path(scene_path_str)
+    if not scene_path.is_file():
+        raise CycleInputError(f"scene file {scene_path} (from sidecar {p}) does not exist")
+
+    recorded_chain_sha256 = scene_block.get("chain_sha256") or {}
+    current_chain = e1_identity._extends_chain(scene_path)
+    current_chain_sha256 = {str(cp): e1_identity._sha256_file(cp) for cp in current_chain}
+    if current_chain_sha256 != recorded_chain_sha256:
+        raise CycleInputError(
+            f"scene chain hash mismatch for {scene_path}: sidecar recorded "
+            f"{recorded_chain_sha256}, current files hash to {current_chain_sha256}")
+
+    from reachy_ai.scene.awareness import SceneModel
+    return SceneModel.from_yaml(str(scene_path))
+
+
 def resolve_leg(
     evidence: ev.Evidence, sidecar_path, leg_label: str,
     route_deg: Sequence, guard: Sequence[str], *,
@@ -475,12 +512,41 @@ def compute_place_route_metrics(
             if affected is not None and not affected.indeterminate:
                 seg_local = range(affected.start_command_index, affected.end_command_index + 1)
                 seg_commanded = [commanded[i] for i in seg_local if i < len(commanded)]
-                if seg_commanded:
+                # CB1 (merge verdict, 2026-09-25 stage-repairs assignment
+                # §4): realised must be taken from the SAME seg_local
+                # positions as seg_commanded (the affected segment's own
+                # span within the leg), not realised[:len(seg_commanded)]
+                # -- which silently took samples from the LEG's own
+                # start regardless of where the segment actually begins.
+                seg_realised = [realised[i] for i in seg_local if i < len(realised)]
+                if seg_commanded and seg_realised:
                     seg_deltas = cl.compute_deltas(
-                        "PLACE_ROUTE", None, 200, scene, seg_commanded,
-                        realised[:len(seg_commanded)])
+                        "PLACE_ROUTE", None, 200, scene, seg_commanded, seg_realised)
                     if seg_deltas:
                         m.delta_cmd_segment_max_cm = max(d.delta_cmd_cm for d in seg_deltas)
+
+        # CB1 (merge verdict, 2026-09-25 stage-repairs assignment §4):
+        # wrist_ball_delta_cm is intentionally left null even with a
+        # scene supplied. The plan (§7.5: "B's wrist_ball Δ falls by
+        # ... against the median of the manipulated A cycles") and the
+        # review ("compute wrist_ball_delta_cm with the vendored
+        # indep_wrist_ball") name two DIFFERENT, both-plausible
+        # readings: (a) delta_trk_cm for the link=="wrist_ball" entries
+        # already present in `deltas`/`seg_deltas` above (hand="shells"
+        # only -- "tube" has no wrist_ball capsule), or (b) a
+        # cross-check-style delta computed directly via
+        # indep_wrist_ball/cross_check_wrist_ball against one particular
+        # scene object at one particular instant. Neither the plan nor
+        # the report says which, against which object id, or at which
+        # instant (a whole-segment worst-case? a single waypoint?) --
+        # per the "no invented definitions" rule, this is flagged, not
+        # guessed.
+        m.open_questions.append(
+            "wrist_ball_delta_cm: report §5/plan §7.3-7.5 and the review name two "
+            "different readings (delta_trk_cm for the existing link==\"wrist_ball\" "
+            "compute_deltas entries, vs. a cross-check computed directly via "
+            "indep_wrist_ball/cross_check_wrist_ball) and do not say which, against "
+            "which scene object, or at which instant -- left null rather than guessed")
 
     return m
 
@@ -938,6 +1004,21 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         # leg's first command to the next leg or reset in that epoch".
         _check_no_unplaceable_in_legs(evd, [setup_leg, flight_leg])
 
+        # CB1 (merge verdict, 2026-09-25 stage-repairs assignment §4):
+        # the setup sidecar's own "scene" block (present -- real
+        # link_e1_flight.py sidecars carry it; absent -- V1's own
+        # harness never wired one, and every synthetic fixture in this
+        # test suite) decides whether a scene is used at all. A scene
+        # block that IS present but names a missing file or a chain hash
+        # that no longer matches is CycleInputError (rc 3) -- never
+        # silently dropped to "no scene". No block at all is scene=None,
+        # unchanged from before (compute_place_route_metrics's own
+        # open_questions branch).
+        scene = None
+        setup_sidecar_doc = _json.loads(Path(setup_sidecar).read_text())
+        if setup_sidecar_doc.get("scene"):
+            scene = load_verified_scene(setup_sidecar)
+
         provenance_gate = compliance_gate = start_variant_result = None
         guard_note = (
             "report §4 states which guard set applies to which route (CRITICAL_JOINTS for "
@@ -1024,7 +1105,7 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
             start_variant_result = initial.start_variant_gate(control_dir, args.cycle)
 
         cv, _ = evaluate_cycle(
-            args.cycle, args.arm, evd, [setup_leg, flight_leg],
+            args.cycle, args.arm, evd, [setup_leg, flight_leg], scene=scene,
             provenance_gate=provenance_gate, compliance_gate=compliance_gate,
             start_variant_gate_result=start_variant_result, guard_note=guard_note,
             skip_gates=args.validation_mode)
