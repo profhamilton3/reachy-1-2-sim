@@ -234,12 +234,30 @@ def _subclassify(*, name: str, value: float, epoch: int, command_index: int,
         a, b = ctx.start8[name], ctx.goal8[name]
         if a != b:
             # Ill-conditioned within 0.05 deg of either end -- excluded from
-            # the tau-agreement check (report §4, C2); a match that close
-            # to an endpoint is left to the genuine-echo bucket rather than
-            # guessed at.
+            # the tau-agreement check (report §4, C2), exactly as C2 itself
+            # exempts a near-end joint from the tau comparison.
             near_end = (abs(np.degrees(value - a)) <= ILL_CONDITIONED_DEG
                         or abs(np.degrees(value - b)) <= ILL_CONDITIONED_DEG)
-            if not near_end:
+            if near_end:
+                # Q-echo (coordinator ruling, 2026-09-25 stage-1 rulings,
+                # §3): plan §7.1 defines path coincidence as the
+                # minimum-jerk setpoint on THIS goto's own path, "at an
+                # implied tau that agrees ... (C2)" -- and C2 exempts a
+                # near-end joint from that tau-agreement test, it does
+                # not disqualify the joint from being on-path. A match
+                # near an end that lies within [start, goal] of the
+                # CURRENT goto is a path coincidence (a direction
+                # reversal's early minimum-jerk samples pass back through
+                # values the lagging plant held moments earlier -- V1's
+                # F7, cycle 2 setup, r_shoulder_roll). Off-path near an
+                # end (never observed on real B data, but not excluded by
+                # construction) is left to genuine_echo -- the exemption
+                # is from the tau check, never a blanket "near an end is
+                # safe" rule.
+                lo, hi = (a, b) if a <= b else (b, a)
+                if lo <= value <= hi:
+                    return PATH_COINCIDENCE
+            else:
                 tau = implied_tau(a, b, value)
                 predicted = pose_at(a, b, tau)
                 if _within_float32_ulps(predicted, value, ULP_FLOAT32_FACTOR):

@@ -101,7 +101,24 @@ class TestEndToEndFixtureTable:
         payload = read_result(out)
         assert payload["verdict"] == cyc.VERDICT_OK, payload
 
-    def test_a_with_echoes_is_manipulated(self, tmp_path):
+    def test_a_with_echoes_is_manipulated(self, tmp_path, monkeypatch):
+        # Q-echo (coordinator ruling, 2026-09-25 stage-1 rulings, §3): with
+        # this module's own zeroed `_LAG_RAD` (state == target exactly),
+        # EVERY forced echo sourced from a past STATE of the SAME goto is,
+        # by construction, mathematically exactly ON that goto's own
+        # minimum-jerk curve -- so whenever it also lands near either end
+        # (common: minimum-jerk spends many ticks near-flat there), it is
+        # now correctly path_coincidence, never genuine_echo (this is the
+        # exact bug the ruling fixes, not a defect in the fix). That
+        # collapsed this fixture's segment-scoped genuine count to 0 for
+        # every seed tried. A real echo is never on the CORRECT goto's own
+        # path in the first place (it is a stale/manipulated report, not a
+        # coincidental resample of the same curve) -- modelling that here
+        # needs a genuinely lagged plant, restored for this ONE test only
+        # (every other test in this module still isolates C1 from lag via
+        # the file's own autouse fixture; lag never enters any C0-C8 check,
+        # which reads only commanded targets, never states).
+        monkeypatch.setattr(mf, "_LAG_RAD", [0.0021 + 0.0001 * j for j in range(8)])
         ev_dir, control_dir = _build_cycle(tmp_path, echo_rate=0.4, seed=7)
         out = tmp_path / "out.json"
         rc = _run_cli(ev_dir, control_dir, "A", out)
