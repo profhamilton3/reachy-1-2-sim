@@ -341,19 +341,33 @@ def _cycle_rep_key(cycle: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def load_between_files(control_dir) -> "tuple[list, dict, bool]":
-    """Every ``between_*.json`` in ``control_dir``, ordered by the cycle
-    id's own trailing ``r<rep>``. Returns ``(verdicts, metrics,
-    hash_mismatch)`` -- ``hash_mismatch`` is True if ANY file's
-    ``tools_sha256`` disagrees with the running ``tools/goalfix_cmp``
-    package (T5: "checking each file's tools_sha256 against the running
-    package"); that file's own verdict/metrics are excluded rather than
-    trusted."""
+def load_between_files(
+    control_dir, arm_map: Dict[int, object], *, required_reps: Optional[Sequence[int]] = None,
+) -> "tuple[list, dict, bool]":
+    """MB3 (merge verdict, 2026-09-25 stage-repairs assignment §3):
+    cycles are KEYED BY REP FROM ``arm_map`` (an already-validated
+    ``{rep: ArmMapEntry}`` -- ``validate_arm_map``'s own frozen
+    ``ARM_MAP_ORDER``, "ABBABAABABBA", is the caller's job to enforce
+    before this is called), never by file count or filename sort order.
+    Rejects (raises ``SummaryCliError``, mapped to rc 3 by the caller):
+    a ``validation_only`` file (never authorizing), an ``rc`` inconsistent
+    with its own ``verdict``, a cycle whose rep is not in ``arm_map``, a
+    duplicate rep, an arm that differs from ``arm_map[rep].arm``, and
+    malformed JSON. ``required_reps`` (given by the checkpoint's own
+    ``--n``), if given, additionally requires every rep in it to be
+    present -- probe P10's "r1 missing, r2..r5 present" bug: the old code
+    took bare ``verdicts[:n]`` positionally, so a SHORTFALL was the only
+    detectable shape of "missing"; a missing rep in the MIDDLE with
+    enough total files was invisible.
+
+    Returns ``(verdicts, metrics, hash_mismatch)`` -- ``hash_mismatch``
+    is True if ANY file's ``tools_sha256`` disagrees with the running
+    ``tools/goalfix_cmp`` package; that file's own verdict/metrics are
+    excluded rather than trusted, same as before."""
     from pathlib import Path as _Path
     running_sha = cyc._package_sha256()
-    files = sorted(_Path(control_dir).glob("between_*.json"),
-                    key=lambda p: _cycle_rep_key(p.stem[len("between_"):]))
-    verdicts: List[cyc.CycleVerdict] = []
+    files = sorted(_Path(control_dir).glob("between_*.json"))
+    by_rep: Dict[int, cyc.CycleVerdict] = {}
     metrics: Dict[str, CycleMetrics] = {}
     hash_mismatch = False
     for f in files:
@@ -364,37 +378,72 @@ def load_between_files(control_dir) -> "tuple[list, dict, bool]":
         if doc.get("tools_sha256") != running_sha:
             hash_mismatch = True
             continue
+        if doc.get("validation_only"):
+            raise SummaryCliError(f"{f.name}: validation_only results never authorize")
+        verdict = doc.get("verdict")
+        rc = doc.get("rc")
+        if verdict is None or rc != cyc.rc_for_verdict(verdict):
+            raise SummaryCliError(
+                f"{f.name}: rc {rc!r} is inconsistent with verdict {verdict!r}")
+        cycle_id = doc.get("cycle")
+        rep = _cycle_rep_key(cycle_id) if cycle_id else 0
+        if rep not in arm_map:
+            raise SummaryCliError(f"{f.name}: cycle {cycle_id!r} has no rep {rep} in the arm map")
+        if rep in by_rep:
+            raise SummaryCliError(
+                f"{f.name}: duplicate rep {rep} (cycle {cycle_id!r} claims a rep "
+                f"already claimed by {by_rep[rep].cycle!r})")
+        entry_arm = getattr(arm_map[rep], "arm", None)
+        if doc.get("arm") != entry_arm:
+            raise SummaryCliError(
+                f"{f.name}: arm {doc.get('arm')!r} != arm_map[{rep}].arm {entry_arm!r}")
         v = cyc.CycleVerdict(
-            doc["cycle"], doc["arm"], doc["verdict"], doc.get("reasons", []),
+            cycle_id, doc["arm"], verdict, doc.get("reasons", []),
             doc.get("genuine_echo_count", 0), doc.get("segment_indeterminate", False))
-        verdicts.append(v)
+        by_rep[rep] = v
         m = doc.get("metrics")
         if m:
-            metrics[doc["cycle"]] = CycleMetrics(
+            metrics[cycle_id] = CycleMetrics(
                 leg_start_shoulder_pitch_error_deg=m.get("leg_start_shoulder_pitch_error_deg"),
                 delta_cmd_max_cm=m.get("delta_cmd_max_cm"),
                 wrist_ball_delta_cm=m.get("wrist_ball_delta_cm"),
                 post_arrival_rise_deg=m.get("post_arrival_rise_deg"),
                 c5_c6_pass=m.get("c5_c6_pass", True))
+
+    if required_reps is not None:
+        missing = sorted(set(required_reps) - set(by_rep))
+        if missing:
+            raise SummaryCliError(f"missing required rep(s) {missing}")
+
+    verdicts = [by_rep[r] for r in sorted(by_rep)]
     return verdicts, metrics, hash_mismatch
 
 
 def _cli(argv: Optional[Sequence[str]] = None) -> int:
     import argparse
 
-    from tools.goalfix_cmp._io import write_result
+    from tools.goalfix_cmp import provenance as pv
+    from tools.goalfix_cmp._io import RC_INCONCLUSIVE, write_result
 
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    # MB3 (merge verdict, 2026-09-25 stage-repairs assignment §3): BOTH
+    # subcommands now require a validated arm map -- cycles are keyed
+    # by rep from it, never by file count or filename sort.
     cp = sub.add_parser("checkpoint")
     cp.add_argument("--control-dir", required=True)
+    cp.add_argument("--arm-map", required=True)
+    cp.add_argument("--expected-bridge-sha-a", required=True)
+    cp.add_argument("--expected-bridge-sha-b", required=True)
     cp.add_argument("--n", type=int, default=4)
     cp.add_argument("--out", required=True)
 
     fn = sub.add_parser("final")
     fn.add_argument("--control-dir", required=True)
-    fn.add_argument("--arm-map")
+    fn.add_argument("--arm-map", required=True)
+    fn.add_argument("--expected-bridge-sha-a", required=True)
+    fn.add_argument("--expected-bridge-sha-b", required=True)
     fn.add_argument("--a-target-count", type=int, default=6)
     fn.add_argument("--a-manipulated-min", type=int, default=4)
     fn.add_argument("--out", required=True)
@@ -402,8 +451,18 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     args = p.parse_args(argv)
 
     try:
-        verdicts, metrics, hash_mismatch = load_between_files(args.control_dir)
+        arm_map_doc = json.loads(open(args.arm_map).read())
+        arm_map_entries = [pv.ArmMapEntry(**e) for e in arm_map_doc]
+        map_check = pv.validate_arm_map(
+            arm_map_entries,
+            expected_bridge_sha={"A": args.expected_bridge_sha_a, "B": args.expected_bridge_sha_b})
+        if not map_check.ok:
+            raise SummaryCliError(f"arm_map: {map_check.reason}")
+        arm_map = {e.rep: e for e in arm_map_entries}
+
         if args.cmd == "checkpoint":
+            verdicts, metrics, hash_mismatch = load_between_files(
+                args.control_dir, arm_map, required_reps=range(1, args.n + 1))
             r = checkpoint_after(verdicts, args.n, hash_mismatch=hash_mismatch)
             payload = {
                 "n_cycles": r.n_cycles, "any_stop": r.any_stop,
@@ -413,6 +472,7 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
             }
             return write_result(args.out, r.rc(), payload)
         else:
+            verdicts, metrics, hash_mismatch = load_between_files(args.control_dir, arm_map)
             if hash_mismatch:
                 r = SummaryResult(len(verdicts), OUTCOME_INCOMPLETE,
                                    "one or more between_*.json files were hashed against a "
@@ -421,9 +481,12 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
                 r = aggregate(verdicts, metrics, a_target_count=args.a_target_count,
                                a_manipulated_min=args.a_manipulated_min)
             return write_result(args.out, r.rc(), r.as_dict())
-    except (SummaryCliError, OSError, KeyError) as exc:
-        from tools.goalfix_cmp._io import RC_INCONCLUSIVE
+    except (SummaryCliError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
         return write_result(args.out, RC_INCONCLUSIVE, {"ok": False, "reason": str(exc)})
+    except Exception as exc:
+        # MB6-style catch-all, kept here too for the same reason.
+        return write_result(args.out, RC_INCONCLUSIVE,
+                             {"ok": False, "reason": f"{type(exc).__name__}: {exc}"})
 
 
 def main() -> int:
