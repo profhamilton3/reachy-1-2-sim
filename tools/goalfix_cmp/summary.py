@@ -574,11 +574,18 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     # MB3 (merge verdict, 2026-09-25 stage-repairs assignment §3): BOTH
     # subcommands now require a validated arm map -- cycles are keyed
     # by rep from it, never by file count or filename sort.
-    # MB7 (merge verdict, 2026-09-25 stage-repairs assignment §3): opt-in
-    # -- omit all three and no tripwire check runs at all (unchanged
-    # behaviour for every existing caller). Supply any one of them and
-    # MB7 enforcement applies: a counter whose OWN required log/path is
-    # still missing is rc 3; any nonzero count is rc 2.
+    # F2 (merge verdict review-2026-09-25-pr144-0722476-merge-verdict.md
+    # §2; 2026-09-25 pr144-f1-f6 assignment): tripwires are now MANDATORY,
+    # never opt-in -- at 0722476, omitting every one of --bridge-log/
+    # --native-log/--states (as test_no_log_flags_is_unaffected pinned)
+    # skipped tripwire evaluation entirely and authorized rc 0 on evidence
+    # that was never actually checked for a reset-ack timeout, a
+    # control_held refusal, or a pause. Not `required=True` at the
+    # argparse level: argparse's own missing-required-arg exit is status
+    # 2, which would read as a STOP to a caller that only looks at rc,
+    # not as the "evidence incomplete" it actually is -- so a missing
+    # input is instead detected in the CLI body and returned as rc 3 with
+    # a JSON reason (see below).
     cp = sub.add_parser("checkpoint")
     cp.add_argument("--control-dir", required=True)
     cp.add_argument("--arm-map", required=True)
@@ -614,7 +621,14 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
             raise SummaryCliError(f"arm_map: {map_check.reason}")
         arm_map = {e.rep: e for e in arm_map_entries}
 
-        # MB7: opt-in tripwire enforcement (see the argparse help above).
+        # F2: tripwires are mandatory for both checkpoint and final -- a
+        # missing input (any one of the three) is rc 3 in code, never
+        # argparse's own status 2 and never a silent rc 0.
+        if args.bridge_log is None or args.native_log is None or args.states is None:
+            raise SummaryCliError(
+                "checkpoint/final require the full tripwire input set: "
+                "--bridge-log, --native-log and --states are all mandatory "
+                "(F2 -- tripwires are never opt-in)")
         # F1 (2026-09-25 pr144-f1-f6 assignment): `args.bridge_log`/
         # `args.native_log` are PATHS (argparse strings naming files on
         # disk, per the --bridge-log/--native-log help text) -- at 0722476
@@ -625,18 +639,15 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         # missing/unreadable/undecodable file raises `SummaryCliError`
         # (rc 3, via the except clause below), naming the path -- never
         # silently treated as empty.
-        tripwire_report = None
-        tripwire_check = None
-        if args.bridge_log is not None or args.native_log is not None or args.states is not None:
-            bridge_text = read_log_text(args.bridge_log) if args.bridge_log is not None else None
-            native_text = read_log_text(args.native_log) if args.native_log is not None else None
-            tripwire_report = mb7_tripwire_report(
-                bridge_log=bridge_text, native_log=native_text, states_paths=args.states)
-            tripwire_check = check_mb7_tripwires(tripwire_report)
-            if tripwire_check.missing_log:
-                raise SummaryCliError(
-                    f"tripwire counter(s) missing their required log/path: "
-                    f"{tripwire_check.missing_log}")
+        bridge_text = read_log_text(args.bridge_log)
+        native_text = read_log_text(args.native_log)
+        tripwire_report = mb7_tripwire_report(
+            bridge_log=bridge_text, native_log=native_text, states_paths=args.states)
+        tripwire_check = check_mb7_tripwires(tripwire_report)
+        if tripwire_check.missing_log:
+            raise SummaryCliError(
+                f"tripwire counter(s) missing their required log/path: "
+                f"{tripwire_check.missing_log}")
 
         if args.cmd == "checkpoint":
             verdicts, metrics, hash_mismatch = load_between_files(

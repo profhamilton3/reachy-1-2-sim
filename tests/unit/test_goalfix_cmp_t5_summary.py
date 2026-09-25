@@ -39,12 +39,33 @@ def _write_arm_map(control_dir):
     return path
 
 
-def _summ_cli(argv, control_dir):
-    return summ._cli(argv + [
+def _default_log_paths(control_dir):
+    """F2: checkpoint/final now require the full tripwire input set.
+    Tests in this module that are not themselves about tripwire
+    behaviour (MB3 rejection, arm-map validation, ordering, ...) get
+    clean/empty default logs here so they can reach the logic they
+    actually exercise; a test that wants specific tripwire content
+    passes its own --bridge-log/--native-log/--states, which wins (see
+    `_summ_cli`'s own `inject_default_logs`)."""
+    bridge = control_dir / "_default_bridge_log.txt"
+    native = control_dir / "_default_native_log.txt"
+    states = control_dir / "_default_states.jsonl"
+    for p in (bridge, native, states):
+        if not p.exists():
+            p.write_text("")
+    return str(bridge), str(native), str(states)
+
+
+def _summ_cli(argv, control_dir, inject_default_logs=True):
+    extra = [
         "--arm-map", str(_write_arm_map(control_dir)),
         "--expected-bridge-sha-a", BRIDGE_SHA_A,
         "--expected-bridge-sha-b", BRIDGE_SHA_B,
-    ])
+    ]
+    if inject_default_logs and "--bridge-log" not in argv:
+        bridge, native, states = _default_log_paths(control_dir)
+        extra += ["--bridge-log", bridge, "--native-log", native, "--states", states]
+    return summ._cli(argv + extra)
 
 
 def _cv(cycle, arm, verdict, reasons=()):
@@ -322,18 +343,27 @@ class TestMB7TripwiresThroughTheCli:
             self._write_between(tmp_path, f"S2-B4-c-r{rep}", arm, verdict, metrics=metrics)
 
     def test_no_log_flags_is_unaffected(self, tmp_path):
+        """F2 (merge verdict §2; 2026-09-25 pr144-f1-f6 assignment):
+        INVERTED from its pre-F2 name/assertion (kept, not deleted, per
+        the assignment's own instruction). At 0722476 this pinned
+        "no log flags -> tripwires are skipped, rc 0" -- exactly the bug
+        (tripwires opt-in, evidence never actually checked). Tripwires
+        are now mandatory for checkpoint/final: omitting all three
+        (--bridge-log/--native-log/--states) is rc 3, never rc 0."""
         self._write_four_clean(tmp_path)
         out = tmp_path / "checkpoint_1.json"
         rc = _summ_cli(["checkpoint", "--control-dir", str(tmp_path), "--n", "4",
-                        "--out", str(out)], tmp_path)
-        assert rc == RC_OK
-        assert "tripwires" not in read_result(out)
+                        "--out", str(out)], tmp_path, inject_default_logs=False)
+        assert rc == RC_INCONCLUSIVE
+        payload = read_result(out)
+        assert payload.get("ok") is False
+        assert "mandatory" in payload.get("reason", "")
 
     def test_missing_required_log_is_rc3(self, tmp_path):
-        """The pre-F1 flag ('--bridge-log' alone, without --native-log/
-        --states): the counters that were never supplied at all are
-        `missing_log`, giving rc 3 -- unrelated to path-reading, still
-        true after F1."""
+        """F2: supplying only '--bridge-log' (without --native-log/
+        --states) is rc 3 -- the F2 mandatory-input check fires before
+        any per-counter missing_log check is even reached, since the
+        full set is required up front."""
         self._write_four_clean(tmp_path)
         bridge_log = tmp_path / "bridge_log.txt"
         bridge_log.write_text("nothing interesting\n")
@@ -341,7 +371,7 @@ class TestMB7TripwiresThroughTheCli:
         rc = _summ_cli(["checkpoint", "--control-dir", str(tmp_path), "--n", "4",
                         "--bridge-log", str(bridge_log), "--out", str(out)], tmp_path)
         assert rc == RC_INCONCLUSIVE
-        assert "missing their required" in read_result(out).get("reason", "")
+        assert "mandatory" in read_result(out).get("reason", "")
 
     def test_nonzero_lease_acquisition_stops_a_clean_checkpoint(self, tmp_path):
         self._write_four_clean(tmp_path)
