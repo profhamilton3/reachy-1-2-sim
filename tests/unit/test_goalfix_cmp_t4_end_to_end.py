@@ -177,6 +177,70 @@ class TestEndToEndFixtureTable:
         rc = _run_cli(ev_dir, control_dir, "B", out)
         assert rc == RC_INCONCLUSIVE
 
+    def _build_truncated_flight_cycle(self, tmp_path, k=10):
+        """Probe P7: drops the flight leg's own last `k` states.jsonl
+        rows (their commands then have no state reporting them
+        applied) and fixes up the flight sidecar's own last alignment
+        entry so `leg_from_sidecar` still finds a valid server_seq."""
+        import hashlib
+        import json as _json
+
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        states_path = ev_dir / "states.jsonl"
+        rows = [_json.loads(line) for line in states_path.read_text().splitlines() if line.strip()]
+        truncated = rows[:-k]
+        states_path.write_text("\n".join(_json.dumps(r) for r in truncated) + "\n")
+        sums_path = ev_dir / "SHA256SUMS"
+        lines = sums_path.read_text().splitlines()
+        new_lines = []
+        for line in lines:
+            h, name = line.split(None, 1)
+            if name == "states.jsonl":
+                h = hashlib.sha256(states_path.read_bytes()).hexdigest()
+            new_lines.append(f"{h}  {name}")
+        sums_path.write_text("\n".join(new_lines) + "\n")
+        flight_sidecar = control_dir / f"{CYCLE}-flight.link.json"
+        sc = _json.loads(flight_sidecar.read_text())
+        sc["alignment"][-1]["server_seq"] = truncated[-1]["seq"]
+        flight_sidecar.write_text(_json.dumps(sc))
+        return ev_dir, control_dir
+
+    def test_mb5_unplaceable_trailing_flight_commands_gives_rc3(self, tmp_path):
+        """MB5 (merge verdict, 2026-09-25 stage-repairs assignment §3;
+        probe P7): the flight leg's own last 10 commands have no state
+        reporting them applied -- `commands_in_leg` silently SKIPS
+        unplaceable commands when building `leg.command_indices`, so
+        they were never checked against any range at all, and
+        da3a81c's CLI gives verdict `ok` (rc 3 here only because
+        `--validation-mode` always forces it, masking the verdict --
+        checked directly below) while the payload's own
+        unplaceable_command_indices lists exactly them."""
+        ev_dir, control_dir = self._build_truncated_flight_cycle(tmp_path)
+        out = tmp_path / "out.json"
+        rc = _run_cli(ev_dir, control_dir, "B", out)
+        assert rc == RC_INCONCLUSIVE
+        payload = read_result(out)
+        # The fix short-circuits with an EvidenceError before any
+        # verdict is computed at all -- never a verdict of "ok".
+        assert payload.get("verdict") != cyc.VERDICT_OK, payload
+        assert "unplaceable" in payload.get("reason", ""), payload
+
+    def test_mutation_unplaceable_gate_removed_would_authorize(self, tmp_path):
+        """Mutation (drop the `_check_no_unplaceable_in_legs` call from
+        the CLI, as at da3a81c): the SAME truncated fixture above gives
+        verdict `ok` with the unplaceable indices merely reported, not
+        gated -- verified directly against a da3a81c-equivalent
+        (commit 922b5f7, the last head before MB5) copy of cycle.py,
+        which returns exactly `{"verdict": "ok", "reasons": [], ...,
+        "unplaceable_command_indices": [...]}` for this fixture."""
+        ev_dir, control_dir = self._build_truncated_flight_cycle(tmp_path)
+        out = tmp_path / "out.json"
+        rc = _run_cli(ev_dir, control_dir, "B", out)
+        payload = read_result(out)
+        # The shipped (fixed) CLI disagrees with the pre-MB5 CLI's own
+        # verdict "ok" for this exact fixture.
+        assert payload.get("verdict") != cyc.VERDICT_OK, payload
+
 
 class TestGatesThroughTheCli:
     """The provenance/compliance/start_variant gates, exercised WITHOUT

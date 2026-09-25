@@ -667,6 +667,27 @@ def evaluate_cycle_safe(
     return cv
 
 
+def _check_no_unplaceable_in_legs(evidence: ev.Evidence, legs: Sequence[LegSpec]) -> None:
+    """MB5: for each leg, checks every raw ``joint_command`` global index
+    from the leg's own first PLACEABLE command up to (but not including)
+    the next leg's own first command, the next ``reset`` row, or the end
+    of ``commands.jsonl`` -- whichever comes first. Raises
+    ``ev.EvidenceError`` (mapped to rc 3 by the caller) naming every
+    unplaceable index found in that range."""
+    starts = sorted(leg.command_indices[0] for leg in legs if leg.command_indices)
+    for leg in legs:
+        if not leg.command_indices:
+            continue
+        start = leg.command_indices[0]
+        later_starts = [s for s in starts if s > start]
+        end = min(later_starts) if later_starts else len(evidence.commands)
+        for i in range(start, end):
+            if evidence.commands.kind[i] == "reset":
+                end = i
+                break
+        ev.check_no_unplaceable_in_range(evidence, list(range(start, end)))
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -727,6 +748,19 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         overlap = set(setup_leg.command_indices) & set(flight_leg.command_indices)
         if overlap:
             raise CycleInputError(f"setup and flight legs overlap at command indices {sorted(overlap)}")
+
+        # MB5 (merge verdict, 2026-09-25 stage-repairs assignment §3):
+        # commands_in_leg (resolve_leg's own building block) SKIPS
+        # unplaceable commands when assembling leg.command_indices --
+        # so an unplaceable joint_command trailing a leg (P7: the
+        # flight leg's own last 10 commands) was never checked against
+        # ANY range at all, and the CLI never called
+        # check_no_unplaceable_in_range (only pathcheck/echo's OWN CLIs
+        # did). Checked here from each leg's own first PLACEABLE
+        # command's GLOBAL index to the next leg's own start, or the
+        # next reset row, or the end of commands.jsonl -- "from the
+        # leg's first command to the next leg or reset in that epoch".
+        _check_no_unplaceable_in_legs(evd, [setup_leg, flight_leg])
 
         provenance_gate = compliance_gate = start_variant_result = None
         guard_note = (
