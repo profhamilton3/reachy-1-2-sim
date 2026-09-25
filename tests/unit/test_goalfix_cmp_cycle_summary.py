@@ -184,7 +184,10 @@ class TestAggregate:
         verdicts = ([self._cv(f"A{i}", "A", cyc.VERDICT_MANIPULATED) for i in range(3)]
                     + [self._cv(f"A{i}", "A", cyc.VERDICT_INCONCLUSIVE_BASELINE) for i in range(3, 6)]
                     + [self._cv(f"B{i}", "B", cyc.VERDICT_OK) for i in range(6)])
-        r = summ.aggregate(verdicts, {})
+        metrics = {f"B{i}": summ.CycleMetrics(
+            leg_start_shoulder_pitch_error_deg=0.5, delta_cmd_max_cm=0.01,
+            wrist_ball_delta_cm=0.9) for i in range(6)}
+        r = summ.aggregate(verdicts, metrics)
         assert r.outcome == summ.OUTCOME_INCONCLUSIVE_COMPARISON
         assert r.rc() == 3
 
@@ -203,20 +206,8 @@ class TestAggregate:
         assert r.rc() == 0
 
 
-class TestTripwires:
-    def test_b_expected_all_zero(self):
-        counts = summ.count_tripwires("everything nominal, no issues here")
-        assert summ.check_tripwires(counts, "B") == []
-
-    def test_a_allows_unexpected_reset_ack(self):
-        log = "Unexpected reset_ack id=3 (expected 3)\n" * 2
-        counts = summ.count_tripwires(log)
-        assert counts["unexpected_reset_ack"] == 2
-        assert summ.check_tripwires(counts, "A") == []
-        assert summ.check_tripwires(counts, "B") == ["unexpected_reset_ack"]
-
-    def test_reset_ack_timeout_always_flagged(self):
-        log = "reset ack timed out after 6s"
-        counts = summ.count_tripwires(log)
-        assert summ.check_tripwires(counts, "A") == ["reset_ack_timeout"]
-        assert summ.check_tripwires(counts, "B") == ["reset_ack_timeout"]
+"""Tripwire tests (T9) now live in test_goalfix_cmp_t9_tripwires.py -- the
+old count_tripwires(single_blob) API this class exercised no longer
+exists (T9 grounds each pattern in its OWN real log source, since
+"lease acquisition"/"pause" matched nothing real and merging every
+source into one blob can't tell a missing log apart from a clean one)."""
