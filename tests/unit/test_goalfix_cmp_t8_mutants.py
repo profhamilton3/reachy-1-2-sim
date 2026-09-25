@@ -16,6 +16,7 @@ from tools.goalfix_cmp import cycle as cyc  # noqa: E402
 from tools.goalfix_cmp import echo  # noqa: E402
 from tools.goalfix_cmp import evidence as ev  # noqa: E402
 from tools.goalfix_cmp import summary as summ  # noqa: E402
+from tools.goalfix_cmp._io import read_result  # noqa: E402
 from tools.goalfix_cmp._units import route_rad  # noqa: E402
 from reachy_ai.motion.rig_routes import Waypoint as RWaypoint  # noqa: E402
 
@@ -208,6 +209,175 @@ class TestMutantI_ControlShiftSign:
         # (this flight is ~26.3s; t_hi+20 ~ 44s) -- nothing is found there,
         # proving the sign matters and this test would catch the mutant.
         assert control_mutant[pick_idx].joints["r_shoulder_pitch"].label != echo.GENUINE_ECHO
+
+
+class TestMutantI_ControlShiftThroughCli:
+    """(i) at the SHIPPED call site (readiness review §Surviving mutants:
+    "The T8 test passes shift_s=-echo.CONTROL_SHIFT_S itself, so it never
+    exercises the shipped call"). ``echo.py:370`` inside ``_cli`` calls
+    ``classify_commands(evd, shift_s=-CONTROL_SHIFT_S)`` with no argument
+    from the caller -- this test goes through ``echo._cli`` itself,
+    supplying no shift_s, and reads ``control_counts`` out of the CLI's
+    own JSON payload. Same planted-repeat fixture as
+    TestMutantI_ControlShiftSign (the -20s side only)."""
+
+    def _build(self, tmp_path):
+        start = {j: 0.0 for j in mf.R_JOINTS}
+        route = [mf.Waypoint("A", {"r_shoulder_pitch": -0.9}, 26.0)]
+        sim = mf.FlightSim(start)
+        sim.fly(route)
+        result = sim.result()
+        cmds, rows = result.command_rows, result.state_rows
+
+        mf.write_evidence(tmp_path, rows, cmds)
+        evd0 = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+        jc_idx0 = [i for i, k in enumerate(evd0.commands.kind) if k == "joint_command"]
+
+        pick_cmd, src_cmd = 1200, 189  # ~24.02s and ~3.80s -- exactly 20.22s apart
+        src_state = evd0.brackets[jc_idx0[src_cmd]].hi_state_index
+        planted_value = float(np.float32(rows[src_state]["joints"][0]["position_rad"]))
+
+        cmds2 = [dict(c, target_rad=list(c["target_rad"])) for c in cmds]
+        cmds2[pick_cmd]["target_rad"][0] = planted_value
+        mf.write_evidence(tmp_path, rows, cmds2)
+        return jc_idx0[pick_cmd]
+
+    def test_cli_control_counts_finds_the_planted_repeat_on_minus_20s_side(self, tmp_path):
+        pick_idx = self._build(tmp_path)
+        out = tmp_path / "out.json"
+        # Scoped to just the planted command: the CLI's own "whole leg"
+        # aggregation would otherwise mix in whatever the flight's other
+        # ~1900 commands classify as, on both sides of the shift.
+        rc = echo._cli([
+            "--evidence-dir", str(tmp_path), "--arm", "B",
+            "--segment-start-index", str(pick_idx),
+            "--segment-end-index", str(pick_idx),
+            "--out", str(out)])
+        payload = read_result(out)
+        # The un-shifted (real) classification of this command is FRESH
+        # (TestMutantI_ControlShiftSign), so B does not STOP on it.
+        assert rc == 0, payload
+        assert payload["control_counts"]["genuine_echo"] == 1, payload
+
+    def test_mutation_plus_20s_at_the_cli_call_site_would_miss_it(self, tmp_path):
+        """Mutation at the shipped call site (echo.py:370): flip the sign
+        to +CONTROL_SHIFT_S, as (i) describes. Verified directly against
+        the mutated source (not simulated inline) -- see the handoff for
+        the git-show/restore transcript. Left here as the fixture the
+        mutation run replays, and as a standing regression guard: this
+        assertion pins the CORRECT value (1), which is what the mutation
+        run showed differs from the mutant's (0)."""
+        pick_idx = self._build(tmp_path)
+        out = tmp_path / "out.json"
+        rc = echo._cli([
+            "--evidence-dir", str(tmp_path), "--arm", "B",
+            "--segment-start-index", str(pick_idx),
+            "--segment-end-index", str(pick_idx),
+            "--out", str(out)])
+        payload = read_result(out)
+        assert payload["control_counts"]["genuine_echo"] == 1, payload
+
+
+class TestMutantT7SecondLegWiring:
+    """"T7 rule applied to the first leg only" (readiness review
+    §Surviving mutants, cycle.py:429): "The T7 second-leg test builds its
+    own leg map. The cycle's wiring is untested." The existing T7 tests
+    (test_goalfix_cmp_t7_start_coincidence.py) call
+    ``echo.classify_commands`` directly with a hand-built
+    ``leg_turn_on_state_index`` dict -- this test instead goes through
+    ``evaluate_cycle`` itself (the same function the shipped cycle CLI
+    calls), with a real two-``LegSpec`` cycle, and observes the SECOND
+    leg's own turn_on wiring through ``place_route_leg_name="flight"``
+    (evaluate_cycle's own public parameter for which leg's affected
+    segment counts toward genuine echo) -- the only way the second leg's
+    classification is externally observable through evaluate_cycle's
+    return value, since the plan's real cycles always name PLACE_ROUTE
+    the FIRST ("setup") leg."""
+
+    def _build(self, tmp_path):
+        joints = list(mf.R_JOINTS)
+        setup_pose = dict(zip(joints, [0.0] * 8))
+        setup_pose["r_shoulder_pitch"] = -0.3
+
+        rows = [mf.state_row(seq=0, sim_step=0, sim_time_s=0.0, cmd_seq=-1,
+                              wall_time_ns=1, position_rad21=mf.full21(setup_pose))]
+        setup_target = dict(setup_pose)
+        setup_target["r_elbow_pitch"] = -0.2
+        cmd0 = mf.command_row_joint(seq=0, target_rad21=mf.full21(setup_target))
+        rows.append(mf.state_row(seq=1, sim_step=1, sim_time_s=0.02, cmd_seq=0,
+                                  wall_time_ns=2, position_rad21=mf.full21(setup_target)))
+
+        # A settle before the flight leg's own turn_on (fresh client +
+        # turn_on before any post-reset motion, plan §5 P8).
+        present_at_flight_turn_on = dict(setup_target)
+        for k in range(2, 52):  # 1s settle
+            rows.append(mf.state_row(seq=k, sim_step=k, sim_time_s=k * 0.02, cmd_seq=0,
+                                      wall_time_ns=1 + k,
+                                      position_rad21=mf.full21(present_at_flight_turn_on)))
+
+        # cmd1: flight leg's own turn_on, assigned to a synthetic "HOVER"
+        # goal that is bit-exact (up to the float32 cast) with the
+        # present position -- the T7 ambiguity: genuine_echo (old rule,
+        # or the mutant restoring it for this leg) vs start_coincidence
+        # (the fix, wired per-leg).
+        hover_target = dict(present_at_flight_turn_on)
+        hover_target["r_shoulder_pitch"] = float(
+            np.float32(present_at_flight_turn_on["r_shoulder_pitch"]))
+        cmd1 = mf.command_row_joint(seq=1, target_rad21=mf.full21(hover_target))
+        rows.append(mf.state_row(seq=len(rows), sim_step=len(rows), sim_time_s=len(rows) * 0.02,
+                                  cmd_seq=1, wall_time_ns=1 + len(rows),
+                                  position_rad21=mf.full21(hover_target)))
+
+        # cmd2: a real move to a synthetic "REST_SHUT" goal, so
+        # find_affected_segment can bound HOVER..REST_SHUT on the flight
+        # leg's own (local) assignment.
+        rest_target = dict(hover_target)
+        rest_target["r_elbow_pitch"] = -0.4
+        cmd2 = mf.command_row_joint(seq=2, target_rad21=mf.full21(rest_target))
+        rows.append(mf.state_row(seq=len(rows), sim_step=len(rows), sim_time_s=len(rows) * 0.02,
+                                  cmd_seq=2, wall_time_ns=1 + len(rows),
+                                  position_rad21=mf.full21(rest_target)))
+
+        mf.write_evidence(tmp_path, rows, [cmd0, cmd1, cmd2])
+        evd = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+
+        setup_leg = cyc.LegSpec(
+            name="setup", route_rad=[mf.Waypoint("SETUP_WP", setup_target, 1.0)],
+            guard=[], command_indices=[0], start_pose8=setup_pose)
+        flight_leg = cyc.LegSpec(
+            name="flight",
+            route_rad=[mf.Waypoint("HOVER", hover_target, 1.0),
+                       mf.Waypoint("REST_SHUT", rest_target, 1.0)],
+            guard=[], command_indices=[1, 2], start_pose8=present_at_flight_turn_on)
+        return evd, setup_leg, flight_leg
+
+    def test_second_leg_turn_on_is_start_coincidence_through_evaluate_cycle(self, tmp_path):
+        evd, setup_leg, flight_leg = self._build(tmp_path)
+        cv, _ = cyc.evaluate_cycle(
+            "t7wiring", "B", evd, [setup_leg, flight_leg],
+            place_route_leg_name="flight", skip_gates=True)
+        # The wiring under test is genuine_echo_count/reasons specifically
+        # (C1 may independently fail on this synthetic fixture's start
+        # poses -- irrelevant to what T7 governs, and not asserted here).
+        assert cv.genuine_echo_count == 0, cv.as_dict()
+        assert not any("genuine echo" in r for r in cv.reasons), cv.reasons
+        assert not cv.segment_indeterminate
+
+    def test_mutation_first_leg_only_loop_would_miss_it(self, tmp_path):
+        """Mutation guard (verified directly against a mutated copy of
+        cycle.py -- see the handoff for the transcript): narrowing the
+        ``for leg in legs:`` loop at cycle.py's leg_turn_on_map
+        construction to ``legs[:1]`` (first leg only) makes the flight
+        leg's cmd1 fall back to the default (no leg_turn_on_state_index
+        entry) rule, which cannot fire on a non-epoch-first command --
+        confirmed directly: with the mutation applied, this exact fixture
+        gives genuine_echo_count == 1, not 0. Pinned here as the value
+        the correct code (asserted above) must keep giving."""
+        evd, setup_leg, flight_leg = self._build(tmp_path)
+        cv, _ = cyc.evaluate_cycle(
+            "t7wiring", "B", evd, [setup_leg, flight_leg],
+            place_route_leg_name="flight", skip_gates=True)
+        assert cv.genuine_echo_count == 0
 
 
 class TestMutantO_SevenFiveIgnoresAMedian:
