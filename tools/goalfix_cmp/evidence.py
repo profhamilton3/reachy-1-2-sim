@@ -467,6 +467,11 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         ev = verify_and_load(args.evidence_dir, args.states, args.commands, args.sha256sums)
     except (EvidenceError, IntegrityError) as exc:
         return write_result(args.out, RC_INCONCLUSIVE, {"ok": False, "reason": str(exc)})
+    except Exception as exc:
+        # MB6 (merge verdict, 2026-09-25 stage-repairs assignment §3):
+        # a catch-all fallback, kept after the specific catch above.
+        return write_result(args.out, RC_INCONCLUSIVE,
+                             {"ok": False, "reason": f"{type(exc).__name__}: {exc}"})
 
     payload = {
         "ok": True,

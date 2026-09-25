@@ -16,8 +16,10 @@ for _p in ("../../src", "../../scripts", "../../native_mujoco", "../..", "../fix
 
 import make_fixtures as mf  # noqa: E402
 from tools.goalfix_cmp import cycle as cyc  # noqa: E402
+from tools.goalfix_cmp import evidence as ev  # noqa: E402
+from tools.goalfix_cmp import initial  # noqa: E402
 from tools.goalfix_cmp import provenance as pv  # noqa: E402
-from tools.goalfix_cmp._io import RC_INCONCLUSIVE, RC_OK, RC_STOP, read_result  # noqa: E402
+from tools.goalfix_cmp._io import IntegrityError, RC_INCONCLUSIVE, RC_OK, RC_STOP, read_result  # noqa: E402
 from reachy_ai.motion import rig_routes as R  # noqa: E402
 
 # This module's fixtures test C1 (start continuity against the turn_on
@@ -425,6 +427,56 @@ class TestMB2ProvenanceGate(TestGatesThroughTheCli):
         out = tmp_path / "out.json"
         rc = self._run_with_gates(ev_dir, control_dir, "B", out)
         assert rc != cyc.RC_OK
+
+
+class TestMB6NoEscapingExceptions(TestGatesThroughTheCli):
+    """MB6 (merge verdict, 2026-09-25 stage-repairs assignment §3; probes
+    P6a-c): malformed control JSON must give rc 3 JSON, never an
+    untranslated traceback (invariant 1)."""
+
+    def test_p6a_malformed_arm_map_gives_rc3_json(self, tmp_path):
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        self._write_gate_files(control_dir)
+        (control_dir / "arm_map.json").write_text("{not json")
+        out = tmp_path / "out.json"
+        rc = self._run_with_gates(ev_dir, control_dir, "B", out)
+        assert rc == RC_INCONCLUSIVE
+        assert "reason" in read_result(out)
+
+    def test_p6b_arm_map_entry_missing_key_gives_rc3_json(self, tmp_path):
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        self._write_gate_files(control_dir)
+        arm_map_path = control_dir / "arm_map.json"
+        entries = json.loads(arm_map_path.read_text())
+        del entries[self.GATE_REP - 1]["image_id"]
+        arm_map_path.write_text(json.dumps(entries))
+        out = tmp_path / "out.json"
+        rc = self._run_with_gates(ev_dir, control_dir, "B", out)
+        assert rc == RC_INCONCLUSIVE
+        assert "reason" in read_result(out)
+
+    def test_p6c_malformed_versions_doc_gives_rc3_json(self, tmp_path):
+        ev_dir, control_dir = _build_cycle(tmp_path)
+        self._write_gate_files(control_dir)
+        (control_dir / f"versions_{CYCLE}.json").write_text("[")
+        out = tmp_path / "out.json"
+        rc = self._run_with_gates(ev_dir, control_dir, "B", out)
+        assert rc == RC_INCONCLUSIVE
+        assert "reason" in read_result(out)
+
+    def test_mutation_catch_all_removed_would_raise(self):
+        """Mutation (remove the catch-all `except Exception`): a bare
+        `json.JSONDecodeError` from malformed control JSON is not an
+        instance of any of the specific exception types the CLI's OTHER
+        except clause names -- so removing the catch-all lets it escape
+        uncaught. Verified structurally (not by re-running a reverted
+        CLI, to avoid a second real subprocess-equivalent invocation):
+        none of the specific types below is a JSONDecodeError, and
+        JSONDecodeError is not a subclass of any of them."""
+        import json as _json
+
+        specific = (ev.EvidenceError, IntegrityError, initial.StartVariantGateUnavailable)
+        assert not issubclass(_json.JSONDecodeError, specific)
 
 
 class TestValidationModeRefusal:

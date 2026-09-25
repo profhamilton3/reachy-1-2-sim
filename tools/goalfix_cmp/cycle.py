@@ -856,6 +856,18 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
             cv.validation_only = True
     except (ev.EvidenceError, IntegrityError, initial.StartVariantGateUnavailable) as exc:
         return write_result(args.out, RC_INCONCLUSIVE, {"ok": False, "reason": str(exc)})
+    except Exception as exc:
+        # MB6 (merge verdict, 2026-09-25 stage-repairs assignment §3):
+        # a catch-all around the whole CLI body -- invariant 1 ("a
+        # Python exception must never escape a CLI") held only for the
+        # specific, anticipated exceptions above. A malformed arm_map/
+        # versions document (JSONDecodeError, a missing dict key ->
+        # KeyError/TypeError, probes P6a-c) escaped as an untranslated
+        # traceback with no JSON written at all. The specific catches
+        # above are kept for their own messages; this is the fallback,
+        # never the first choice.
+        return write_result(args.out, RC_INCONCLUSIVE,
+                             {"ok": False, "reason": f"{type(exc).__name__}: {exc}"})
 
     return write_result(args.out, cv.rc(), cv.as_dict())
 
