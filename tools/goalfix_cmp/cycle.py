@@ -374,18 +374,25 @@ def compute_place_route_metrics(
         else:
             m.net_shoulder_pitch_hold_deg = 0.0  # no commands in the hold -- target never moved
 
-    # Leg-start shoulder-pitch error: |realised position at the start of
-    # the affected segment (the first setpoint of the HOVER->REST_SHUT
-    # goto) - HOVER's own shoulder-pitch target|, per report §2's "the
-    # REST_SHUT leg starts from a target N deg from HOVER" framing.
+    # Leg-start shoulder-pitch error (CB2, merge verdict, 2026-09-25
+    # stage-repairs assignment §4): |commanded TARGET at the segment's
+    # first setpoint - HOVER's own shoulder-pitch target|, from
+    # commands.target_rad -- report line 91: "the tolerance report
+    # measured a leg-start SETPOINT 0.98-4.87deg from HOVER; here the
+    # TARGET at leg start is ..."; line 101: "the REST_SHUT leg starts
+    # from that moved TARGET, not from HOVER" (the "commanded start").
+    # states.position_rad is the REALISED position, a different
+    # quantity (post_arrival_rise_deg, below, report line 72: "arm
+    # rise") -- using it here would report 0.0 as "refutes" a lag that
+    # is entirely in the realised trace and never in the commanded
+    # target at all.
     if affected is not None and not affected.indeterminate:
         seg_start_cmd_global = place_leg.command_indices[affected.start_command_index]
         seg_start_state_idx = evidence.brackets[seg_start_cmd_global].hi_state_index
         hover_target_rad = place_leg.route_rad[affected.hover_goal_index].pose["r_shoulder_pitch"]
-        if seg_start_state_idx is not None:
-            realised = float(evidence.states.position_rad[seg_start_state_idx, 0])  # r_shoulder_pitch, ARM7[0]
-            m.leg_start_shoulder_pitch_error_deg = float(
-                np.degrees(abs(realised - hover_target_rad)))
+        commanded = float(evidence.commands.target_rad[seg_start_cmd_global, r_shoulder_k])
+        m.leg_start_shoulder_pitch_error_deg = float(
+            np.degrees(abs(commanded - hover_target_rad)))
 
         # Post-arrival rise: arm's rise from its closest approach to HOVER
         # (within the hold window) to the segment's own start -- report §5:
