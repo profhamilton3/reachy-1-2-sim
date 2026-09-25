@@ -277,30 +277,33 @@ def test_f6_cycle_cli_on_real_bridge_cycles(v3, tmp_path):
         assert payload["unplaceable_command_indices"] == []
 
 
-def test_f6_c0_c8_breakdown_pins_c1_and_c4_failing_on_real_jitter(v3):
+def test_f6_c0_c8_breakdown_after_r_tie_r_const_q_hold_q_echo(v3):
     """The full per-check C0-C8 table (not just the CLI's failure-only
     ``reasons`` list), via ``evaluate_cycle`` directly (the same call the
-    CLI makes; this reads the checks it does not serialize). Pins, on
-    this clean (uninjected) real-bridge run's setup leg, for EVERY cycle:
-    C0, C5, C6, C8 pass; C1 (``C1_TOL_RAD = 1e-6`` rad -- pathcheck.py:34)
-    and C4 (the T-10ms residual budget) FAIL from real float32/scheduling
-    noise alone, never from an injected defect -- reproduced across
-    multiple runs of this harness. C5/C6 passing is ITSELF a
-    toy-plant-inapplicability finding, not evidence those checks are
-    exercised: C5 only checks setpoints AFTER a waypoint's first EXACT
-    match (``pathcheck.py:212-214``, CB6) and F2 shows several waypoints
-    never land exactly, so C5 silently skips them; C6 only inspects
-    commands actually found inside a hold window, and F3 shows every hold
-    window here is empty, so it has nothing to check either. Neither is
-    evidence C5/C6 catch anything on this harness.
+    CLI makes; this reads the checks it does not serialize).
 
-    C7 (exact-equality gripper/arm constancy) is NOT pinned here: across
-    repeated runs of this same scenario it was observed to fail on one
-    run and pass on another (same real-bridge jitter class as C1/C4, but
-    apparently just under vs. just over C7's own equality boundary
-    depending on real wall-clock scheduling) -- recorded as an additional
-    finding in the handoff, not asserted either way, per the instruction
-    not to invent a definition that makes a test pass."""
+    Re-run after implementing R-tie, R-const, the Q-hold windows and the
+    Q-echo path-coincidence rule (coordinator rulings, 2026-09-25 stage-1
+    rulings): R-tie/R-const fixed the tooling-segmentation artefacts the
+    Stage 1 report mis-diagnosed as "real jitter" (the boundary
+    mis-assignments the rulings' §1 diagnosed from this same class of
+    data). What remains on repeated runs of this harness's CLEAN,
+    uninjected B cycles is real: C6 and C8 pass reliably. C0, C1, C2,
+    C3, C4, C5 and C7 were each observed to fail on AT LEAST ONE run
+    (across the runs made during this stage), from real
+    float32/scheduling noise/tau-spread at their own tight tolerances
+    (``C1_TOL_RAD=1e-6`` rad; ``C2_SKEW_TOL_S=0.030`` s; ``C4``'s T-10ms
+    residual budget; C5's CB6 first-exact-match gating; C7's
+    exact-equality gripper/arm constancy; C0's goal-sequence exactness)
+    -- and to PASS on at least one other run each. This is reported to
+    the coordinator as-is (the ruling's own instruction: "stop and
+    report if any remain other than C4"); it is not resolved here, and
+    none of C0/C1/C2/C3/C5/C7 is asserted either way, per the
+    instruction not to invent a definition that makes a test pass. C6
+    passing is ITSELF a toy-plant-inapplicability finding, not evidence
+    it is exercised: C6 only inspects commands actually found inside a
+    hold window, and F3 shows every hold window here is empty, so it
+    has nothing to check."""
     for name in v3["names"]:
         setup_leg, flight_leg = _resolve_legs(v3, name)
         evd = v3["evidence"]
@@ -309,10 +312,6 @@ def test_f6_c0_c8_breakdown_pins_c1_and_c4_failing_on_real_jitter(v3):
         # ("_seed_deviation_rad", "_assignment" -- pathcheck.run_all's own
         # internals); only pc.ALL_CHECKS ("C0".."C8") are CheckResults.
         setup_checks = {cid: leg_results["setup"].pathcheck[cid].passed for cid in pc.ALL_CHECKS}
-        assert setup_checks["C0"] is True
-        assert setup_checks["C1"] is False, "expected on real-bridge jitter at C1_TOL_RAD=1e-6 rad"
-        assert setup_checks["C4"] is False, "expected: real last-setpoint residual vs the T-10ms budget"
-        assert setup_checks["C5"] is True, "passes vacuously: see docstring (CB6)"
         assert setup_checks["C6"] is True, "passes vacuously: see docstring (F3: empty hold windows)"
         assert setup_checks["C8"] is True
         # Every hold window found had NO commands of its own on this
@@ -345,17 +344,23 @@ def test_f7_echo_classification_of_generated_cycle(v3):
         counts = echo.count_labels(results, both_legs_idx)
         # NOT pinned at exactly 0: across repeated runs of this same
         # uninjected-B scenario, genuine_echo_count was observed as BOTH 0
-        # and a small nonzero value (4, on one run) -- real, fast-converging
-        # plant dynamics can put a genuinely commanded FUTURE target within
-        # float32-exact reach of a real PAST state sample purely by
-        # coincidence, with no injected manipulation and no bug in the
-        # classifier. This is itself a finding for the coordinator: the
-        # B-verdict's "any genuine echo -> STOP" rule (cycle.py) has no
-        # margin against this on real data. Bounded loosely here only to
-        # catch a gross regression (e.g. hundreds of echoes), never tuned
-        # to make this test pass.
+        # and a small nonzero value (4, on one run, before the Q-echo
+        # fix). Real, fast-converging plant dynamics can put a genuinely
+        # commanded FUTURE target within float32-exact reach of a real
+        # PAST state sample purely by coincidence, with no injected
+        # manipulation. The Q-echo fix reclassifies the near-end/on-path
+        # shape of that coincidence as `path_coincidence` (also observed
+        # nonzero here after the fix, where it was always 0 before) --
+        # but does not guarantee genuine_echo is always exactly 0, since
+        # an off-path near-end (or a non-near-end on-path-by-fluke)
+        # coincidence is still possible in principle. This remains a
+        # finding for the coordinator: the B-verdict's "any genuine echo
+        # -> STOP" rule (cycle.py) has no margin against real coincidence
+        # on real data. Bounded loosely here only to catch a gross
+        # regression (e.g. hundreds of echoes), never tuned to make this
+        # test pass.
         assert 0 <= counts.genuine_echo <= 20, counts.as_dict()
-        assert counts.path_coincidence == 0
+        assert 0 <= counts.path_coincidence <= 20, counts.as_dict()
         assert counts.timing_ambiguous == 0
         assert counts.unavailable == 0
         # start_coincidence fires (both legs' own turn_on, per F4) --
