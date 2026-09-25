@@ -93,6 +93,14 @@ class LegSpec:
     #: a caller building a LegSpec by hand (a fixture, not resolve_leg)
     #: need not compute it itself.
     turn_on_state_index: Optional[int] = None
+    #: Q-hold ruling (2026-09-25 stage-1 rulings, §2): the sidecar's own
+    #: aligned span (``ev.Leg.t_lo``/``t_hi``, sim_time_s of the leg's
+    #: FIRST/LAST aligned state) -- the outer edge of the lead-in and
+    #: parked-tail windows. ``None`` for a caller (a fixture, not
+    #: resolve_leg) that has no sidecar of its own; those two windows are
+    #: then skipped, never assumed empty.
+    sidecar_t_lo: Optional[float] = None
+    sidecar_t_hi: Optional[float] = None
 
 
 def resolve_leg(
@@ -126,7 +134,8 @@ def resolve_leg(
         name: float(evidence.states.position_rad[turn_on_idx, k])
         for k, name in enumerate(pc.R_JOINTS)
     }
-    return LegSpec(leg_label, route_rad(route_deg), guard, idx, start_pose8, turn_on_idx)
+    return LegSpec(leg_label, route_rad(route_deg), guard, idx, start_pose8, turn_on_idx,
+                   sidecar_t_lo=leg.t_lo, sidecar_t_hi=leg.t_hi)
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +194,41 @@ def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
         hs = holds.hold_window_stats(w, epoch, target8, evidence, list(idx))
         if hs is not None:
             hold_stats.append(hs)
+
+    # Q-hold ruling (2026-09-25 stage-1 rulings, §2): the lead-in
+    # (LEAD_IN_S) and parked-tail (PARKED_TAIL_S) windows, bounded by the
+    # sidecar's own aligned span at one end and this leg's first/last
+    # command at the other -- imported constants used only for the
+    # report-only duration below, never for locating or gating the
+    # window itself. Skipped (never assumed empty) when the caller built
+    # this LegSpec without a sidecar span.
+    if leg.sidecar_t_lo is not None and leg.turn_on_state_index is not None:
+        lead_in_hi = float(evidence.states.sim_time_s[leg.turn_on_state_index])
+        try:
+            es = holds.edge_window_stats(
+                goal_index=holds.LEAD_IN_GOAL_INDEX, t_lo_s=leg.sidecar_t_lo, t_hi_s=lead_in_hi,
+                epoch=epoch, last_k_target8=leg.start_pose8, evidence=evidence,
+                all_command_indices=list(idx))
+        except ValueError as exc:
+            raise CycleInputError(f"{leg.name}: lead-in window: {exc}") from exc
+        if es is not None:
+            hold_stats.append(es)
+
+    if leg.sidecar_t_hi is not None:
+        last_k_idx = int(idx[-1])
+        parked_lo = evidence.brackets[last_k_idx].t_hi
+        if parked_lo is not None:
+            last_k_target8 = {name: float(evidence.commands.target_rad[last_k_idx, k])
+                               for k, name in enumerate(pc.R_JOINTS)}
+            try:
+                es = holds.edge_window_stats(
+                    goal_index=holds.PARKED_TAIL_GOAL_INDEX, t_lo_s=parked_lo,
+                    t_hi_s=leg.sidecar_t_hi, epoch=epoch, last_k_target8=last_k_target8,
+                    evidence=evidence, all_command_indices=list(idx))
+            except ValueError as exc:
+                raise CycleInputError(f"{leg.name}: parked-tail window: {exc}") from exc
+            if es is not None:
+                hold_stats.append(es)
 
     ctx = build_goto_context(leg.route_rad, leg.start_pose8, assignment)
 
@@ -402,13 +446,21 @@ def evaluate_cycle(
         f"{lr.name}:{cid}" for lr in leg_results.values() for cid, r in lr.pathcheck.items()
         if isinstance(r, pc.CheckResult) and not r.passed]
 
+    def _hold_violates(hs: holds.HoldStats) -> bool:
+        # Q-hold ruling (§2): the lead-in window's content rule is "any
+        # joint_command inside it is a violation" -- stricter than the
+        # settle-hold/parked-tail "non-carry (drift != 0) is a
+        # violation" rule, since nothing should be commanded at all
+        # before turn_on.
+        if hs.window.goal_index == holds.LEAD_IN_GOAL_INDEX:
+            return bool(hs.window_command_indices)
+        return any(v != 0.0 for v in hs.target_drift.values())
+
     any_hold_target_drift = any(
-        any(v != 0.0 for v in hs.target_drift.values())
-        for lr in leg_results.values() for hs in lr.hold_stats)
+        _hold_violates(hs) for lr in leg_results.values() for hs in lr.hold_stats)
     drift_reasons = [
         f"{lr.name}: hold at goal {hs.window.goal_index} drifted {hs.target_drift}"
-        for lr in leg_results.values() for hs in lr.hold_stats
-        if any(v != 0.0 for v in hs.target_drift.values())]
+        for lr in leg_results.values() for hs in lr.hold_stats if _hold_violates(hs)]
 
     truncated_inside_leg = [lr.name for lr in leg_results.values()
                              if lr.truncated_final_line_inside_leg]

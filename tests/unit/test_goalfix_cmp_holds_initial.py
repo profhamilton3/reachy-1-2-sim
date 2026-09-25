@@ -46,7 +46,7 @@ class TestHolds:
         assignment = seg.assign_goals(ROUTE, START, targets8)
         windows = holds.find_hold_windows(assignment, evd.brackets, list(jc_idx))
         assert len(windows) == 1
-        goal_index, t_lo, t_hi = windows[0]
+        goal_index, t_lo, t_hi, _last_k_command_index = windows[0]
         assert goal_index == 0  # SWING_1's hold, before HOVER begins
         assert t_hi - t_lo == pytest.approx(0.3, abs=0.02)
 
