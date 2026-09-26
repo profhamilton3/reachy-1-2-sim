@@ -241,7 +241,11 @@ class TestWAC1CleanB:
 
         # t_lo_start precedes the first REST_SHUT command's own t_lo
         # (segment_start + 1) by >= SETTLE_GAP_S -- the HOVER hold is
-        # inside the window.
+        # inside the window. Exact-value check first (W-M10: t_lo_start
+        # must be t_lo(segment_start), never t_hi -- the two are close
+        # enough in wall-clock terms that the >= SETTLE_GAP_S bound alone
+        # does not discriminate them).
+        assert w["t_lo_start"] == evd.brackets[seg_start].t_lo
         assert evd.brackets[seg_start + 1].t_lo - w["t_lo_start"] >= window.SETTLE_GAP_S
 
         m = payload["metrics"]
