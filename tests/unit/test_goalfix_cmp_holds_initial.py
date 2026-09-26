@@ -64,6 +64,62 @@ class TestHolds:
         assert stats.static_offset_first["r_shoulder_pitch"] == pytest.approx(-0.0021, abs=1e-6)
 
 
+class _FakeBracket:
+    def __init__(self, t_hi, t_lo):
+        self.t_hi = t_hi
+        self.t_lo = t_lo
+
+
+class TestFindHoldWindowsBridgesNoneRuns:
+    """B15/H12 (coordinator review, 2026-09-25 Stage-A slice review, §4;
+    owner Stage B authorization): a run of unassigned (``None``)
+    commands between two DIFFERENT consecutive assigned goals must still
+    produce ONE hold window spanning the whole gap -- not silently
+    skipped, as the OLD "adjacent commands only" rule did (G-b: a
+    130-command run went entirely unchecked)."""
+
+    def test_a_run_of_nones_between_different_goals_still_forms_one_window(self):
+        assignment = seg.GoalAssignment(goal_index=[0, 0, None, None, 1], ok=True)
+        command_indices = [10, 11, 12, 13, 14]
+        brackets = {ci: _FakeBracket(t_hi=1.0 + 0.1 * k, t_lo=0.9 + 0.1 * k)
+                    for k, ci in enumerate(command_indices)}
+
+        windows = holds.find_hold_windows(assignment, brackets, command_indices)
+        assert len(windows) == 1
+        goal_index, t_lo, t_hi, last_k_command_index = windows[0]
+        assert goal_index == 0
+        assert last_k_command_index == 11  # goal 0's own LAST assigned command
+        assert t_lo == pytest.approx(1.1)   # command 11's own t_hi
+        assert t_hi == pytest.approx(1.3)   # command 14's own t_lo (goal 1's first)
+
+    def test_mutation_adjacent_only_rule_would_miss_the_run(self):
+        """Mutation guard: the OLD rule (adjacent commands i/i+1 only)
+        never looks at the pair (11, 14) -- every adjacent pair in the
+        run has at least one ``None`` neighbour, so no window is EVER
+        formed. Reproduced directly against a local re-implementation of
+        the OLD rule, then compared against the shipped (fixed)
+        function's own, disagreeing output."""
+        assignment = seg.GoalAssignment(goal_index=[0, 0, None, None, 1], ok=True)
+        command_indices = [10, 11, 12, 13, 14]
+        brackets = {ci: _FakeBracket(t_hi=1.0 + 0.1 * k, t_lo=0.9 + 0.1 * k)
+                    for k, ci in enumerate(command_indices)}
+
+        def old_find_hold_windows(assignment, brackets, command_indices):
+            windows = []
+            n = len(assignment.goal_index)
+            for i in range(n - 1):
+                g, nxt = assignment.goal_index[i], assignment.goal_index[i + 1]
+                if g is None or nxt is None or nxt == g:
+                    continue
+                windows.append((g, i, i + 1))
+            return windows
+
+        mutant_windows = old_find_hold_windows(assignment, brackets, command_indices)
+        assert mutant_windows == [], "the reported bug: no window forms for this run under the old rule"
+        fixed_windows = holds.find_hold_windows(assignment, brackets, command_indices)
+        assert len(fixed_windows) == 1
+
+
 class TestInitial:
     def test_identical_states_zero_deviation(self):
         state_a = list(range(21))
