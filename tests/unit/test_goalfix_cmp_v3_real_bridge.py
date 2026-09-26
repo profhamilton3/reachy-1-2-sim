@@ -254,8 +254,24 @@ def test_f6_cycle_cli_on_real_bridge_cycles(v3, tmp_path):
     generated cycle. ``--validation-mode`` always exits rc 3 by design
     (the provenance/compliance/start_variant gates do not exist for this
     harness -- there is no Docker image, no host SHA, no start-variant
-    file); the payload's own ``verdict`` (STOP here, on BOTH cycles) is
-    what carries the finding."""
+    file); the payload's own ``verdict`` is what carries the finding.
+
+    UPDATED (Stage B, owner rulings 2026-09-25: N1-N3, C1'/C4', R-carry,
+    R-over, carry-aware C2): this test originally pinned "STOP, purely
+    from real signal characteristics" (see test_f6_c0_c8_breakdown's own
+    docstring: C0/C1/C2/C3/C4/C5/C7 were each observed to fail OR pass on
+    different runs, at the OLD literal tolerances -- C1_TOL_RAD=1e-6 rad,
+    C2's non-carry-aware 30ms check, C4's T-10ms residual budget, C0's
+    strict tie-break exactness). Those exact tolerances are what the
+    owner's rulings replaced, precisely because they mistook real
+    float32/scheduling noise on a genuinely clean signal for a
+    violation. Re-observed after the fix (repeatedly, including outside
+    pytest): both real-bridge B cycles now verdict "ok", with EVERY
+    C0-C8 check passing on both legs, reasons=[], genuine_echo_count=0 --
+    not a loosened check, the same real captured data now correctly read.
+    Pinned to this new, correct baseline; a future STOP here on real data
+    is a new finding worth its own investigation, not a sign this
+    assertion needs loosening again."""
     for name in v3["names"]:
         out = tmp_path / f"between_{name}.json"
         argv = ["--ev-dir", str(v3["ev_dir"]), "--control-dir", str(v3["control_dir"]),
@@ -265,13 +281,12 @@ def test_f6_cycle_cli_on_real_bridge_cycles(v3, tmp_path):
         assert rc == RC_INCONCLUSIVE, "validation-mode always exits 3 by design"
         payload = read_result(out)
         assert payload["validation_only"] is True
-        # The FINDING: a clean, uninjected real-bridge B cycle does not
-        # verdict "ok" -- it STOPs, purely from real signal characteristics
-        # (see test_f6_c0_c8_breakdown for exactly which checks and why).
-        assert payload["verdict"] == cyc.VERDICT_STOP, payload["reasons"]
-        # Not pinned at exactly 0 -- see test_f7's docstring: this same
-        # segment-scoped count was observed nonzero on real data on at
-        # least one run, from real signal coincidence, not manipulation.
+        assert payload["verdict"] == cyc.VERDICT_OK, payload["reasons"]
+        assert payload["reasons"] == []
+        # Not pinned at exactly 0 in general -- see test_f7's docstring:
+        # this same segment-scoped count was observed nonzero on real
+        # data on at least one (pre-fix) run, from real signal
+        # coincidence, not manipulation. Currently observed at 0.
         assert 0 <= payload["genuine_echo_count"] <= 20, payload
         assert payload["segment_indeterminate"] is False
         assert payload["unplaceable_command_indices"] == []
@@ -282,28 +297,24 @@ def test_f6_c0_c8_breakdown_after_r_tie_r_const_q_hold_q_echo(v3):
     ``reasons`` list), via ``evaluate_cycle`` directly (the same call the
     CLI makes; this reads the checks it does not serialize).
 
-    Re-run after implementing R-tie, R-const, the Q-hold windows and the
-    Q-echo path-coincidence rule (coordinator rulings, 2026-09-25 stage-1
-    rulings): R-tie/R-const fixed the tooling-segmentation artefacts the
-    Stage 1 report mis-diagnosed as "real jitter" (the boundary
-    mis-assignments the rulings' §1 diagnosed from this same class of
-    data). What remains on repeated runs of this harness's CLEAN,
-    uninjected B cycles is real: C6 and C8 pass reliably. C0, C1, C2,
-    C3, C4, C5 and C7 were each observed to fail on AT LEAST ONE run
-    (across the runs made during this stage), from real
-    float32/scheduling noise/tau-spread at their own tight tolerances
-    (``C1_TOL_RAD=1e-6`` rad; ``C2_SKEW_TOL_S=0.030`` s; ``C4``'s T-10ms
-    residual budget; C5's CB6 first-exact-match gating; C7's
-    exact-equality gripper/arm constancy; C0's goal-sequence exactness)
-    -- and to PASS on at least one other run each. This is reported to
-    the coordinator as-is (the ruling's own instruction: "stop and
-    report if any remain other than C4"); it is not resolved here, and
-    none of C0/C1/C2/C3/C5/C7 is asserted either way, per the
-    instruction not to invent a definition that makes a test pass. C6
-    passing is ITSELF a toy-plant-inapplicability finding, not evidence
-    it is exercised: C6 only inspects commands actually found inside a
-    hold window, and F3 shows every hold window here is empty, so it
-    has nothing to check."""
+    HISTORY: after R-tie/R-const/Q-hold/Q-echo (2026-09-25 stage-1
+    rulings), C0/C1/C2/C3/C4/C5/C7 each still varied run to run at their
+    OLD literal tolerances (``C1_TOL_RAD=1e-6`` rad,
+    ``C2_SKEW_TOL_S=0.030`` s non-carry-aware, C4's T-10ms residual
+    budget, C5's CB6 gating, C7's exact-equality, C0's tie-break
+    exactness) -- reported as-observed, none of them asserted either
+    way, per the "no invented definition" instruction.
+
+    UPDATED (Stage B, owner rulings 2026-09-25: N1-N3, C1'=0.05deg,
+    C4'=0.01deg, R-carry, R-over, carry-aware C2): repeated re-observation
+    on this same real-bridge scenario now shows EVERY C0-C8 check passing
+    on both legs of both cycles (see test_f6_cycle_cli_on_real_bridge_cycles's
+    own updated docstring) -- the variance above was the OLD tolerances'
+    own false positives on real float32/scheduling noise, not
+    unavoidable plant noise. Only C6/C8 (and the empty-hold-window facts)
+    are asserted directly here, unchanged, since this test predates the
+    fix and a full C0-C8 assertion belongs with the CLI-level test that
+    already carries it."""
     for name in v3["names"]:
         setup_leg, flight_leg = _resolve_legs(v3, name)
         evd = v3["evidence"]
