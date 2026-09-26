@@ -18,6 +18,7 @@ an incomplete session report ``supports``.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
@@ -760,9 +761,12 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     # F3 (merge verdict §2; 2026-09-25 pr144-f1-f6 assignment):
     # --bridge-log is GONE -- that log is now resolved PER CYCLE from
     # each cycle's own manifest (F4's cycle_<id>.json), never a
-    # session-level positional flag. --control-stop/--control-stop-absent
-    # are mutually exclusive and (like --native-log/--states) required in
-    # code, not at the argparse level (see the F2 comment above).
+    # session-level positional flag.
+    # B2/H2 (merge verdict §2; coordinator Stage B authorization):
+    # --control-stop/--control-stop-absent are GONE too -- an operator
+    # path that a mistyped or nonexistent value reads as "no stop"
+    # (fails open). The stop file is DERIVED: `<control-dir>/stop`,
+    # checked by the CLI itself, never given.
     cp = sub.add_parser("checkpoint")
     cp.add_argument("--control-dir", required=True)
     cp.add_argument("--arm-map", required=True)
@@ -771,8 +775,6 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     cp.add_argument("--n", type=int, default=4)
     cp.add_argument("--native-log")
     cp.add_argument("--states", nargs="+")
-    cp.add_argument("--control-stop")
-    cp.add_argument("--control-stop-absent", action="store_true")
     cp.add_argument("--out", required=True)
 
     fn = sub.add_parser("final")
@@ -784,13 +786,25 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     fn.add_argument("--a-manipulated-min", type=int, default=4)
     fn.add_argument("--native-log")
     fn.add_argument("--states", nargs="+")
-    fn.add_argument("--control-stop")
-    fn.add_argument("--control-stop-absent", action="store_true")
     fn.add_argument("--out", required=True)
 
     args = p.parse_args(argv)
 
     try:
+        from pathlib import Path as _Path
+
+        # B2/H2: a --control-dir that does not exist or is unreadable is
+        # rc 3 -- it can never confirm control/stop's own absence, which
+        # is the NORMAL case, not an error, once the directory itself is
+        # confirmed real.
+        control_dir_path = _Path(args.control_dir)
+        if not control_dir_path.is_dir():
+            raise SummaryCliError(f"--control-dir does not exist or is not a directory: {args.control_dir}")
+        try:
+            os.listdir(control_dir_path)
+        except OSError as exc:
+            raise SummaryCliError(f"--control-dir is not readable: {args.control_dir}: {exc}") from exc
+
         arm_map_doc = json.loads(open(args.arm_map).read())
         arm_map_entries = [pv.ArmMapEntry(**e) for e in arm_map_doc]
         map_check = pv.validate_arm_map(
@@ -806,23 +820,12 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         if args.native_log is None or args.states is None:
             raise SummaryCliError(
                 "checkpoint/final require the full tripwire input set: "
-                "--native-log, --states and one of --control-stop/"
-                "--control-stop-absent are all mandatory "
-                "(F2/F3 -- tripwires are never opt-in)")
-        # F3: --control-stop's absence is the normal case and must be
-        # declared EXPLICITLY (--control-stop-absent) -- never inferred
-        # from simply omitting the flag, which is exactly the "missing
-        # input" case F2 rejects above, not "absent and known to be so".
-        if args.control_stop and args.control_stop_absent:
-            raise SummaryCliError(
-                "--control-stop and --control-stop-absent are mutually exclusive")
-        if not args.control_stop and not args.control_stop_absent:
-            raise SummaryCliError(
-                "checkpoint/final require exactly one of --control-stop or "
-                "--control-stop-absent (F3 -- its absence must be declared "
-                "explicitly, never assumed)")
-        from pathlib import Path as _Path
-        control_stop_present = bool(args.control_stop) and _Path(args.control_stop).is_file()
+                "--native-log and --states are mandatory (F2 -- tripwires "
+                "are never opt-in)")
+        # B2/H2: control/stop is derived from --control-dir itself, never
+        # an operator-given path -- its absence in an existing, readable
+        # control directory is the normal case.
+        control_stop_present = (control_dir_path / "stop").is_file()
 
         # F1 (2026-09-25 pr144-f1-f6 assignment): `args.native_log` is a
         # PATH (an argparse string naming a file on disk) -- at 0722476

@@ -40,8 +40,9 @@ def _write_arm_map(control_dir):
 
 
 def _default_log_paths(control_dir):
-    """F2/F3: checkpoint/final now require the full tripwire input set
-    (--native-log, --states, one of --control-stop/--control-stop-absent).
+    """F2/B2: checkpoint/final now require the full tripwire input set
+    (--native-log, --states; control/stop is derived from --control-dir
+    itself, B2/H2 -- no operator flag at all).
     Tests in this module that are not themselves about tripwire
     behaviour (MB3 rejection, arm-map validation, ordering, ...) get
     clean/empty default logs here so they can reach the logic they
@@ -92,7 +93,7 @@ def _summ_cli(argv, control_dir, inject_default_logs=True):
     ]
     if inject_default_logs and "--native-log" not in argv:
         native, states = _default_log_paths(control_dir)
-        extra += ["--native-log", native, "--states", states, "--control-stop-absent"]
+        extra += ["--native-log", native, "--states", states]
     return summ._cli(argv + extra)
 
 
@@ -381,7 +382,7 @@ class TestMB7TripwiresThroughTheCli:
         "no log flags -> tripwires are skipped, rc 0" -- exactly the bug
         (tripwires opt-in, evidence never actually checked). Tripwires
         are now mandatory for checkpoint/final: omitting --native-log/
-        --states/--control-stop(-absent) is rc 3, never rc 0."""
+        --states is rc 3, never rc 0."""
         self._write_four_clean(tmp_path)
         out = tmp_path / "checkpoint_1.json"
         rc = _summ_cli(["checkpoint", "--control-dir", str(tmp_path), "--n", "4",
@@ -392,8 +393,7 @@ class TestMB7TripwiresThroughTheCli:
         assert "mandatory" in payload.get("reason", "")
 
     def test_missing_required_log_is_rc3(self, tmp_path):
-        """F2: supplying only '--native-log' (without --states/
-        --control-stop(-absent)) is rc 3."""
+        """F2: supplying only '--native-log' (without --states) is rc 3."""
         self._write_four_clean(tmp_path)
         native_log = tmp_path / "native.log"
         native_log.write_text("nothing interesting\n")
@@ -414,7 +414,7 @@ class TestMB7TripwiresThroughTheCli:
         rc = _summ_cli([
             "checkpoint", "--control-dir", str(tmp_path), "--n", "4",
             "--native-log", str(native_log),
-            "--states", str(states), "--control-stop-absent",
+            "--states", str(states),
             "--out", str(out),
         ], tmp_path, inject_default_logs=False)
         assert rc == RC_STOP
@@ -472,7 +472,7 @@ class TestF1TripwiresReadTheLogFiles:
             "checkpoint", "--control-dir", str(tmp_path), "--n", "4",
             "--native-log", str(tmp_path / "does_not_exist_native.log"),
             "--states", str(tmp_path / "does_not_exist_states.jsonl"),
-            "--control-stop-absent", "--out", str(out),
+            "--out", str(out),
             "--arm-map", str(_write_arm_map(tmp_path)),
             "--expected-bridge-sha-a", BRIDGE_SHA_A, "--expected-bridge-sha-b", BRIDGE_SHA_B,
         ])
@@ -490,7 +490,7 @@ class TestF1TripwiresReadTheLogFiles:
         rc = summ._cli([
             "checkpoint", "--control-dir", str(tmp_path), "--n", "4",
             "--native-log", str(native_log), "--states", str(states),
-            "--control-stop-absent", "--out", str(out),
+            "--out", str(out),
             "--arm-map", str(_write_arm_map(tmp_path)),
             "--expected-bridge-sha-a", BRIDGE_SHA_A, "--expected-bridge-sha-b", BRIDGE_SHA_B,
         ])
@@ -568,7 +568,7 @@ class TestF3PerCycleTripwires:
         rc = summ._cli([
             "checkpoint", "--control-dir", str(tmp_path), "--n", "4",
             "--native-log", str(native_log), "--states", str(states),
-            "--control-stop-absent", "--out", str(out),
+            "--out", str(out),
             "--arm-map", str(_write_arm_map(tmp_path)),
             "--expected-bridge-sha-a", BRIDGE_SHA_A, "--expected-bridge-sha-b", BRIDGE_SHA_B,
         ])
@@ -659,20 +659,19 @@ class TestF3PerCycleTripwires:
         assert "reset_sh_mismatch" in row["violated"]
 
     def test_control_stop_present_stops(self, tmp_path):
-        """`control/stop` present -> rc 2, even with every per-cycle log
-        clean."""
+        """B2/H2: `<control-dir>/stop` present -> rc 2, even with every
+        per-cycle log clean. DERIVED from --control-dir itself -- there
+        is no operator flag to name it with."""
         self._write_four_clean(tmp_path)
         native_log = tmp_path / "native.log"
         native_log.write_text("")
         states = tmp_path / "states.jsonl"
         states.write_text("")
-        control_stop = tmp_path / "stop"
-        control_stop.write_text("STOP: board contact\n")
+        (tmp_path / "stop").write_text("STOP: board contact\n")
         out = tmp_path / "checkpoint_1.json"
         rc = summ._cli([
             "checkpoint", "--control-dir", str(tmp_path), "--n", "4",
-            "--native-log", str(native_log), "--states", str(states),
-            "--control-stop", str(control_stop), "--out", str(out),
+            "--native-log", str(native_log), "--states", str(states), "--out", str(out),
             "--arm-map", str(_write_arm_map(tmp_path)),
             "--expected-bridge-sha-a", BRIDGE_SHA_A, "--expected-bridge-sha-b", BRIDGE_SHA_B,
         ])
@@ -681,31 +680,31 @@ class TestF3PerCycleTripwires:
         assert payload["tripwires"]["control_stop_present"] is True
 
     def test_control_stop_absent_is_the_normal_case_not_rc3(self, tmp_path):
+        """B2/H2: no `<control-dir>/stop` file at all is the NORMAL case
+        -- rc 0 (given every other input clean), never rc 3, and never
+        needing an operator flag to say so."""
         self._write_four_clean(tmp_path)
         rc, payload = self._checkpoint(tmp_path)
         assert rc == RC_OK
         assert payload["tripwires"]["control_stop_present"] is False
 
-    def test_control_stop_neither_flag_given_is_rc3(self, tmp_path):
-        """F3: --control-stop's absence is the normal case and must be
-        declared EXPLICITLY -- simply omitting both flags is rc 3, never
-        silently treated as "absent"."""
-        self._write_four_clean(tmp_path)
+    def test_missing_control_dir_is_rc3(self, tmp_path):
+        """B2/H2: a --control-dir that does not exist can never confirm
+        control/stop's own absence -- rc 3, never rc 0."""
         native_log = tmp_path / "native.log"
         native_log.write_text("")
         states = tmp_path / "states.jsonl"
         states.write_text("")
         out = tmp_path / "checkpoint_1.json"
         rc = summ._cli([
-            "checkpoint", "--control-dir", str(tmp_path), "--n", "4",
-            "--native-log", str(native_log), "--states", str(states),
-            "--out", str(out),
+            "checkpoint", "--control-dir", str(tmp_path / "does_not_exist"), "--n", "4",
+            "--native-log", str(native_log), "--states", str(states), "--out", str(out),
             "--arm-map", str(_write_arm_map(tmp_path)),
             "--expected-bridge-sha-a", BRIDGE_SHA_A, "--expected-bridge-sha-b", BRIDGE_SHA_B,
         ])
         payload = read_result(out)
         assert rc == RC_INCONCLUSIVE
-        assert "explicitly" in payload.get("reason", "")
+        assert "control-dir" in payload.get("reason", "")
 
     def test_missing_cycle_manifest_is_rc3(self, tmp_path):
         self._write_four_clean(tmp_path)

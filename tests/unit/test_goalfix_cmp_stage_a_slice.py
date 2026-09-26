@@ -190,7 +190,7 @@ def test_h6_workaround_lets_cli_run_in_non_validation_mode(stage_a):
         "--expected-bridge-sha-a", sas.BRIDGE_SHA["A"], "--expected-bridge-sha-b", sas.BRIDGE_SHA["B"],
         "--n", "4", "--native-log", str(evidence.native_log_path),
         "--states", str(evidence.run_dir / "states.jsonl"),
-        "--control-stop-absent", "--out", str(out),
+        "--out", str(out),
     ]
     rc = summ._cli(["checkpoint"] + argv)
     payload = read_result(out)
