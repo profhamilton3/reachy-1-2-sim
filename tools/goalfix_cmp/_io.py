@@ -56,11 +56,26 @@ def verified(evidence_dir: PathLike, rel_path: str, sums: Dict[str, str]) -> Pat
     """The path to ``rel_path`` under ``evidence_dir``, after checking its
     sha256 against ``sums``. Raises ``IntegrityError`` -- naming the file --
     on a missing manifest entry, a missing file, or a hash mismatch. Never
-    returns a path whose bytes were not checked."""
+    returns a path whose bytes were not checked.
+
+    H6/B6 (merge verdict; coordinator Stage B authorization): a real
+    session's ``SHA256SUMS`` sits at the evidence ROOT, keyed
+    ``./e1_server_runs/<run>/...`` -- when ``evidence_dir`` is instead
+    the RUN directory itself (its own ``server_run_dir``, per the
+    sidecars) and ``sums`` was read from that root file, the plain
+    ``rel_path`` key will not be present. Falls back to the run-prefixed
+    key, inferring ``<run>`` from ``evidence_dir``'s own directory name
+    (the same name the sidecars' ``server_run_dir`` ends in) -- resolved
+    from the sums file's OWN keys, nothing copied or derived."""
     key = os.path.normpath(rel_path)
     p = Path(evidence_dir) / rel_path
     if key not in sums:
-        raise IntegrityError(f"{rel_path}: no entry in SHA256SUMS")
+        prefixed_key = os.path.normpath(
+            f"e1_server_runs/{Path(evidence_dir).resolve().name}/{rel_path}")
+        if prefixed_key in sums:
+            key = prefixed_key
+        else:
+            raise IntegrityError(f"{rel_path}: no entry in SHA256SUMS")
     if not p.is_file():
         raise IntegrityError(f"{rel_path}: file is missing")
     actual = sha256_of(p)

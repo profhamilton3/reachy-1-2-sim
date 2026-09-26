@@ -1058,8 +1058,22 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
 
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--ev-dir", required=True)
-    p.add_argument("--states", default="states.jsonl")
-    p.add_argument("--commands", default="commands.jsonl")
+    # H6/B6 (merge verdict; coordinator Stage B authorization): a real
+    # session's own SHA256SUMS sits at the evidence ROOT, keyed
+    # `./e1_server_runs/<run>/...`, while the sidecars' own
+    # `server_run_dir` names the RUN directory itself -- two different
+    # directories the old CLI could not satisfy at once. `--run`, when
+    # given, treats `--ev-dir` as that root: `--states`/`--commands`
+    # default to `e1_server_runs/<run>/{states,commands}.jsonl` (still
+    # overridable), and the sidecar check below is against the RUN
+    # directory, never the root. Nothing is copied or derived either
+    # way -- see `_io.verified`'s own prefixed-key fallback for the
+    # OTHER layout (`--ev-dir` already the run directory, `--sha256sums`
+    # pointing at the root file).
+    p.add_argument("--run", help="the run directory's own name, under <ev-dir>/e1_server_runs/ "
+                                  "-- when given, --ev-dir is the evidence ROOT (H6/B6)")
+    p.add_argument("--states")
+    p.add_argument("--commands")
     p.add_argument("--sha256sums", default="SHA256SUMS")
     p.add_argument("--control-dir", required=True)
     p.add_argument("--cycle", required=True)
@@ -1091,6 +1105,12 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
              "~/b4-goalfix-cmp-*")
     args = p.parse_args(argv)
 
+    # H6/B6: with --run given, --states/--commands default to the run's
+    # own path UNDER the evidence root, not the root itself.
+    states_rel = args.states or (f"e1_server_runs/{args.run}/states.jsonl" if args.run else "states.jsonl")
+    commands_rel = args.commands or (
+        f"e1_server_runs/{args.run}/commands.jsonl" if args.run else "commands.jsonl")
+
     if args.validation_mode:
         ev_dir_resolved = str(Path(args.ev_dir).expanduser().resolve())
         home = str(Path.home())
@@ -1101,7 +1121,7 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
                 "reason": "--validation-mode is refused when --ev-dir is under ~/b4-goalfix-cmp-*"})
 
     try:
-        evd = ev.verify_and_load(args.ev_dir, args.states, args.commands, args.sha256sums)
+        evd = ev.verify_and_load(args.ev_dir, states_rel, commands_rel, args.sha256sums)
 
         control_dir = Path(args.control_dir)
 
@@ -1140,7 +1160,11 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         # which have no linker manifest) -- the guessed-name fallback
         # below still applies, exactly as before F4, but ONLY here.
 
-        run_dir = str(Path(args.ev_dir).resolve())
+        # H6/B6: with --run, the sidecar's own server_run_dir is the RUN
+        # directory (<ev-dir>/e1_server_runs/<run>), never the evidence
+        # root --ev-dir itself.
+        run_dir = str((Path(args.ev_dir) / "e1_server_runs" / args.run).resolve()
+                      if args.run else Path(args.ev_dir).resolve())
         if manifest is not None:
             setup_sidecar = str(control_dir / manifest["setup_sidecar"])
             flight_sidecar = str(control_dir / manifest["flight_sidecar"])
