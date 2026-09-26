@@ -890,6 +890,15 @@ class CycleVerdict:
     #: evaluated at all. REPORT-ONLY alongside ``segment_indeterminate``
     #: (which is ``not window["valid"]`` when this is not ``None``).
     window: Optional[Dict[str, object]] = None
+    #: D-2 (R-carry', assignment R1.1): a repeat whose chain origin was a
+    #: genuine echo -- counted, never added to genuine_echo_count.
+    #: Per-leg (each leg's own full command range) and segment-scoped
+    #: (the same W-blk segment genuine_echo_count uses; ``None`` when no
+    #: window was computed or it is invalid, matching genuine_echo_count's
+    #: own convention of staying at its default rather than a fabricated
+    #: 0).
+    echo_carry_by_leg: Dict[str, int] = field(default_factory=dict)
+    segment_echo_carry_count: Optional[int] = None
 
     def rc(self) -> int:
         if self.validation_only:
@@ -913,6 +922,8 @@ class CycleVerdict:
             "per_waypoint": self.per_waypoint,
             "manifest_binding": self.manifest_binding,
             "window": self.window,
+            "echo_carry_by_leg": self.echo_carry_by_leg,
+            "segment_echo_carry_count": self.segment_echo_carry_count,
             "rc": self.rc(),
         }
 
@@ -966,13 +977,6 @@ def evaluate_cycle(
     for leg in legs:
         leg_results[leg.name] = evaluate_leg(evidence, leg)
 
-    any_pathcheck_fail = any(
-        not r.passed for lr in leg_results.values() for r in lr.pathcheck.values()
-        if isinstance(r, pc.CheckResult))
-    fail_reasons = [
-        f"{lr.name}:{cid}" for lr in leg_results.values() for cid, r in lr.pathcheck.items()
-        if isinstance(r, pc.CheckResult) and not r.passed]
-
     def _hold_violates(hs: holds.HoldStats) -> bool:
         # Q-hold ruling (§2): the lead-in window's content rule is "any
         # joint_command inside it is a violation" -- stricter than the
@@ -1025,6 +1029,55 @@ def evaluate_cycle(
     echo_results = echo.classify_commands(
         evidence, full_goto_context, leg_turn_on_state_index=leg_turn_on_map)
 
+    # D-2 (R-carry', assignment R1.1): per-leg echo_carry, over each
+    # leg's own full command range (never scoped to the W-blk segment --
+    # that scoping is segment_echo_carry_count, below).
+    echo_carry_by_leg: Dict[str, int] = {
+        leg.name: echo.count_labels(echo_results, leg.command_indices).echo_carry
+        for leg in legs}
+
+    # R-carry' (D-2; decision report §6; assignment R1.2): withdraw the
+    # carry exemption from N1, C2's own tau set, and N3/C1' wherever a
+    # repeat's own chain origin was a genuine echo (echo.ECHO_CARRY) --
+    # traced by echo.classify_commands above, never by bit-equality
+    # alone. assign_goals, the commanded trajectory and hold analysis are
+    # all unchanged (R1.3): only this recheck, run per leg after the
+    # first (ordinary) pathcheck pass, can turn a passing C1/C2 into a
+    # failing one -- never the reverse, and never any OTHER check.
+    for leg in legs:
+        lr = leg_results[leg.name]
+        idx = leg.command_indices
+        withdraw_mask: List[Dict[str, bool]] = []
+        for gi in idx:
+            cr = echo_results[gi]
+            row = {name: (cr is not None and cr.joints[name].label == echo.ECHO_CARRY)
+                   for name in pc.R_JOINTS}
+            withdraw_mask.append(row)
+        if not any(any(row.values()) for row in withdraw_mask):
+            continue  # nothing withdrawn on this leg -- the first pass already stands
+        targets21 = evidence.commands.target_rad[np.asarray(idx)]
+        targets8 = [{name: float(row[k]) for k, name in enumerate(pc.R_JOINTS)}
+                    for row in targets21]
+        t_hi_s = [evidence.brackets[i].t_hi for i in idx]
+        c1_recheck = pc.check_c1(targets8, leg.start_pose8, lr.assignment,
+                                  route=leg.route_rad, carry_withdraw=withdraw_mask)
+        c2_recheck, _c3_unused = pc.check_c2_c3(
+            targets8, t_hi_s, leg.start_pose8, leg.route_rad, lr.assignment,
+            carry_withdraw=withdraw_mask)
+        for check_id, recheck in (("C1", c1_recheck), ("C2", c2_recheck)):
+            first_pass = lr.pathcheck.get(check_id)
+            if (isinstance(first_pass, pc.CheckResult) and first_pass.passed
+                    and not recheck.passed):
+                lr.pathcheck[check_id] = pc.CheckResult(
+                    check_id, False, recheck.first_violation_index, f"R-carry′: {recheck.detail}")
+
+    any_pathcheck_fail = any(
+        not r.passed for lr in leg_results.values() for r in lr.pathcheck.values()
+        if isinstance(r, pc.CheckResult))
+    fail_reasons = [
+        f"{lr.name}:{cid}" for lr in leg_results.values() for cid, r in lr.pathcheck.items()
+        if isinstance(r, pc.CheckResult) and not r.passed]
+
     place_leg = next((l for l in legs if l.name == place_route_leg_name), None)
     place_lr = leg_results.get(place_route_leg_name)
     genuine = 0
@@ -1033,6 +1086,7 @@ def evaluate_cycle(
     win: Optional[window.WindowResult] = None
     control_genuine_echo_count: Optional[int] = None
     control_new_target_count: Optional[int] = None
+    segment_echo_carry_count: Optional[int] = None
 
     if place_leg is not None and place_lr is not None:
         # D-1 (decision report §2/§6; assignment W2): the measurement
@@ -1053,6 +1107,9 @@ def evaluate_cycle(
             seg_global_indices = list(win.segment_commands)
             counts = echo.count_labels(echo_results, seg_global_indices)
             genuine = counts.genuine_echo
+            # D-2 (R-carry', assignment R1.1): reported alongside the
+            # segment's own genuine-echo count -- never added to it.
+            segment_echo_carry_count = counts.echo_carry
 
             # CB7 (readiness review, 2026-09-25 stage-repairs
             # assignment §4): plan §7.1's control run, scoped to the
@@ -1063,7 +1120,8 @@ def evaluate_cycle(
             control_counts = echo.count_labels(control_results, seg_global_indices)
             control_genuine_echo_count = control_counts.genuine_echo
             control_new_target_count = (
-                sum(control_counts.as_dict().values()) - control_counts.carry)
+                sum(control_counts.as_dict().values())
+                - control_counts.carry - control_counts.echo_carry)
 
     metrics = None
     if place_leg is not None and place_lr is not None:
@@ -1165,7 +1223,9 @@ def evaluate_cycle(
         control_genuine_echo_count=control_genuine_echo_count,
         control_new_target_count=control_new_target_count,
         per_waypoint={lr.name: lr.per_waypoint for lr in leg_results.values()},
-        window=_window_report_dict(win))
+        window=_window_report_dict(win),
+        echo_carry_by_leg=echo_carry_by_leg,
+        segment_echo_carry_count=segment_echo_carry_count)
     return cv, leg_results
 
 

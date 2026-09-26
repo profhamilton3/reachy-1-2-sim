@@ -202,3 +202,41 @@ def test_h6_workaround_lets_cli_run_in_non_validation_mode(stage_a):
     tw = payload["tripwires"]
     assert tw["reset_ack_timeout_total"] == 0
     assert tw["control_held_refusal_total"] == 0
+
+
+def test_r_ac4_clean_b_cycles_have_zero_echo_carry(stage_a):
+    """R-AC4 (D-2; assignment R2): B cycles r2 and r3 (this harness's own
+    clean-B legs -- test_only_a_cycles_carry_injected_echoes confirms
+    they carry no injected echoes at all) have echo_carry == 0, on every
+    leg and in the W-blk segment, through the real, non-validation-mode
+    cycle CLI (H6's own documented workaround). Every other verdict field
+    (window validity, blocks, verdict itself) is exactly what Part W's
+    own regenerated-slice acceptance (W-AC7) already established for
+    these two cycles -- D-2 changes nothing on a recording with no
+    genuine echoes at all, since the provenance recheck only ever fires
+    where something was actually withdrawn."""
+    stage, evidence = stage_a
+    for c in stage.cycles:
+        if c.arm != "B":
+            continue
+        out = evidence.control_dir / f"between_r_ac4_{c.name}.json"
+        argv = [
+            "--ev-dir", str(evidence.run_dir),
+            "--sha256sums", "derived-SHA256SUMS",
+            "--control-dir", str(evidence.control_dir),
+            "--cycle", c.name, "--rep", str(c.rep), "--arm", c.arm,
+            "--arm-map", str(evidence.arm_map_path),
+            "--expected-host-sha", EXPECTED_HOST_SHA,
+            "--required-supervisor-programs", "reachy-sdk-server",
+            "--expected-bridge-sha-a", sas.BRIDGE_SHA["A"],
+            "--expected-bridge-sha-b", sas.BRIDGE_SHA["B"],
+            "--out", str(out),
+        ]
+        rc = cyc._cli(argv)
+        payload = read_result(out)
+        assert payload["verdict"] == cyc.VERDICT_OK, payload
+        assert payload["window"]["valid"], payload["window"]["reasons"]
+        assert len(payload["window"]["blocks"]) == 11
+        assert payload["echo_carry_by_leg"]["setup"] == 0, payload["echo_carry_by_leg"]
+        assert payload["echo_carry_by_leg"]["flight"] == 0, payload["echo_carry_by_leg"]
+        assert payload["segment_echo_carry_count"] == 0

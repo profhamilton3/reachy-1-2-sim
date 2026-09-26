@@ -130,7 +130,8 @@ def _on_segment_strict(
 
 
 def carry_mask(
-    targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float],
+    targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float], *,
+    withdraw: Optional[Sequence[Dict[str, bool]]] = None,
 ) -> List[Dict[str, bool]]:
     """Per command, per right-arm joint: ``True`` iff that joint's value
     here is bit-exact to the IMMEDIATELY PRECEDING command's value for
@@ -139,11 +140,24 @@ def carry_mask(
     carry-aware caller (``assign_goals``'s own R-const/R-over admission,
     via ``_on_segment_strict``, and ``pathcheck``'s N1/N3/C1'/C2) uses
     this exact rule, so they can never disagree on what counts as a
-    carry."""
+    carry.
+
+    ``withdraw`` (D-2, R-carry' provenance; additive, default ``None``
+    leaves every caller's existing behaviour unchanged): per command, per
+    joint, ``True`` forces that position's own carry exemption OFF
+    regardless of bit-equality -- the provenance recheck's own way of
+    saying "this repeat's chain origin was a genuine echo, so it no
+    longer counts as a clean carry here." Never used by
+    ``assign_goals`` itself (goal assignment is not changed by D-2)."""
     out: List[Dict[str, bool]] = []
     prev = start_pose8
-    for tgt in targets8:
-        out.append({j: (prev.get(j, 0.0) == tgt.get(j, 0.0)) for j in R_JOINTS})
+    for i, tgt in enumerate(targets8):
+        row = {j: (prev.get(j, 0.0) == tgt.get(j, 0.0)) for j in R_JOINTS}
+        if withdraw is not None:
+            for j in R_JOINTS:
+                if row[j] and withdraw[i].get(j, False):
+                    row[j] = False
+        out.append(row)
         prev = tgt
     return out
 

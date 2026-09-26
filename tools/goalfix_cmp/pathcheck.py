@@ -97,7 +97,8 @@ def check_c0(assignment: seg.GoalAssignment, route: Sequence[Waypoint]) -> Check
 
 def check_c1(targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float],
              assignment: seg.GoalAssignment,
-             route: Optional[Sequence[Waypoint]] = None) -> CheckResult:
+             route: Optional[Sequence[Waypoint]] = None, *,
+             carry_withdraw: Optional[Sequence[Dict[str, bool]]] = None) -> CheckResult:
     """N3 + C1' (owner rulings, 2026-09-25 owner-comparison-definitions),
     replacing the withdrawn literal ``C1_TOL_RAD``/``+1e-9`` slack.
 
@@ -118,10 +119,16 @@ def check_c1(targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float]
     (the previous waypoint's pose, or ``start_pose8`` for the route's own
     first goto); kept optional, defaulting to re-deriving it the same way
     ``check_c4``/``check_c2_c3`` do, only so existing direct callers that
-    already pass ``route`` via other means keep working."""
+    already pass ``route`` via other means keep working.
+
+    ``carry_withdraw`` (D-2, R-carry' provenance; additive, default
+    unchanged): threaded straight through to ``seg.carry_mask`` -- a
+    repeat whose chain origin was a genuine echo is no longer skipped
+    over as a carry, so it can itself become "the first non-carry
+    value" this check evaluates."""
     if route is None:
         raise TypeError("check_c1 requires route (N3/C1' need each goto's own reported start)")
-    carries = seg.carry_mask(targets8, start_pose8)
+    carries = seg.carry_mask(targets8, start_pose8, withdraw=carry_withdraw)
     for k in range(len(route)):
         idxs = _idx_for_goal(assignment, k)
         if not idxs:
@@ -158,7 +165,8 @@ def check_c1(targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float]
 def check_c2_c3(
     targets8: Sequence[Dict[str, float]], t_hi_s: Sequence[float],
     start_pose8: Dict[str, float], route: Sequence[Waypoint],
-    assignment: seg.GoalAssignment,
+    assignment: seg.GoalAssignment, *,
+    carry_withdraw: Optional[Sequence[Dict[str, bool]]] = None,
 ) -> Tuple[CheckResult, CheckResult]:
     """C2 keeps the tau-agreement check, WITH the report's own 0.05deg
     near-end exemption (inverting m^-1 is ill-conditioned there). C3
@@ -178,14 +186,19 @@ def check_c2_c3(
     bit-exact leading carry of the preceding command -- never counted as
     a violation. C2's own tau-agreement computation excludes a carry
     from ``taus`` entirely (point 5: "C2 computes tau only over joints
-    whose value in that command is a setpoint of goto k, not a carry")."""
+    whose value in that command is a setpoint of goto k, not a carry").
+
+    ``carry_withdraw`` (D-2, R-carry' provenance; additive, default
+    unchanged): threaded straight through to ``seg.carry_mask`` -- a
+    repeat whose chain origin was a genuine echo is no longer exempt from
+    N1 or from C2's own tau set."""
     seg_start = dict(start_pose8)
     last_goal: Optional[int] = None
     last_tau: Dict[str, float] = {}
     last_val: Dict[str, float] = {}
     c2_fail: Optional[CheckResult] = None
     c3_fail: Optional[CheckResult] = None
-    carries = seg.carry_mask(targets8, start_pose8)
+    carries = seg.carry_mask(targets8, start_pose8, withdraw=carry_withdraw)
 
     for i, tgt in enumerate(targets8):
         if c2_fail is not None and c3_fail is not None:

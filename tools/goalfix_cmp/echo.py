@@ -47,6 +47,15 @@ ILL_CONDITIONED_DEG = 0.05
 ULP_FLOAT32_FACTOR = 1  # matches within `n` float32 ULPs; the plan asks for 1
 
 CARRY = "carry"
+#: D-2 (R-carry' provenance, decision report §6): a repeat (bit-equal to
+#: the preceding same-epoch command's value for that joint) whose CHAIN
+#: ORIGIN -- the label of that value's own first appearance -- was a
+#: genuine echo. Distinct from CARRY: equality alone is not proof of a
+#: clean carry (a repeated echo is still an echo's own aftereffect), but
+#: it stays a carry everywhere the commanded trajectory and hold analysis
+#: look at it (assignment R1.3) -- only the provenance recheck (R1.2)
+#: treats it differently from an ordinary carry.
+ECHO_CARRY = "echo_carry"
 FRESH = "fresh"
 GENUINE_ECHO = "genuine_echo"
 START_COINCIDENCE = "start_coincidence"
@@ -133,6 +142,12 @@ def classify_commands(
 
     epoch_cache: Dict[int, tuple] = {}
     prev_target: Dict[int, np.ndarray] = {}  # per-epoch previous command's 8-vector
+    #: D-2 (R-carry'): per epoch, per joint, the label of the value
+    #: CURRENTLY in force's own first (non-carry) appearance -- a repeat's
+    #: "chain origin". Updated only on a non-carry classification; a
+    #: repeat looks this up but never changes it, so it survives an
+    #: arbitrarily long run of repeats of the same value.
+    chain_origin: Dict[int, Dict[str, str]] = {}
 
     for i in range(len(commands)):
         if commands.kind[i] != "joint_command":
@@ -150,6 +165,7 @@ def classify_commands(
 
         prev = prev_target.get(epoch)
         ctx = goto_context[i] if i < len(goto_context) else None
+        origin_for_epoch = chain_origin.setdefault(epoch, {})
 
         # H5/B5 (owner-approved plan §7.1; coordinator Stage B
         # authorization): the tau-agreement comparison this command's own
@@ -175,7 +191,12 @@ def classify_commands(
         if bracket.unplaceable:
             for j, name in enumerate(R_JOINTS):
                 is_carry = prev is not None and target8[j] == prev[j]
-                result.joints[name] = JointResult(CARRY if is_carry else FRESH)
+                if is_carry:
+                    label = ECHO_CARRY if origin_for_epoch.get(name) == GENUINE_ECHO else CARRY
+                else:
+                    label = FRESH
+                    origin_for_epoch[name] = FRESH
+                result.joints[name] = JointResult(label)
             prev_target[epoch] = target8
             continue
 
@@ -196,7 +217,8 @@ def classify_commands(
             value = target8[j]
             is_carry = prev is not None and value == prev[j]
             if is_carry:
-                result.joints[name] = JointResult(CARRY)
+                label = ECHO_CARRY if origin_for_epoch.get(name) == GENUINE_ECHO else CARRY
+                result.joints[name] = JointResult(label)
                 continue
 
             if unavailable:
@@ -212,12 +234,14 @@ def classify_commands(
 
             if len(hits) == 0 and not hi_match:
                 result.joints[name] = JointResult(FRESH)
+                origin_for_epoch[name] = FRESH
                 continue
 
             if len(hits) == 0 and hi_match:
                 result.joints[name] = JointResult(
                     TIMING_AMBIGUOUS, age_s=float(t_hi - e_sim_time[hi_idx]),
                     source_state_index=int(e_state_idx[hi_idx]))
+                origin_for_epoch[name] = TIMING_AMBIGUOUS
                 continue
 
             src_local = int(hits[-1])  # most recent match in the unambiguous window
@@ -234,6 +258,7 @@ def classify_commands(
                 src_global_index=src_global, moving_taus=moving_taus)
             result.joints[name] = JointResult(label, age_s=src_age, source_state_index=src_global,
                                                tau_agreement_vacuous=vacuous)
+            origin_for_epoch[name] = label
 
         prev_target[epoch] = target8
 
@@ -330,6 +355,11 @@ def _within_float32_ulps(a: float, b: float, n: int) -> bool:
 @dataclass
 class Counts:
     carry: int = 0
+    #: D-2 (R-carry'): a repeat whose chain origin was a genuine echo --
+    #: counted and reported in the echo analysis, but NOT added to
+    #: genuine_echo (manipulation status is unchanged) and not a "new
+    #: target" (excluded from control_new_target_count exactly like carry).
+    echo_carry: int = 0
     fresh: int = 0
     genuine_echo: int = 0
     start_coincidence: int = 0
@@ -346,7 +376,8 @@ class Counts:
         setattr(self, label, getattr(self, label) + 1)
 
     def as_dict(self) -> Dict[str, int]:
-        return dict(carry=self.carry, fresh=self.fresh, genuine_echo=self.genuine_echo,
+        return dict(carry=self.carry, echo_carry=self.echo_carry,
+                    fresh=self.fresh, genuine_echo=self.genuine_echo,
                     start_coincidence=self.start_coincidence,
                     path_coincidence=self.path_coincidence,
                     timing_ambiguous=self.timing_ambiguous,
