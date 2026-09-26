@@ -71,57 +71,81 @@ def _exact_equal8(a: Dict[str, float], b: Dict[str, float]) -> bool:
     return all(a.get(j, 0.0) == b.get(j, 0.0) for j in R_JOINTS)
 
 
+def ulp32(x: float) -> float:
+    """One float32 ULP of ``x`` (a non-negative magnitude, float64), via
+    ``np.spacing`` at float32 precision -- the exact quantisation step of
+    a ``float32(position_rad)`` value on the wire. Used by R-over (below)
+    and by ``pathcheck``'s N2/N3/C1'/C4' (owner rulings, 2026-09-25).
+    ``np.spacing`` is sign-aware (``np.spacing(-0.7) < 0``, the step
+    towards ``-inf``) -- ``abs()`` here, always, so callers can add this
+    to either side of a bound without re-deriving the sign themselves."""
+    return abs(float(np.spacing(np.float32(x))))
+
+
 def _on_segment_strict(
     start8: Dict[str, float], goal8: Dict[str, float], value8: Dict[str, float],
-    tol_deg: float, const_ref: Dict[str, float],
+    prev8: Dict[str, float], tol_deg: float,
 ) -> bool:
-    """R-const (coordinator ruling, 2026-09-25, §1): a MOVING joint
-    (nominal ``start8[j] != goal8[j]``) still uses the tol box
-    (``_on_segment``'s behaviour). A CONSTANT joint (nominal ``start8[j]
-    == goal8[j]``, report §4 C2: "each joint with start = goal is
-    exactly constant") must equal, EXACTLY, ``const_ref[j]`` -- the
-    value that goto's own FIRST accepted setpoint gave that joint, never
-    the tol box. ``const_ref`` has no entry for a joint not yet seen in
-    this goto (the bootstrap case): the candidate value trivially passes
-    and becomes the reference for later samples of the SAME goto (the
-    caller records it). This is what stops a genuinely-moved constant
-    joint (the next waypoint's real first sample, drifted a few 1e-5 deg
-    past the ±``ON_SEGMENT_TOL_DEG`` box) from being admitted to the
-    PREVIOUS goto merely because it started at the same nominal value."""
+    """R-carry + R-const + R-over (coordinator ruling, 2026-09-25 stage-A
+    review, §3 R-carry; owner rulings R-over): ``prev8`` is the
+    IMMEDIATELY PRECEDING command's own value (or ``start_pose8`` for the
+    leg's first command) -- the same reference every call site at row
+    ``i`` uses, regardless of which candidate goto is being tested.
+
+    1. A joint whose value here is BIT-EXACT to ``prev8[j]`` is a carry
+       (R-carry §1): accepted unconditionally, for both moving and
+       constant joints -- a carry carries no positional information
+       about which goto it belongs to, so it must never fail (or
+       establish) a segment-membership test.
+    2. A CONSTANT joint (nominal ``start8[j] == goal8[j]`` -- report §4
+       C2's own definition) that is NOT a carry must equal the nominal
+       value EXACTLY (R-const/N1) -- never a bootstrapped reference from
+       whatever the goto's own first accepted sample happened to be
+       (that bootstrap is exactly the G-a defect: a leading carry from
+       the PREVIOUS goto poisoned the reference, rejecting the later,
+       correct, exact samples).
+    3. A MOVING joint that is not a carry uses the tol box on its START
+       side (unchanged), but on its GOAL side the box is tightened to 1
+       float32 ULP of the goal (R-over): a setpoint beyond the goal, in
+       the direction of travel, by more than that never belongs to this
+       goto -- it is goto k+1's own (or later's), never admitted here
+       merely because it is inside the old, far more permissive
+       ``ON_SEGMENT_TOL_DEG`` box."""
     tol = np.radians(tol_deg)
     for j in R_JOINTS:
         a, b, v = start8.get(j, 0.0), goal8.get(j, 0.0), value8.get(j, 0.0)
+        if prev8.get(j, 0.0) == v:
+            continue  # R-carry: a bit-exact carry, accepted regardless
         if a == b:
-            if j in const_ref:
-                if v != const_ref[j]:
-                    return False
-            elif not (a - tol <= v <= a + tol):
-                # Bootstrap: no reference established for THIS goto yet
-                # (this is either the goto's own first sample, or a
-                # candidate never before visited -- lookahead/backward
-                # scan always call with an empty `const_ref`). Nothing to
-                # compare "goto k's first setpoint" against but the
-                # nominal value itself, so this collapses to the same
-                # tol-box test a moving joint's degenerate a==b case
-                # would give -- never a free pass.
-                return False
+            if v != a:
+                return False  # R-const/N1: a non-carry constant sample must equal S exactly
             continue
-        lo, hi = (a, b) if a <= b else (b, a)
-        if not (lo - tol <= v <= hi + tol):
+        if b >= a:
+            lo_bound, hi_bound = a - tol, b + ulp32(b)
+        else:
+            lo_bound, hi_bound = b - ulp32(b), a + tol
+        if not (lo_bound <= v <= hi_bound):
             return False
     return True
 
 
-def _record_const_ref(
-    seg_start: Dict[str, float], goal8: Dict[str, float], tgt: Dict[str, float],
-    const_ref: Dict[str, float],
-) -> None:
-    """Establishes ``const_ref[j]`` from ``tgt`` for every joint constant
-    in this goto (``seg_start[j] == goal8[j]``) that has no reference
-    yet -- the goto's own first accepted setpoint, per R-const."""
-    for j in R_JOINTS:
-        if seg_start.get(j, 0.0) == goal8.get(j, 0.0):
-            const_ref.setdefault(j, tgt.get(j, 0.0))
+def carry_mask(
+    targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float],
+) -> List[Dict[str, bool]]:
+    """Per command, per right-arm joint: ``True`` iff that joint's value
+    here is bit-exact to the IMMEDIATELY PRECEDING command's value for
+    that joint (``start_pose8`` for the leg's own first command) --
+    R-carry ruling §1's definition. The single source of truth: every
+    carry-aware caller (``assign_goals``'s own R-const/R-over admission,
+    via ``_on_segment_strict``, and ``pathcheck``'s N1/N3/C1'/C2) uses
+    this exact rule, so they can never disagree on what counts as a
+    carry."""
+    out: List[Dict[str, bool]] = []
+    prev = start_pose8
+    for tgt in targets8:
+        out.append({j: (prev.get(j, 0.0) == tgt.get(j, 0.0)) for j in R_JOINTS})
+        prev = tgt
+    return out
 
 
 @dataclass
@@ -153,16 +177,18 @@ def assign_goals(
     result: List[Optional[int]] = [None] * n
     cur = 0
     seg_start = dict(start_pose8)
-    #: R-const: `cur`'s own established constant-joint reference values
-    #: (its first accepted setpoint's values, for joints whose nominal
-    #: start == goal in THIS goto). Reset whenever `cur` changes.
-    const_ref: Dict[str, float] = {}
     violation_index: Optional[int] = None
     violation_kind: Optional[str] = None
 
     for i in range(n):
         tgt = targets8[i]
-        if cur < len(route) and _on_segment_strict(seg_start, _pose8(route[cur]), tgt, tol_deg, const_ref):
+        #: R-carry: the reference for THIS row's own carry test is fixed
+        #: by its position in the file, never by which candidate goto is
+        #: being tried -- computed once per row, passed unchanged to
+        #: every `_on_segment_strict` call below.
+        prev8 = targets8[i - 1] if i > 0 else start_pose8
+
+        if cur < len(route) and _on_segment_strict(seg_start, _pose8(route[cur]), tgt, prev8, tol_deg):
             # R-tie (coordinator ruling, 2026-09-25, §1): a setpoint that
             # bit-equals cur's own goal AND DIFFERS from the immediately
             # preceding command belongs to cur -- it continues cur's
@@ -186,12 +212,9 @@ def assign_goals(
                         and not _exact_equal8(nxt, nxt_goal)):
                     cur = cur + 1
                     seg_start = nxt_start
-                    const_ref = {}
                     result[i] = cur
-                    _record_const_ref(seg_start, _pose8(route[cur]), tgt, const_ref)
                     continue
             result[i] = cur
-            _record_const_ref(seg_start, _pose8(route[cur]), tgt, const_ref)
             continue
 
         advanced = False
@@ -200,14 +223,12 @@ def assign_goals(
             if idx >= len(route):
                 break
             candidate_start = _pose8(route[idx - 1])
-            if _on_segment_strict(candidate_start, _pose8(route[idx]), tgt, tol_deg, {}):
+            if _on_segment_strict(candidate_start, _pose8(route[idx]), tgt, prev8, tol_deg):
                 if look > 1 and violation_index is None:
                     violation_index, violation_kind = i, SKIPPED_WAYPOINT
                 cur = idx
                 seg_start = candidate_start
-                const_ref = {}
                 result[i] = cur
-                _record_const_ref(seg_start, _pose8(route[cur]), tgt, const_ref)
                 advanced = True
                 break
         if advanced:
@@ -215,7 +236,7 @@ def assign_goals(
 
         for idx in range(0, cur):
             prior_start = start_pose8 if idx == 0 else _pose8(route[idx - 1])
-            if _on_segment_strict(prior_start, _pose8(route[idx]), tgt, tol_deg, {}):
+            if _on_segment_strict(prior_start, _pose8(route[idx]), tgt, prev8, tol_deg):
                 if violation_index is None:
                     violation_index, violation_kind = i, EXTRA_WAYPOINT
                 result[i] = idx

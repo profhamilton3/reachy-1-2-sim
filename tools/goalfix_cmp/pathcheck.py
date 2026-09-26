@@ -27,14 +27,27 @@ from reachy_ai.motion.kinematics import (  # noqa: E402
 )
 
 from tools.goalfix_cmp import segments as seg  # noqa: E402
-from tools.goalfix_cmp._minjerk import implied_tau, pose_at  # noqa: E402
+from tools.goalfix_cmp._minjerk import implied_tau  # noqa: E402
 
 GRIPPER_LO_RAD, GRIPPER_HI_RAD = sorted(
     (np.radians(_GRIPPER_OPEN_LIMIT_DEG), np.radians(_GRIPPER_SHUT_LIMIT_DEG)))
-C1_TOL_RAD = 1e-6
 C2_SKEW_TOL_S = 0.030
 C2_ILL_CONDITIONED_DEG = 0.05
-C4_LEAD_S = 0.010  # "T - 10 ms"
+#: Owner rulings (2026-09-25 owner-comparison-definitions): C1'/C4' replace
+#: report §4's literal C1 (``C1_TOL_RAD=1e-6`` rad) and C4 (residual at
+#: T-10ms, ``C4_LEAD_S``) for the comparison. Both withdrawn, along with
+#: the old ``+1e-9`` slack -- see ``check_c1``/``check_c4``.
+C1_PRIME_DEG = 0.05
+C4_PRIME_DEG = 0.01
+
+#: The blind bands the owner ruling requires reported, never as 0 (an
+#: echoed start this close ahead of S on a direction-reversing joint is
+#: not detected by C1'; a last sample this close short of G is not
+#: detected by C4'). REPORT-ONLY, surfaced verbatim in the cycle payload.
+UNOBSERVABLE_BAND_DEG = {
+    "c1_prime_start_ahead_on_reversal_deg": C1_PRIME_DEG,
+    "c4_prime_short_of_goal_deg": C4_PRIME_DEG,
+}
 
 ALL_CHECKS = ("C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8")
 
@@ -82,25 +95,59 @@ def check_c0(assignment: seg.GoalAssignment, route: Sequence[Waypoint]) -> Check
 # C1: start continuity
 # ---------------------------------------------------------------------------
 
-_UNSET = object()
-
-
 def check_c1(targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float],
-             assignment: seg.GoalAssignment) -> CheckResult:
-    prev: Dict[str, float] = dict(start_pose8)
-    last_goal = _UNSET  # sentinel: the very first command is always a boundary,
-    # even if goal assignment could not place it (still checked against
-    # start_pose8, per C1's own "route start" case).
-    for i, tgt in enumerate(targets8):
-        g = assignment.goal_index[i]
-        if g != last_goal:  # first setpoint of a new goto (or the very first command)
-            for j in R_JOINTS:
-                if abs(tgt.get(j, 0.0) - prev.get(j, 0.0)) > C1_TOL_RAD:
-                    return CheckResult("C1", False, i,
-                                        f"joint {j} jumps {prev.get(j,0.0)} -> {tgt.get(j,0.0)} "
-                                        "at a goto's first setpoint")
-            last_goal = g
-        prev = tgt
+             assignment: seg.GoalAssignment,
+             route: Optional[Sequence[Waypoint]] = None) -> CheckResult:
+    """N3 + C1' (owner rulings, 2026-09-25 owner-comparison-definitions),
+    replacing the withdrawn literal ``C1_TOL_RAD``/``+1e-9`` slack.
+
+    Evaluated PER JOINT, at that joint's own FIRST NON-CARRY value within
+    each goto (R-carry ruling §4: "N3/C1' evaluate each moving joint at
+    its first non-carry value in goto k") -- a leading carry (bit-exact
+    to the immediately preceding command, per ``segments.carry_mask``) is
+    never treated as "the first setpoint"; different joints of the same
+    goto may therefore have their own check applied at different command
+    indices. A constant joint (nominal ``S == G``) is N1's job (folded
+    into C2, below), not C1'/N3.
+
+    - **N3**: the first non-carry value does not lie behind ``S`` (against
+      the direction of travel) by more than 1 float32 ULP of ``S``.
+    - **C1'**: that same value is within 0.05 deg of ``S``.
+
+    ``route`` is required to know each goto's own reported start ``S``
+    (the previous waypoint's pose, or ``start_pose8`` for the route's own
+    first goto); kept optional, defaulting to re-deriving it the same way
+    ``check_c4``/``check_c2_c3`` do, only so existing direct callers that
+    already pass ``route`` via other means keep working."""
+    if route is None:
+        raise TypeError("check_c1 requires route (N3/C1' need each goto's own reported start)")
+    carries = seg.carry_mask(targets8, start_pose8)
+    for k in range(len(route)):
+        idxs = _idx_for_goal(assignment, k)
+        if not idxs:
+            continue
+        seg_start = start_pose8 if k == 0 else _goal8(route[k - 1])
+        goal8 = _goal8(route[k])
+        for j in R_JOINTS:
+            a, b = seg_start.get(j, 0.0), goal8.get(j, 0.0)
+            if a == b:
+                continue  # constant joint: N1's job, not N3/C1'
+            first_i = next((i for i in idxs if not carries[i][j]), None)
+            if first_i is None:
+                continue  # every sample of this joint in this goto was a carry
+            v = targets8[first_i].get(j, 0.0)
+            behind = (a - v) if b > a else (v - a)  # positive => behind S
+            if behind > seg.ulp32(a):
+                return CheckResult(
+                    "C1", False, first_i,
+                    f"joint {j} first non-carry setpoint {v} lies behind S={a} by more than "
+                    f"1 ULP (N3)")
+            off_deg = abs(np.degrees(v - a))
+            if off_deg > C1_PRIME_DEG:
+                return CheckResult(
+                    "C1", False, first_i,
+                    f"joint {j} first non-carry setpoint {v} is {off_deg} deg from S={a} "
+                    f"(> C1' {C1_PRIME_DEG} deg)")
     return CheckResult("C1", True)
 
 
@@ -123,13 +170,22 @@ def check_c2_c3(
     exactly "the value never moves back away from the goal", which is
     checkable directly with no inversion, near the ends too, and with NO
     tolerance (float32 rounding of a monotone float64 sequence is itself
-    non-decreasing)."""
+    non-decreasing).
+
+    R-carry (coordinator ruling, 2026-09-25 stage-A slice review, §3):
+    N1 (a constant joint's non-carry samples must equal ``S`` exactly,
+    folded into C2's own "a constant joint moved" reason) exempts a
+    bit-exact leading carry of the preceding command -- never counted as
+    a violation. C2's own tau-agreement computation excludes a carry
+    from ``taus`` entirely (point 5: "C2 computes tau only over joints
+    whose value in that command is a setpoint of goto k, not a carry")."""
     seg_start = dict(start_pose8)
     last_goal: Optional[int] = None
     last_tau: Dict[str, float] = {}
     last_val: Dict[str, float] = {}
     c2_fail: Optional[CheckResult] = None
     c3_fail: Optional[CheckResult] = None
+    carries = seg.carry_mask(targets8, start_pose8)
 
     for i, tgt in enumerate(targets8):
         if c2_fail is not None and c3_fail is not None:
@@ -147,9 +203,10 @@ def check_c2_c3(
         constant_violation = False
         for j in ARM7:
             a, b, v = seg_start.get(j, 0.0), goal8.get(j, 0.0), tgt.get(j, 0.0)
+            is_carry = carries[i][j]
             if a == b:
-                if v != a:
-                    constant_violation = True
+                if not is_carry and v != a:
+                    constant_violation = True  # N1
                 continue
             # C3 (A2): raw-value monotonicity toward the goal, every
             # sample, no near-end exemption, no tolerance.
@@ -159,6 +216,8 @@ def check_c2_c3(
                     c3_fail = CheckResult(
                         "C3", False, i, f"joint {j} moved away from the goal (raw value)")
             last_val[j] = v
+            if is_carry:
+                continue  # R-carry point 5: not a setpoint of this goto -- excluded from tau
             if _near_end(v, a, b):
                 continue
             taus[j] = implied_tau(a, b, v)
@@ -188,6 +247,21 @@ def _leg_seconds(route: Sequence[Waypoint], goal_index: int) -> float:
 
 def check_c4(targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float],
              route: Sequence[Waypoint], assignment: seg.GoalAssignment) -> CheckResult:
+    """N2 + C4' (owner rulings, 2026-09-25 owner-comparison-definitions),
+    replacing the withdrawn literal T-10ms residual budget (``C4_LEAD_S``)
+    and its ``+1e-9`` slack.
+
+    - **N2**: no setpoint of this goto lies beyond the goal, in the
+      direction of travel, by more than 1 float32 ULP of the goal.
+      ``segments.assign_goals``'s own R-over admission already excludes
+      such a setpoint from this goto in the first place (so this scan is
+      normally vacuous against real ``assignment`` input) -- checked
+      again here, directly against every one of the goto's own assigned
+      setpoints, as a second, independent line of defence for a caller
+      that supplies its own hand-built ``assignment`` (bypassing
+      ``assign_goals``), and so this check can never silently depend on
+      segmentation alone to catch an overshoot.
+    - **C4'**: the goto's LAST setpoint is within 0.01 deg of the goal."""
     for k, wp in enumerate(route):
         idxs = _idx_for_goal(assignment, k)
         if not idxs:
@@ -195,18 +269,24 @@ def check_c4(targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float]
         last_i = idxs[-1]
         seg_start = start_pose8 if k == 0 else _goal8(route[k - 1])
         goal8 = _goal8(wp)
-        T = wp.seconds
-        tau_ref = max(0.0, (T - C4_LEAD_S) / T) if T > 0 else 1.0
         for j in ARM7:
             a, b = seg_start.get(j, 0.0), goal8.get(j, 0.0)
             if a == b:
                 continue
-            residual = abs(pose_at(a, b, tau_ref) - b)
-            v = targets8[last_i].get(j, 0.0)
-            if abs(v - b) > residual + 1e-9:
-                return CheckResult("C4", False, last_i,
-                                    f"{wp.name}: joint {j} ends {abs(v-b)} rad off goal "
-                                    f"(residual budget {residual})")
+            for i in idxs:
+                v = targets8[i].get(j, 0.0)
+                overshoot = (v - b) if b > a else (b - v)
+                if overshoot > seg.ulp32(b):
+                    return CheckResult(
+                        "C4", False, i,
+                        f"{wp.name}: joint {j} setpoint {v} exceeds goal {b} by more than "
+                        f"1 ULP (N2)")
+            v_last = targets8[last_i].get(j, 0.0)
+            off_deg = abs(np.degrees(v_last - b))
+            if off_deg > C4_PRIME_DEG:
+                return CheckResult(
+                    "C4", False, last_i,
+                    f"{wp.name}: joint {j} ends {off_deg} deg off goal (> C4' {C4_PRIME_DEG} deg)")
     return CheckResult("C4", True)
 
 
@@ -348,7 +428,7 @@ def run_all(
         assignment = seg.assign_goals(route, start_pose8, targets8)
 
     c0 = check_c0(assignment, route)
-    c1 = check_c1(targets8, start_pose8, assignment)
+    c1 = check_c1(targets8, start_pose8, assignment, route)
     c2, c3 = check_c2_c3(targets8, t_hi_s, start_pose8, route, assignment)
     c4 = check_c4(targets8, start_pose8, route, assignment)
     c5 = check_c5(targets8, route, assignment)

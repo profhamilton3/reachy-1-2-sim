@@ -144,6 +144,74 @@ class TestC0Failures:
         assert assignment.violation_kind == seg.EXTRA_WAYPOINT
 
 
+class TestROver:
+    """R-over (owner rulings, 2026-09-25 owner-comparison-definitions):
+    a setpoint that lies more than 1 float32 ULP beyond ``wp_k``'s own
+    pose, in the direction of goto k+1, never belongs to goto k -- the
+    "F-e" shape (proposal §1 F-e; assignment B11: "the F-e sequence
+    (commands 740-747 shape)"): goto k+1's own first sample, arriving
+    after the settle-hold gap, has moved a small amount past ``wp_k`` in
+    the CONTINUING direction, and the old, far more permissive
+    ``ON_SEGMENT_TOL_DEG`` box admitted it to goto k. Built here as a
+    synthetic fixture matching that shape (never reading recorded
+    evidence): a clean two-waypoint flight, then HOVER's own last write
+    is perturbed to leak past its own goal, by the same 6.5e-5deg scale
+    the proposal's F-e finding measured."""
+
+    def test_next_gotos_first_sample_is_not_absorbed_into_the_previous_goto(self):
+        sim = mf.FlightSim(START)
+        sim.fly(ROUTE)
+        result = sim.result()
+        targets8 = _targets8(result.command_rows)
+        assignment = seg.assign_goals(ROUTE, START, targets8)
+
+        # HOVER's own last sample, by the CURRENT (clean) assignment.
+        hover_last = max(i for i, g in enumerate(assignment.goal_index) if g == 1)
+
+        # The F-e shape: overshoot HOVER's own goal by a small amount in
+        # the direction REST_SHUT continues (a few 1e-4deg-scale, well
+        # inside the OLD ON_SEGMENT_TOL_DEG box) at HOVER's OWN last
+        # command -- i.e. HOVER's last write "leaks" toward REST_SHUT.
+        hover_goal = HOVER_POSE["r_shoulder_pitch"]
+        restshut_goal = REST_SHUT_POSE["r_shoulder_pitch"]
+        direction = 1.0 if restshut_goal > hover_goal else -1.0
+        leak = hover_goal + direction * np.radians(6.5e-5)  # proposal F-a/F-e's own scale
+        targets8[hover_last] = dict(targets8[hover_last], r_shoulder_pitch=leak)
+
+        reassigned = seg.assign_goals(ROUTE, START, targets8)
+        # R-over: HOVER (goto 1) never admits this leaked sample -- it is
+        # excluded from goto 1 (either reassigned forward or
+        # indeterminate), never silently kept as HOVER's own last write.
+        assert reassigned.goal_index[hover_last] != 1, (
+            "the leaked, over-goal sample must not stay assigned to HOVER (R-over)")
+
+    def test_mutation_revert_r_over_would_admit_the_overshoot(self):
+        """Mutation guard: the OLD (pre-R-over) admission box -- the full
+        ``ON_SEGMENT_TOL_DEG`` on BOTH sides, no 1-ULP goal-side
+        tightening -- admits the exact same leaked sample to HOVER.
+        Reproduced directly against a local re-implementation of the OLD
+        rule (verified separately, in the handoff, against a scratch
+        export with R-over's own tightening reverted)."""
+        def on_segment_old(start8, goal8, value8, tol_deg=seg.ON_SEGMENT_TOL_DEG):
+            tol = np.radians(tol_deg)
+            for j in mf.R_JOINTS:
+                a, b, v = start8.get(j, 0.0), goal8.get(j, 0.0), value8.get(j, 0.0)
+                lo, hi = (a, b) if a <= b else (b, a)
+                if not (lo - tol <= v <= hi + tol):
+                    return False
+            return True
+
+        hover_goal = HOVER_POSE["r_shoulder_pitch"]
+        restshut_goal = REST_SHUT_POSE["r_shoulder_pitch"]
+        direction = 1.0 if restshut_goal > hover_goal else -1.0
+        leak = hover_goal + direction * np.radians(6.5e-5)
+        leaked_pose = full_pose(r_shoulder_pitch=leak, r_shoulder_roll=HOVER_POSE["r_shoulder_roll"],
+                                 r_elbow_pitch=HOVER_POSE["r_elbow_pitch"],
+                                 r_wrist_pitch=HOVER_POSE["r_wrist_pitch"])
+        mutant_admits = on_segment_old(SWING_1_POSE, HOVER_POSE, leaked_pose)
+        assert mutant_admits, "the reported bug: the old box admits the overshoot to HOVER"
+
+
 class TestTruncatedLeg:
     def test_truncated_mid_segment_is_indeterminate(self):
         sim = mf.FlightSim(START)

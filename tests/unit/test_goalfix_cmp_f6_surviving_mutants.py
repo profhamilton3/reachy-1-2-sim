@@ -86,8 +86,18 @@ class TestMutantQIsolatedProof:
         cmds, rows = list(result.command_rows), list(result.state_rows)
 
         goal_val = route_r[1].pose["r_shoulder_pitch"]
-        eps = np.float32(5e-7)
-        overshoot = float(np.float32(np.float32(goal_val) - eps))
+        # R-over (owner rulings, 2026-09-25): a setpoint beyond the goal
+        # by MORE than 1 float32 ULP, in the direction of travel, never
+        # belongs to this goto (segments.assign_goals rejects it, falling
+        # through to indeterminate here since there is no further
+        # waypoint in this fixture's 2-waypoint route to attribute it
+        # to). Exactly 1 ULP beyond stays admitted -- this fixture needs
+        # the overshoot to still be REST_SHUT's OWN last command (to
+        # isolate the echo-classifier question from segmentation), so it
+        # uses exactly 1 ULP (not the old, larger 5e-7 rad ~= 4 ULPs at
+        # this magnitude), via `np.nextafter` in the continuing
+        # (decreasing) direction.
+        overshoot = float(np.nextafter(np.float32(goal_val), np.float32(-np.inf)))
         pick_cmd = 201  # REST_SHUT's own last command (verified below)
         src_row = 207   # ~0.2s earlier in simulation time (verified below)
 

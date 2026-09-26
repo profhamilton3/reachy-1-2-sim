@@ -65,27 +65,78 @@ class TestCleanRoute:
 
 
 class TestC1:
-    def test_start_discontinuity_fails_c1(self):
+    """N3 + C1' (owner rulings, 2026-09-25 owner-comparison-definitions),
+    replacing the withdrawn literal ``C1_TOL_RAD``/``+1e-9`` slack. The
+    hand-built ``GoalAssignment`` here isolates ``check_c1``'s own N3/C1'
+    logic from ``assign_goals``'s (much tighter, ~1e-4deg) admission
+    tolerance -- a value that fails admission is excluded from every
+    goto's own assigned span entirely (an "unassigned run", B15's job,
+    not C1's); these tests are about values that a real ``assign_goals``
+    call WOULD admit, checking C1's own, separate, looser bounds."""
+
+    #: A single-goto route with a NON-ZERO reported start S (so
+    #: ``ulp32(S)`` is a real, non-degenerate value) -- ``start_pose8``
+    #: IS S itself here, so the goto's own first command is checked
+    #: directly against it, with no earlier "goto A" to get confused
+    #: with (goto A's own first sample would legitimately equal ITS OWN
+    #: start, R-carry's own "carry" case -- skipped entirely, so testing
+    #: N3/C1' needs the joint UNDER TEST to be a real, later goto).
+    _ROUTE1 = [mf.Waypoint("B", full_pose(r_shoulder_pitch=-0.7), 1.0)]
+    _S = -0.3
+    _START2 = full_pose(r_shoulder_pitch=_S)
+
+    def test_large_backward_excursion_is_excluded_from_assignment_not_c1(self):
+        """A perturbation this large (0.01 rad, ~0.57deg) exceeds even
+        assign_goals's own (much tighter) admission tolerance, so the
+        command is excluded from every goto's own assigned span
+        entirely -- pathcheck.run_all's C0-C8 have nothing to check at
+        that index; B15 (cycle.py) is what catches an unassigned run
+        like this one, not C1."""
         result = _fly()
         targets21 = _targets21(result.command_rows)
-        targets21[0][0] += 0.01  # perturb the very first command's shoulder_pitch
+        targets21[0][0] += 0.01
         t_hi_s = _t_hi(result)
         results = pc.run_all(targets21, t_hi_s, START, ROUTE, guard=())
-        assert not results["C1"].passed
-        assert results["C1"].first_violation_index == 0
+        assert results["C0"].passed and results["C1"].passed
+        assert results["_assignment"].goal_index[0] is None
 
-    def test_boundary_at_1e_minus_6(self):
-        result = _fly()
-        targets21 = _targets21(result.command_rows)
-        targets21[0][0] += 9e-7  # inside tolerance
-        t_hi_s = _t_hi(result)
-        results = pc.run_all(targets21, t_hi_s, START, ROUTE, guard=())
-        assert results["C1"].passed
+    def test_n3_exactly_1_ulp_behind_s_passes(self):
+        one_ulp = seg.ulp32(self._S)
+        targets8 = [full_pose(r_shoulder_pitch=self._S + one_ulp)]  # B's own first: 1 ULP behind S
+        assignment = seg.GoalAssignment(goal_index=[0], ok=True)
+        result = pc.check_c1(targets8, self._START2, assignment, self._ROUTE1)
+        assert result.passed, result
 
-        targets21b = _targets21(result.command_rows)
-        targets21b[0][0] += 2e-6  # outside tolerance
-        results_b = pc.run_all(targets21b, t_hi_s, START, ROUTE, guard=())
-        assert not results_b["C1"].passed
+    def test_n3_more_than_1_ulp_behind_s_fails(self):
+        targets8 = [full_pose(r_shoulder_pitch=self._S + seg.ulp32(self._S) * 4)]
+        assignment = seg.GoalAssignment(goal_index=[0], ok=True)
+        result = pc.check_c1(targets8, self._START2, assignment, self._ROUTE1)
+        assert not result.passed
+        assert "N3" in result.detail
+
+    def test_c1_prime_boundary_at_point_05_deg(self):
+        assignment = seg.GoalAssignment(goal_index=[0], ok=True)
+        ahead_ok = self._S - np.radians(0.04)     # 0.04deg of real forward progress
+        result_ok = pc.check_c1(
+            [full_pose(r_shoulder_pitch=ahead_ok)], self._START2, assignment, self._ROUTE1)
+        assert result_ok.passed, result_ok
+
+        ahead_bad = self._S - np.radians(0.06)    # 0.06deg -- exceeds C1'
+        result_bad = pc.check_c1(
+            [full_pose(r_shoulder_pitch=ahead_bad)], self._START2, assignment, self._ROUTE1)
+        assert not result_bad.passed
+        assert "C1'" in result_bad.detail
+
+    def test_mutation_n3_bound_removed_would_admit_the_violation(self):
+        """Mutation guard: dropping the N3 comparison entirely (falling
+        through straight to the C1' check) would let the more-than-1-ULP
+        backward excursion above pass, since it is still well inside
+        C1's own 0.05deg band. Verified directly against the shipped
+        function's own two branches -- this pins that N3 is a REAL,
+        independent gate, not redundant with C1'."""
+        v = self._S + seg.ulp32(self._S) * 4
+        off_deg = abs(np.degrees(v - self._S))
+        assert off_deg < pc.C1_PRIME_DEG, "the mutant's own C1' check alone would NOT catch this"
 
 
 class TestC2Skew:
@@ -144,6 +195,51 @@ class TestC4:
         results = pc.run_all(targets21, t_hi_s, START, ROUTE, guard=(), assignment=assignment)
         assert not results["C4"].passed
         assert results["C4"].first_violation_index == last
+
+    #: Owner rulings (2026-09-25 owner-comparison-definitions): N2 + C4',
+    #: replacing the withdrawn literal T-10ms residual/``+1e-9`` slack.
+    #: Hand-built assignment (same isolation rationale as above).
+    _ROUTE1 = [mf.Waypoint("B", full_pose(r_shoulder_pitch=-0.7), 1.0)]
+    _START2 = full_pose(r_shoulder_pitch=-0.3)
+    _G = -0.7
+
+    def test_n2_exactly_1_ulp_beyond_goal_passes(self):
+        one_ulp = seg.ulp32(self._G)
+        # beyond G in the CONTINUING (decreasing) direction => more negative
+        targets8 = [full_pose(r_shoulder_pitch=self._G - one_ulp)]
+        assignment = seg.GoalAssignment(goal_index=[0], ok=True)
+        result = pc.check_c4(targets8, self._START2, self._ROUTE1, assignment)
+        assert result.passed, result
+
+    def test_n2_more_than_1_ulp_beyond_goal_fails(self):
+        targets8 = [full_pose(r_shoulder_pitch=self._G - seg.ulp32(self._G) * 4)]
+        assignment = seg.GoalAssignment(goal_index=[0], ok=True)
+        result = pc.check_c4(targets8, self._START2, self._ROUTE1, assignment)
+        assert not result.passed
+        assert "N2" in result.detail
+
+    def test_c4_prime_boundary_at_point_01_deg(self):
+        assignment = seg.GoalAssignment(goal_index=[0], ok=True)
+        short_ok = self._G + np.radians(0.008)     # 0.008deg short of goal
+        result_ok = pc.check_c4(
+            [full_pose(r_shoulder_pitch=short_ok)], self._START2, self._ROUTE1, assignment)
+        assert result_ok.passed, result_ok
+
+        short_bad = self._G + np.radians(0.02)     # 0.02deg -- exceeds C4'
+        result_bad = pc.check_c4(
+            [full_pose(r_shoulder_pitch=short_bad)], self._START2, self._ROUTE1, assignment)
+        assert not result_bad.passed
+        assert "C4'" in result_bad.detail
+
+    def test_mutation_n2_bound_removed_would_admit_the_overshoot(self):
+        """Mutation guard: dropping the N2 scan entirely (falling
+        through straight to the C4' last-setpoint check) would let the
+        more-than-1-ULP overshoot above pass, since it is still well
+        inside C4's own 0.01deg band -- pinning N2 as a real, independent
+        gate."""
+        v = self._G - seg.ulp32(self._G) * 4
+        off_deg = abs(np.degrees(v - self._G))
+        assert off_deg < pc.C4_PRIME_DEG, "the mutant's own C4' check alone would NOT catch this"
 
 
 class TestC5:
