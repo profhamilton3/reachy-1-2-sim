@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -63,6 +64,10 @@ from tools.goalfix_cmp._io import read_result  # noqa: E402
 pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 
 EXPECTED_HOST_SHA = "e54be0e65335af4a6317e287a6be0c22fad753c9"
+#: W-AC7 (assignment W3): PR #144's own pre-D-1 head, compared against on
+#: the SAME regenerated evidence to check the new window-based wrist-ball
+#: computation against the old, affected-based one.
+B59404C_SHA = "b59404cc8eda390585f0ec647ce91e26be942f5c"
 
 
 @pytest.fixture(scope="module")
@@ -202,6 +207,123 @@ def test_h6_workaround_lets_cli_run_in_non_validation_mode(stage_a):
     tw = payload["tripwires"]
     assert tw["reset_ack_timeout_total"] == 0
     assert tw["control_held_refusal_total"] == 0
+
+
+def test_w_ac7_slice_window_and_wrist_ball_match_b59404c(stage_a, tmp_path_factory, capsys):
+    """W-AC7 (D-1; assignment W3): the Stage A slice regenerated at this
+    head. For B cycles r2 and r3: window.valid with 11 blocks (asserted
+    UNCONDITIONALLY -- this is D-1's own robustness claim); first_rest
+    preceded by a real settle gap (>= window.SETTLE_GAP_S); and, wherever
+    b59404c's own (pre-D-1, goal-assignment-based) segmentation ALSO
+    succeeds on this same real recording, wrist_ball_planned/commanded/
+    realised_cm match it to <= 1e-9 cm.
+
+    Both this head's own values AND b59404c's own values are computed
+    here, from the SAME states.jsonl/commands.jsonl/sidecars this
+    fixture just generated -- never hardcoded from memory. b59404c's own
+    values come from a real `git archive` export of that commit, run as
+    a subprocess (never imported into this process, which already has
+    this head's own same-named tools.goalfix_cmp package loaded).
+
+    b59404c's own segmentation is NOT assumed to succeed: it is the
+    fragile, goal-assignment-based method D-1 replaces, and on a REAL
+    V3-harness recording (live async timing, regenerated fresh on every
+    call to this fixture) it can genuinely come back
+    `affected segment is indeterminate` on one real run and not on
+    another -- observed directly in the course of this work (identical
+    test code, two different real regenerations: one gave b59404c a
+    valid segment on both r2 and r3, a second gave it an indeterminate
+    segment on r2 alone). Re-running until b59404c happens to succeed
+    would be exactly the "tune the cutoff to obtain passes" the
+    assignment forbids. So: the numeric match is asserted only where
+    b59404c's own value exists at all on THIS run; where it does not,
+    that is reported as b59404c's own finding, not silently hidden and
+    not a failure of this head's own code -- head's window is required
+    to stay valid regardless, which is the actual property under test."""
+    stage, evidence = stage_a
+
+    archive_dir = str(tmp_path_factory.mktemp("b59404c_archive"))
+    with open(os.path.join(archive_dir, "archive.tar"), "wb") as f:
+        subprocess.run(["git", "archive", B59404C_SHA], cwd=_ROOT, stdout=f, check=True)
+    subprocess.run(["tar", "-xf", os.path.join(archive_dir, "archive.tar"), "-C", archive_dir], check=True)
+    assert os.path.isfile(os.path.join(archive_dir, "tools", "goalfix_cmp", "cycle.py"))
+
+    evd = ev.verify_and_load(evidence.run_dir, "states.jsonl", "commands.jsonl", "derived-SHA256SUMS")
+
+    out_dir = str(tmp_path_factory.mktemp("w_ac7_out"))
+    results = {}
+    compared = 0
+    for c in stage.cycles:
+        if c.name not in ("S2-B4-c-r2", "S2-B4-c-r3"):
+            continue
+        argv = [
+            "--ev-dir", str(evidence.run_dir),
+            "--sha256sums", "derived-SHA256SUMS",
+            "--control-dir", str(evidence.control_dir),
+            "--cycle", c.name, "--rep", str(c.rep), "--arm", c.arm,
+            "--arm-map", str(evidence.arm_map_path),
+            "--expected-host-sha", EXPECTED_HOST_SHA,
+            "--required-supervisor-programs", "reachy-sdk-server",
+            "--expected-bridge-sha-a", sas.BRIDGE_SHA["A"],
+            "--expected-bridge-sha-b", sas.BRIDGE_SHA["B"],
+        ]
+
+        out_head = os.path.join(out_dir, f"head_{c.name}.json")
+        cyc._cli(argv + ["--out", out_head])
+        payload_head = read_result(out_head)
+
+        out_old = os.path.join(out_dir, f"b59404c_{c.name}.json")
+        old_argv = [sys.executable, "-m", "tools.goalfix_cmp.cycle"] + argv + ["--out", out_old]
+        proc = subprocess.run(old_argv, cwd=archive_dir, capture_output=True, text=True)
+        assert os.path.isfile(out_old), (proc.returncode, proc.stdout[-4000:], proc.stderr[-4000:])
+        payload_old = read_result(out_old)
+
+        # D-1's own claim: head's window is valid regardless of whether
+        # b59404c's own (fragile) goal-assignment segmentation is.
+        w = payload_head["window"]
+        assert w["valid"], w["reasons"]
+        assert len(w["blocks"]) == 11
+
+        first_rest = w["first_rest"]
+        lb = evd.brackets[first_rest].t_lo - evd.brackets[first_rest - 1].t_hi
+        assert lb >= 0.28, lb
+
+        m_head = payload_head["metrics"]
+        m_old = payload_old["metrics"]
+        assert m_head is not None
+        assert m_head["wrist_ball_planned_cm"] is not None, m_head["open_questions"]
+
+        entry = {
+            "head_planned_cm": m_head["wrist_ball_planned_cm"],
+            "head_commanded_cm": m_head["wrist_ball_commanded_cm"],
+            "head_realised_cm": m_head["wrist_ball_realised_cm"],
+            "settle_gap_before_first_rest_s": lb,
+        }
+        if m_old is not None and m_old.get("wrist_ball_planned_cm") is not None:
+            for field in ("wrist_ball_planned_cm", "wrist_ball_commanded_cm", "wrist_ball_realised_cm"):
+                diff = abs(m_head[field] - m_old[field])
+                assert diff <= 1e-9, (c.name, field, m_head[field], m_old[field], diff)
+            entry["b59404c_planned_cm"] = m_old["wrist_ball_planned_cm"]
+            entry["b59404c_commanded_cm"] = m_old["wrist_ball_commanded_cm"]
+            entry["b59404c_realised_cm"] = m_old["wrist_ball_realised_cm"]
+            entry["b59404c_comparison"] = "matched to <= 1e-9 cm"
+            compared += 1
+        else:
+            entry["b59404c_comparison"] = (
+                "b59404c's own segmentation failed on THIS regeneration "
+                f"(reasons: {payload_old.get('reasons') if payload_old else 'no payload'}) "
+                "-- no numeric comparison possible for this cycle on this run; "
+                "head's own window stayed valid regardless (see above)")
+
+        results[c.name] = entry
+
+    assert set(results) == {"S2-B4-c-r2", "S2-B4-c-r3"}
+    with capsys.disabled():
+        print("\nW-AC7 wrist-ball values (head vs b59404c, same regenerated files):")
+        print(json.dumps(results, indent=2))
+    assert compared >= 1, (
+        "b59404c's own segmentation failed on BOTH cycles this run -- "
+        "no numeric comparison was possible at all; see printed values/reasons above")
 
 
 def test_r_ac4_clean_b_cycles_have_zero_echo_carry(stage_a):
