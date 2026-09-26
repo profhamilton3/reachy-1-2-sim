@@ -606,6 +606,32 @@ class TestF3PerCycleTripwires:
         assert row["unexpected_reset_ack"] == 1
         assert row["violated"] == []
 
+    def test_control_held_refusal_stops_both_arms(self, tmp_path):
+        """B1/H1 (merge verdict §2; coordinator Stage B authorization):
+        a non-zero control_held_refusal in ANY cycle's bridge_log ->
+        STOP, in BOTH arms (plan §7.7's own table). At 0722476 this
+        counter was tallied (control_held_refusal_total) but never
+        added to a row's own `violated` list, so it never gated at
+        all."""
+        self._write_four_clean(tmp_path, manifest_overrides={
+            "S2-B4-c-r2": {"bridge_log_text": "Server error: [control_held] execution lease held\n"}})
+        rc, payload = self._checkpoint(tmp_path)
+        assert rc == RC_STOP
+        row = next(r for r in payload["tripwires"]["per_cycle"] if r["cycle"] == "S2-B4-c-r2")
+        assert row["control_held_refusal"] == 1
+        assert "control_held_refusal" in row["violated"]
+
+    def test_control_held_refusal_on_a_cycle_also_stops(self, tmp_path):
+        """No A carve-out for control_held_refusal (unlike
+        unexpected_reset_ack) -- plan §7.7's table requires 0 in BOTH
+        arms."""
+        self._write_four_clean(tmp_path, manifest_overrides={
+            "S2-B4-c-r1": {"bridge_log_text": "Server error: [control_held] execution lease held\n"}})
+        rc, payload = self._checkpoint(tmp_path)
+        assert rc == RC_STOP
+        row = next(r for r in payload["tripwires"]["per_cycle"] if r["cycle"] == "S2-B4-c-r1")
+        assert "control_held_refusal" in row["violated"]
+
     def test_mixed_arms_binding_is_per_cycle_not_pooled(self, tmp_path):
         """Mixed arms: an A cycle carrying "Unexpected reset_ack" must
         not be charged to a B cycle, and vice versa -- proves the

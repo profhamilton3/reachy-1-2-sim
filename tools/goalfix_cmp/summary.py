@@ -430,6 +430,14 @@ def per_cycle_reset_tripwires(control_dir, cycle_id: str, arm: str) -> Dict[str,
         violated.append("reset_sh_mismatch")
     if counts["unexpected_reset_ack"] and arm == "B":
         violated.append("unexpected_reset_ack")
+    # B1/H1 (merge verdict, 2026-09-25 pr144-0722476-merge-verdict.md §2;
+    # coordinator Stage B authorization): plan §7.7's own table requires
+    # a non-zero control_held refusal to STOP in BOTH arms -- this was
+    # counted (control_held_refusal_total is still reported) but never
+    # added to `violated`, so a clean checkpoint/final authorized (rc 0)
+    # even with a real control_held refusal in a cycle's own bridge log.
+    if counts["control_held_refusal"]:
+        violated.append("control_held_refusal")
 
     return {"cycle": cycle_id, "arm": arm, **counts, "violated": violated}
 
