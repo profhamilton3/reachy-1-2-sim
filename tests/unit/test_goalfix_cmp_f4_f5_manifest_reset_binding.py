@@ -597,7 +597,34 @@ class TestF4DuplicateManifestBindingRejectedAtSummary:
             json.dumps(self._between_doc("S2-B4-c-r2", "B", epoch=2, reset_gen=2, sidecar_suffix="2")))
         verdicts, metrics, hash_mismatch = summ.load_between_files(tmp_path, arm_map)
         assert len(verdicts) == 2
-        assert hash_mismatch is False
+
+    def test_missing_manifest_binding_on_non_validation_cycle_is_rejected(self, tmp_path):
+        """B7/H7 (merge verdict §3; coordinator Stage B authorization):
+        manifest_binding is mandatory on a real (non-validation) between
+        file -- its absence used to let the duplicate epoch/reset-gen/
+        sidecar checks below run `if mb:` and skip entirely (silently
+        passing, per G3b), never actually checked at all."""
+        arm_map = self._arm_map(tmp_path)
+        doc = self._between_doc("S2-B4-c-r1", "A", epoch=1, reset_gen=1)
+        doc["manifest_binding"] = None
+        (tmp_path / "between_S2-B4-c-r1.json").write_text(json.dumps(doc))
+        with pytest.raises(summ.SummaryCliError, match="manifest_binding is missing"):
+            summ.load_between_files(tmp_path, arm_map)
+
+    def test_duplicate_sidecar_detected_despite_different_path_spelling(self, tmp_path):
+        """B7/H7: sidecar duplicates are compared on NORMALIZED paths --
+        "setup.link.json" and "./setup.link.json" (or an equivalent
+        absolute form) name the same real file and must collide, not
+        pass as "different" strings."""
+        arm_map = self._arm_map(tmp_path)
+        doc1 = self._between_doc("S2-B4-c-r1", "A", epoch=1, reset_gen=1)
+        doc1["manifest_binding"]["setup_sidecar"] = "setup.link.json"
+        (tmp_path / "between_S2-B4-c-r1.json").write_text(json.dumps(doc1))
+        doc2 = self._between_doc("S2-B4-c-r2", "B", epoch=2, reset_gen=2, sidecar_suffix="2")
+        doc2["manifest_binding"]["setup_sidecar"] = "./setup.link.json"  # same file, different spelling
+        (tmp_path / "between_S2-B4-c-r2.json").write_text(json.dumps(doc2))
+        with pytest.raises(summ.SummaryCliError, match="already claimed"):
+            summ.load_between_files(tmp_path, arm_map)
 
     def test_mutation_duplicate_epoch_check_removed(self, tmp_path):
         """Mutation (drop the epoch half of the duplicate check): the

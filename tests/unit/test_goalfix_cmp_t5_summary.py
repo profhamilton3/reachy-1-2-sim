@@ -207,6 +207,10 @@ class TestSummaryCli:
             "genuine_echo_count": 0, "segment_indeterminate": False,
             "metrics": metrics, "tools_sha256": sha or cyc._package_sha256(),
             "rc": rc if rc is not None else cyc.rc_for_verdict(verdict),
+            "manifest_binding": {
+                "rep": _cycle_rep(cycle), "cycle": cycle, "epoch": _cycle_rep(cycle),
+                "reset_gen": _cycle_rep(cycle), "setup_sidecar": f"{cycle}-setup.link.json",
+                "flight_sidecar": f"{cycle}-flight.link.json"},
         }
         (control_dir / f"between_{cycle}.json").write_text(json.dumps(doc))
 
@@ -264,6 +268,10 @@ class TestMB3RejectNonAuthorizingEvidence:
             "metrics": metrics, "tools_sha256": sha or cyc._package_sha256(),
             "rc": rc if rc is not None else cyc.rc_for_verdict(verdict),
             "validation_only": validation_only,
+            "manifest_binding": None if validation_only else {
+                "rep": _cycle_rep(cycle), "cycle": cycle, "epoch": _cycle_rep(cycle),
+                "reset_gen": _cycle_rep(cycle), "setup_sidecar": f"{cycle}-setup.link.json",
+                "flight_sidecar": f"{cycle}-flight.link.json"},
         }
         (control_dir / f"between_{cycle}.json").write_text(json.dumps(doc))
 
@@ -365,6 +373,10 @@ class TestMB7TripwiresThroughTheCli:
             "genuine_echo_count": 0, "segment_indeterminate": False,
             "metrics": metrics, "tools_sha256": cyc._package_sha256(),
             "rc": cyc.rc_for_verdict(verdict), "validation_only": False,
+            "manifest_binding": {
+                "rep": _cycle_rep(cycle), "cycle": cycle, "epoch": _cycle_rep(cycle),
+                "reset_gen": _cycle_rep(cycle), "setup_sidecar": f"{cycle}-setup.link.json",
+                "flight_sidecar": f"{cycle}-flight.link.json"},
         }
         (control_dir / f"between_{cycle}.json").write_text(json.dumps(doc))
 
@@ -451,6 +463,10 @@ class TestF1TripwiresReadTheLogFiles:
             "genuine_echo_count": 0, "segment_indeterminate": False,
             "metrics": metrics, "tools_sha256": cyc._package_sha256(),
             "rc": cyc.rc_for_verdict(verdict), "validation_only": False,
+            "manifest_binding": {
+                "rep": _cycle_rep(cycle), "cycle": cycle, "epoch": _cycle_rep(cycle),
+                "reset_gen": _cycle_rep(cycle), "setup_sidecar": f"{cycle}-setup.link.json",
+                "flight_sidecar": f"{cycle}-flight.link.json"},
         }
         (control_dir / f"between_{cycle}.json").write_text(json.dumps(doc))
 
@@ -546,6 +562,10 @@ class TestF3PerCycleTripwires:
             "genuine_echo_count": 0, "segment_indeterminate": False,
             "metrics": metrics, "tools_sha256": cyc._package_sha256(),
             "rc": cyc.rc_for_verdict(verdict), "validation_only": False,
+            "manifest_binding": {
+                "rep": _cycle_rep(cycle), "cycle": cycle, "epoch": _cycle_rep(cycle),
+                "reset_gen": _cycle_rep(cycle), "setup_sidecar": f"{cycle}-setup.link.json",
+                "flight_sidecar": f"{cycle}-flight.link.json"},
         }
         (control_dir / f"between_{cycle}.json").write_text(json.dumps(doc))
 

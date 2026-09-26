@@ -687,7 +687,16 @@ def load_between_files(
             raise SummaryCliError(
                 f"{f.name}: arm {doc.get('arm')!r} != arm_map[{rep}].arm {entry_arm!r}")
 
+        # B7/H7 (merge verdict §3; coordinator Stage B authorization):
+        # manifest_binding is mandatory on a non-validation between file
+        # -- it is only ever None when --validation-mode ran with no
+        # manifest at all (cycle.py's own contract). A non-validation
+        # file missing it entirely bypassed the duplicate epoch/reset-gen/
+        # sidecar checks below (they only ran `if mb:`), letting a
+        # duplicate epoch through with rc 0.
         mb = doc.get("manifest_binding")
+        if mb is None and not doc.get("validation_only"):
+            raise SummaryCliError(f"{f.name}: manifest_binding is missing on a non-validation cycle")
         if mb:
             epoch = mb.get("epoch")
             if epoch is not None:
@@ -706,11 +715,20 @@ def load_between_files(
             for sc_field in ("setup_sidecar", "flight_sidecar"):
                 sc = mb.get(sc_field)
                 if sc is not None:
-                    if sc in seen_sidecars and seen_sidecars[sc] != cycle_id:
+                    # B7/H7: manifest sidecar paths may be absolute, or
+                    # relative to --control-dir (F4) -- two cycles could
+                    # name the SAME real file with different spellings
+                    # ("setup.link.json" vs "./setup.link.json" vs its
+                    # absolute form). Normalized, always relative to
+                    # control_dir when not already absolute, so those
+                    # compare equal.
+                    sc_norm = os.path.normpath(
+                        sc if os.path.isabs(sc) else str(_Path(control_dir) / sc))
+                    if sc_norm in seen_sidecars and seen_sidecars[sc_norm] != cycle_id:
                         raise SummaryCliError(
                             f"{f.name}: sidecar {sc!r} is already claimed by cycle "
-                            f"{seen_sidecars[sc]!r}, not {cycle_id!r}")
-                    seen_sidecars[sc] = cycle_id
+                            f"{seen_sidecars[sc_norm]!r}, not {cycle_id!r}")
+                    seen_sidecars[sc_norm] = cycle_id
 
         v = cyc.CycleVerdict(
             cycle_id, doc["arm"], verdict, doc.get("reasons", []),
