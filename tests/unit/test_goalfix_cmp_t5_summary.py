@@ -481,13 +481,23 @@ class TestF1TripwiresReadTheLogFiles:
         """S4: --native-log naming a file that does not exist -> rc 3,
         never rc 0. At 0722476 a nonexistent path's own STRING had no
         tripwire text in it either, so counts came back 0 and the
-        checkpoint passed at rc 0."""
+        checkpoint passed at rc 0.
+
+        B9/H9 (merge verdict §3; coordinator Stage B authorization):
+        --states must be a REAL, existing file here -- the ORIGINAL
+        fixture made --states nonexistent too, so a mutant that treats
+        a missing --native-log as empty (rc 0) could still be masked by
+        the (unrelated) --states failure, never isolating what this
+        test claims to prove. With --states real, only --native-log's
+        own missing-file path is under test."""
         self._write_four_clean(tmp_path)
+        states = tmp_path / "states.jsonl"
+        states.write_text("")
         out = tmp_path / "checkpoint_1.json"
         rc = summ._cli([
             "checkpoint", "--control-dir", str(tmp_path), "--n", "4",
             "--native-log", str(tmp_path / "does_not_exist_native.log"),
-            "--states", str(tmp_path / "does_not_exist_states.jsonl"),
+            "--states", str(states),
             "--out", str(out),
             "--arm-map", str(_write_arm_map(tmp_path)),
             "--expected-bridge-sha-a", BRIDGE_SHA_A, "--expected-bridge-sha-b", BRIDGE_SHA_B,
