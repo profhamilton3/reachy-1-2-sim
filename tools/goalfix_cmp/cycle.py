@@ -179,8 +179,12 @@ def resolve_leg(
                 f"{leg_label}: sidecar's log {log_name!r} does not name route "
                 f"{expected_route_name!r}")
     if expected_server_run_dir is not None:
+        if "server_run_dir" not in sidecar:
+            raise CycleInputError(
+                f"{leg_label}: sidecar is missing server_run_dir "
+                f"(expected {expected_server_run_dir!r})")
         sc_run_dir = sidecar.get("server_run_dir")
-        if sc_run_dir is not None and sc_run_dir != expected_server_run_dir:
+        if sc_run_dir != expected_server_run_dir:
             raise CycleInputError(
                 f"{leg_label}: sidecar's server_run_dir {sc_run_dir!r} != "
                 f"this cycle's own run {expected_server_run_dir!r}")

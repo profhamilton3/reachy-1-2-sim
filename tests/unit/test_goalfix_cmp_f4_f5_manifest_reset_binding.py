@@ -222,6 +222,25 @@ class TestF4ManifestMandatoryOutsideValidationMode:
         assert rc == RC_INCONCLUSIVE
         assert "server_run_dir" in read_result(out).get("reason", "")
 
+    def test_absent_server_run_dir_is_rc3(self, tmp_path):
+        """B10/H10: a sidecar with NO ``server_run_dir`` key at all (not
+        merely a wrong one) must also be rc 3 -- at 0722476,
+        ``resolve_leg``'s check only fired when the key was PRESENT and
+        wrong (``sc_run_dir is not None and sc_run_dir != expected``),
+        silently passing when the key was absent entirely."""
+        ev_dir, control_dir = _build_cycle_n_resets(tmp_path, 2)
+        setup_sc_path = control_dir / f"{CYCLE}-setup.link.json"
+        sc = json.loads(setup_sc_path.read_text())
+        del sc["server_run_dir"]
+        setup_sc_path.write_text(json.dumps(sc))
+        _write_manifest(control_dir, reset_gen=2, reset_record="reset_record.txt")
+        _write_reset_record(control_dir, "reset_record.txt",
+                             "reset gen=2 ack=2 resets_recorded 1->2 sim_step 0->0\n")
+        out = tmp_path / "out.json"
+        rc = _run_cli(ev_dir, control_dir, "B", out)
+        assert rc == RC_INCONCLUSIVE
+        assert "missing server_run_dir" in read_result(out).get("reason", "")
+
     def test_clean_manifest_gives_ok_verdict(self, tmp_path):
         ev_dir, control_dir = _build_cycle_n_resets(tmp_path, 2)
         _write_manifest(control_dir, reset_gen=2, reset_record="reset_record.txt")
@@ -315,6 +334,33 @@ class TestF4ManifestMandatoryOutsideValidationMode:
         # The mutant's own (wrong) behaviour: no exception at all.
         cyc.resolve_leg(evd, control_dir / f"{CYCLE}-setup.link.json", "setup",
                          R.PLACE_ROUTE, R.CRITICAL_JOINTS)
+
+    def test_mutation_absent_server_run_dir_check_removed(self, tmp_path):
+        """Mutation (B10's own fix reverted to the 0722476 form:
+        ``if sc_run_dir is not None and sc_run_dir != expected: raise``):
+        a sidecar with the key entirely absent would resolve cleanly with
+        no exception at all. Reproduced directly against the shipped
+        ``resolve_leg`` (which DOES raise) and against a local
+        re-implementation of the OLD, buggy predicate (which does NOT),
+        never by editing the module in place."""
+        ev_dir, control_dir = _build_cycle_n_resets(tmp_path, 2)
+        setup_sc_path = control_dir / f"{CYCLE}-setup.link.json"
+        sc = json.loads(setup_sc_path.read_text())
+        del sc["server_run_dir"]
+        setup_sc_path.write_text(json.dumps(sc))
+        import tools.goalfix_cmp.evidence as ev_mod
+        evd = ev_mod.verify_and_load(ev_dir, "states.jsonl", "commands.jsonl")
+
+        # Shipped behaviour: raises on the absent key.
+        with pytest.raises(cyc.CycleInputError, match="missing server_run_dir"):
+            cyc.resolve_leg(evd, setup_sc_path, "setup", R.PLACE_ROUTE, R.CRITICAL_JOINTS,
+                             expected_route_name="PLACE_ROUTE", expected_server_run_dir="run_OTHER")
+
+        # The OLD (mutant) predicate, re-implemented independently here
+        # (never by mutating the shipped module): silently accepts.
+        sc_run_dir = sc.get("server_run_dir")
+        old_buggy_would_raise = sc_run_dir is not None and sc_run_dir != "run_OTHER"
+        assert old_buggy_would_raise is False
 
     def test_mutation_manifest_fallback_restored(self, tmp_path):
         """Mutation (restore the guessed-name fallback outside
