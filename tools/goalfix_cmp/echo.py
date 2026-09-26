@@ -72,6 +72,11 @@ class JointResult:
     label: str
     age_s: Optional[float] = None          # genuine_echo / start / path / ambiguous
     source_state_index: Optional[int] = None
+    #: H5/B5: True only for a PATH_COINCIDENCE with no other moving,
+    #: non-near-end, non-carry joint in the same command to compare tau
+    #: agreement against -- the rule is vacuous in that case (on-path
+    #: alone decides it), reported here rather than silently folded in.
+    tau_agreement_vacuous: bool = False
 
 
 @dataclass
@@ -146,6 +151,27 @@ def classify_commands(
         prev = prev_target.get(epoch)
         ctx = goto_context[i] if i < len(goto_context) else None
 
+        # H5/B5 (owner-approved plan §7.1; coordinator Stage B
+        # authorization): the tau-agreement comparison this command's own
+        # path-coincidence subclassification needs -- one implied tau per
+        # OTHER moving, non-near-end, non-carry joint of THIS command,
+        # computed once here (not per candidate joint) so `_subclassify`
+        # can compare against every one of them.
+        moving_taus: Dict[str, float] = {}
+        if ctx is not None:
+            for jn, jname in enumerate(R_JOINTS):
+                if prev is not None and target8[jn] == prev[jn]:
+                    continue  # R-carry: not a setpoint of this goto
+                if jname not in ctx.start8 or jname not in ctx.goal8:
+                    continue
+                ja, jb = ctx.start8[jname], ctx.goal8[jname]
+                if ja == jb:
+                    continue
+                jv = target8[jn]
+                if _is_near_end(jv, ja, jb):
+                    continue
+                moving_taus[jname] = implied_tau(ja, jb, jv)
+
         if bracket.unplaceable:
             for j, name in enumerate(R_JOINTS):
                 is_carry = prev is not None and target8[j] == prev[j]
@@ -202,20 +228,26 @@ def classify_commands(
                 turn_on_state_idx = int(e_state_idx[0]) if prev is None else None
             else:
                 turn_on_state_idx = leg_turn_on_state_index.get(i)
-            label = _subclassify(
+            label, vacuous = _subclassify(
                 name=name, value=value, epoch=epoch, command_index=i,
                 turn_on_state_index=turn_on_state_idx, ctx=ctx,
-                src_global_index=src_global)
-            result.joints[name] = JointResult(label, age_s=src_age, source_state_index=src_global)
+                src_global_index=src_global, moving_taus=moving_taus)
+            result.joints[name] = JointResult(label, age_s=src_age, source_state_index=src_global,
+                                               tau_agreement_vacuous=vacuous)
 
         prev_target[epoch] = target8
 
     return out
 
 
+def _is_near_end(value: float, a: float, b: float, tol_deg: float = ILL_CONDITIONED_DEG) -> bool:
+    return (abs(np.degrees(value - a)) <= tol_deg or abs(np.degrees(value - b)) <= tol_deg)
+
+
 def _subclassify(*, name: str, value: float, epoch: int, command_index: int,
                   turn_on_state_index: Optional[int], ctx: Optional[GotoContext],
-                  src_global_index: int) -> str:
+                  src_global_index: int,
+                  moving_taus: Optional[Dict[str, float]] = None) -> str:
     """An exact match's subclass, per plan §7.1's table.
 
     T7 (review §3.3): the plan's own rule is "the first setpoint after
@@ -227,18 +259,26 @@ def _subclassify(*, name: str, value: float, epoch: int, command_index: int,
     state the lookback happens to turn up. The pre-T7 rule pinned that
     reference to the EPOCH's absolute first state unconditionally, which a
     leg starting after any settle -- let alone a cycle's SECOND leg --
-    can never satisfy; E8 is exactly this."""
+    can never satisfy; E8 is exactly this.
+
+    H5/B5 (V1-a; owner-approved plan §7.1; coordinator Stage B
+    authorization): the non-near-end branch used to accept any value that
+    round-trips through ``implied_tau``/``pose_at`` for SOME tau in
+    [start, goal] -- true for every value in range, so it never actually
+    tested plan §7.1's own rule ("at an implied tau that agrees with the
+    command's other moving joints within 30 ms (C2)"). Now: on-path AND
+    that tau agrees, within 30 ms of SIMULATION TIME (using this goto's
+    own ``seconds``), with EVERY OTHER entry in ``moving_taus`` (every
+    other moving, non-near-end, non-carry joint of this SAME command). No
+    such other joint -> the rule is vacuous: still path coincidence (the
+    on-path test alone), reported via ``JointResult.tau_agreement_vacuous``.
+    The near-end exemption (Q-echo) is unchanged."""
     if turn_on_state_index is not None and src_global_index == turn_on_state_index:
-        return START_COINCIDENCE
+        return START_COINCIDENCE, False
     if ctx is not None and name in ctx.start8 and name in ctx.goal8:
         a, b = ctx.start8[name], ctx.goal8[name]
         if a != b:
-            # Ill-conditioned within 0.05 deg of either end -- excluded from
-            # the tau-agreement check (report §4, C2), exactly as C2 itself
-            # exempts a near-end joint from the tau comparison.
-            near_end = (abs(np.degrees(value - a)) <= ILL_CONDITIONED_DEG
-                        or abs(np.degrees(value - b)) <= ILL_CONDITIONED_DEG)
-            if near_end:
+            if _is_near_end(value, a, b):
                 # Q-echo (coordinator ruling, 2026-09-25 stage-1 rulings,
                 # §3): plan §7.1 defines path coincidence as the
                 # minimum-jerk setpoint on THIS goto's own path, "at an
@@ -256,13 +296,22 @@ def _subclassify(*, name: str, value: float, epoch: int, command_index: int,
                 # safe" rule.
                 lo, hi = (a, b) if a <= b else (b, a)
                 if lo <= value <= hi:
-                    return PATH_COINCIDENCE
+                    return PATH_COINCIDENCE, False
             else:
                 tau = implied_tau(a, b, value)
                 predicted = pose_at(a, b, tau)
-                if _within_float32_ulps(predicted, value, ULP_FLOAT32_FACTOR):
-                    return PATH_COINCIDENCE
-    return GENUINE_ECHO
+                on_path = _within_float32_ulps(predicted, value, ULP_FLOAT32_FACTOR)
+                if on_path:
+                    others = {jn: jt for jn, jt in (moving_taus or {}).items() if jn != name}
+                    if not others:
+                        return PATH_COINCIDENCE, True  # vacuous: no other joint to compare
+                    seconds = ctx.seconds
+                    agrees = all(
+                        abs(tau - other_tau) * seconds <= C2_SKEW_TOL_S + 1e-9
+                        for other_tau in others.values())
+                    if agrees:
+                        return PATH_COINCIDENCE, False
+    return GENUINE_ECHO, False
 
 
 def _within_float32_ulps(a: float, b: float, n: int) -> bool:
@@ -287,6 +336,11 @@ class Counts:
     path_coincidence: int = 0
     timing_ambiguous: int = 0
     unavailable: int = 0
+    #: H5/B5: of `path_coincidence`, how many had no OTHER moving,
+    #: non-near-end, non-carry joint in the same command to check tau
+    #: agreement against (the rule was vacuous -- on-path alone decided
+    #: it). Counted and reported, never silently folded into the total.
+    path_coincidence_vacuous: int = 0
 
     def add(self, label: str) -> None:
         setattr(self, label, getattr(self, label) + 1)
@@ -296,7 +350,8 @@ class Counts:
                     start_coincidence=self.start_coincidence,
                     path_coincidence=self.path_coincidence,
                     timing_ambiguous=self.timing_ambiguous,
-                    unavailable=self.unavailable)
+                    unavailable=self.unavailable,
+                    path_coincidence_vacuous=self.path_coincidence_vacuous)
 
 
 def count_labels(results: Sequence[Optional[CommandResult]],
@@ -309,6 +364,8 @@ def count_labels(results: Sequence[Optional[CommandResult]],
             continue
         for jr in r.joints.values():
             counts.add(jr.label)
+            if jr.label == PATH_COINCIDENCE and jr.tau_agreement_vacuous:
+                counts.path_coincidence_vacuous += 1
     return counts
 
 

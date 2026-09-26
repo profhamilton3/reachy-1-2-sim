@@ -54,7 +54,7 @@ class TestQEchoRuling:
     def test_near_start_reversal_is_path_coincidence(self):
         ctx = echo.GotoContext(
             start8={"r_shoulder_roll": self._A}, goal8={"r_shoulder_roll": self._B}, seconds=2.5)
-        label = echo._subclassify(
+        label, _vacuous = echo._subclassify(
             name="r_shoulder_roll", value=self._VALUE, epoch=0, command_index=0,
             turn_on_state_index=None, ctx=ctx, src_global_index=0)
         assert label == echo.PATH_COINCIDENCE
@@ -69,7 +69,7 @@ class TestQEchoRuling:
         assert not (min(self._A, self._B) <= off_path_value <= max(self._A, self._B))
         ctx = echo.GotoContext(
             start8={"r_shoulder_roll": self._A}, goal8={"r_shoulder_roll": self._B}, seconds=2.5)
-        label = echo._subclassify(
+        label, _vacuous = echo._subclassify(
             name="r_shoulder_roll", value=off_path_value, epoch=0, command_index=0,
             turn_on_state_index=None, ctx=ctx, src_global_index=0)
         assert label == echo.GENUINE_ECHO
