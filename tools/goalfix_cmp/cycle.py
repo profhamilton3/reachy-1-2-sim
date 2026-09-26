@@ -49,6 +49,7 @@ from tools.goalfix_cmp import initial  # noqa: E402
 from tools.goalfix_cmp import pathcheck as pc  # noqa: E402
 from tools.goalfix_cmp import provenance as pv  # noqa: E402
 from tools.goalfix_cmp import segments as seg  # noqa: E402
+from tools.goalfix_cmp import window  # noqa: E402
 from tools.goalfix_cmp._io import RC_INCONCLUSIVE, RC_OK, RC_STOP  # noqa: E402
 from tools.goalfix_cmp._units import RadWaypoint, route_rad  # noqa: E402
 
@@ -605,11 +606,23 @@ class CycleMetrics:
 
 def compute_place_route_metrics(
     evidence: ev.Evidence, place_leg: LegSpec, place_result: LegResult,
-    affected, scene, board_object_ids: Optional[Sequence[str]] = None,
+    affected, scene, board_object_ids: Optional[Sequence[str]] = None, *,
+    win: Optional["window.WindowResult"],
 ) -> CycleMetrics:
     """§7.3-7.5, computed from evidence where report §5 defines the
     quantity precisely enough; ``null`` (via ``open_questions``) where it
     does not -- never invented (assignment §2 T4 item 8).
+
+    ``win`` (D-1, decision report §2/§6; assignment W2 item 5): the
+    wrist_ball block's segment and window now come from
+    ``window.identify_window``, never from ``affected`` or a REST-assigned
+    search -- ``affected`` is kept only for the OTHER metrics below
+    (leg_start_shoulder_pitch_error_deg, post_arrival_rise_deg,
+    delta_cmd_segment_max_cm), which W2 leaves on the old boundary.
+    Required (keyword-only, no default that silently means "no window")
+    so every caller states its own window explicitly -- pass
+    ``window.identify_window(evidence, place_leg)`` (or ``None`` where a
+    caller genuinely has no setup leg to compute one for).
 
     ``board_object_ids`` (B12, owner rulings W1-W4): the setup sidecar's
     own ``scene.board_object_ids`` list -- the single board object
@@ -741,104 +754,91 @@ def compute_place_route_metrics(
         object_id, oid_question = _wrist_ball_object_id()
         if oid_question:
             m.open_questions.append(oid_question)
-        elif affected is None or affected.indeterminate:
+        elif win is None or not win.valid:
+            # D-1/W4 (decision report §6; assignment W2 item 5): the
+            # wrist_ball block's segment and window now come from
+            # window.identify_window, never from affected or a
+            # REST-assigned search -- an invalid/missing window is the
+            # ONLY reason this is null now (K3 is superseded: a bare C0
+            # violation on the setup leg no longer nulls this out on its
+            # own, per D-1(b)).
+            reason = "; ".join(win.reasons) if win is not None else "no window was computed"
             m.open_questions.append(
-                "wrist_ball_delta_cm: affected segment is indeterminate or missing (W4)")
+                f"wrist_ball_delta_cm: window is indeterminate or missing (W4): {reason}")
         else:
-            # W2: REST's own first ASSIGNED command after the segment --
-            # "to the first setpoint of the REST goto". R.PLACE_ROUTE has
-            # REST immediately after REST_SHUT; a route with no REST
-            # waypoint at all (or none assigned after the segment) is a
-            # missing input (W4), never guessed at.
-            route = place_leg.route_rad
-            rest_wp_idx = next((i for i, wp in enumerate(route) if wp.name == "REST"), None)
-            rest_first_local = None
-            if rest_wp_idx is not None:
-                rest_positions = [
-                    i for i, g in enumerate(place_result.assignment.goal_index)
-                    if g == rest_wp_idx and i > affected.end_command_index]
-                if rest_positions:
-                    rest_first_local = rest_positions[0]
-            if rest_first_local is None:
+            wb_global = list(win.segment_commands)
+            wb_commanded = (cl.commanded_samples(evidence.commands.target_rad[wb_global, :8])
+                             if wb_global else [])
+
+            b_start, b_rest = evidence.brackets[win.segment_start], evidence.brackets[win.first_rest]
+            epoch = int(evidence.commands.epoch[win.segment_start])
+
+            def _realised_window(lo_t, hi_t):
+                if lo_t is None or hi_t is None:
+                    return None
+                mask = ((evidence.states.epoch == epoch)
+                        & (evidence.states.sim_time_s >= lo_t)
+                        & (evidence.states.sim_time_s < hi_t))
+                state_idx = np.nonzero(mask)[0]
+                if len(state_idx) == 0:
+                    return None
+                samples, _ = cl.realised_samples_from_states(
+                    evidence.states.position_rad[state_idx, :8])
+                return samples
+
+            wb_realised = _realised_window(b_start.t_lo, b_rest.t_lo)
+            if not wb_commanded or not wb_realised:
                 m.open_questions.append(
-                    "wrist_ball_delta_cm: no REST goto found after the affected segment (W4)")
+                    "wrist_ball_delta_cm: no commanded/realised samples in the W2 "
+                    "segment window")
             else:
-                seg_wb_local = range(affected.start_command_index, rest_first_local)
-                wb_global = [place_leg.command_indices[i] for i in seg_wb_local]
-                wb_commanded = (cl.commanded_samples(evidence.commands.target_rad[wb_global, :8])
-                                 if wb_global else [])
-
-                start_global = place_leg.command_indices[affected.start_command_index]
-                rest_first_global = place_leg.command_indices[rest_first_local]
-                b_start, b_rest = evidence.brackets[start_global], evidence.brackets[rest_first_global]
-                epoch = int(evidence.commands.epoch[start_global])
-
-                def _realised_window(lo_t, hi_t):
-                    if lo_t is None or hi_t is None:
-                        return None
-                    mask = ((evidence.states.epoch == epoch)
-                            & (evidence.states.sim_time_s >= lo_t)
-                            & (evidence.states.sim_time_s < hi_t))
-                    state_idx = np.nonzero(mask)[0]
-                    if len(state_idx) == 0:
-                        return None
-                    samples, _ = cl.realised_samples_from_states(
-                        evidence.states.position_rad[state_idx, :8])
-                    return samples
-
-                wb_realised = _realised_window(b_start.t_lo, b_rest.t_lo)
-                if not wb_commanded or not wb_realised:
+                wb_deltas = cl.compute_deltas(
+                    "PLACE_ROUTE", [_R.HOVER, _R.REST_SHUT], 400, scene,
+                    wb_commanded, wb_realised)
+                entry = next(
+                    (d for d in wb_deltas if d.hand == "shells" and d.link == "wrist_ball"
+                     and d.object_id == object_id), None)
+                if entry is None:
                     m.open_questions.append(
-                        "wrist_ball_delta_cm: no commanded/realised samples in the W2 "
-                        "segment window")
+                        f"wrist_ball_delta_cm: object {object_id!r} has no "
+                        "wrist_ball/shells clearance entry over this segment's "
+                        "planned/commanded/realised samples")
                 else:
-                    wb_deltas = cl.compute_deltas(
-                        "PLACE_ROUTE", [_R.HOVER, _R.REST_SHUT], 400, scene,
-                        wb_commanded, wb_realised)
-                    entry = next(
-                        (d for d in wb_deltas if d.hand == "shells" and d.link == "wrist_ball"
-                         and d.object_id == object_id), None)
-                    if entry is None:
-                        m.open_questions.append(
-                            f"wrist_ball_delta_cm: object {object_id!r} has no "
-                            "wrist_ball/shells clearance entry over this segment's "
-                            "planned/commanded/realised samples")
-                    else:
-                        m.wrist_ball_object_id = object_id
-                        m.wrist_ball_planned_cm = entry.planned_cm
-                        m.wrist_ball_commanded_cm = entry.commanded_cm
-                        m.wrist_ball_realised_cm = entry.realised_cm
-                        m.wrist_ball_delta_cm = entry.planned_cm - entry.realised_cm
-                        m.delta_cmd_wb_cm = entry.delta_cmd_cm
-                        m.delta_trk_wb_cm = entry.delta_trk_cm
-                        m.cross_check_wrist_ball_cm = cl.cross_check_wrist_ball(
-                            wb_realised, scene, object_id, hand="shells")
+                    m.wrist_ball_object_id = object_id
+                    m.wrist_ball_planned_cm = entry.planned_cm
+                    m.wrist_ball_commanded_cm = entry.commanded_cm
+                    m.wrist_ball_realised_cm = entry.realised_cm
+                    m.wrist_ball_delta_cm = entry.planned_cm - entry.realised_cm
+                    m.delta_cmd_wb_cm = entry.delta_cmd_cm
+                    m.delta_trk_wb_cm = entry.delta_trk_cm
+                    m.cross_check_wrist_ball_cm = cl.cross_check_wrist_ball(
+                        wb_realised, scene, object_id, hand="shells")
 
-                        # Report-only (owner ruling, last bullet): the
-                        # SAME planned/commanded, realised against the
-                        # t_hi-bounded window instead -- exposes the
-                        # bracket's own [t_lo, t_hi] sensitivity. Never
-                        # gated, never fed into wrist_ball_delta_cm
-                        # itself.
-                        sensitivity: Dict[str, Optional[float]] = {
-                            "t_lo_realised_cm": entry.realised_cm,
-                            "t_lo_delta_cm": m.wrist_ball_delta_cm,
-                            "t_hi_realised_cm": None,
-                            "t_hi_delta_cm": None,
-                        }
-                        wb_realised_thi = _realised_window(b_start.t_hi, b_rest.t_hi)
-                        if wb_realised_thi:
-                            thi_deltas = cl.compute_deltas(
-                                "PLACE_ROUTE", [_R.HOVER, _R.REST_SHUT], 400, scene,
-                                wb_commanded, wb_realised_thi)
-                            thi_entry = next(
-                                (d for d in thi_deltas if d.hand == "shells"
-                                 and d.link == "wrist_ball" and d.object_id == object_id), None)
-                            if thi_entry is not None:
-                                sensitivity["t_hi_realised_cm"] = thi_entry.realised_cm
-                                sensitivity["t_hi_delta_cm"] = (
-                                    thi_entry.planned_cm - thi_entry.realised_cm)
-                        m.wrist_ball_bracket_sensitivity = sensitivity
+                    # Report-only (owner ruling, last bullet): the
+                    # SAME planned/commanded, realised against the
+                    # t_hi-bounded window instead -- exposes the
+                    # bracket's own [t_lo, t_hi] sensitivity. Never
+                    # gated, never fed into wrist_ball_delta_cm
+                    # itself.
+                    sensitivity: Dict[str, Optional[float]] = {
+                        "t_lo_realised_cm": entry.realised_cm,
+                        "t_lo_delta_cm": m.wrist_ball_delta_cm,
+                        "t_hi_realised_cm": None,
+                        "t_hi_delta_cm": None,
+                    }
+                    wb_realised_thi = _realised_window(b_start.t_hi, b_rest.t_hi)
+                    if wb_realised_thi:
+                        thi_deltas = cl.compute_deltas(
+                            "PLACE_ROUTE", [_R.HOVER, _R.REST_SHUT], 400, scene,
+                            wb_commanded, wb_realised_thi)
+                        thi_entry = next(
+                            (d for d in thi_deltas if d.hand == "shells"
+                             and d.link == "wrist_ball" and d.object_id == object_id), None)
+                        if thi_entry is not None:
+                            sensitivity["t_hi_realised_cm"] = thi_entry.realised_cm
+                            sensitivity["t_hi_delta_cm"] = (
+                                thi_entry.planned_cm - thi_entry.realised_cm)
+                    m.wrist_ball_bracket_sensitivity = sensitivity
 
     return m
 
@@ -884,6 +884,12 @@ class CycleVerdict:
     #: all cycles are visible. ``None`` when no manifest was used at all
     #: (only possible in --validation-mode).
     manifest_binding: Optional[Dict[str, object]] = None
+    #: D-1 (decision report §2/§6; assignment W2 item 6): the W-blk
+    #: window result for the setup leg, every ``window.WindowResult``
+    #: field except ``state_indices``. ``None`` when no setup leg was
+    #: evaluated at all. REPORT-ONLY alongside ``segment_indeterminate``
+    #: (which is ``not window["valid"]`` when this is not ``None``).
+    window: Optional[Dict[str, object]] = None
 
     def rc(self) -> int:
         if self.validation_only:
@@ -906,8 +912,22 @@ class CycleVerdict:
             "control_new_target_count": self.control_new_target_count,
             "per_waypoint": self.per_waypoint,
             "manifest_binding": self.manifest_binding,
+            "window": self.window,
             "rc": self.rc(),
         }
+
+
+def _window_report_dict(win: Optional["window.WindowResult"]) -> Optional[Dict[str, object]]:
+    """D-1 (assignment W2 item 6): the between JSON's own ``window``
+    object -- every ``WindowResult`` field except ``state_indices``
+    (the raw state-array row numbers are an implementation detail, not
+    part of the report)."""
+    if win is None:
+        return None
+    import dataclasses
+    d = dataclasses.asdict(win)
+    d.pop("state_indices", None)
+    return d
 
 
 def _package_sha256() -> str:
@@ -1010,51 +1030,53 @@ def evaluate_cycle(
     genuine = 0
     segment_indeterminate = True
     affected = None
+    win: Optional[window.WindowResult] = None
     control_genuine_echo_count: Optional[int] = None
     control_new_target_count: Optional[int] = None
 
     if place_leg is not None and place_lr is not None:
+        # D-1 (decision report §2/§6; assignment W2): the measurement
+        # window is now located by settle-gap blocks (W-blk), never by
+        # goal assignment -- robust to exactly the echo corruption that
+        # broke find_affected_segment's own C0 boundary on 91-94% of a
+        # real setup leg's commands (decision report §3.1). `affected` is
+        # still computed, for the OTHER metrics below
+        # (leg_start_shoulder_pitch_error_deg, post_arrival_rise_deg,
+        # delta_cmd_segment_max_cm) that W2 leaves on the old boundary --
+        # it no longer drives segment_indeterminate or the wrist_ball
+        # segment/window at all.
+        win = window.identify_window(evidence, place_leg)
         affected = seg.find_affected_segment(place_lr.assignment, place_leg.route_rad,
                                               hover_name, rest_shut_name)
-        if affected is not None:
-            segment_indeterminate = affected.indeterminate
-            # W4: an unassigned non-carry run anywhere in the SETUP leg
-            # invalidates the affected segment, even when
-            # find_affected_segment itself found determinate bounds --
-            # the anomaly may sit outside [start_command_index,
-            # end_command_index] yet still make the leg's own C0
-            # segmentation untrustworthy.
-            if place_lr.unassigned_non_carry_violation:
-                segment_indeterminate = True
-                # B12: compute_place_route_metrics reads affected.indeterminate
-                # directly (W4) -- it must see the SAME forced-indeterminate
-                # verdict this override applies here, not the (possibly
-                # False) value find_affected_segment itself returned.
-                affected.indeterminate = True
-            if not segment_indeterminate:
-                seg_global_indices = [
-                    place_leg.command_indices[i]
-                    for i in range(affected.start_command_index, affected.end_command_index + 1)]
-                counts = echo.count_labels(echo_results, seg_global_indices)
-                genuine = counts.genuine_echo
+        segment_indeterminate = not win.valid
+        if win.valid:
+            seg_global_indices = list(win.segment_commands)
+            counts = echo.count_labels(echo_results, seg_global_indices)
+            genuine = counts.genuine_echo
 
-                # CB7 (readiness review, 2026-09-25 stage-repairs
-                # assignment §4): plan §7.1's control run, scoped to the
-                # SAME affected segment -- REPORT-ONLY, never read below.
-                control_results = echo.classify_commands(
-                    evidence, full_goto_context, shift_s=-echo.CONTROL_SHIFT_S,
-                    leg_turn_on_state_index=leg_turn_on_map)
-                control_counts = echo.count_labels(control_results, seg_global_indices)
-                control_genuine_echo_count = control_counts.genuine_echo
-                control_new_target_count = (
-                    sum(control_counts.as_dict().values()) - control_counts.carry)
+            # CB7 (readiness review, 2026-09-25 stage-repairs
+            # assignment §4): plan §7.1's control run, scoped to the
+            # SAME W-blk segment -- REPORT-ONLY, never read below.
+            control_results = echo.classify_commands(
+                evidence, full_goto_context, shift_s=-echo.CONTROL_SHIFT_S,
+                leg_turn_on_state_index=leg_turn_on_map)
+            control_counts = echo.count_labels(control_results, seg_global_indices)
+            control_genuine_echo_count = control_counts.genuine_echo
+            control_new_target_count = (
+                sum(control_counts.as_dict().values()) - control_counts.carry)
 
     metrics = None
     if place_leg is not None and place_lr is not None:
         metrics = compute_place_route_metrics(
-            evidence, place_leg, place_lr, affected, scene, board_object_ids)
+            evidence, place_leg, place_lr, affected, scene, board_object_ids, win=win)
 
     reasons = list(fail_reasons) + drift_reasons + lead_in_reasons + unassigned_non_carry_reasons
+    if win is not None:
+        # D-1: the W-blk validity reasons (wblk:*), report-only detail
+        # behind segment_indeterminate below -- collected regardless of
+        # arm, exactly like the generic "affected segment is
+        # indeterminate" reason already is.
+        reasons.extend(win.reasons)
     for name in truncated_inside_leg:
         reasons.append(f"{name}: commands.jsonl's final line was truncated inside this leg")
 
@@ -1142,7 +1164,8 @@ def evaluate_cycle(
         tools_sha256=_package_sha256(),
         control_genuine_echo_count=control_genuine_echo_count,
         control_new_target_count=control_new_target_count,
-        per_waypoint={lr.name: lr.per_waypoint for lr in leg_results.values()})
+        per_waypoint={lr.name: lr.per_waypoint for lr in leg_results.values()},
+        window=_window_report_dict(win))
     return cv, leg_results
 
 

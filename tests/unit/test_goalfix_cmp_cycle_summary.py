@@ -61,7 +61,11 @@ def _place_route_legspec(evidence):
 
 class TestEvaluateCycle:
     def test_clean_b_cycle_is_ok(self, tmp_path):
-        sim = mf.FlightSim(START, restream_passes=1, settle_s=0.05)
+        # D-1: W-blk needs a real settle gap (>= SETTLE_GAP_S=0.28s) to
+        # find its own block boundaries -- settle_s=0.05 (kept for other
+        # tests' own speed) no longer produces one, so this fixture uses
+        # the FlightSim default (0.3s) instead.
+        sim = mf.FlightSim(START, restream_passes=1)
         sim.fly(PLACE_ROUTE)
         result = sim.result()
         evidence = _write_and_load(tmp_path, result.state_rows, result.command_rows)
@@ -91,24 +95,33 @@ class TestEvaluateCycle:
         assert cv.rc() == 3
 
     def test_a_cycle_with_echoes_is_manipulated(self, tmp_path):
-        """W4/B15 (coordinator review, 2026-09-25 Stage-A slice review,
-        §4; owner Stage B authorization): at this echo rate, at least
-        one injected echo is off-path enough that `assign_goals` cannot
-        place it at all -- an unassigned, non-carry command, which now
-        invalidates the affected segment (W4) before the segment-scoped
-        genuine-echo count is even computed. This is not a fixture bug:
-        it reproduces V1-b's own real-A finding (echo-driven segmentation
-        corruption) exactly, at this echo rate. `inconclusive_baseline`
-        is the correct verdict here, not `manipulated`."""
+        """D-1 supersedes the W4/B15 finding this test used to assert
+        (coordinator review, 2026-09-25 Stage-A slice review, §4): at
+        this echo rate, at least one injected echo is off-path enough
+        that `assign_goals` cannot place it -- an unassigned, non-carry
+        command. Under the OLD affected-based method that invalidated
+        the whole segment (`inconclusive_baseline`), reproducing V1-b's
+        real-A finding that echoes corrupt GOAL-ASSIGNMENT segmentation.
+        W-blk (D-1) segments by the bridge's own settle-gap timing
+        instead, which an echoed VALUE cannot disturb -- exactly the
+        finding behind D-1 (decision report §3.1: 91-94% of a real A
+        setup leg's commands go unassigned under C0, yet all 6 of 6 real
+        A windows are still identifiable via W-blk). The window here
+        stays valid, so the segment-scoped genuine-echo count is
+        computed as normal and this cycle is correctly `manipulated`."""
         sim = mf.FlightSim(START, seed=4)
         sim.fly(PLACE_ROUTE, echo_rate=0.44)
         result = sim.result()
         evidence = _write_and_load(tmp_path, result.state_rows, result.command_rows)
         legs = [_place_route_legspec(evidence)]
         cv, _ = cyc.evaluate_cycle("A_c2", "A", evidence, legs, **_PASSING_GATES)
-        assert cv.verdict == cyc.VERDICT_INCONCLUSIVE_BASELINE
-        assert cv.rc() == 3
-        assert cv.segment_indeterminate
+        assert cv.verdict == cyc.VERDICT_MANIPULATED, cv.reasons
+        assert cv.rc() == 0
+        assert not cv.segment_indeterminate
+        assert cv.genuine_echo_count > 0
+        # The unassigned non-carry command is still real and still
+        # reported (report-only for A, per D-1(b)) -- it just no longer
+        # invalidates the window/segment on its own.
         assert any("unassigned non-carry" in r for r in cv.reasons), cv.reasons
 
     def test_a_cycle_missing_start_variant_is_evidence_incomplete(self, tmp_path):

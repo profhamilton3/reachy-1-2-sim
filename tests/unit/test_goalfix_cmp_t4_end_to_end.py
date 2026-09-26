@@ -66,7 +66,9 @@ def _build_cycle(tmp_path, *, echo_rate=0.0, seed=0, home_offset_deg=0.0):
 
     home = dict(R.HOME)
     home["r_shoulder_pitch"] = home.get("r_shoulder_pitch", 0.0) + home_offset_deg
-    sim = mf.FlightSim(home, pose_units="deg", restream_passes=1, settle_s=0.05)
+    # D-1: W-blk needs a real settle gap (>= SETTLE_GAP_S=0.28s) to find
+    # its own block boundaries -- settle_s=0.05 no longer produces one.
+    sim = mf.FlightSim(home, pose_units="deg", restream_passes=1)
     sim.fly(R.PLACE_ROUTE, echo_rate=echo_rate, echo_rng=__import__("random").Random(seed))
     setup_last_seq = sim.state_rows[-1]["seq"]
     setup_first_seq = 0
@@ -102,7 +104,9 @@ def _build_cycle_with_reset(tmp_path):
     control_dir.mkdir()
 
     home = dict(R.HOME)
-    sim = mf.FlightSim(home, pose_units="deg", restream_passes=1, settle_s=0.05)
+    # D-1: W-blk needs a real settle gap (>= SETTLE_GAP_S=0.28s) to find
+    # its own block boundaries -- settle_s=0.05 no longer produces one.
+    sim = mf.FlightSim(home, pose_units="deg", restream_passes=1)
     # `__init__` already emits one state at sim_step 0; advance one tick
     # first so the reset's own sim_step actually DROPS back to 0 (an
     # epoch boundary is detected by a strict decrease -- 0 -> 0 is not
@@ -168,7 +172,7 @@ class TestEndToEndFixtureTable:
         payload = read_result(out)
         assert payload["verdict"] == cyc.VERDICT_OK, payload
 
-    def test_a_with_echoes_is_inconclusive_baseline_via_w4(self, tmp_path, monkeypatch):
+    def test_a_with_echoes_is_manipulated_via_wblk(self, tmp_path, monkeypatch):
         # Q-echo (coordinator ruling, 2026-09-25 stage-1 rulings, §3): with
         # this module's own zeroed `_LAG_RAD` (state == target exactly),
         # EVERY forced echo sourced from a past STATE of the SAME goto is,
@@ -186,21 +190,30 @@ class TestEndToEndFixtureTable:
         # the file's own autouse fixture; lag never enters any C0-C8 check,
         # which reads only commanded targets, never states).
         #
-        # W4/B15 (coordinator review, 2026-09-25 Stage-A slice review, §4;
-        # owner Stage B authorization): with a genuinely lagged plant, at
+        # D-1 (decision report §2/§3.1/§6) supersedes the W4/B15 finding
+        # this test used to assert (coordinator review, 2026-09-25
+        # Stage-A slice review, §4): with a genuinely lagged plant, at
         # least one echo at this rate/seed is off-path enough that
         # assign_goals cannot place it -- an unassigned, non-carry
-        # command, which invalidates the affected segment (W4). The
-        # correct verdict is now `inconclusive_baseline`, matching V1-b's
-        # own real-A finding that echoes corrupt segmentation -- not
-        # `manipulated`.
+        # command. Under the OLD affected (goal-assignment) segmentation
+        # this invalidated the whole segment (`inconclusive_baseline`).
+        # W-blk segments by the bridge's own settle-gap TIMING instead,
+        # which an echoed VALUE cannot disturb -- this real cycle is
+        # exactly the decision report's own §3.1 finding (91-94% of a
+        # real A setup leg's commands unassigned under C0, yet the
+        # window is still identifiable), so the window stays valid and
+        # the correct verdict is `manipulated`, not `inconclusive_baseline`.
         monkeypatch.setattr(mf, "_LAG_RAD", [0.0021 + 0.0001 * j for j in range(8)])
         ev_dir, control_dir = _build_cycle(tmp_path, echo_rate=0.4, seed=7)
         out = tmp_path / "out.json"
         rc = _run_cli(ev_dir, control_dir, "A", out)
         payload = read_result(out)
-        assert payload["verdict"] == cyc.VERDICT_INCONCLUSIVE_BASELINE, payload
-        assert payload["segment_indeterminate"] is True
+        assert payload["verdict"] == cyc.VERDICT_MANIPULATED, payload
+        assert payload["segment_indeterminate"] is False
+        assert payload["window"]["valid"] is True
+        # The unassigned non-carry command is still real and still
+        # reported (report-only for A, per D-1(b)) -- it just no longer
+        # invalidates the window/segment on its own.
         assert any("unassigned non-carry" in r for r in payload["reasons"]), payload["reasons"]
 
     def test_a_without_echoes_is_inconclusive_baseline(self, tmp_path):
@@ -254,11 +267,18 @@ class TestEndToEndFixtureTable:
         rc = _run_cli(ev_dir, control_dir, "B", out)
         assert rc == RC_INCONCLUSIVE
 
-    def _build_truncated_flight_cycle(self, tmp_path, k=10):
+    def _build_truncated_flight_cycle(self, tmp_path, k=20):
         """Probe P7: drops the flight leg's own last `k` states.jsonl
         rows (their commands then have no state reporting them
         applied) and fixes up the flight sidecar's own last alignment
-        entry so `leg_from_sidecar` still finds a valid server_seq."""
+        entry so `leg_from_sidecar` still finds a valid server_seq.
+
+        D-1: `_build_cycle` now flies with the FlightSim default
+        settle_s (0.3s = 15 trailing hold-only state rows with no
+        command of their own), so `k` must reach past that hold to cut
+        into a real command-bracketing state -- `k=10` (right for the
+        old settle_s=0.05 fixture) truncated only trailing hold rows,
+        leaving nothing genuinely unplaceable."""
         import hashlib
         import json as _json
 

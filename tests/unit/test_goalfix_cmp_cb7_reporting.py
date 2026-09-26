@@ -94,9 +94,32 @@ class TestPerWaypointReport:
 
 class TestControlRatePerSegment:
     def test_control_genuine_echo_count_present_when_segment_determinate(self, tmp_path):
-        evd, leg = _build(tmp_path)
-        cv, _ = cyc.evaluate_cycle("cb7", "A", evd, [leg], skip_gates=True)
-        assert not cv.segment_indeterminate
+        # D-1 (superseded W2/W4 behaviour): `_build()`'s 2-command,
+        # no-settle-gap, HOVER/REST_SHUT-only fixture has no REST
+        # waypoint and no settle hold at all, so W-blk can never find a
+        # determinate window on it (`wblk:missing_waypoint=REST`,
+        # `wblk:block_count=1`) -- it never exercised segment
+        # DETERMINACY under the old affected-based method either
+        # (find_affected_segment needs no REST goto to be determinate,
+        # but this test's OWN intent, per its name, is "when segment
+        # determinate"). A real HOVER->REST_SHUT->REST flight, with the
+        # settle holds the new method depends on, is needed instead.
+        joints = list(mf.R_JOINTS)
+        start = dict(zip(joints, [0.0] * 8))
+        hover = dict(start, r_wrist_pitch=np.radians(-40.0))
+        rest_shut = dict(hover, r_wrist_pitch=np.radians(-60.0))
+        rest = dict(rest_shut, r_gripper=np.radians(30.0))
+        route = [mf.Waypoint("HOVER", hover, 1.0), mf.Waypoint("REST_SHUT", rest_shut, 1.0),
+                 mf.Waypoint("REST", rest, 1.0)]
+        sim = mf.FlightSim(start)
+        sim.fly(route)
+        result = sim.result()
+        mf.write_evidence(tmp_path, result.state_rows, result.command_rows)
+        evd = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+        leg = cyc.LegSpec("setup", route_rad=route, guard=(), start_pose8=start,
+                           command_indices=list(range(len(result.command_rows))))
+        cv, _ = cyc.evaluate_cycle("cb7c", "A", evd, [leg], skip_gates=True)
+        assert not cv.segment_indeterminate, cv.reasons
         assert cv.control_genuine_echo_count is not None
         assert cv.control_new_target_count is not None
         assert cv.control_genuine_echo_count == 0  # no planted control-side match here

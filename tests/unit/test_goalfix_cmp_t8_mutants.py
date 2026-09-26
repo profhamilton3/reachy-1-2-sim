@@ -473,6 +473,20 @@ class TestMutantT7SecondLegWiring:
                                   cmd_seq=1, wall_time_ns=1 + len(rows),
                                   position_rad21=mf.full21(hover_target)))
 
+        # D-1 (decision report §2/§6; assignment W1): W-blk needs a real
+        # settle gap (>= SETTLE_GAP_S=0.28s, i.e. >= 14 command-free
+        # ticks) after each goto, and a real HOVER/REST_SHUT/REST triple,
+        # to find a window at all -- without one, genuine_echo_count is
+        # always 0 regardless of the T7 per-leg wiring this test exists
+        # to check, silently defeating test_mutation_first_leg_only_
+        # loop_would_miss_it's own mutation guard below. Nothing about
+        # the T7 mechanism itself (per-command echo classification,
+        # independent of segmentation) is affected by adding this.
+        for _ in range(16):  # settle after HOVER's own cmd1
+            rows.append(mf.state_row(seq=len(rows), sim_step=len(rows), sim_time_s=len(rows) * 0.02,
+                                      cmd_seq=1, wall_time_ns=1 + len(rows),
+                                      position_rad21=mf.full21(hover_target)))
+
         # cmd2: a real move to a synthetic "REST_SHUT" goal, so
         # find_affected_segment can bound HOVER..REST_SHUT on the flight
         # leg's own (local) assignment.
@@ -483,7 +497,20 @@ class TestMutantT7SecondLegWiring:
                                   cmd_seq=2, wall_time_ns=1 + len(rows),
                                   position_rad21=mf.full21(rest_target)))
 
-        mf.write_evidence(tmp_path, rows, [cmd0, cmd1, cmd2])
+        for _ in range(16):  # settle after REST_SHUT's own cmd2
+            rows.append(mf.state_row(seq=len(rows), sim_step=len(rows), sim_time_s=len(rows) * 0.02,
+                                      cmd_seq=2, wall_time_ns=1 + len(rows),
+                                      position_rad21=mf.full21(rest_target)))
+
+        # cmd3: REST -- only the gripper opens, matching PLACE_ROUTE's
+        # own REST_SHUT->REST shape.
+        rest2_target = dict(rest_target, r_gripper=-0.8)
+        cmd3 = mf.command_row_joint(seq=3, target_rad21=mf.full21(rest2_target))
+        rows.append(mf.state_row(seq=len(rows), sim_step=len(rows), sim_time_s=len(rows) * 0.02,
+                                  cmd_seq=3, wall_time_ns=1 + len(rows),
+                                  position_rad21=mf.full21(rest2_target)))
+
+        mf.write_evidence(tmp_path, rows, [cmd0, cmd1, cmd2, cmd3])
         evd = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
 
         setup_leg = cyc.LegSpec(
@@ -492,8 +519,9 @@ class TestMutantT7SecondLegWiring:
         flight_leg = cyc.LegSpec(
             name="flight",
             route_rad=[mf.Waypoint("HOVER", hover_target, 1.0),
-                       mf.Waypoint("REST_SHUT", rest_target, 1.0)],
-            guard=[], command_indices=[1, 2], start_pose8=present_at_flight_turn_on)
+                       mf.Waypoint("REST_SHUT", rest_target, 1.0),
+                       mf.Waypoint("REST", rest2_target, 1.0)],
+            guard=[], command_indices=[1, 2, 3], start_pose8=present_at_flight_turn_on)
         return evd, setup_leg, flight_leg
 
     def test_second_leg_turn_on_is_start_coincidence_through_evaluate_cycle(self, tmp_path):

@@ -69,7 +69,9 @@ def _build_cycle_n_resets(tmp_path, n_resets, *, extra_reset_after_flight=False)
     control_dir.mkdir()
 
     home = dict(R.HOME)
-    sim = mf.FlightSim(home, pose_units="deg", restream_passes=1, settle_s=0.05)
+    # D-1: W-blk needs a real settle gap (>= SETTLE_GAP_S=0.28s) to find
+    # its own block boundaries -- settle_s=0.05 no longer produces one.
+    sim = mf.FlightSim(home, pose_units="deg", restream_passes=1)
     sim._hold_ticks(1, home)
     for i in range(n_resets):
         sim.reset(seed=i + 1)

@@ -27,6 +27,7 @@ for _p in ("../../src", "../../scripts", "../../native_mujoco", "../..", "../fix
 import make_fixtures as mf  # noqa: E402
 from tools.goalfix_cmp import cycle as cyc  # noqa: E402
 from tools.goalfix_cmp import evidence as ev  # noqa: E402
+from tools.goalfix_cmp import window  # noqa: E402
 from reachy_ai.motion.rig_routes import SHUT, OPEN  # noqa: E402
 from reachy_ai.scene.awareness import SceneModel, SceneObject  # noqa: E402
 
@@ -51,37 +52,60 @@ def _build(tmp_path, *, with_rest=True, hold_commands=1):
     REST_SHUT, an optional REST_SHUT hold (bit-exact carries), then
     (optionally) REST (same arm pose, gripper OPEN -- exactly how
     R.PLACE_ROUTE's own REST_SHUT->REST transition only moves the
-    gripper)."""
+    gripper).
+
+    D-1 (decision report §2/§6; assignment W2 item 5): the wrist_ball
+    segment/window now come from W-blk, which needs a real command-free
+    settle gap (>= window.SETTLE_GAP_S) at each goto boundary to find its
+    own blocks at all -- inserted here (state-only rows, no command)
+    between HOVER's own arrival and REST_SHUT's approach, and again
+    before REST. pre1/pre2 stay inside HOVER's own block (no settle gap
+    before them), so the segment still starts at HOVER's own LAST
+    command, not the leg's own first -- the same property the original,
+    settle-gap-free fixture tested under the old affected-based method.
+    """
     joints = list(mf.R_JOINTS)
     pre1 = _pose(joints, r_shoulder_pitch=np.radians(-5.0), r_gripper=np.radians(SHUT))
     pre2 = _pose(joints, r_shoulder_pitch=np.radians(-10.0), r_gripper=np.radians(SHUT))
     hover = _pose(joints, r_shoulder_pitch=np.radians(-30.0), r_gripper=np.radians(SHUT))
     rest_shut = _pose(joints, r_shoulder_pitch=np.radians(-70.0), r_gripper=np.radians(SHUT))
-
-    targets = [pre1, pre2, hover, rest_shut]
-    for _ in range(hold_commands):
-        targets.append(dict(rest_shut))  # bit-exact carry of REST_SHUT
-    if with_rest:
-        rest = dict(rest_shut, r_gripper=np.radians(OPEN))
-        targets.append(rest)
+    rest = dict(rest_shut, r_gripper=np.radians(OPEN))
 
     start_pose = _pose(joints)
     rows = [mf.state_row(seq=0, sim_step=0, sim_time_s=0.0, cmd_seq=-1,
                           wall_time_ns=1, position_rad21=mf.full21(start_pose))]
     cmds = []
-    for i, tgt in enumerate(targets):
+
+    def _emit(tgt):
+        i = len(cmds)
         cmds.append(mf.command_row_joint(seq=i, target_rad21=mf.full21(tgt)))
-        rows.append(mf.state_row(seq=i + 1, sim_step=i + 1, sim_time_s=(i + 1) * 0.02,
-                                  cmd_seq=i, wall_time_ns=2 + i,
-                                  position_rad21=mf.full21(tgt)))
+        rows.append(mf.state_row(seq=len(rows), sim_step=len(rows), sim_time_s=len(rows) * 0.02,
+                                  cmd_seq=i, wall_time_ns=2 + len(rows), position_rad21=mf.full21(tgt)))
+
+    def _settle(pose, n=16):  # >= window.SETTLE_GAP_S (0.28s) of command-free ticks
+        for _ in range(n):
+            rows.append(mf.state_row(seq=len(rows), sim_step=len(rows), sim_time_s=len(rows) * 0.02,
+                                      cmd_seq=len(cmds) - 1, wall_time_ns=2 + len(rows),
+                                      position_rad21=mf.full21(pose)))
+
+    _emit(pre1)
+    _emit(pre2)
+    _emit(hover)
+    _settle(hover)
+    _emit(rest_shut)
+    for _ in range(hold_commands):
+        _emit(dict(rest_shut))  # bit-exact carry of REST_SHUT, same block
+
+    route = [mf.Waypoint("HOVER", hover, 1.0), mf.Waypoint("REST_SHUT", rest_shut, 1.0)]
+    if with_rest:
+        _settle(rest_shut)
+        _emit(rest)
+        route.append(mf.Waypoint("REST", rest, 1.0))
 
     mf.write_evidence(tmp_path, rows, cmds)
     evd = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
-    route = [mf.Waypoint("HOVER", hover, 1.0), mf.Waypoint("REST_SHUT", rest_shut, 1.0)]
-    if with_rest:
-        route.append(mf.Waypoint("REST", rest, 1.0))
     leg = cyc.LegSpec("setup", route_rad=route, guard=(), start_pose8=start_pose,
-                       command_indices=list(range(len(targets))))
+                       command_indices=list(range(len(cmds))))
     return evd, leg
 
 
@@ -91,8 +115,10 @@ class TestWristBallDeltaRealComputation:
         lr = cyc.evaluate_leg(evd, leg)
         affected = cyc.seg.find_affected_segment(lr.assignment, leg.route_rad)
         assert affected is not None and not affected.indeterminate
+        win = window.identify_window(evd, leg)
+        assert win.valid, win.reasons
         m = cyc.compute_place_route_metrics(
-            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1"])
+            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1"], win=win)
         assert not m.open_questions, m.open_questions
         assert m.wrist_ball_delta_cm is not None
         assert m.wrist_ball_object_id == "box_1"
@@ -110,8 +136,9 @@ class TestWristBallDeltaRealComputation:
         evd, leg = _build(tmp_path)
         lr = cyc.evaluate_leg(evd, leg)
         affected = cyc.seg.find_affected_segment(lr.assignment, leg.route_rad)
+        win = window.identify_window(evd, leg)
         m = cyc.compute_place_route_metrics(
-            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1"])
+            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1"], win=win)
         assert m.cross_check_wrist_ball_cm is not None
         assert m.cross_check_wrist_ball_cm >= 0.0
 
@@ -121,8 +148,9 @@ class TestWristBallMissingInputsAreNullNeverGuessed:
         evd, leg = _build(tmp_path)
         lr = cyc.evaluate_leg(evd, leg)
         affected = cyc.seg.find_affected_segment(lr.assignment, leg.route_rad)
+        win = window.identify_window(evd, leg)
         m = cyc.compute_place_route_metrics(
-            evd, leg, lr, affected, _box_scene(), board_object_ids=None)
+            evd, leg, lr, affected, _box_scene(), board_object_ids=None, win=win)
         assert m.wrist_ball_delta_cm is None
         assert any("board_object_ids" in q and "empty or absent" in q for q in m.open_questions)
 
@@ -130,66 +158,69 @@ class TestWristBallMissingInputsAreNullNeverGuessed:
         evd, leg = _build(tmp_path)
         lr = cyc.evaluate_leg(evd, leg)
         affected = cyc.seg.find_affected_segment(lr.assignment, leg.route_rad)
+        win = window.identify_window(evd, leg)
         m = cyc.compute_place_route_metrics(
-            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1", "box_2"])
+            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1", "box_2"], win=win)
         assert m.wrist_ball_delta_cm is None
         assert any("2 entries" in q for q in m.open_questions)
 
     def test_indeterminate_segment_is_null_with_open_question(self, tmp_path):
+        """D-1 (decision report §2/§6; assignment W2 item 5) supersedes
+        this test's original mechanism: the wrist_ball block's nullity is
+        no longer driven by `affected.indeterminate` at all (forcing it
+        True here would now have zero effect on `m`) -- it comes
+        entirely from `win.valid`. Constructs an explicitly invalid
+        window directly, the same contract (null + open_question) now
+        exercised through its real trigger."""
         evd, leg = _build(tmp_path)
         lr = cyc.evaluate_leg(evd, leg)
         affected = cyc.seg.find_affected_segment(lr.assignment, leg.route_rad)
-        affected.indeterminate = True  # W4
+        bad_win = window.WindowResult(valid=False, reasons=["wblk:block_count=1"])
         m = cyc.compute_place_route_metrics(
-            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1"])
+            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1"], win=bad_win)
         assert m.wrist_ball_delta_cm is None
         assert any("indeterminate or missing" in q for q in m.open_questions)
 
     def test_no_rest_goto_after_segment_is_null_with_open_question(self, tmp_path):
-        """W2/W4: a route with no REST waypoint after REST_SHUT at all
-        (this leg's own route only has HOVER/REST_SHUT) -- the segment
-        itself is perfectly determinate, but there is nothing to bound
-        the W2 window's upper edge."""
+        """D-1 (assignment W1 "missing_waypoint"): a route with no REST
+        waypoint after REST_SHUT at all (this leg's own route only has
+        HOVER/REST_SHUT) -- W-blk itself cannot even locate a window
+        (`wblk:missing_waypoint=REST`), superseding the old affected-
+        based "no REST goto found after the segment" reason text (the
+        segment concept itself no longer exists independently of the
+        window)."""
         evd, leg = _build(tmp_path, with_rest=False)
         lr = cyc.evaluate_leg(evd, leg)
         affected = cyc.seg.find_affected_segment(lr.assignment, leg.route_rad)
         assert affected is not None and not affected.indeterminate
+        win = window.identify_window(evd, leg)
+        assert not win.valid
+        assert any("missing_waypoint=REST" in r for r in win.reasons), win.reasons
         m = cyc.compute_place_route_metrics(
-            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1"])
+            evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1"], win=win)
         assert m.wrist_ball_delta_cm is None
-        assert any("no REST goto found" in q for q in m.open_questions)
+        assert any("missing_waypoint=REST" in q for q in m.open_questions)
 
     def test_no_scene_is_null_exactly_as_before(self, tmp_path):
         evd, leg = _build(tmp_path)
         lr = cyc.evaluate_leg(evd, leg)
         affected = cyc.seg.find_affected_segment(lr.assignment, leg.route_rad)
+        win = window.identify_window(evd, leg)
         m = cyc.compute_place_route_metrics(
-            evd, leg, lr, affected, None, board_object_ids=["box_1"])
+            evd, leg, lr, affected, None, board_object_ids=["box_1"], win=win)
         assert m.wrist_ball_delta_cm is None
 
-    def test_mutation_rest_search_not_bounded_by_segment_end_would_pick_earlier_rest(self, tmp_path):
-        """Mutation guard (drop the `i > affected.end_command_index`
-        filter from the REST search): reproduced directly against the
-        real assignment -- with the filter, REST's own first assigned
-        LOCAL index must be strictly after the segment's own end; without
-        it, the search could latch onto a spurious earlier occurrence.
-        This route has exactly one REST occurrence, so the filtered and
-        unfiltered searches happen to agree here -- this guard instead
-        pins that `rest_first_local` is unconditionally the FIRST REST
-        occurrence >= 0 in this fixture, and separately confirms it is
-        also > affected.end_command_index (the shipped invariant), so a
-        mutant that dropped the filter could not silently regress without
-        this test's own second assertion catching it on a route where the
-        two diverge (documented, not fabricated: this fixture's own
-        route has no earlier REST occurrence to diverge from)."""
-        evd, leg = _build(tmp_path)
-        lr = cyc.evaluate_leg(evd, leg)
-        affected = cyc.seg.find_affected_segment(lr.assignment, leg.route_rad)
-        route = leg.route_rad
-        rest_idx = next(i for i, wp in enumerate(route) if wp.name == "REST")
-        positions = [i for i, g in enumerate(lr.assignment.goal_index) if g == rest_idx]
-        assert positions, "fixture must actually assign something to REST"
-        assert positions[0] > affected.end_command_index
+    # D-1 (decision report §2/§6; assignment W2 item 5): the mutation
+    # guard formerly here (`test_mutation_rest_search_not_bounded_by_
+    # segment_end_would_pick_earlier_rest`) pinned the OLD REST-assigned
+    # search's own `i > affected.end_command_index` filter in
+    # `compute_place_route_metrics`. That search no longer exists at all
+    # -- the wrist_ball segment/window come from `window.identify_window`
+    # unconditionally now, with no goal-assignment-based REST search to
+    # guard. Deleted rather than reworked: there is no D-1 equivalent
+    # mechanism for it to pin (window.py's own `first_rest`/block
+    # partitioning is exercised directly by the W-blk acceptance tests,
+    # not by a REST-search filter).
 
 
 class TestW1PerCycleCriterionThroughAggregate:
