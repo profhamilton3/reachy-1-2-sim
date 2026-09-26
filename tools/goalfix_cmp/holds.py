@@ -65,15 +65,26 @@ def find_hold_windows(
     under R-tie/R-const, never by the mere absence of commands.
     ``last_k_command_index`` is the GLOBAL index of the last command
     assigned to the goal being held -- the window's own reference target
-    (never the window's own first/last sample)."""
+    (never the window's own first/last sample).
+
+    B15/H12 (coordinator review, 2026-09-25 Stage-A slice review, §4;
+    owner Stage B authorization): the window spans the file-order
+    interval between k's LAST assigned command and k+1's FIRST assigned
+    command -- INCLUDING any run of unassigned (``None``-goal) commands
+    in between (an indeterminate sample, e.g. a genuine echo that broke
+    segmentation, no longer silently escapes this window merely because
+    it is not immediately adjacent to the two assigned commands that
+    bound it). Found from the ASSIGNED positions only (``None`` entries
+    are skipped when looking for the boundary, never treated as ending
+    one), so a run of any length is bridged the same way a single
+    ``None`` used to be."""
     windows = []
-    n = len(assignment.goal_index)
-    for i in range(n - 1):
-        g, nxt = assignment.goal_index[i], assignment.goal_index[i + 1]
-        if g is None or nxt is None or nxt == g:
+    assigned = [(i, g) for i, g in enumerate(assignment.goal_index) if g is not None]
+    for (i, g), (j, nxt) in zip(assigned, assigned[1:]):
+        if nxt == g:
             continue
         t_lo = brackets[command_indices[i]].t_hi
-        t_hi = brackets[command_indices[i + 1]].t_lo
+        t_hi = brackets[command_indices[j]].t_lo
         if t_lo is None or t_hi is None:
             continue
         windows.append((g, t_lo, t_hi, command_indices[i]))

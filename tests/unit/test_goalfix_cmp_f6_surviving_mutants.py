@@ -222,6 +222,13 @@ class TestMutantQThroughCli:
         return ev_dir, control_dir
 
     def test_genuine_echo_stops_through_the_cli(self, tmp_path):
+        """B15/H12 (coordinator review, 2026-09-25 Stage-A slice review,
+        §4; owner Stage B authorization) now catches this construction's
+        off-path, non-carry injection as an unassigned command before
+        echo classification's own segment-scoped count runs -- STOP
+        still holds, via the unassigned-non-carry reason (co-firing with
+        C1/C2/lead-in at this route's own out-of-order boundary, per the
+        class docstring)."""
         ev_dir, control_dir = self._build(tmp_path)
         out = tmp_path / "out.json"
         rc = cyc._cli([
@@ -230,8 +237,7 @@ class TestMutantQThroughCli:
         ])
         payload = read_result(out)
         assert payload["verdict"] == cyc.VERDICT_STOP, payload
-        assert payload["genuine_echo_count"] >= 1, payload
-        assert any("genuine echo" in r for r in payload["reasons"])
+        assert any("unassigned non-carry" in r for r in payload["reasons"]), payload["reasons"]
 
 
 # ---------------------------------------------------------------------------

@@ -168,7 +168,7 @@ class TestEndToEndFixtureTable:
         payload = read_result(out)
         assert payload["verdict"] == cyc.VERDICT_OK, payload
 
-    def test_a_with_echoes_is_manipulated(self, tmp_path, monkeypatch):
+    def test_a_with_echoes_is_inconclusive_baseline_via_w4(self, tmp_path, monkeypatch):
         # Q-echo (coordinator ruling, 2026-09-25 stage-1 rulings, §3): with
         # this module's own zeroed `_LAG_RAD` (state == target exactly),
         # EVERY forced echo sourced from a past STATE of the SAME goto is,
@@ -185,13 +185,23 @@ class TestEndToEndFixtureTable:
         # (every other test in this module still isolates C1 from lag via
         # the file's own autouse fixture; lag never enters any C0-C8 check,
         # which reads only commanded targets, never states).
+        #
+        # W4/B15 (coordinator review, 2026-09-25 Stage-A slice review, §4;
+        # owner Stage B authorization): with a genuinely lagged plant, at
+        # least one echo at this rate/seed is off-path enough that
+        # assign_goals cannot place it -- an unassigned, non-carry
+        # command, which invalidates the affected segment (W4). The
+        # correct verdict is now `inconclusive_baseline`, matching V1-b's
+        # own real-A finding that echoes corrupt segmentation -- not
+        # `manipulated`.
         monkeypatch.setattr(mf, "_LAG_RAD", [0.0021 + 0.0001 * j for j in range(8)])
         ev_dir, control_dir = _build_cycle(tmp_path, echo_rate=0.4, seed=7)
         out = tmp_path / "out.json"
         rc = _run_cli(ev_dir, control_dir, "A", out)
         payload = read_result(out)
-        assert payload["verdict"] == cyc.VERDICT_MANIPULATED, payload
-        assert payload["genuine_echo_count"] > 0
+        assert payload["verdict"] == cyc.VERDICT_INCONCLUSIVE_BASELINE, payload
+        assert payload["segment_indeterminate"] is True
+        assert any("unassigned non-carry" in r for r in payload["reasons"]), payload["reasons"]
 
     def test_a_without_echoes_is_inconclusive_baseline(self, tmp_path):
         ev_dir, control_dir = _build_cycle(tmp_path)

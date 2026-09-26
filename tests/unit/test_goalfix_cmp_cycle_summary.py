@@ -91,15 +91,25 @@ class TestEvaluateCycle:
         assert cv.rc() == 3
 
     def test_a_cycle_with_echoes_is_manipulated(self, tmp_path):
+        """W4/B15 (coordinator review, 2026-09-25 Stage-A slice review,
+        §4; owner Stage B authorization): at this echo rate, at least
+        one injected echo is off-path enough that `assign_goals` cannot
+        place it at all -- an unassigned, non-carry command, which now
+        invalidates the affected segment (W4) before the segment-scoped
+        genuine-echo count is even computed. This is not a fixture bug:
+        it reproduces V1-b's own real-A finding (echo-driven segmentation
+        corruption) exactly, at this echo rate. `inconclusive_baseline`
+        is the correct verdict here, not `manipulated`."""
         sim = mf.FlightSim(START, seed=4)
         sim.fly(PLACE_ROUTE, echo_rate=0.44)
         result = sim.result()
         evidence = _write_and_load(tmp_path, result.state_rows, result.command_rows)
         legs = [_place_route_legspec(evidence)]
         cv, _ = cyc.evaluate_cycle("A_c2", "A", evidence, legs, **_PASSING_GATES)
-        assert cv.verdict == cyc.VERDICT_MANIPULATED
-        assert cv.rc() == 0
-        assert cv.genuine_echo_count > 0
+        assert cv.verdict == cyc.VERDICT_INCONCLUSIVE_BASELINE
+        assert cv.rc() == 3
+        assert cv.segment_indeterminate
+        assert any("unassigned non-carry" in r for r in cv.reasons), cv.reasons
 
     def test_a_cycle_missing_start_variant_is_evidence_incomplete(self, tmp_path):
         """MB1/P1: an A cycle with echoes but a missing start_variant

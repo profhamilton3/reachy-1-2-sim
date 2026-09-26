@@ -368,6 +368,16 @@ class LegResult:
     #: -- one entry per route waypoint, REPORT-ONLY (never read by any
     #: verdict/rc computation in this module).
     per_waypoint: List[Dict[str, object]] = field(default_factory=list)
+    #: B15/H12 (coordinator review, 2026-09-25 Stage-A slice review, §4;
+    #: owner Stage B authorization): an unassigned (None-goal) command,
+    #: ANYWHERE inside the leg's own mid-span (strictly between the
+    #: turn_on match and the route's own final-waypoint assignment --
+    #: never the lead-in or parked-tail windows, which are gated
+    #: separately), that is NOT a bit-exact carry of its own immediately
+    #: preceding command. B -> STOP; for A, invalidates the affected
+    #: segment (W4).
+    unassigned_non_carry_violation: bool = False
+    unassigned_non_carry_detail: str = ""
 
 
 def _per_waypoint_report(
@@ -457,6 +467,7 @@ def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
     # defect Q-hold closed for the settle-hold windows).
     lead_in_violation = False
     lead_in_detail = ""
+    turn_on_match: Optional[holds.TurnOnMatch] = None
     if leg.sidecar_t_lo is not None:
         turn_on_match = holds.find_turn_on_command(evidence, list(idx))
         if turn_on_match is None:
@@ -478,11 +489,13 @@ def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
                 lead_in_detail = turn_on_match.detail
 
     parked_tail_indeterminate = False
+    final_local: Optional[int] = None
     if leg.sidecar_t_hi is not None:
         final_idx = holds.find_final_waypoint_last_command(assignment, list(idx), len(leg.route_rad))
         if final_idx is None:
             parked_tail_indeterminate = True
         else:
+            final_local = list(idx).index(final_idx)
             parked_lo = evidence.brackets[final_idx].t_hi
             if parked_lo is not None:
                 last_k_target8 = {name: float(evidence.commands.target_rad[final_idx, k])
@@ -496,6 +509,31 @@ def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
                     raise CycleInputError(f"{leg.name}: parked-tail window: {exc}") from exc
                 if es is not None:
                     hold_stats.append(es)
+
+    # B15/H12 (coordinator review, 2026-09-25 Stage-A slice review, §4;
+    # owner Stage B authorization): an unassigned command ANYWHERE in the
+    # leg's own mid-span (between the turn_on match and the route's own
+    # final-waypoint assignment -- the lead-in/parked-tail windows are
+    # gated separately, above) that is not a bit-exact carry of its own
+    # immediately preceding command is a real anomaly (an echo, or
+    # anything else `assign_goals` could not place), never silently
+    # invisible just because it does not happen to sit at a goal
+    # transition (`find_hold_windows`'s own, narrower scope).
+    unassigned_non_carry_violation = False
+    unassigned_non_carry_detail = ""
+    lo_local = (turn_on_match.local_index
+                if leg.sidecar_t_lo is not None and turn_on_match is not None else 0)
+    hi_local = final_local if final_local is not None else (len(idx) - 1)
+    for local_i in range(lo_local, hi_local + 1):
+        if assignment.goal_index[local_i] is not None:
+            continue
+        prev8 = targets8[local_i - 1] if local_i > 0 else leg.start_pose8
+        if targets8[local_i] != prev8:
+            unassigned_non_carry_violation = True
+            unassigned_non_carry_detail = (
+                f"unassigned, non-carry command at local index {local_i} "
+                f"(global {int(idx[local_i])})")
+            break
 
     ctx = build_goto_context(leg.route_rad, leg.start_pose8, assignment)
 
@@ -523,7 +561,9 @@ def evaluate_leg(evidence: ev.Evidence, leg: LegSpec) -> LegResult:
                       duplicates_inside, lead_in_violation=lead_in_violation,
                       lead_in_detail=lead_in_detail,
                       parked_tail_indeterminate=parked_tail_indeterminate,
-                      per_waypoint=_per_waypoint_report(targets8, leg.route_rad, assignment))
+                      per_waypoint=_per_waypoint_report(targets8, leg.route_rad, assignment),
+                      unassigned_non_carry_violation=unassigned_non_carry_violation,
+                      unassigned_non_carry_detail=unassigned_non_carry_detail)
 
 
 # ---------------------------------------------------------------------------
@@ -805,6 +845,14 @@ def evaluate_cycle(
     lead_in_reasons = [f"{lr.name}: lead-in violation: {lr.lead_in_detail}"
                         for lr in leg_results.values() if lr.lead_in_violation]
 
+    # B15/H12: an unassigned, non-carry command anywhere in a leg's own
+    # mid-span -> B STOP; for A, invalidates the affected segment (W4).
+    any_unassigned_non_carry = any(
+        lr.unassigned_non_carry_violation for lr in leg_results.values())
+    unassigned_non_carry_reasons = [
+        f"{lr.name}: unassigned non-carry command: {lr.unassigned_non_carry_detail}"
+        for lr in leg_results.values() if lr.unassigned_non_carry_violation]
+
     # T4 item 4: goto_context, built per leg, merged into one full-length
     # array so echo.classify_commands sees path coincidence for every leg.
     full_goto_context: List[Optional[echo.GotoContext]] = [None] * len(evidence.commands)
@@ -835,7 +883,15 @@ def evaluate_cycle(
                                               hover_name, rest_shut_name)
         if affected is not None:
             segment_indeterminate = affected.indeterminate
-            if not affected.indeterminate:
+            # W4: an unassigned non-carry run anywhere in the SETUP leg
+            # invalidates the affected segment, even when
+            # find_affected_segment itself found determinate bounds --
+            # the anomaly may sit outside [start_command_index,
+            # end_command_index] yet still make the leg's own C0
+            # segmentation untrustworthy.
+            if place_lr.unassigned_non_carry_violation:
+                segment_indeterminate = True
+            if not segment_indeterminate:
                 seg_global_indices = [
                     place_leg.command_indices[i]
                     for i in range(affected.start_command_index, affected.end_command_index + 1)]
@@ -857,7 +913,7 @@ def evaluate_cycle(
     if place_leg is not None and place_lr is not None:
         metrics = compute_place_route_metrics(evidence, place_leg, place_lr, affected, scene)
 
-    reasons = list(fail_reasons) + drift_reasons + lead_in_reasons
+    reasons = list(fail_reasons) + drift_reasons + lead_in_reasons + unassigned_non_carry_reasons
     for name in truncated_inside_leg:
         reasons.append(f"{name}: commands.jsonl's final line was truncated inside this leg")
 
@@ -909,7 +965,7 @@ def evaluate_cycle(
         if segment_indeterminate:
             reasons.append("affected segment is indeterminate or missing (B)")
         if (any_pathcheck_fail or genuine > 0 or any_hold_target_drift or any_lead_in_violation
-                or segment_indeterminate or gate_failed):
+                or segment_indeterminate or gate_failed or any_unassigned_non_carry):
             verdict = VERDICT_STOP
         elif gate_incomplete:
             verdict = VERDICT_EVIDENCE_INCOMPLETE

@@ -294,19 +294,23 @@ class TestMutantQ_BIgnoresGenuineEchoInSegment:
     def test_off_path_near_end_echo_stops_b(self, tmp_path):
         """Not an isolation proof (see the class docstring: this specific
         injection also trips C1) -- it demonstrates the ruling's own
-        second suggested test: an off-path near-end echo is still
-        genuine_echo, named in the STOP reason. Mutant (q)'s "removing
-        genuine>0 would still STOP via pathcheck" caveat applies here the
-        same way it already does to `test_genuine_echo_in_segment_stops_b`
-        -- both are accepted as reported, not reworked to force isolation
-        that a correct R-const/Q-echo no longer allows for an off-path
-        injection at a goto boundary."""
+        second suggested test: an off-path near-end echo. B15/H12
+        (coordinator review, 2026-09-25 Stage-A slice review, §4; owner
+        Stage B authorization) now catches this construction FIRST: the
+        planted value is deliberately off-path AND not a carry
+        (documented in `_build`'s own comment), so
+        `segments.assign_goals` cannot place it at all -- it is
+        unassigned, which is exactly B15's own scope, and STOPs the
+        cycle before echo classification's own segment-scoped count is
+        even computed (`segment_indeterminate` short-circuits it to 0).
+        Still STOP, via the unassigned-non-carry reason, not the
+        genuine-echo one -- accepted as reported, not reworked to force
+        the OLD isolation this construction no longer produces."""
         evd, leg = self._build(tmp_path)
         cv, leg_results = cyc.evaluate_cycle("t8q", "B", evd, [leg], skip_gates=True)
 
-        assert cv.genuine_echo_count >= 1, cv.as_dict()
         assert cv.verdict == cyc.VERDICT_STOP
-        assert any("genuine echo" in reason for reason in cv.reasons)
+        assert any("unassigned non-carry" in reason for reason in cv.reasons), cv.as_dict()
 
 
 class TestMutantI_ControlShiftSign:
