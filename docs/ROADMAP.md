@@ -2,6 +2,10 @@
 
 This backlog is organized as mergeable vertical slices. Do not open one giant “add MuJoCo” change. Each epic has explicit entry conditions, tasks, and exit gates.
 
+## Proposed extension — continuous whole-arm clearance monitoring
+
+See [Continuous whole-arm clearance monitoring](roadmap/continuous-whole-arm-protection.md) for the proposed operating contract, simulator-state monitoring and stop enforcement, followed by camera-fed obstacle integration. It builds on issues #56 and #74 and cross-links the IITG perception roadmap. **Status: proposal; implementation and experiments are not authorized by this document.**
+
 ## Global rules
 
 - Preserve Reachy v1 SDK behavior and port `50051`.
