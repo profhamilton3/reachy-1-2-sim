@@ -362,6 +362,39 @@ class TestF5ResetBinding:
         assert rc == RC_INCONCLUSIVE
         assert "do not all agree" in read_result(out).get("reason", "")
 
+    def test_resets_recorded_b_to_b_plus_2_is_rc3(self, tmp_path):
+        """B4/H4 (merge verdict §2; coordinator Stage B authorization):
+        check 2 (``after == before + 1``) -- a record claiming
+        ``resets_recorded 1->3`` (a +2 jump, skipping a reset the
+        evidence never shows was verified) is rc 3, with its own
+        reason, never silently accepted because ``after`` happens to
+        still be a valid epoch number."""
+        ev_dir, control_dir = _build_cycle_n_resets(tmp_path, 2)
+        _write_manifest(control_dir, reset_gen=2, reset_record="reset_record.txt")
+        _write_reset_record(control_dir, "reset_record.txt",
+                             self._record(gen=2, ack=2, before=1, after=3))
+        out = tmp_path / "out.json"
+        rc = _run_cli(ev_dir, control_dir, "B", out)
+        assert rc == RC_INCONCLUSIVE
+        assert "is not a +1 increment" in read_result(out).get("reason", "")
+
+    def test_sim_step_after_absent_from_epoch_is_rc3(self, tmp_path):
+        """B4/H4: check 7 -- the record's own ``sim_step_after`` (s1)
+        must appear as SOME state's ``sim_step`` inside the verified
+        epoch. A value the epoch never actually reports (the record and
+        the evidence disagree) is rc 3, never silently accepted just
+        because gen/ack/before/after all check out."""
+        ev_dir, control_dir = _build_cycle_n_resets(tmp_path, 2)
+        _write_manifest(control_dir, reset_gen=2, reset_record="reset_record.txt")
+        _write_reset_record(control_dir, "reset_record.txt",
+                             self._record(gen=2, ack=2, before=1, after=2, s0=0, s1=999999))
+        out = tmp_path / "out.json"
+        rc = _run_cli(ev_dir, control_dir, "B", out)
+        assert rc == RC_INCONCLUSIVE
+        reason = read_result(out).get("reason", "")
+        assert "sim_step_after" in reason
+        assert "999999" in reason
+
     def test_legs_in_epoch_after_minus_one_is_rc3(self, tmp_path):
         """Legs actually in epoch 2; the record claims after=1 (epoch
         after-1) -- rc 3, naming the epoch."""
