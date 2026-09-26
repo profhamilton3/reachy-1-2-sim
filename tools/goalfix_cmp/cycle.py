@@ -580,6 +580,23 @@ class CycleMetrics:
     delta_cmd_max_cm: Optional[float] = None
     delta_cmd_segment_max_cm: Optional[float] = None
     wrist_ball_delta_cm: Optional[float] = None
+    #: B12 (owner rulings W1-W4; proposal §4.1): the decomposition behind
+    #: wrist_ball_delta_cm, reported alongside it -- never gated on their
+    #: own (only wrist_ball_delta_cm itself is a §7.5 metric).
+    wrist_ball_object_id: Optional[str] = None
+    wrist_ball_planned_cm: Optional[float] = None
+    wrist_ball_commanded_cm: Optional[float] = None
+    wrist_ball_realised_cm: Optional[float] = None
+    delta_cmd_wb_cm: Optional[float] = None
+    delta_trk_wb_cm: Optional[float] = None
+    #: Report-only (proposal §4.1 "Cross-check"; never gated).
+    cross_check_wrist_ball_cm: Optional[float] = None
+    #: Report-only (owner ruling, wrist_ball_delta_cm §, last bullet): the
+    #: realised minimum and Delta, recomputed with the realised window's
+    #: two endpoints at t_hi instead of t_lo, exposing the sensitivity of
+    #: the wrist_ball minimum to the command-bracket's own [t_lo, t_hi]
+    #: uncertainty. Never used by any check.
+    wrist_ball_bracket_sensitivity: Optional[Dict[str, Optional[float]]] = None
     post_arrival_rise_deg: Optional[float] = None
     net_shoulder_pitch_hold_deg: Optional[float] = None
     c5_c6_pass: bool = True
@@ -588,11 +605,16 @@ class CycleMetrics:
 
 def compute_place_route_metrics(
     evidence: ev.Evidence, place_leg: LegSpec, place_result: LegResult,
-    affected, scene,
+    affected, scene, board_object_ids: Optional[Sequence[str]] = None,
 ) -> CycleMetrics:
     """§7.3-7.5, computed from evidence where report §5 defines the
     quantity precisely enough; ``null`` (via ``open_questions``) where it
-    does not -- never invented (assignment §2 T4 item 8)."""
+    does not -- never invented (assignment §2 T4 item 8).
+
+    ``board_object_ids`` (B12, owner rulings W1-W4): the setup sidecar's
+    own ``scene.board_object_ids`` list -- the single board object
+    wrist_ball_delta_cm is measured against. ``None``/empty/more-than-one
+    -> null (via ``open_questions``), never guessed at."""
     m = CycleMetrics()
     c5_ok = place_result.pathcheck["C5"].passed
     c6_ok = place_result.pathcheck["C6"].passed
@@ -687,28 +709,136 @@ def compute_place_route_metrics(
                     if seg_deltas:
                         m.delta_cmd_segment_max_cm = max(d.delta_cmd_cm for d in seg_deltas)
 
-        # CB1 (merge verdict, 2026-09-25 stage-repairs assignment §4):
-        # wrist_ball_delta_cm is intentionally left null even with a
-        # scene supplied. The plan (§7.5: "B's wrist_ball Δ falls by
-        # ... against the median of the manipulated A cycles") and the
-        # review ("compute wrist_ball_delta_cm with the vendored
-        # indep_wrist_ball") name two DIFFERENT, both-plausible
-        # readings: (a) delta_trk_cm for the link=="wrist_ball" entries
-        # already present in `deltas`/`seg_deltas` above (hand="shells"
-        # only -- "tube" has no wrist_ball capsule), or (b) a
-        # cross-check-style delta computed directly via
-        # indep_wrist_ball/cross_check_wrist_ball against one particular
-        # scene object at one particular instant. Neither the plan nor
-        # the report says which, against which object id, or at which
-        # instant (a whole-segment worst-case? a single waypoint?) --
-        # per the "no invented definitions" rule, this is flagged, not
-        # guessed.
-        m.open_questions.append(
-            "wrist_ball_delta_cm: report §5/plan §7.3-7.5 and the review name two "
-            "different readings (delta_trk_cm for the existing link==\"wrist_ball\" "
-            "compute_deltas entries, vs. a cross-check computed directly via "
-            "indep_wrist_ball/cross_check_wrist_ball) and do not say which, against "
-            "which scene object, or at which instant -- left null rather than guessed")
+        # B12 (owner rulings W1-W4, 2026-09-25; proposal §4.1, now
+        # approved -- the CB1 open question above is resolved): the
+        # segment (W2) runs from the last HOVER-assigned setpoint,
+        # through the HOVER hold, the HOVER->REST_SHUT goto and its
+        # passes, and the REST_SHUT settle hold, up to (never including)
+        # the first setpoint of the REST goto. Object (single board
+        # object, W1-W4 table): the setup sidecar's own
+        # scene.board_object_ids. Hand model: shells only (tube has no
+        # wrist_ball capsule). Planned: the HOVER->REST_SHUT joint-space
+        # line, 400 samples, shells aperture rule, gripper SHUT at both
+        # ends. Commanded: every setpoint in the segment. Realised (W3):
+        # every checksum-verified states.jsonl row whose sim_time_s lies
+        # in [t_lo of the segment's first command, t_lo of the REST
+        # goto's first command), same epoch -- never imputed. Missing
+        # inputs (an ambiguous board object, an indeterminate/missing
+        # segment (W4), or no REST goto after the segment) -> null via
+        # open_questions, never guessed.
+        from reachy_ai.motion import rig_routes as _R
+
+        def _wrist_ball_object_id() -> Tuple[Optional[str], Optional[str]]:
+            if not board_object_ids:
+                return None, ("wrist_ball_delta_cm: setup sidecar's scene.board_object_ids "
+                               "is empty or absent (need exactly 1)")
+            if len(board_object_ids) != 1:
+                return None, (
+                    f"wrist_ball_delta_cm: setup sidecar's scene.board_object_ids has "
+                    f"{len(board_object_ids)} entries {list(board_object_ids)!r} (need exactly 1)")
+            return board_object_ids[0], None
+
+        object_id, oid_question = _wrist_ball_object_id()
+        if oid_question:
+            m.open_questions.append(oid_question)
+        elif affected is None or affected.indeterminate:
+            m.open_questions.append(
+                "wrist_ball_delta_cm: affected segment is indeterminate or missing (W4)")
+        else:
+            # W2: REST's own first ASSIGNED command after the segment --
+            # "to the first setpoint of the REST goto". R.PLACE_ROUTE has
+            # REST immediately after REST_SHUT; a route with no REST
+            # waypoint at all (or none assigned after the segment) is a
+            # missing input (W4), never guessed at.
+            route = place_leg.route_rad
+            rest_wp_idx = next((i for i, wp in enumerate(route) if wp.name == "REST"), None)
+            rest_first_local = None
+            if rest_wp_idx is not None:
+                rest_positions = [
+                    i for i, g in enumerate(place_result.assignment.goal_index)
+                    if g == rest_wp_idx and i > affected.end_command_index]
+                if rest_positions:
+                    rest_first_local = rest_positions[0]
+            if rest_first_local is None:
+                m.open_questions.append(
+                    "wrist_ball_delta_cm: no REST goto found after the affected segment (W4)")
+            else:
+                seg_wb_local = range(affected.start_command_index, rest_first_local)
+                wb_global = [place_leg.command_indices[i] for i in seg_wb_local]
+                wb_commanded = (cl.commanded_samples(evidence.commands.target_rad[wb_global, :8])
+                                 if wb_global else [])
+
+                start_global = place_leg.command_indices[affected.start_command_index]
+                rest_first_global = place_leg.command_indices[rest_first_local]
+                b_start, b_rest = evidence.brackets[start_global], evidence.brackets[rest_first_global]
+                epoch = int(evidence.commands.epoch[start_global])
+
+                def _realised_window(lo_t, hi_t):
+                    if lo_t is None or hi_t is None:
+                        return None
+                    mask = ((evidence.states.epoch == epoch)
+                            & (evidence.states.sim_time_s >= lo_t)
+                            & (evidence.states.sim_time_s < hi_t))
+                    state_idx = np.nonzero(mask)[0]
+                    if len(state_idx) == 0:
+                        return None
+                    samples, _ = cl.realised_samples_from_states(
+                        evidence.states.position_rad[state_idx, :8])
+                    return samples
+
+                wb_realised = _realised_window(b_start.t_lo, b_rest.t_lo)
+                if not wb_commanded or not wb_realised:
+                    m.open_questions.append(
+                        "wrist_ball_delta_cm: no commanded/realised samples in the W2 "
+                        "segment window")
+                else:
+                    wb_deltas = cl.compute_deltas(
+                        "PLACE_ROUTE", [_R.HOVER, _R.REST_SHUT], 400, scene,
+                        wb_commanded, wb_realised)
+                    entry = next(
+                        (d for d in wb_deltas if d.hand == "shells" and d.link == "wrist_ball"
+                         and d.object_id == object_id), None)
+                    if entry is None:
+                        m.open_questions.append(
+                            f"wrist_ball_delta_cm: object {object_id!r} has no "
+                            "wrist_ball/shells clearance entry over this segment's "
+                            "planned/commanded/realised samples")
+                    else:
+                        m.wrist_ball_object_id = object_id
+                        m.wrist_ball_planned_cm = entry.planned_cm
+                        m.wrist_ball_commanded_cm = entry.commanded_cm
+                        m.wrist_ball_realised_cm = entry.realised_cm
+                        m.wrist_ball_delta_cm = entry.planned_cm - entry.realised_cm
+                        m.delta_cmd_wb_cm = entry.delta_cmd_cm
+                        m.delta_trk_wb_cm = entry.delta_trk_cm
+                        m.cross_check_wrist_ball_cm = cl.cross_check_wrist_ball(
+                            wb_realised, scene, object_id, hand="shells")
+
+                        # Report-only (owner ruling, last bullet): the
+                        # SAME planned/commanded, realised against the
+                        # t_hi-bounded window instead -- exposes the
+                        # bracket's own [t_lo, t_hi] sensitivity. Never
+                        # gated, never fed into wrist_ball_delta_cm
+                        # itself.
+                        sensitivity: Dict[str, Optional[float]] = {
+                            "t_lo_realised_cm": entry.realised_cm,
+                            "t_lo_delta_cm": m.wrist_ball_delta_cm,
+                            "t_hi_realised_cm": None,
+                            "t_hi_delta_cm": None,
+                        }
+                        wb_realised_thi = _realised_window(b_start.t_hi, b_rest.t_hi)
+                        if wb_realised_thi:
+                            thi_deltas = cl.compute_deltas(
+                                "PLACE_ROUTE", [_R.HOVER, _R.REST_SHUT], 400, scene,
+                                wb_commanded, wb_realised_thi)
+                            thi_entry = next(
+                                (d for d in thi_deltas if d.hand == "shells"
+                                 and d.link == "wrist_ball" and d.object_id == object_id), None)
+                            if thi_entry is not None:
+                                sensitivity["t_hi_realised_cm"] = thi_entry.realised_cm
+                                sensitivity["t_hi_delta_cm"] = (
+                                    thi_entry.planned_cm - thi_entry.realised_cm)
+                        m.wrist_ball_bracket_sensitivity = sensitivity
 
     return m
 
@@ -795,6 +925,7 @@ def _package_sha256() -> str:
 def evaluate_cycle(
     cycle: str, arm: str, evidence: ev.Evidence, legs: Sequence[LegSpec], *,
     scene=None,
+    board_object_ids: Optional[Sequence[str]] = None,
     provenance_gate: Optional[pv.GateResult] = None,
     compliance_gate: Optional[Tuple[bool, str]] = None,
     start_variant_gate_result: Optional[Tuple[bool, Optional[str], Optional[dict]]] = None,
@@ -895,6 +1026,11 @@ def evaluate_cycle(
             # segmentation untrustworthy.
             if place_lr.unassigned_non_carry_violation:
                 segment_indeterminate = True
+                # B12: compute_place_route_metrics reads affected.indeterminate
+                # directly (W4) -- it must see the SAME forced-indeterminate
+                # verdict this override applies here, not the (possibly
+                # False) value find_affected_segment itself returned.
+                affected.indeterminate = True
             if not segment_indeterminate:
                 seg_global_indices = [
                     place_leg.command_indices[i]
@@ -915,7 +1051,8 @@ def evaluate_cycle(
 
     metrics = None
     if place_leg is not None and place_lr is not None:
-        metrics = compute_place_route_metrics(evidence, place_leg, place_lr, affected, scene)
+        metrics = compute_place_route_metrics(
+            evidence, place_leg, place_lr, affected, scene, board_object_ids)
 
     reasons = list(fail_reasons) + drift_reasons + lead_in_reasons + unassigned_non_carry_reasons
     for name in truncated_inside_leg:
@@ -960,14 +1097,19 @@ def evaluate_cycle(
         for name, dups in duplicate_inside_leg.items():
             reasons.append(f"{name}: duplicate sim_step state(s) inside this leg: {dups}")
 
+    # B12/W4: reported for EITHER arm -- an A cycle going
+    # inconclusive_baseline needs its own reason on the record too (owner
+    # ruling: "every exclusion is reported: the cycle, the reason and its
+    # counts"), not only a B cycle's STOP.
+    if segment_indeterminate:
+        reasons.append(f"affected segment is indeterminate or missing ({arm})")
+
     verdict: str
     if truncated_inside_leg or duplicate_inside_leg:
         verdict = VERDICT_EVIDENCE_INCOMPLETE
     elif arm == "B":
         if genuine > 0:
             reasons.append(f"{genuine} genuine echo(es) in the affected segment")
-        if segment_indeterminate:
-            reasons.append("affected segment is indeterminate or missing (B)")
         if (any_pathcheck_fail or genuine > 0 or any_hold_target_drift or any_lead_in_violation
                 or segment_indeterminate or gate_failed or any_unassigned_non_carry):
             verdict = VERDICT_STOP
@@ -1240,9 +1382,14 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
         # unchanged from before (compute_place_route_metrics's own
         # open_questions branch).
         scene = None
+        board_object_ids = None
         setup_sidecar_doc = _json.loads(Path(setup_sidecar).read_text())
         if setup_sidecar_doc.get("scene"):
             scene = load_verified_scene(setup_sidecar)
+            # B12 (owner rulings W1-W4): the single board object
+            # wrist_ball_delta_cm is measured against -- read straight
+            # from the setup sidecar's own scene block, never guessed.
+            board_object_ids = setup_sidecar_doc["scene"].get("board_object_ids")
 
         provenance_gate = compliance_gate = start_variant_result = None
         guard_note = (
@@ -1331,6 +1478,7 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
 
         cv, _ = evaluate_cycle(
             args.cycle, args.arm, evd, [setup_leg, flight_leg], scene=scene,
+            board_object_ids=board_object_ids,
             provenance_gate=provenance_gate, compliance_gate=compliance_gate,
             start_variant_gate_result=start_variant_result, guard_note=guard_note,
             skip_gates=args.validation_mode)

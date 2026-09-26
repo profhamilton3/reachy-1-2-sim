@@ -51,6 +51,12 @@ class CycleMetrics:
     wrist_ball_delta_cm: Optional[float] = None
     post_arrival_rise_deg: Optional[float] = None
     c5_c6_pass: bool = True
+    #: B12 (owner rulings W1-W4): why wrist_ball_delta_cm (or another
+    #: metric) is null on this cycle, if it is -- carried through so
+    #: `aggregate` can report EVERY A exclusion's own reason (W4's "every
+    #: exclusion is reported: the cycle, the reason and its counts"),
+    #: never just a silent drop from the median.
+    open_questions: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -98,6 +104,27 @@ def checkpoint_after(
                              any_incomplete, missing)
 
 
+#: B12/W4 (owner rulings, 2026-09-25): fixed, always-reported text -- the
+#: excluded A cycles this package drops from the wrist_ball median are
+#: never a random sample (echoes corrupt segmentation), so the A median
+#: may be biased toward cycles with fewer/milder echoes, which would make
+#: B's improvement look SMALLER than it really is. The direction is not
+#: established either way, and this statement is reported unconditionally
+#: (never only when exclusions happen to be nonzero).
+WRIST_BALL_SELECTION_BIAS_NOTE = (
+    "excluded A cycles are not a random sample: echoes that corrupt C0 "
+    "segmentation are exactly the cycles this metric must drop, so the A "
+    "median may be biased toward cycles with fewer or milder echoes, "
+    "which would make B's improvement look smaller than it really is. "
+    "The direction of this bias is not established.")
+
+
+@dataclass
+class WristBallExclusion:
+    cycle: str
+    reason: str
+
+
 @dataclass
 class SummaryResult:
     n_cycles: int
@@ -105,6 +132,12 @@ class SummaryResult:
     detail: str
     b_median_wrist_ball_cm: Optional[float] = None
     a_manipulated_median_wrist_ball_cm: Optional[float] = None
+    #: B12/W4: every A cycle dropped from the wrist_ball median, with its
+    #: own reason -- "every exclusion is reported: the cycle, the reason
+    #: and its counts."
+    a_wrist_ball_exclusions: List[WristBallExclusion] = field(default_factory=list)
+    a_manipulated_count: int = 0
+    a_wrist_ball_count: int = 0
 
     def rc(self) -> int:
         if self.outcome == OUTCOME_STOPPED:
@@ -118,6 +151,11 @@ class SummaryResult:
             "n_cycles": self.n_cycles, "outcome": self.outcome, "detail": self.detail,
             "b_median_wrist_ball_cm": self.b_median_wrist_ball_cm,
             "a_manipulated_median_wrist_ball_cm": self.a_manipulated_median_wrist_ball_cm,
+            "a_manipulated_count": self.a_manipulated_count,
+            "a_wrist_ball_count": self.a_wrist_ball_count,
+            "a_wrist_ball_exclusions": [
+                {"cycle": e.cycle, "reason": e.reason} for e in self.a_wrist_ball_exclusions],
+            "a_wrist_ball_selection_bias": WRIST_BALL_SELECTION_BIAS_NOTE,
             "rc": self.rc(),
         }
 
@@ -179,6 +217,24 @@ def aggregate(
 
     manipulated_a = [v for v in a_cycles if v.verdict == cyc.VERDICT_MANIPULATED]
 
+    # B12/W4: every excluded A cycle, with its own reason -- both kinds:
+    # (1) segmentation-invalid A cycles (inconclusive_baseline -- never
+    # even reached "manipulated"), and (2) a manipulated A cycle whose
+    # wrist_ball_delta_cm is itself null (an ambiguous board object, no
+    # REST goto after the segment, etc. -- CycleMetrics.open_questions
+    # carries the specific reason).
+    a_wrist_ball_exclusions: List[WristBallExclusion] = []
+    for v in a_cycles:
+        if v.verdict != cyc.VERDICT_MANIPULATED:
+            reason = "; ".join(v.reasons) if v.reasons else f"verdict={v.verdict}"
+            a_wrist_ball_exclusions.append(WristBallExclusion(v.cycle, reason))
+    for v in manipulated_a:
+        m = metrics.get(v.cycle)
+        if m is None or m.wrist_ball_delta_cm is None:
+            reason = ("; ".join(m.open_questions) if m and m.open_questions else
+                       "wrist_ball_delta_cm is null (no metrics recorded)")
+            a_wrist_ball_exclusions.append(WristBallExclusion(v.cycle, reason))
+
     a_wrist_ball = [metrics[v.cycle].wrist_ball_delta_cm for v in manipulated_a
                     if v.cycle in metrics and metrics[v.cycle].wrist_ball_delta_cm is not None]
     b_wrist_ball = [metrics[v.cycle].wrist_ball_delta_cm for v in b_cycles]
@@ -190,11 +246,15 @@ def aggregate(
 
     inconclusive_comparison = len(manipulated_a) < a_manipulated_min
 
+    # W1 (owner ruling, binding): EVERY valid B cycle must individually
+    # meet wrist_ball_delta_cm <= median_A - 0.5 cm -- not a comparison of
+    # the two medians. The B median is still reported (b_median above),
+    # never used as the pass criterion itself.
     b_supports = (
         bool(b_leg_start_err) and all(e <= B_LEG_START_ERROR_MAX_DEG for e in b_leg_start_err)
         and bool(b_delta_cmd) and all(d <= B_DELTA_CMD_MAX_CM for d in b_delta_cmd)
-        and (a_median is not None and b_median is not None
-             and (a_median - b_median) >= B_WRIST_BALL_DROP_MIN_CM))
+        and (a_median is not None and bool(b_wrist_ball)
+             and all(w <= a_median - B_WRIST_BALL_DROP_MIN_CM for w in b_wrist_ball)))
 
     b_refutes = (
         (b_leg_start_err and max(b_leg_start_err) >= REFUTE_LEG_START_ERROR_DEG)
@@ -213,7 +273,10 @@ def aggregate(
     else:
         outcome, detail = OUTCOME_OTHERWISE_INCONCLUSIVE, "neither the support nor the refute criteria are met"
 
-    return SummaryResult(len(verdicts), outcome, detail, b_median, a_median)
+    return SummaryResult(len(verdicts), outcome, detail, b_median, a_median,
+                          a_wrist_ball_exclusions=a_wrist_ball_exclusions,
+                          a_manipulated_count=len(manipulated_a),
+                          a_wrist_ball_count=len(a_wrist_ball))
 
 
 # ---------------------------------------------------------------------------
@@ -741,7 +804,8 @@ def load_between_files(
                 delta_cmd_max_cm=m.get("delta_cmd_max_cm"),
                 wrist_ball_delta_cm=m.get("wrist_ball_delta_cm"),
                 post_arrival_rise_deg=m.get("post_arrival_rise_deg"),
-                c5_c6_pass=m.get("c5_c6_pass", True))
+                c5_c6_pass=m.get("c5_c6_pass", True),
+                open_questions=list(m.get("open_questions") or []))
 
     if required_reps is not None:
         missing = sorted(set(required_reps) - set(by_rep))

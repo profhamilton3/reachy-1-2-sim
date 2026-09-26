@@ -21,17 +21,18 @@ Two independent repairs:
    within the leg. Fixed to slice ``realised`` at the SAME ``seg_local``
    positions as ``seg_commanded``.
 
-``wrist_ball_delta_cm`` itself is intentionally left ``None`` (with an
-``open_questions`` entry): the plan's own §7.5 language ("B's wrist_ball
-Δ falls by ... against the median of the manipulated A cycles") and the
-review's "compute wrist_ball_delta_cm with the vendored indep_wrist_ball"
-name two DIFFERENT, both-plausible readings -- Δtrk for the wrist_ball
-link out of the existing per-link compute_deltas output, or a
-cross-check-style delta computed directly via indep_wrist_ball/
-cross_check_wrist_ball against ONE particular scene object at ONE
-particular instant -- and neither the plan nor the report says which,
-against which object, or at which instant. Per the "no invented
-definitions" rule, this is left null and flagged rather than guessed."""
+``wrist_ball_delta_cm`` itself was, at the time this file was written,
+intentionally left ``None`` (with an ``open_questions`` entry): the
+plan's own §7.5 language and the review named two DIFFERENT,
+both-plausible readings with no way to choose between them. B12 (owner
+rulings W1-W4, 2026-09-25; proposal §4.1) resolved every open choice
+here -- the real computation now lives in
+``compute_place_route_metrics``, tested in
+``test_goalfix_cmp_b12_wrist_ball.py``. The fixtures in THIS file still
+pass no ``board_object_ids`` (and most have no ``REST`` waypoint in
+their tiny synthetic routes at all), so ``wrist_ball_delta_cm`` stays
+null for a DIFFERENT, still-accurate reason on every case here: a
+missing input (W4), never a withheld definition."""
 import hashlib
 import json
 import os
