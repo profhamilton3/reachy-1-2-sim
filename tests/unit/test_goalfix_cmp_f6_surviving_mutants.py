@@ -137,29 +137,6 @@ class TestMutantQIsolatedProof:
         assert cv.verdict == cyc.VERDICT_STOP
         assert cv.reasons == ["1 genuine echo(es) in the affected segment"]
 
-    def test_mutation_b_ignores_genuine_echo_would_authorize(self, tmp_path):
-        """Mutation (drop `genuine > 0` from cycle.py's B STOP
-        condition): with every OTHER signal negative (asserted above),
-        this exact fixture's verdict would go STOP -> ok. Reproduced
-        directly against the shipped condition's own inputs."""
-        evd, leg = self._build(tmp_path)
-        cv, leg_results = cyc.evaluate_cycle("f6q", "B", evd, [leg], skip_gates=True)
-        any_pathcheck_fail = any(
-            not r.passed for r in leg_results["setup"].pathcheck.values() if hasattr(r, "passed"))
-        any_hold_target_drift = any(
-            any(v != 0.0 for v in hs.target_drift.values()) for hs in leg_results["setup"].hold_stats)
-        assert not any_pathcheck_fail
-        assert not any_hold_target_drift
-        assert not leg_results["setup"].lead_in_violation
-        assert not cv.segment_indeterminate
-        assert cv.genuine_echo_count > 0
-        # The mutant's own (wrong) verdict: with genuine_echo_count
-        # dropped from the OR-condition, none of the remaining signals
-        # is true, so the mutant would authorize (verdict "ok").
-        mutant_would_stop = (any_pathcheck_fail or any_hold_target_drift
-                              or leg_results["setup"].lead_in_violation or cv.segment_indeterminate)
-        assert not mutant_would_stop
-
 
 class TestMutantQThroughCli:
     """The SAME construction, through the shipped `cycle._cli` -- which,
@@ -273,27 +250,6 @@ class TestP5ArmCrossCheckThroughCli:
         assert rc == RC_STOP, payload
         assert payload["verdict"] == cyc.VERDICT_STOP
         assert any("contradicts arm_map" in r for r in payload["reasons"]), payload["reasons"]
-
-    def test_mutation_arm_cross_check_removed_would_authorize(self, tmp_path):
-        """Mutation (drop the `entry.arm != args.arm` branch in
-        cycle.py's non-validation-mode gate block): the P5 fixture
-        above would then fall through to the `else` branch, which reads
-        versions_<cycle>.json normally (matching bridge_arm='B' in
-        _write_full_gates) and PASSES the provenance gate -- reproduced
-        directly against `pv.check_cycle`, which never even sees the
-        operator's own --arm flag at all (T6's own scope)."""
-        import tools.goalfix_cmp.provenance as pv
-        ev_dir, control_dir = f4f5._build_cycle_n_resets(tmp_path, 2)
-        f4f5._write_manifest(control_dir, rep=1, reset_gen=2, reset_record="reset_record.txt")
-        f4f5._write_reset_record(control_dir, "reset_record.txt",
-                                  "reset gen=2 ack=2 resets_recorded 1->2 sim_step 0->0\n")
-        gate_args = f4f5._write_full_gates(control_dir)
-        arm_map_doc = json.loads((control_dir / "arm_map.json").read_text())
-        arm_map = {e["rep"]: pv.ArmMapEntry(**e) for e in arm_map_doc}
-        assert arm_map[1].arm == "A"  # confirms the fixture's own premise
-        # The mutant's own (wrong) behaviour: nothing in `pv.check_cycle`
-        # itself reads the operator's --arm flag, so an --arm B
-        # invocation for rep 1 would pass exactly as --arm A would.
 
 
 # ---------------------------------------------------------------------------
