@@ -185,24 +185,36 @@ class TestRAC3FreshOriginRepeatStaysExcluded:
     exercises)."""
 
     def _build(self, tmp_path):
+        # Mirrors R-AC2's own tau-spread structure (a second,
+        # independently-moving joint B, so withdrawing A's repeat would
+        # be DETECTABLE via a tau mismatch) -- but A's repeated value has
+        # NO past-state match anywhere (never planted as an echo source),
+        # so its own chain origin is FRESH, not genuine_echo. This is
+        # what actually distinguishes R-AC3 from R-M3's own mutant
+        # ("withdraws the exemption from every carry"): a single-moving-
+        # joint fixture can never show a tau MISMATCH at all (nothing to
+        # disagree with), so it cannot kill that mutant.
         start = full_pose()
-        goal = full_pose(r_shoulder_pitch=-1.0)
-        route = [mf.Waypoint("G", goal, 2.0)]
-        # A mid-goto value that has no past-state match anywhere (never
-        # planted as an echo source) repeats once, bit-exact, purely by
-        # construction -- its own chain origin is FRESH.
+        goal = full_pose(r_shoulder_pitch=-1.0, r_elbow_pitch=-1.0)
+        route = [mf.Waypoint("G", goal, 3.0)]
+        from tools.goalfix_cmp._minjerk import pose_at
+        dt = 0.1
         targets = [
-            full_pose(),                          # t0: anchor
-            full_pose(r_shoulder_pitch=-0.4),      # t1: fresh
-            full_pose(r_shoulder_pitch=-0.4),      # t2: repeat of t1 -- fresh-origin carry
-            full_pose(r_shoulder_pitch=-0.5),      # t3: fresh, breaks the chain
+            full_pose(),  # t0: anchor
+            full_pose(r_shoulder_pitch=1.0,
+                      r_elbow_pitch=pose_at(0.0, -1.0, 0.02)),   # t1: fresh (never seen before;
+                                                                  #     out-of-range -> tau pinned to 0)
+            full_pose(r_shoulder_pitch=1.0,
+                      r_elbow_pitch=pose_at(0.0, -1.0, 0.15)),   # t2: repeat of t1 -- FRESH-origin carry
+            full_pose(r_shoulder_pitch=pose_at(0.0, -1.0, 0.30),
+                      r_elbow_pitch=pose_at(0.0, -1.0, 0.30)),   # t3: fresh again
         ]
         rows = [mf.state_row(seq=0, sim_step=0, sim_time_s=0.0, cmd_seq=-1,
                               wall_time_ns=1, position_rad21=mf.full21(start))]
         cmds = []
         for i, tgt in enumerate(targets):
             cmds.append(mf.command_row_joint(seq=i, target_rad21=mf.full21(tgt)))
-            rows.append(mf.state_row(seq=i + 1, sim_step=i + 1, sim_time_s=(i + 1) * 0.02,
+            rows.append(mf.state_row(seq=i + 1, sim_step=i + 1, sim_time_s=(i + 1) * dt,
                                       cmd_seq=i, wall_time_ns=2 + i,
                                       position_rad21=mf.full21(tgt)))
         mf.write_evidence(tmp_path, rows, cmds)
@@ -217,6 +229,11 @@ class TestRAC3FreshOriginRepeatStaysExcluded:
                                 seconds=leg.route_rad[0].seconds)
         goto_context = [ctx] * len(evd.commands)
         results = echo.classify_commands(evd, goto_context, leg_turn_on_state_index={0: 0})
+        # t1's own reporting state trivially matches its own command (no
+        # lag in this fixture), so it lands as TIMING_AMBIGUOUS rather
+        # than FRESH -- either way its origin is not GENUINE_ECHO, which
+        # is the only thing that matters for t2's own label below.
+        assert results[1].joints["r_shoulder_pitch"].label in (echo.FRESH, echo.TIMING_AMBIGUOUS)
         assert results[2].joints["r_shoulder_pitch"].label == echo.CARRY
         counts = echo.count_labels(results)
         assert counts.echo_carry == 0
