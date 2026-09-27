@@ -1,0 +1,369 @@
+"""Stage A vertical-slice regeneration test (assignment
+``outputs/assignment-2026-09-25-sonnet-pr144-slice-then-h1-h10.md``, Stage A).
+
+Drives ``tests/fixtures/goalfix_cmp/stage_a_slice.py`` end to end: 4 real
+V3-harness cycles (A B B A), plan-§6-shaped evidence (root ``SHA256SUMS``,
+linker sidecars with a real B4 scene block, ``control/`` manifests,
+``reset_<gen>.txt`` produced by ACTUALLY running
+``scripts/e1_stage1/reset_verify.py`` against the fixture run directory),
+then the shipped ``cycle``/``summary`` CLIs in non-validation mode.
+
+This is the SLOW path: 4 real cycles over a real (loopback) gRPC/websocket
+stack take real wall-clock minutes, plus 4 real ``reset_verify.py``
+subprocess round-trips. There is no marker registry in this repo (no
+``conftest.py``/``pytest.ini``), so this is gated the same, sole way
+``test_goalfix_cmp_v3_real_bridge.py`` already is: ``reachy_sdk``/``grpc``/
+``websockets``/``scipy`` -- skip on system ``python3``, fail under
+``REQUIRE_REACHY_SDK=1`` / ``~/goalfix-venv``.
+
+This test does not assert every finding in the Stage A handoff (those were
+established once, by hand, and are not re-derived here); it re-runs the
+SAME generation path and pins the structural facts that must keep holding:
+the evidence lays out as plan §6 describes, ``reset_verify.py`` really
+ran and really agreed with the harness's own reset count, the H6 layout
+conflict reproduces on the real root ``SHA256SUMS``, and the documented
+workaround lets the shipped CLI produce a real (non-validation-mode)
+verdict for all 4 cycles plus a checkpoint.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
+for _p in (_ROOT, os.path.join(_ROOT, "src"), os.path.join(_ROOT, "native_mujoco"),
+           os.path.join(_ROOT, "scripts"), os.path.join(_ROOT, "tests", "integration"),
+           os.path.join(_ROOT, "tests", "fixtures", "goalfix_cmp")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+if os.environ.get("REQUIRE_REACHY_SDK") == "1":
+    import grpc  # noqa: F401
+    import numpy as np  # noqa: F401
+    import reachy_sdk  # noqa: F401
+    import websockets  # noqa: F401
+    import scipy  # noqa: F401
+else:
+    pytest.importorskip("grpc")
+    pytest.importorskip("numpy")
+    pytest.importorskip("reachy_sdk")
+    pytest.importorskip("websockets")
+    pytest.importorskip("scipy")
+
+import stage_a_slice as sas  # noqa: E402
+from tools.goalfix_cmp import cycle as cyc  # noqa: E402
+from tools.goalfix_cmp import summary as summ  # noqa: E402
+from tools.goalfix_cmp import evidence as ev  # noqa: E402
+from tools.goalfix_cmp._io import read_result  # noqa: E402
+
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+
+EXPECTED_HOST_SHA = "e54be0e65335af4a6317e287a6be0c22fad753c9"
+#: W-AC7 (assignment W3): PR #144's own pre-D-1 head, compared against on
+#: the SAME regenerated evidence to check the new window-based wrist-ball
+#: computation against the old, affected-based one.
+B59404C_SHA = "b59404cc8eda390585f0ec647ce91e26be942f5c"
+
+
+@pytest.fixture(scope="module")
+def stage_a(tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("stage_a_slice")
+    ev_dir = tmp / "ev"
+    control_dir = tmp / "control"
+    stage = sas.run_stage_a_session(ev_dir, control_dir)
+    try:
+        evidence = sas.emit_stage_a_evidence(stage, ev_dir)
+        yield stage, evidence
+    finally:
+        stage.session.close()
+
+
+def test_four_cycles_order_a_b_b_a(stage_a):
+    stage, _evidence = stage_a
+    assert [c.arm for c in stage.cycles] == ["A", "B", "B", "A"]
+    assert [c.rep for c in stage.cycles] == [1, 2, 3, 4]
+
+
+def test_reset_verify_actually_ran_and_agreed(stage_a):
+    """A1/A2: reset_<gen>.txt is produced by ACTUALLY running
+    reset_verify.py, not synthesised -- each cycle's real subprocess call
+    must have exited 0 and reported the expected resets_recorded
+    before->after increment (gen == this cycle's own rep)."""
+    stage, _evidence = stage_a
+    for cyc_ in stage.cycles:
+        assert cyc_.reset_verify_rc == 0, cyc_.reset_verify_stdout
+        assert f"reset gen={cyc_.reset_gen} ack={cyc_.reset_gen}" in cyc_.reset_verify_stdout
+        before_after = f"resets_recorded {cyc_.reset_gen - 1}->{cyc_.reset_gen}"
+        assert before_after in cyc_.reset_verify_stdout
+
+
+def test_only_a_cycles_carry_injected_echoes(stage_a):
+    stage, _evidence = stage_a
+    by_name = {c.name: c for c in stage.cycles}
+    for c in stage.cycles:
+        if c.arm == "A":
+            assert len(c.injected_echoes) > 0, "A cycle should carry synthetic echo injection"
+        else:
+            assert c.injected_echoes == []
+
+
+def test_evidence_layout_matches_plan_section_6(stage_a):
+    """Root SHA256SUMS keyed ./e1_server_runs/<run>/..., run dir holds the
+    real commands/states files, sidecars are server_run_dir-bound to the
+    run directory and carry a real B4 scene block."""
+    _stage, evidence = stage_a
+    root_sums = evidence.sha256sums_root.read_text()
+    assert f"./e1_server_runs/{evidence.run_dir.name}/states.jsonl" in root_sums
+    assert f"./e1_server_runs/{evidence.run_dir.name}/commands.jsonl" in root_sums
+    assert (evidence.run_dir / "states.jsonl").is_file()
+    assert (evidence.run_dir / "commands.jsonl").is_file()
+    for cyc_name, paths in evidence.sidecars.items():
+        setup_doc = json.loads(paths["setup"].read_text())
+        assert setup_doc["server_run_dir"] == str(evidence.run_dir.resolve())
+        assert "PLACE_ROUTE" in setup_doc["log"]
+        assert setup_doc["scene"]["chain_sha256"]
+        flight_doc = json.loads(paths["flight"].read_text())
+        assert "LIFT_TO_PRESENT" in flight_doc["log"]
+
+
+def test_h6_layout_conflict_reproduces_on_real_root_sha256sums(stage_a):
+    """H6 (merge verdict / assignment A4): --ev-dir == evidence root (so
+    verify_and_load's SHA256SUMS check passes against the REAL root file)
+    makes resolve_leg's server_run_dir check fail, because the sidecar's
+    server_run_dir is the run directory, not the root -- exactly the
+    conflict the review predicted."""
+    _stage, evidence = stage_a
+    run_name = evidence.run_dir.name
+    out = evidence.control_dir / "between_h6_root_attempt.json"
+    cyc_name = "S2-B4-c-r2"
+    argv = [
+        "--ev-dir", str(evidence.ev_dir),
+        "--states", f"e1_server_runs/{run_name}/states.jsonl",
+        "--commands", f"e1_server_runs/{run_name}/commands.jsonl",
+        "--sha256sums", "SHA256SUMS",
+        "--control-dir", str(evidence.control_dir),
+        "--cycle", cyc_name, "--rep", "2", "--arm", "B",
+        "--arm-map", str(evidence.arm_map_path),
+        "--expected-host-sha", EXPECTED_HOST_SHA,
+        "--required-supervisor-programs", "reachy-sdk-server",
+        "--expected-bridge-sha-a", sas.BRIDGE_SHA["A"],
+        "--expected-bridge-sha-b", sas.BRIDGE_SHA["B"],
+        "--out", str(out),
+    ]
+    rc = cyc._cli(argv)
+    assert rc == 3
+    payload = read_result(out)
+    assert "server_run_dir" in payload["reason"]
+
+
+def test_h6_workaround_lets_cli_run_in_non_validation_mode(stage_a):
+    """The documented fixture-side workaround (a derived, prefix-stripped
+    SHA256SUMS inside the run directory, --ev-dir == the run directory)
+    lets cycle._cli produce a real, non-validation-mode verdict for every
+    cycle -- exercising C0-C8, echo classification, the provenance/
+    compliance/start_variant gates and the reset-binding check for real."""
+    stage, evidence = stage_a
+    outs = {}
+    for c in stage.cycles:
+        out = evidence.control_dir / f"between_{c.name}.json"
+        argv = [
+            "--ev-dir", str(evidence.run_dir),
+            "--sha256sums", "derived-SHA256SUMS",
+            "--control-dir", str(evidence.control_dir),
+            "--cycle", c.name, "--rep", str(c.rep), "--arm", c.arm,
+            "--arm-map", str(evidence.arm_map_path),
+            "--expected-host-sha", EXPECTED_HOST_SHA,
+            "--required-supervisor-programs", "reachy-sdk-server",
+            "--expected-bridge-sha-a", sas.BRIDGE_SHA["A"],
+            "--expected-bridge-sha-b", sas.BRIDGE_SHA["B"],
+            "--out", str(out),
+        ]
+        rc = cyc._cli(argv)
+        payload = read_result(out)
+        assert payload["validation_only"] is False
+        assert rc == payload["rc"]
+        outs[c.name] = payload
+
+    out = evidence.control_dir / "checkpoint_n4.json"
+    argv = [
+        "--control-dir", str(evidence.control_dir), "--arm-map", str(evidence.arm_map_path),
+        "--expected-bridge-sha-a", sas.BRIDGE_SHA["A"], "--expected-bridge-sha-b", sas.BRIDGE_SHA["B"],
+        "--n", "4", "--native-log", str(evidence.native_log_path),
+        "--states", str(evidence.run_dir / "states.jsonl"),
+        "--out", str(out),
+    ]
+    rc = summ._cli(["checkpoint"] + argv)
+    payload = read_result(out)
+    assert rc == payload["rc"]
+    # Real reset-protocol tripwires are clean on this harness (a container
+    # recreate + a real reset() each cycle, no lease/control_held/pause
+    # sources triggered) -- never asserted as 0 by fiat, this is what a
+    # clean generate/reset cycle on the harness actually produces.
+    tw = payload["tripwires"]
+    assert tw["reset_ack_timeout_total"] == 0
+    assert tw["control_held_refusal_total"] == 0
+
+
+def test_w_ac7_slice_window_and_wrist_ball_match_b59404c(stage_a, tmp_path_factory, capsys):
+    """W-AC7 (D-1; assignment W3): the Stage A slice regenerated at this
+    head. For B cycles r2 and r3: window.valid with 11 blocks (asserted
+    UNCONDITIONALLY -- this is D-1's own robustness claim); first_rest
+    preceded by a real settle gap (>= window.SETTLE_GAP_S); and, wherever
+    b59404c's own (pre-D-1, goal-assignment-based) segmentation ALSO
+    succeeds on this same real recording, wrist_ball_planned/commanded/
+    realised_cm match it to <= 1e-9 cm.
+
+    Both this head's own values AND b59404c's own values are computed
+    here, from the SAME states.jsonl/commands.jsonl/sidecars this
+    fixture just generated -- never hardcoded from memory. b59404c's own
+    values come from a real `git archive` export of that commit, run as
+    a subprocess (never imported into this process, which already has
+    this head's own same-named tools.goalfix_cmp package loaded).
+
+    b59404c's own segmentation is NOT assumed to succeed: it is the
+    fragile, goal-assignment-based method D-1 replaces, and on a REAL
+    V3-harness recording (live async timing, regenerated fresh on every
+    call to this fixture) it can genuinely come back
+    `affected segment is indeterminate` on one real run and not on
+    another -- observed directly in the course of this work (identical
+    test code, two different real regenerations: one gave b59404c a
+    valid segment on both r2 and r3, a second gave it an indeterminate
+    segment on r2 alone). Re-running until b59404c happens to succeed
+    would be exactly the "tune the cutoff to obtain passes" the
+    assignment forbids. So: the numeric match is asserted only where
+    b59404c's own value exists at all on THIS run; where it does not,
+    that is reported as b59404c's own finding, not silently hidden and
+    not a failure of this head's own code -- head's window is required
+    to stay valid regardless, which is the actual property under test."""
+    stage, evidence = stage_a
+
+    archive_dir = str(tmp_path_factory.mktemp("b59404c_archive"))
+    with open(os.path.join(archive_dir, "archive.tar"), "wb") as f:
+        subprocess.run(["git", "archive", B59404C_SHA], cwd=_ROOT, stdout=f, check=True)
+    subprocess.run(["tar", "-xf", os.path.join(archive_dir, "archive.tar"), "-C", archive_dir], check=True)
+    assert os.path.isfile(os.path.join(archive_dir, "tools", "goalfix_cmp", "cycle.py"))
+
+    evd = ev.verify_and_load(evidence.run_dir, "states.jsonl", "commands.jsonl", "derived-SHA256SUMS")
+
+    out_dir = str(tmp_path_factory.mktemp("w_ac7_out"))
+    results = {}
+    compared = 0
+    for c in stage.cycles:
+        if c.name not in ("S2-B4-c-r2", "S2-B4-c-r3"):
+            continue
+        argv = [
+            "--ev-dir", str(evidence.run_dir),
+            "--sha256sums", "derived-SHA256SUMS",
+            "--control-dir", str(evidence.control_dir),
+            "--cycle", c.name, "--rep", str(c.rep), "--arm", c.arm,
+            "--arm-map", str(evidence.arm_map_path),
+            "--expected-host-sha", EXPECTED_HOST_SHA,
+            "--required-supervisor-programs", "reachy-sdk-server",
+            "--expected-bridge-sha-a", sas.BRIDGE_SHA["A"],
+            "--expected-bridge-sha-b", sas.BRIDGE_SHA["B"],
+        ]
+
+        out_head = os.path.join(out_dir, f"head_{c.name}.json")
+        cyc._cli(argv + ["--out", out_head])
+        payload_head = read_result(out_head)
+
+        out_old = os.path.join(out_dir, f"b59404c_{c.name}.json")
+        old_argv = [sys.executable, "-m", "tools.goalfix_cmp.cycle"] + argv + ["--out", out_old]
+        proc = subprocess.run(old_argv, cwd=archive_dir, capture_output=True, text=True)
+        assert os.path.isfile(out_old), (proc.returncode, proc.stdout[-4000:], proc.stderr[-4000:])
+        payload_old = read_result(out_old)
+
+        # D-1's own claim: head's window is valid regardless of whether
+        # b59404c's own (fragile) goal-assignment segmentation is.
+        w = payload_head["window"]
+        assert w["valid"], w["reasons"]
+        assert len(w["blocks"]) == 11
+
+        first_rest = w["first_rest"]
+        lb = evd.brackets[first_rest].t_lo - evd.brackets[first_rest - 1].t_hi
+        assert lb >= 0.28, lb
+
+        m_head = payload_head["metrics"]
+        m_old = payload_old["metrics"]
+        assert m_head is not None
+        assert m_head["wrist_ball_planned_cm"] is not None, m_head["open_questions"]
+
+        entry = {
+            "head_planned_cm": m_head["wrist_ball_planned_cm"],
+            "head_commanded_cm": m_head["wrist_ball_commanded_cm"],
+            "head_realised_cm": m_head["wrist_ball_realised_cm"],
+            "settle_gap_before_first_rest_s": lb,
+        }
+        if m_old is not None and m_old.get("wrist_ball_planned_cm") is not None:
+            for field in ("wrist_ball_planned_cm", "wrist_ball_commanded_cm", "wrist_ball_realised_cm"):
+                diff = abs(m_head[field] - m_old[field])
+                assert diff <= 1e-9, (c.name, field, m_head[field], m_old[field], diff)
+            entry["b59404c_planned_cm"] = m_old["wrist_ball_planned_cm"]
+            entry["b59404c_commanded_cm"] = m_old["wrist_ball_commanded_cm"]
+            entry["b59404c_realised_cm"] = m_old["wrist_ball_realised_cm"]
+            entry["b59404c_comparison"] = "matched to <= 1e-9 cm"
+            compared += 1
+        else:
+            entry["b59404c_comparison"] = (
+                "b59404c's own segmentation failed on THIS regeneration "
+                f"(reasons: {payload_old.get('reasons') if payload_old else 'no payload'}) "
+                "-- no numeric comparison possible for this cycle on this run; "
+                "head's own window stayed valid regardless (see above)")
+
+        results[c.name] = entry
+
+    assert set(results) == {"S2-B4-c-r2", "S2-B4-c-r3"}
+    with capsys.disabled():
+        print("\nW-AC7 wrist-ball values (head vs b59404c, same regenerated files):")
+        print(json.dumps(results, indent=2))
+    assert compared >= 1, (
+        "b59404c's own segmentation failed on BOTH cycles this run -- "
+        "no numeric comparison was possible at all; see printed values/reasons above")
+
+
+def test_r_ac4_clean_b_cycles_have_zero_echo_carry(stage_a):
+    """R-AC4 (D-2; assignment R2): B cycles r2 and r3 (this harness's own
+    clean-B legs -- test_only_a_cycles_carry_injected_echoes confirms
+    they carry no injected echoes at all) have echo_carry == 0, on every
+    leg and in the W-blk segment, through the real, non-validation-mode
+    cycle CLI (H6's own documented workaround). Every other verdict field
+    (window validity, blocks, verdict itself) is exactly what Part W's
+    own regenerated-slice acceptance (W-AC7) already established for
+    these two cycles -- D-2 changes nothing on a recording with no
+    genuine echoes at all, since the provenance recheck only ever fires
+    where something was actually withdrawn."""
+    stage, evidence = stage_a
+    for c in stage.cycles:
+        if c.arm != "B":
+            continue
+        out = evidence.control_dir / f"between_r_ac4_{c.name}.json"
+        argv = [
+            "--ev-dir", str(evidence.run_dir),
+            "--sha256sums", "derived-SHA256SUMS",
+            "--control-dir", str(evidence.control_dir),
+            "--cycle", c.name, "--rep", str(c.rep), "--arm", c.arm,
+            "--arm-map", str(evidence.arm_map_path),
+            "--expected-host-sha", EXPECTED_HOST_SHA,
+            "--required-supervisor-programs", "reachy-sdk-server",
+            "--expected-bridge-sha-a", sas.BRIDGE_SHA["A"],
+            "--expected-bridge-sha-b", sas.BRIDGE_SHA["B"],
+            "--out", str(out),
+        ]
+        rc = cyc._cli(argv)
+        payload = read_result(out)
+        # Not verdict==OK: this harness has documented, pre-existing gate
+        # gaps unrelated to D-2 (antenna compliance -- NativeStub has no
+        # per-joint compliance; host_tree_dirty -- the agent's own
+        # checkout has untracked files), both named in the coordinator's
+        # own Stage A slice review. D-2's own claim is scoped to window
+        # validity and the echo_carry counters, asserted directly.
+        assert payload["window"]["valid"], payload["window"]["reasons"]
+        assert len(payload["window"]["blocks"]) == 11
+        assert payload["echo_carry_by_leg"]["setup"] == 0, payload["echo_carry_by_leg"]
+        assert payload["echo_carry_by_leg"]["flight"] == 0, payload["echo_carry_by_leg"]
+        assert payload["segment_echo_carry_count"] == 0
