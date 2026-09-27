@@ -404,3 +404,42 @@ class TestFieldLevel:
         p = tmp_path / "states.jsonl"
         _write(p, _lines_text([json.dumps(row)]))
         _compare_load_states(p)
+
+    def test_earlier_column_conversion_error_beats_later_column_missing_key(self, tmp_path):
+        """R1 (coordinator review, 2026-09-27): the old code fully resolved
+        one column -- extraction across every row, then its own
+        np.array(...) conversion -- before even starting the next column's
+        extraction. So an earlier column's CONVERSION error (here: seq=None,
+        a KeyError/TypeError-wrapped EvidenceError) must win over a later
+        column's plain missing-key extraction failure (sim_step absent from
+        row 1), even though the missing key would otherwise look like the
+        "simpler"/earlier-detected problem in a row-major reading."""
+        row0 = _state_row(seq=None)
+        row1 = _state_row(seq=1)
+        del row1["sim_step"]
+        p = tmp_path / "states.jsonl"
+        _write(p, _lines_text([json.dumps(row0), json.dumps(row1)]))
+        _compare_load_states(p)
+
+    def test_earlier_column_raw_valueerror_beats_later_column_missing_key(self, tmp_path):
+        """R1: same as above, but the earlier column's conversion error is
+        a raw (uncaught) ValueError -- confirms it is left exactly as
+        uncaught as the old code left it, still ahead of the later
+        column's missing key."""
+        row0 = _state_row(seq="abc")
+        row1 = _state_row(seq=1)
+        del row1["sim_step"]
+        p = tmp_path / "states.jsonl"
+        _write(p, _lines_text([json.dumps(row0), json.dumps(row1)]))
+        _compare_load_states(p)
+
+    def test_middle_column_conversion_error_beats_later_column_missing_key(self, tmp_path):
+        """R1: the earlier-wins rule isn't specific to column 0 -- a
+        conversion error in sim_step (column index 1) must still beat a
+        missing wall_time_ns (column index 3) in a different row."""
+        row0 = _state_row(seq=0, sim_step="not-a-number")
+        row1 = _state_row(seq=1)
+        del row1["wall_time_ns"]
+        p = tmp_path / "states.jsonl"
+        _write(p, _lines_text([json.dumps(row0), json.dumps(row1)]))
+        _compare_load_states(p)

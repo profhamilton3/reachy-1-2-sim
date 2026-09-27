@@ -157,6 +157,8 @@ class States:
 #: both for KeyError/TypeError row-access precedence and for the
 #: np.array(...) conversion-error precedence (K1 item 3).
 _SCALAR_COLUMNS: Tuple[str, ...] = ("seq", "sim_step", "sim_time_s", "wall_time_ns", "cmd_seq")
+#: dtype the old code converted each of the above with, same order.
+_SCALAR_DTYPES: Tuple[type, ...] = (np.int64, np.int64, np.float64, np.int64, np.int64)
 
 
 def load_states(path) -> States:
@@ -171,15 +173,21 @@ def load_states(path) -> States:
     1. a malformed non-final JSON line (raised by ``_JsonlStream`` itself,
        mid-iteration, before this function ever inspects a field);
     2. ``no usable state rows``;
-    3. for each scalar column, in ``_SCALAR_COLUMNS`` order: the first row
-       (in row order) whose access raises ``KeyError``/``TypeError`` --
-       this mirrors the old code's column-major list comprehensions,
-       which fully checked one column across every row before starting
-       the next, so an EARLIER column's failure always wins even if it
-       occurs at a LATER row than another column's failure. Only once
-       every column's raw values are complete does the old
-       ``np.array(list, dtype=...)`` conversion run, in the same order,
-       any error re-raised exactly as the old code would raise it
+    3. the scalar columns, in ``_SCALAR_COLUMNS`` order, each one fully
+       resolved -- extraction, THEN conversion -- before the next column
+       is even looked at (R1 fix, 2026-09-27): the old code's column-major
+       list comprehensions extracted every row for one column, then
+       immediately converted that column with ``np.array(dtype=...)``,
+       before starting the next column's extraction at all. So an
+       EARLIER column's failure -- extraction OR conversion -- always
+       wins over a LATER column's failure, even a plain missing key,
+       extraction being no exception: the first row (in row order) whose
+       access raises ``KeyError``/``TypeError`` is recorded while
+       streaming (so no second pass over the rows is needed), but at
+       resolution time each column's recorded extraction failure, if any,
+       is raised before that column's conversion is even attempted, and
+       both are resolved before the next column is inspected at all.
+       Every error re-raised exactly as the old code would raise it
        (``KeyError``/``TypeError`` wrapped, anything else -- e.g. a
        ``ValueError`` from a non-numeric string -- left uncaught);
     4. the first row, in row order, whose joint extraction fails --
@@ -224,19 +232,24 @@ def load_states(path) -> States:
     if n_rows == 0:
         raise EvidenceError(f"{path}: no usable state rows")
 
-    for ci in range(len(_SCALAR_COLUMNS)):
+    # R1 (coordinator review, 2026-09-27): each column fully resolved --
+    # its own recorded extraction failure (if any), THEN its own
+    # np.array(...) conversion -- before the NEXT column is looked at at
+    # all, exactly mirroring the old code's sequential
+    # list-comprehension-then-np.array-per-column structure. A column's
+    # conversion error (of whatever type the old code raised, re-raised
+    # unchanged) therefore always wins over a LATER column's plain
+    # missing-key extraction failure, matching b473f6d bit-for-bit.
+    converted: List[np.ndarray] = []
+    for ci, dtype in enumerate(_SCALAR_DTYPES):
         if col_fail[ci] is not None:
             raise EvidenceError(
                 f"{path}: state row missing an expected field: {col_fail[ci]}")
-
-    try:
-        seq = np.array(col_raw[0], dtype=np.int64)
-        sim_step = np.array(col_raw[1], dtype=np.int64)
-        sim_time_s = np.array(col_raw[2], dtype=np.float64)
-        wall_time_ns = np.array(col_raw[3], dtype=np.int64)
-        cmd_seq = np.array(col_raw[4], dtype=np.int64)
-    except (KeyError, TypeError) as exc:
-        raise EvidenceError(f"{path}: state row missing an expected field: {exc}")
+        try:
+            converted.append(np.array(col_raw[ci], dtype=dtype))
+        except (KeyError, TypeError) as exc:
+            raise EvidenceError(f"{path}: state row missing an expected field: {exc}")
+    seq, sim_step, sim_time_s, wall_time_ns, cmd_seq = converted
 
     if joint_fail is not None:
         if isinstance(joint_fail, (KeyError, TypeError)):
