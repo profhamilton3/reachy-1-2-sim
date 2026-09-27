@@ -592,12 +592,27 @@ class CycleMetrics:
     delta_trk_wb_cm: Optional[float] = None
     #: Report-only (proposal §4.1 "Cross-check"; never gated).
     cross_check_wrist_ball_cm: Optional[float] = None
-    #: Report-only (owner ruling, wrist_ball_delta_cm §, last bullet): the
-    #: realised minimum and Delta, recomputed with the realised window's
-    #: two endpoints at t_hi instead of t_lo, exposing the sensitivity of
-    #: the wrist_ball minimum to the command-bracket's own [t_lo, t_hi]
-    #: uncertainty. Never used by any check.
-    wrist_ball_bracket_sensitivity: Optional[Dict[str, Optional[float]]] = None
+    #: Report-only (owner ruling, wrist_ball_delta_cm §, last bullet; K4,
+    #: 2026-09-26 pr144-k2-k4 assignment): the realised window's own two
+    #: endpoints (the HOVER-side bracket and the REST_SHUT-side bracket)
+    #: each individually carry a [t_lo, t_hi] uncertainty -- recomputed
+    #: over all FOUR (start, end) combinations of {t_lo, t_hi}, using the
+    #: window's own b_start/b_rest brackets, the same planned/commanded
+    #: samples for every combination. Keys: "combos" (a dict with exactly
+    #: "lo_lo"/"lo_hi"/"hi_lo"/"hi_hi", each
+    #: {"realised_cm": float|None, "delta_cm": float|None, "status": "ok"
+    #: | "bracket_missing" | "empty_window" | "no_entry"}); "primary_combo"
+    #: ("lo_lo", which always equals wrist_ball_realised_cm/
+    #: wrist_ball_delta_cm exactly); "complete" (True only if all four
+    #: combos are "ok"); "realised_cm_min"/"realised_cm_max"/
+    #: "delta_cm_min"/"delta_cm_max" (over all four, ONLY when complete --
+    #: otherwise None, never a partial min/max); "incomplete_combos" (the
+    #: non-ok keys, [] when complete); and the backward-compatible
+    #: aliases "t_lo_realised_cm"/"t_lo_delta_cm" (== combos["lo_lo"]) and
+    #: "t_hi_realised_cm"/"t_hi_delta_cm" (== combos["hi_hi"]). Never used
+    #: by any check, never gated, never fed into wrist_ball_delta_cm
+    #: itself.
+    wrist_ball_bracket_sensitivity: Optional[Dict[str, object]] = None
     post_arrival_rise_deg: Optional[float] = None
     net_shoulder_pitch_hold_deg: Optional[float] = None
     c5_c6_pass: bool = True
@@ -814,31 +829,71 @@ def compute_place_route_metrics(
                     m.cross_check_wrist_ball_cm = cl.cross_check_wrist_ball(
                         wb_realised, scene, object_id, hand="shells")
 
-                    # Report-only (owner ruling, last bullet): the
-                    # SAME planned/commanded, realised against the
-                    # t_hi-bounded window instead -- exposes the
-                    # bracket's own [t_lo, t_hi] sensitivity. Never
-                    # gated, never fed into wrist_ball_delta_cm
-                    # itself.
-                    sensitivity: Dict[str, Optional[float]] = {
-                        "t_lo_realised_cm": entry.realised_cm,
-                        "t_lo_delta_cm": m.wrist_ball_delta_cm,
-                        "t_hi_realised_cm": None,
-                        "t_hi_delta_cm": None,
-                    }
-                    wb_realised_thi = _realised_window(b_start.t_hi, b_rest.t_hi)
-                    if wb_realised_thi:
-                        thi_deltas = cl.compute_deltas(
-                            "PLACE_ROUTE", [_R.HOVER, _R.REST_SHUT], 400, scene,
-                            wb_commanded, wb_realised_thi)
-                        thi_entry = next(
-                            (d for d in thi_deltas if d.hand == "shells"
-                             and d.link == "wrist_ball" and d.object_id == object_id), None)
-                        if thi_entry is not None:
-                            sensitivity["t_hi_realised_cm"] = thi_entry.realised_cm
-                            sensitivity["t_hi_delta_cm"] = (
-                                thi_entry.planned_cm - thi_entry.realised_cm)
-                    m.wrist_ball_bracket_sensitivity = sensitivity
+            # K4 (2026-09-26 pr144-k2-k4 assignment; owner ruling,
+            # wrist_ball_delta_cm §, last bullet): report-only, all FOUR
+            # (start, end) in {t_lo, t_hi}^2 combinations of the window's
+            # own b_start/b_rest brackets -- never gated, never fed into
+            # wrist_ball_delta_cm/wrist_ball_realised_cm above (those
+            # stay exactly the (t_lo, t_lo) computation). Independent of
+            # whether the primary (lo_lo) computation above succeeded --
+            # each combination reports its OWN status.
+            def _bracket_endpoint(b, attr: str) -> Optional[float]:
+                if b is None or getattr(b, "unplaceable", False):
+                    return None
+                return getattr(b, attr, None)
+
+            def _combo(start_t, end_t) -> Dict[str, object]:
+                if start_t is None or end_t is None:
+                    return {"realised_cm": None, "delta_cm": None, "status": "bracket_missing"}
+                if not wb_commanded:
+                    return {"realised_cm": None, "delta_cm": None, "status": "no_entry"}
+                realised = _realised_window(start_t, end_t)
+                if not realised:
+                    return {"realised_cm": None, "delta_cm": None, "status": "empty_window"}
+                deltas = cl.compute_deltas(
+                    "PLACE_ROUTE", [_R.HOVER, _R.REST_SHUT], 400, scene,
+                    wb_commanded, realised)
+                combo_entry = next(
+                    (d for d in deltas if d.hand == "shells" and d.link == "wrist_ball"
+                     and d.object_id == object_id), None)
+                if combo_entry is None:
+                    return {"realised_cm": None, "delta_cm": None, "status": "no_entry"}
+                return {
+                    "realised_cm": combo_entry.realised_cm,
+                    "delta_cm": combo_entry.planned_cm - combo_entry.realised_cm,
+                    "status": "ok",
+                }
+
+            combos: Dict[str, Dict[str, object]] = {
+                "lo_lo": _combo(_bracket_endpoint(b_start, "t_lo"), _bracket_endpoint(b_rest, "t_lo")),
+                "lo_hi": _combo(_bracket_endpoint(b_start, "t_lo"), _bracket_endpoint(b_rest, "t_hi")),
+                "hi_lo": _combo(_bracket_endpoint(b_start, "t_hi"), _bracket_endpoint(b_rest, "t_lo")),
+                "hi_hi": _combo(_bracket_endpoint(b_start, "t_hi"), _bracket_endpoint(b_rest, "t_hi")),
+            }
+            complete = all(c["status"] == "ok" for c in combos.values())
+            incomplete_combos = [k for k, c in combos.items() if c["status"] != "ok"]
+            if complete:
+                realised_cm_min = min(c["realised_cm"] for c in combos.values())
+                realised_cm_max = max(c["realised_cm"] for c in combos.values())
+                delta_cm_min = min(c["delta_cm"] for c in combos.values())
+                delta_cm_max = max(c["delta_cm"] for c in combos.values())
+            else:
+                realised_cm_min = realised_cm_max = delta_cm_min = delta_cm_max = None
+            m.wrist_ball_bracket_sensitivity = {
+                "combos": combos,
+                "primary_combo": "lo_lo",
+                "complete": complete,
+                "realised_cm_min": realised_cm_min,
+                "realised_cm_max": realised_cm_max,
+                "delta_cm_min": delta_cm_min,
+                "delta_cm_max": delta_cm_max,
+                "incomplete_combos": incomplete_combos,
+                # Backward-compatible aliases of lo_lo/hi_hi.
+                "t_lo_realised_cm": combos["lo_lo"]["realised_cm"],
+                "t_lo_delta_cm": combos["lo_lo"]["delta_cm"],
+                "t_hi_realised_cm": combos["hi_hi"]["realised_cm"],
+                "t_hi_delta_cm": combos["hi_hi"]["delta_cm"],
+            }
 
     return m
 
