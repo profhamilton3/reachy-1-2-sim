@@ -185,6 +185,58 @@ class TestROver:
         assert reassigned.goal_index[hover_last] != 1, (
             "the leaked, over-goal sample must not stay assigned to HOVER (R-over)")
 
+    def test_next_gotos_first_sample_is_not_absorbed_on_an_increasing_goto(self):
+        """K2-M3 (2026-09-26 pr144-k2-k4 assignment): the test above is,
+        by this fixture's own poses, always a DECREASING goto (every
+        joint ROUTE moves goes more negative: SWING_1 -0.3 -> HOVER
+        -0.70 on r_shoulder_pitch) -- so it exercises ONLY
+        ``segments.py``'s own ``else`` branch (``lo_bound = b -
+        ulp32(b)``), never the ``if b >= a`` branch (``hi_bound = b +
+        ulp32(b)``) a few lines above it. A mutant that widens ONLY the
+        increasing side (``b + ulp32(b)`` -> ``b + tol``) leaves the
+        decreasing-goto test above completely unaffected and survives.
+
+        This is the increasing-goto mirror, on a fresh 3-waypoint route
+        (A -0.3 -> B +0.10 -> C +0.40 on r_shoulder_pitch, all
+        increasing): B's own last sample leaks past B's own goal by the
+        SAME proposal F-a/F-e scale (6.5e-5 deg, ~152 float32 ULPs here
+        -- well beyond the 1-ULP admission bound, and well inside
+        ON_SEGMENT_TOL_DEG), in the direction C continues. The shipped
+        code (``hi_bound = b + ulp32(b)``) must not admit it to B."""
+        start = full_pose()
+        a_pose = full_pose(r_shoulder_pitch=-0.3)
+        b_pose = full_pose(r_shoulder_pitch=0.10, r_shoulder_roll=0.05,
+                            r_elbow_pitch=0.20, r_wrist_pitch=0.05)
+        c_pose = full_pose(r_shoulder_pitch=0.40, r_shoulder_roll=0.05,
+                            r_elbow_pitch=0.20, r_wrist_pitch=0.05)
+        route = [mf.Waypoint("A", a_pose, 1.0), mf.Waypoint("B", b_pose, 1.2),
+                 mf.Waypoint("C", c_pose, 1.0)]
+
+        sim = mf.FlightSim(start)
+        sim.fly(route)
+        result = sim.result()
+        targets8 = _targets8(result.command_rows)
+        assignment = seg.assign_goals(route, start, targets8)
+
+        # B's own last sample, by the CURRENT (clean) assignment.
+        b_last = max(i for i, g in enumerate(assignment.goal_index) if g == 1)
+
+        b_goal = b_pose["r_shoulder_pitch"]
+        c_goal = c_pose["r_shoulder_pitch"]
+        assert c_goal > b_goal, "this fixture's own premise: B -> C is increasing"
+        leak = b_goal + np.radians(6.5e-5)
+        assert (leak - b_goal) > seg.ulp32(b_goal), "the leak must exceed 1 ULP of B's own goal"
+        targets8[b_last] = dict(targets8[b_last], r_shoulder_pitch=leak)
+
+        reassigned = seg.assign_goals(route, start, targets8)
+        # R-over (increasing side): B (goto 1) never admits this leaked
+        # sample -- it is excluded from goto 1 (either reassigned
+        # forward or indeterminate), never silently kept as B's own last
+        # write.
+        assert reassigned.goal_index[b_last] != 1, (
+            "the leaked, over-goal sample must not stay assigned to B on an "
+            "increasing goto (R-over)")
+
     def test_mutation_revert_r_over_would_admit_the_overshoot(self):
         """Mutation guard: the OLD (pre-R-over) admission box -- the full
         ``ON_SEGMENT_TOL_DEG`` on BOTH sides, no 1-ULP goal-side
