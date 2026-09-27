@@ -244,3 +244,103 @@ class TestRAC3FreshOriginRepeatStaysExcluded:
         cv, leg_results = cyc.evaluate_cycle("rac3", "B", evd, [leg], skip_gates=True)
         assert leg_results["setup"].pathcheck["C2"].passed
         assert cv.echo_carry_by_leg["setup"] == 0
+
+
+class TestB16CarryExcludedFromC2Tau:
+    """K2-M4 (2026-09-26 pr144-k2-k4 assignment): a dedicated kill for
+    ``pathcheck.py`` ~232-233's ``if is_carry: continue`` (R-carry point
+    5 -- a carry is "not a setpoint of this goto", excluded from C2's own
+    tau set). At 77d6dab, this mutant (deleting that exclusion) already
+    failed 3 tests in this same file
+    (``TestRAC2ProvenanceRecheckStopsB::test_first_pass_c2_passes``,
+    ``::test_provenance_recheck_stops_b``, and
+    ``TestRAC3FreshOriginRepeatStaysExcluded::test_c2_unaffected_through_evaluate_cycle``)
+    -- recorded in the handoff, incidental (none of the three was
+    written for this mutation, and R-AC2's own kill is for the OPPOSITE
+    reason: it asserts C2 FAILS once R-carry' withdraws a GENUINE-ECHO
+    carry's exemption, which is a different code path -- the withdrawal
+    happens in ``cycle.py``'s per-leg recheck loop, layered ON TOP of
+    this same exclusion, never inside it).
+
+    This fixture is deliberately independent of R-AC3's own (fresh-
+    origin, non-echo) construction, so it does not rely on that class
+    continuing to exist or its own naming: a FRESH-origin, bit-exact
+    repeat of a goto's own first (out-of-range, tau-pinned-to-0) sample,
+    on a SECOND, independently and continuously moving joint -- if the
+    repeat's own tau=0 value were folded into C2's tau set (the
+    mutation), it disagrees with the second joint's own advancing tau by
+    far more than the 30 ms tolerance. The shipped code's own exclusion
+    keeps C2 passing; asserts this at the CYCLE level (``evaluate_cycle``,
+    R-AC2/R-AC3's own accepted level for this exact reason -- see this
+    file's own module docstring), not merely a bare pathcheck return
+    value: C2 passes, and no ``setup:C2`` reason is ever contributed to
+    the cycle's own ``reasons`` (the B verdict is not STOP for C2 --
+    ``segment_indeterminate`` still forces STOP overall here, since this
+    is a single custom-waypoint route with no W-blk window, exactly like
+    this file's own R-AC2/R-AC3 fixtures)."""
+
+    def _build(self, tmp_path):
+        start = full_pose()
+        goal = full_pose(r_shoulder_pitch=-1.0, r_elbow_pitch=-1.0)
+        route = [mf.Waypoint("G", goal, 3.0)]
+        from tools.goalfix_cmp._minjerk import pose_at
+        dt = 0.1
+        targets = [
+            full_pose(),  # t0: anchor
+            full_pose(r_shoulder_pitch=1.0,
+                      r_elbow_pitch=pose_at(0.0, -1.0, 0.02)),   # t1: fresh, out-of-range
+                                                                  #     shoulder (tau pinned to 0)
+            full_pose(r_shoulder_pitch=1.0,
+                      r_elbow_pitch=pose_at(0.0, -1.0, 0.60)),   # t2: bit-exact repeat of t1's
+                                                                  #     own shoulder value (a FRESH-
+                                                                  #     origin carry) -- elbow's own
+                                                                  #     tau has advanced to 0.60,
+                                                                  #     far past 30ms from 0
+            full_pose(r_shoulder_pitch=pose_at(0.0, -1.0, 0.90),
+                      r_elbow_pitch=pose_at(0.0, -1.0, 0.90)),   # t3: fresh again
+        ]
+        rows = [mf.state_row(seq=0, sim_step=0, sim_time_s=0.0, cmd_seq=-1,
+                              wall_time_ns=1, position_rad21=mf.full21(start))]
+        cmds = []
+        for i, tgt in enumerate(targets):
+            cmds.append(mf.command_row_joint(seq=i, target_rad21=mf.full21(tgt)))
+            rows.append(mf.state_row(seq=i + 1, sim_step=i + 1, sim_time_s=(i + 1) * dt,
+                                      cmd_seq=i, wall_time_ns=2 + i,
+                                      position_rad21=mf.full21(tgt)))
+        mf.write_evidence(tmp_path, rows, cmds)
+        evd = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+        leg = cyc.LegSpec("setup", route_rad=route, guard=(), start_pose8=start,
+                           command_indices=list(range(len(cmds))))
+        return evd, leg
+
+    def test_repeat_is_a_fresh_origin_carry(self, tmp_path):
+        """Confirms the fixture's own premise: t2's shoulder_pitch value
+        is a CARRY (bit-exact to t1's own command), never GENUINE_ECHO
+        (t1's own value has no PAST state to have echoed from -- it is
+        this goto's own first, fresh sample)."""
+        evd, leg = self._build(tmp_path)
+        ctx = echo.GotoContext(start8=leg.start_pose8, goal8=leg.route_rad[0].pose,
+                                seconds=leg.route_rad[0].seconds)
+        goto_context = [ctx] * len(evd.commands)
+        results = echo.classify_commands(evd, goto_context, leg_turn_on_state_index={0: 0})
+        assert results[1].joints["r_shoulder_pitch"].label in (echo.FRESH, echo.TIMING_AMBIGUOUS)
+        assert results[2].joints["r_shoulder_pitch"].label == echo.CARRY
+
+    def test_c2_passes_and_is_not_a_stop_reason(self, tmp_path):
+        evd, leg = self._build(tmp_path)
+        targets8 = [{name: float(v) for name, v in zip(mf.R_JOINTS, evd.commands.target_rad[i, :8])}
+                    for i in leg.command_indices]
+        assignment = seg.assign_goals(leg.route_rad, leg.start_pose8, targets8)
+        t_hi_s = [evd.brackets[i].t_hi for i in leg.command_indices]
+        # Library level: the repeat's own tau is genuinely excluded from
+        # taus (not merely near-end-exempted) -- confirmed directly so a
+        # regression that removes the exclusion via a DIFFERENT path
+        # (e.g. widening near-end) cannot masquerade as this one.
+        c2, _c3 = pc.check_c2_c3(targets8, t_hi_s, leg.start_pose8, leg.route_rad, assignment)
+        assert c2.passed, c2.detail
+
+        # Cycle level (K2-M4's own target): C2 passes, and the B verdict
+        # is never STOP because of C2 specifically.
+        cv, leg_results = cyc.evaluate_cycle("b16-c2-carry", "B", evd, [leg], skip_gates=True)
+        assert leg_results["setup"].pathcheck["C2"].passed
+        assert not any(r.startswith("setup:C2") for r in cv.reasons), cv.reasons
