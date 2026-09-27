@@ -348,16 +348,20 @@ class TestIncompleteHandling:
         # unique count we key the failure injection on below.
         assert n_lo_hi > n_lo_lo and n_lo_hi > n_hi_lo and n_lo_hi > n_hi_hi
 
-        real_compute_deltas = cl.compute_deltas
+        # K1 (2026-09-27 pr144-k1 assignment): K4's four combinations no
+        # longer call the full cl.compute_deltas each -- only the
+        # realised-only cl.wrist_ball_worst_cm, since planned/commanded
+        # are now taken from the primary entry (unchanged by this mock).
+        # Retargeted to that helper, same identification (by the
+        # combination's own sample COUNT) and same forced outcome.
+        real_wrist_ball_worst_cm = cl.wrist_ball_worst_cm
 
-        def _fail_lo_hi_only(route, waypoints, n_planned_samples, scene,
-                              commanded_q7_gripper, realised_q7_gripper):
-            if len(realised_q7_gripper) == n_lo_hi:
-                return []  # simulates a real "no matching entry" outcome for lo_hi only
-            return real_compute_deltas(route, waypoints, n_planned_samples, scene,
-                                        commanded_q7_gripper, realised_q7_gripper)
+        def _fail_lo_hi_only(q7_and_gripper, scene):
+            if len(q7_and_gripper) == n_lo_hi:
+                return {}  # simulates a real "no matching entry" outcome for lo_hi only
+            return real_wrist_ball_worst_cm(q7_and_gripper, scene)
 
-        with mock.patch.object(cyc.cl, "compute_deltas", side_effect=_fail_lo_hi_only):
+        with mock.patch.object(cyc.cl, "wrist_ball_worst_cm", side_effect=_fail_lo_hi_only):
             m = cyc.compute_place_route_metrics(
                 evd, leg, lr, affected, _box_scene(), board_object_ids=["box_1"], win=win)
 

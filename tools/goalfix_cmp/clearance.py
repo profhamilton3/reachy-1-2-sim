@@ -59,6 +59,27 @@ def _worst_per_link_over_samples(
     return worst
 
 
+def wrist_ball_worst_cm(
+    q7_and_gripper: Sequence[Tuple[Sequence[float], Optional[float]]],
+    scene: SceneModel,
+) -> Dict[str, float]:
+    """Worst clearance in cm, keyed by object_id, for exactly
+    (hand="shells", link="wrist_ball") over ONE sample stream -- the same
+    ``_worst_per_link_over_samples`` aggregation ``compute_deltas`` applies
+    per (hand, link), on its own (K1, 2026-09-27 pr144-k1 assignment,
+    Option A step 6). ``compute_deltas`` always recomputes planned,
+    commanded AND realised, for every hand and link; K4's bracket-
+    sensitivity combinations (cycle.py) need only the realised worst-case
+    per combination, since planned and commanded do not depend on which
+    realised window a combination uses. This same aggregation also gives
+    the commanded side once, for a caller that has no primary entry to
+    copy planned/commanded from -- it is generic over which sample stream
+    (realised or commanded) is passed in, exactly like
+    ``_worst_per_link_over_samples`` itself."""
+    worst = _worst_per_link_over_samples(q7_and_gripper, scene, "shells", "wrist_ball")
+    return {oid: 100.0 * dist for oid, dist in worst.items()}
+
+
 #: native_mujoco's states/commands are MJCF-native radians
 #: (native_mujoco/joint_map.py); measure_route_clearance.py -- and
 #: link_capsules underneath it -- expect the SDK's native degrees (the same

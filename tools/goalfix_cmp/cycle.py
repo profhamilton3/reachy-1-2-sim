@@ -842,6 +842,37 @@ def compute_place_route_metrics(
                     return None
                 return getattr(b, attr, None)
 
+            # K1 (2026-09-27 pr144-k1 assignment, Option A step 6): planned
+            # and commanded for (shells, wrist_ball, object_id) do not
+            # depend on which realised window a combination uses -- only
+            # the primary's own route/waypoints/n_planned_samples/scene
+            # and wb_commanded, all fixed across every combination below,
+            # exactly as they were for the primary computation above. Take
+            # both from the primary `entry` when the primary branch above
+            # produced one (`entry` is only bound in that branch, hence
+            # ``locals().get`` rather than a bare name -- never touching
+            # the primary code itself to give it a default). When it did
+            # not (a null primary from an empty wb_realised, e.g. -- not a
+            # `no_entry` inherent to planned/commanded), compute them ONCE
+            # here instead of once per combination.
+            primary_entry = locals().get("entry")
+            if primary_entry is not None:
+                pc_planned_cm: Optional[float] = primary_entry.planned_cm
+                pc_commanded_cm: Optional[float] = primary_entry.commanded_cm
+            elif not wb_commanded:
+                pc_planned_cm = pc_commanded_cm = None
+            else:
+                _planned_once = cl.M.planned_clearance_by_link(
+                    "PLACE_ROUTE", 400, scene, "wrist_ball", hand="shells",
+                    waypoints=[_R.HOVER, _R.REST_SHUT])
+                _commanded_once = cl._worst_per_link_over_samples(
+                    wb_commanded, scene, "shells", "wrist_ball")
+                if object_id in _planned_once and object_id in _commanded_once:
+                    pc_planned_cm = 100 * _planned_once[object_id]
+                    pc_commanded_cm = 100 * _commanded_once[object_id]
+                else:
+                    pc_planned_cm = pc_commanded_cm = None
+
             def _combo(start_t, end_t) -> Dict[str, object]:
                 if start_t is None or end_t is None:
                     return {"realised_cm": None, "delta_cm": None, "status": "bracket_missing"}
@@ -850,24 +881,35 @@ def compute_place_route_metrics(
                 realised = _realised_window(start_t, end_t)
                 if not realised:
                     return {"realised_cm": None, "delta_cm": None, "status": "empty_window"}
-                deltas = cl.compute_deltas(
-                    "PLACE_ROUTE", [_R.HOVER, _R.REST_SHUT], 400, scene,
-                    wb_commanded, realised)
-                combo_entry = next(
-                    (d for d in deltas if d.hand == "shells" and d.link == "wrist_ball"
-                     and d.object_id == object_id), None)
-                if combo_entry is None:
+                realised_worst = cl.wrist_ball_worst_cm(realised, scene)
+                if (pc_planned_cm is None or pc_commanded_cm is None
+                        or object_id not in realised_worst):
                     return {"realised_cm": None, "delta_cm": None, "status": "no_entry"}
+                realised_cm = realised_worst[object_id]
                 return {
-                    "realised_cm": combo_entry.realised_cm,
-                    "delta_cm": combo_entry.planned_cm - combo_entry.realised_cm,
+                    "realised_cm": realised_cm,
+                    "delta_cm": pc_planned_cm - realised_cm,
                     "status": "ok",
                 }
 
+            _lo_start = _bracket_endpoint(b_start, "t_lo")
+            _lo_end = _bracket_endpoint(b_rest, "t_lo")
+            if primary_entry is not None and _lo_start is not None and _lo_end is not None:
+                # lo_lo reuse: its endpoints are exactly the primary's
+                # (b_start.t_lo, b_rest.t_lo, both not None/unplaceable),
+                # so its realised/delta are the primary's, bit-identical.
+                lo_lo_combo: Dict[str, object] = {
+                    "realised_cm": primary_entry.realised_cm,
+                    "delta_cm": primary_entry.planned_cm - primary_entry.realised_cm,
+                    "status": "ok",
+                }
+            else:
+                lo_lo_combo = _combo(_lo_start, _lo_end)
+
             combos: Dict[str, Dict[str, object]] = {
-                "lo_lo": _combo(_bracket_endpoint(b_start, "t_lo"), _bracket_endpoint(b_rest, "t_lo")),
-                "lo_hi": _combo(_bracket_endpoint(b_start, "t_lo"), _bracket_endpoint(b_rest, "t_hi")),
-                "hi_lo": _combo(_bracket_endpoint(b_start, "t_hi"), _bracket_endpoint(b_rest, "t_lo")),
+                "lo_lo": lo_lo_combo,
+                "lo_hi": _combo(_lo_start, _bracket_endpoint(b_rest, "t_hi")),
+                "hi_lo": _combo(_bracket_endpoint(b_start, "t_hi"), _lo_end),
                 "hi_hi": _combo(_bracket_endpoint(b_start, "t_hi"), _bracket_endpoint(b_rest, "t_hi")),
             }
             complete = all(c["status"] == "ok" for c in combos.values())
