@@ -46,6 +46,22 @@ class TestIntegrity:
         with pytest.raises(IntegrityError):
             ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
 
+    def test_hash_is_checked_before_content_is_parsed(self, tmp_path):
+        """K1-M6 (2026-09-27 pr144-k1 assignment): verify_and_load must
+        check sha256 BEFORE parsing either file (D8's "verify before use"
+        rule) -- corrupt states.jsonl's own CONTENT into malformed JSON
+        (a non-final bad line) without touching SHA256SUMS, so its
+        recorded hash no longer matches the file at all. If the file
+        were parsed first, this would surface as ev.EvidenceError
+        (malformed JSON); verified first, it is IntegrityError (a hash
+        mismatch) -- and parsing never happens at all."""
+        (states_path, commands_path, sha_path), _ = _simple_flight(tmp_path)
+        lines = states_path.read_text().splitlines()
+        lines[0] = "{not json"
+        states_path.write_text("\n".join(lines) + "\n")  # SHA256SUMS left stale
+        with pytest.raises(IntegrityError):
+            ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+
 
 class TestLoading:
     def test_right_arm_slice_matches_joint_order(self, tmp_path):
