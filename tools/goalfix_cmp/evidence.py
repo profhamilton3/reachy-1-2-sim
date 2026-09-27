@@ -49,31 +49,84 @@ class EvidenceError(ValueError):
     this to rc=3 (evidence incomplete), never rc=0."""
 
 
+class _JsonlStream:
+    """Streams parsed JSON objects from ``path``, one physical line at a
+    time (K1, 2026-09-27 pr144-k1 assignment, Option A): the same
+    semantics the old whole-file ``_read_jsonl`` had, without ever holding
+    the full text, the full line list, or the full parsed-row list in
+    memory at once -- the file this loads can be several GB (proposal
+    §2).
+
+    A malformed line is held *pending*: if any further physical line
+    follows it -- even a blank one -- it was not the final line, and this
+    raises ``EvidenceError``, byte-identical to the old message, including
+    ``N`` (the file's total physical line count, with one trailing empty
+    element dropped -- exactly ``Path.read_text().split("\\n")``'s own
+    convention, which is also exactly what iterating an already-open text
+    file gives for free with no special-casing: a file ending in a
+    newline never yields a phantom empty final "line" from iteration the
+    way ``str.split("\\n")`` does, so counting physical lines via
+    iteration always equals the old ``len(lines)`` after its drop, in
+    every case -- empty file, no trailing newline, trailing blank lines,
+    CRLF). ``N`` is completed by counting -- never parsing -- the
+    remaining physical lines once a pending line is found not to be
+    final, so the file is never scanned from the start a second time.
+
+    If the file ends while a line is pending, that line is the truncated
+    final line: it is dropped and ``truncated`` (readable once the stream
+    has been fully consumed) is set True.
+
+    Blank/whitespace-only lines are skipped, via the same ``strip()`` the
+    old code used.
+    """
+
+    def __init__(self, path):
+        self._path = path
+        self.truncated = False
+
+    def __iter__(self):
+        path = self._path
+        pending = None  # 0-based line index of an unresolved malformed line
+        with open(path) as f:
+            index = -1
+            for raw_line in f:
+                index += 1
+                if pending is not None:
+                    # Another physical line exists -- the pending line was
+                    # NOT the final line (true even if THIS line is itself
+                    # blank). Finish counting N by continuing this same
+                    # iterator (never re-opening/re-scanning from the top).
+                    n_remaining = sum(1 for _ in f)
+                    total = index + 1 + n_remaining
+                    raise EvidenceError(
+                        f"{path}: malformed JSON on line {pending + 1} of "
+                        f"{total} (not the final line -- a truncated "
+                        "recording only ever affects the last one)")
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    pending = index
+                    continue
+                yield index, obj
+            if pending is not None:
+                self.truncated = True
+
+
 def _read_jsonl(path) -> Tuple[List[dict], bool]:
     """Parsed JSON rows, plus whether the final line was truncated (and
     dropped) rather than a real parse error. A malformed NON-final line is
-    a harder failure -- ``EvidenceError``, not a silent skip."""
-    text = Path(path).read_text()
-    lines = text.split("\n")
-    if lines and lines[-1] == "":
-        lines = lines[:-1]  # trailing newline, not a truncation
-    rows: List[dict] = []
-    truncated = False
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
-            if i == len(lines) - 1:
-                truncated = True
-                continue
-            raise EvidenceError(
-                f"{path}: malformed JSON on line {i + 1} of {len(lines)} "
-                "(not the final line -- a truncated recording only ever "
-                "affects the last one)")
-    return rows, truncated
+    a harder failure -- ``EvidenceError``, not a silent skip.
+
+    A thin compatibility wrapper over ``_JsonlStream`` (K1): still
+    materializes the full row list, for ``load_commands`` and any other
+    caller that wants that -- ``load_states`` streams directly from
+    ``_JsonlStream`` instead, to avoid holding it."""
+    stream = _JsonlStream(path)
+    rows = [obj for _, obj in stream]
+    return rows, stream.truncated
 
 
 # ---------------------------------------------------------------------------
@@ -100,26 +153,100 @@ class States:
         return self.position_rad[:, :8]
 
 
+#: Scalar column names, in the exact order the old code checked them --
+#: both for KeyError/TypeError row-access precedence and for the
+#: np.array(...) conversion-error precedence (K1 item 3).
+_SCALAR_COLUMNS: Tuple[str, ...] = ("seq", "sim_step", "sim_time_s", "wall_time_ns", "cmd_seq")
+
+
 def load_states(path) -> States:
-    rows, truncated = _read_jsonl(path)
-    if not rows:
+    """Streamed (K1, 2026-09-27): builds compact per-column buffers row by
+    row, from ``_JsonlStream`` directly (never materializing a full list
+    of row dicts, unlike ``_read_jsonl``/the old ``load_states``), and
+    discards each row dict as soon as its fields have been copied out.
+
+    Error precedence stays byte-identical to the old whole-file version,
+    which parsed and held every row before looking at any field:
+
+    1. a malformed non-final JSON line (raised by ``_JsonlStream`` itself,
+       mid-iteration, before this function ever inspects a field);
+    2. ``no usable state rows``;
+    3. for each scalar column, in ``_SCALAR_COLUMNS`` order: the first row
+       (in row order) whose access raises ``KeyError``/``TypeError`` --
+       this mirrors the old code's column-major list comprehensions,
+       which fully checked one column across every row before starting
+       the next, so an EARLIER column's failure always wins even if it
+       occurs at a LATER row than another column's failure. Only once
+       every column's raw values are complete does the old
+       ``np.array(list, dtype=...)`` conversion run, in the same order,
+       any error re-raised exactly as the old code would raise it
+       (``KeyError``/``TypeError`` wrapped, anything else -- e.g. a
+       ``ValueError`` from a non-numeric string -- left uncaught);
+    4. the first row, in row order, whose joint extraction fails --
+       ``KeyError``/``TypeError`` wrapped the same way, any other
+       exception type re-raised unchanged. Deferred exactly like the
+       scalar columns: the old code's joint loop never even started
+       unless every scalar column had already converted cleanly, so a
+       joint failure is only ever surfaced once no scalar column failed.
+    """
+    stream = _JsonlStream(path)
+    col_raw: List[list] = [[] for _ in _SCALAR_COLUMNS]
+    col_fail: List[Optional[BaseException]] = [None] * len(_SCALAR_COLUMNS)
+    position_rows: List[np.ndarray] = []
+    compliant_rows: List[np.ndarray] = []
+    joint_fail: Optional[BaseException] = None
+    n_rows = 0
+
+    for _, r in stream:
+        n_rows += 1
+        for ci, name in enumerate(_SCALAR_COLUMNS):
+            if col_fail[ci] is not None:
+                continue  # already has its (first, row-order) failure
+            try:
+                col_raw[ci].append(r[name])
+            except (KeyError, TypeError) as exc:
+                col_fail[ci] = exc
+        if joint_fail is None:
+            try:
+                by_name = {j["name"]: j for j in r["joints"]}
+                row_pos = np.empty(21, dtype=np.float64)
+                row_compl = np.empty(21, dtype=bool)
+                for k, name in enumerate(_JOINT_ORDER):
+                    jd = by_name[name]
+                    row_pos[k] = jd["position_rad"]
+                    row_compl[k] = bool(jd["compliant"])
+            except Exception as exc:  # deferred -- see precedence note above
+                joint_fail = exc
+            else:
+                position_rows.append(row_pos)
+                compliant_rows.append(row_compl)
+
+    if n_rows == 0:
         raise EvidenceError(f"{path}: no usable state rows")
+
+    for ci in range(len(_SCALAR_COLUMNS)):
+        if col_fail[ci] is not None:
+            raise EvidenceError(
+                f"{path}: state row missing an expected field: {col_fail[ci]}")
+
     try:
-        seq = np.array([r["seq"] for r in rows], dtype=np.int64)
-        sim_step = np.array([r["sim_step"] for r in rows], dtype=np.int64)
-        sim_time_s = np.array([r["sim_time_s"] for r in rows], dtype=np.float64)
-        wall_time_ns = np.array([r["wall_time_ns"] for r in rows], dtype=np.int64)
-        cmd_seq = np.array([r["cmd_seq"] for r in rows], dtype=np.int64)
-        position_rad = np.empty((len(rows), 21), dtype=np.float64)
-        compliant = np.empty((len(rows), 21), dtype=bool)
-        for i, r in enumerate(rows):
-            by_name = {j["name"]: j for j in r["joints"]}
-            for k, name in enumerate(_JOINT_ORDER):
-                jd = by_name[name]
-                position_rad[i, k] = jd["position_rad"]
-                compliant[i, k] = bool(jd["compliant"])
+        seq = np.array(col_raw[0], dtype=np.int64)
+        sim_step = np.array(col_raw[1], dtype=np.int64)
+        sim_time_s = np.array(col_raw[2], dtype=np.float64)
+        wall_time_ns = np.array(col_raw[3], dtype=np.int64)
+        cmd_seq = np.array(col_raw[4], dtype=np.int64)
     except (KeyError, TypeError) as exc:
         raise EvidenceError(f"{path}: state row missing an expected field: {exc}")
+
+    if joint_fail is not None:
+        if isinstance(joint_fail, (KeyError, TypeError)):
+            raise EvidenceError(
+                f"{path}: state row missing an expected field: {joint_fail}") from joint_fail
+        raise joint_fail
+
+    truncated = stream.truncated
+    position_rad = np.stack(position_rows)
+    compliant = np.stack(compliant_rows)
 
     epoch = assign_state_epochs(sim_step)
     duplicate_indices: List[int] = []
