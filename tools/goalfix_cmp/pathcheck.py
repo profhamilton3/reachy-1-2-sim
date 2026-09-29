@@ -378,8 +378,12 @@ def check_c7(targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float]
       threaded straight to ``seg.carry_mask`` -- a repeat whose chain
       origin was a genuine echo gets no carry exemption.
 
-    The gripper-range branch and the gripper-only-waypoint arm branch are
-    unchanged."""
+    The gripper-only-waypoint arm branch (``r_gripper`` changes, every ARM7
+    joint's nominal start equals its goal) applies the same rule per ARM7
+    joint: reference = nominal ``seg_start[j]`` (R-const; never the goto's
+    first assigned command), carries exempt (R-carry / R-carry'), any
+    other value not bit-equal to ``seg_start[j]`` fails. Both constant
+    branches therefore follow N1. The gripper-range branch is unchanged."""
     for i, tgt in enumerate(targets8):
         g_val = tgt.get("r_gripper", 0.0)
         if not (GRIPPER_LO_RAD - 1e-6 <= g_val <= GRIPPER_HI_RAD + 1e-6):
@@ -404,10 +408,11 @@ def check_c7(targets8: Sequence[Dict[str, float]], start_pose8: Dict[str, float]
                     return CheckResult("C7", False, i,
                                         f"{wp.name}: gripper moved outside a gripper-changing waypoint")
         if gripper_changes and not arm_changes:
-            a0 = {j: targets8[idxs[0]].get(j, 0.0) for j in ARM7}
             for i in idxs:
                 for j in ARM7:
-                    if targets8[i].get(j, 0.0) != a0[j]:
+                    if carries[i][j]:
+                        continue  # R-carry: not a setpoint of this goto
+                    if targets8[i].get(j, 0.0) != seg_start.get(j, 0.0):
                         return CheckResult("C7", False, i,
                                             f"{wp.name}: arm joint {j} moved during a gripper-only waypoint")
     return CheckResult("C7", True)

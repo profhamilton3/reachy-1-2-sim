@@ -345,3 +345,184 @@ class TestUnchangedBranches:
         c7 = _run_c7_synth(route, start, t, [0] * 6)
         assert not c7.passed and c7.first_violation_index == 4
         assert c7.detail == "SHUT: arm joint r_shoulder_pitch moved during a gripper-only waypoint"
+
+
+# ---------------------------------------------------------------------------
+# Gripper-only-waypoint ARM branch: R-const / R-carry / R-carry' (2026-09-28
+# arm-branch repair, PR #147 extension)
+#
+# Defect: the branch used the goto's FIRST assigned arm command (``a0``) as
+# every arm joint's reference, so a legitimate bit-exact leading arm carry
+# (the previous goto's last non-exact write) followed by the exact nominal S
+# was flagged. Repair: reference = nominal ``seg_start[j]``, carries exempt
+# through ``seg.carry_mask(..., withdraw=carry_withdraw)``, any other value
+# not bit-equal to S fails (N1's own rule, no tolerance).
+# ---------------------------------------------------------------------------
+
+S_ARM = float(np.float32(-0.5))                                     # nominal S = G of GRIPONLY's arm
+SP_ARM = float(np.nextafter(np.float32(S_ARM), np.float32(-np.inf)))  # S - 1 float32 ULP (R-over: assignable)
+SU_ARM = float(np.nextafter(np.float32(S_ARM), np.float32(np.inf)))   # S + 1 float32 ULP
+GA0 = -0.6                                                          # gripper before GRIPONLY
+ARM_J = "r_shoulder_pitch"
+
+ROUTE_ARM = [mf.Waypoint("ARM", _pose(r_shoulder_pitch=S_ARM, r_gripper=GA0), 2.0),
+             mf.Waypoint("GRIPONLY", _pose(r_shoulder_pitch=S_ARM, r_gripper=0.3), 2.0)]
+START_ARM = _pose(r_gripper=GA0)
+
+
+def _arm_targets(lead=SP_ARM, *, bad_at=None, bad=SU_ARM):
+    """6 commands. Goto 0 (ARM): c0, c1 (its last write ``lead``). Goto 1 (GRIPONLY,
+    arm constant at S, gripper moving): c2 carries ``lead`` bit-exactly, c3..c5 exact S.
+    ``bad_at`` replaces that command's arm value with ``bad`` (fresh, non-carry, != S)."""
+    t = [_pose(r_shoulder_pitch=pose_at(0.0, S_ARM, 0.001), r_gripper=GA0),
+         _pose(r_shoulder_pitch=lead, r_gripper=GA0),
+         _pose(r_shoulder_pitch=lead, r_gripper=-0.4),
+         _pose(r_shoulder_pitch=S_ARM, r_gripper=-0.2),
+         _pose(r_shoulder_pitch=S_ARM, r_gripper=0.0),
+         _pose(r_shoulder_pitch=S_ARM, r_gripper=0.3)]
+    if bad_at is not None:
+        t[bad_at]["r_shoulder_pitch"] = bad
+    return t
+
+
+def _run_all_arm(targets, assignment=None):
+    return pc.run_all(_t21(targets), [0.1 * i for i in range(len(targets))], START_ARM,
+                      ROUTE_ARM, (), assignment=assignment)
+
+
+def _build_arm_cycle(tmp_path, targets, *, state0_arm=None, never_reported=None):
+    """Evidence for ``targets``: the plant reports each command's own value, except that
+    ``never_reported`` (an arm value) is reported as S instead, and state 0 (before any
+    command) may report ``state0_arm`` (the origin of a genuine echo of that value)."""
+    s0 = _pose(r_gripper=GA0)
+    if state0_arm is not None:
+        s0[ARM_J] = state0_arm
+    rows = [mf.state_row(seq=0, sim_step=0, sim_time_s=0.0, cmd_seq=-1, wall_time_ns=1,
+                          position_rad21=mf.full21(s0))]
+    cmds = []
+    for i, tgt in enumerate(targets):
+        cmds.append(mf.command_row_joint(seq=i, target_rad21=mf.full21(tgt)))
+        reported = dict(tgt)
+        if never_reported is not None and reported[ARM_J] == never_reported:
+            reported[ARM_J] = S_ARM
+        rows.append(mf.state_row(seq=i + 1, sim_step=i + 1, sim_time_s=(i + 1) * 0.1, cmd_seq=i,
+                                  wall_time_ns=2 + i, position_rad21=mf.full21(reported)))
+    mf.write_evidence(tmp_path, rows, cmds)
+    evd = ev.verify_and_load(tmp_path, "states.jsonl", "commands.jsonl")
+    leg = cyc.LegSpec("setup", route_rad=ROUTE_ARM, guard=(), start_pose8=START_ARM,
+                       command_indices=list(range(len(cmds))))
+    return evd, leg
+
+
+class TestGripperOnlyArmBranchLeadingCarry:
+    def test_leading_arm_carry_then_exact_S_passes_via_run_all(self):
+        """The section-6 reproduction: route ARM then GRIPONLY; goto 0 ends at S - 1 ULP;
+        goto 1's first command carries it bit-exactly, its second is exact S."""
+        t = [_pose(r_shoulder_pitch=pose_at(0.0, S_ARM, 0.001), r_gripper=GA0),
+             _pose(r_shoulder_pitch=SP_ARM, r_gripper=GA0),
+             _pose(r_shoulder_pitch=SP_ARM, r_gripper=-0.4),
+             _pose(r_shoulder_pitch=S_ARM, r_gripper=-0.1),
+             _pose(r_shoulder_pitch=S_ARM, r_gripper=0.3)]
+        asg = seg.assign_goals(ROUTE_ARM, START_ARM, t)
+        assert asg.ok and asg.goal_index == [0, 0, 1, 1, 1]   # the carry IS goto 1's leading command
+        assert t[2][ARM_J] == t[1][ARM_J] != S_ARM
+        # run_all computes its own assignment (assignment=None)
+        res = _run_all_arm(t)
+        assert res["C7"].passed, (res["C7"].first_violation_index, res["C7"].detail)
+
+    def test_cycle_path_leading_arm_carry_passes(self, tmp_path):
+        evd, leg = _build_arm_cycle(tmp_path, _arm_targets(), never_reported=SP_ARM)
+        cv, lrs = cyc.evaluate_cycle("c7arm-ok", "B", evd, [leg], skip_gates=True)
+        lr = lrs["setup"]
+        assert lr.assignment.goal_index == [0, 0, 1, 1, 1, 1]
+        assert lr.pathcheck["C7"].passed, lr.pathcheck["C7"].detail
+        assert "setup:C7" not in cv.reasons
+
+
+class TestGripperOnlyArmBranchFreshInvalid:
+    """A fresh (non-carry) arm value != S inside a gripper-only goto. On the shipped path
+    ``assign_goals`` rejects the sample first (R-const/N1), so it is an unassigned
+    non-carry command and the cycle STOPs on that rule; C7 is the second line of
+    defence and is exercised through ``run_all`` with the clean assignment."""
+
+    CLEAN = [0, 0, 1, 1, 1, 1]
+
+    @pytest.mark.parametrize("bad_at", [4, 3], ids=["a_mid_goto", "b_first_non_carry"])
+    def test_shipped_path_stops_on_unassigned_non_carry(self, tmp_path, bad_at):
+        t = _arm_targets(bad_at=bad_at)
+        assert seg.assign_goals(ROUTE_ARM, START_ARM, t).goal_index[bad_at] is None
+        evd, leg = _build_arm_cycle(tmp_path, t, never_reported=SP_ARM)
+        cv, lrs = cyc.evaluate_cycle(f"c7arm-bad{bad_at}", "B", evd, [leg], skip_gates=True)
+        lr = lrs["setup"]
+        assert cv.verdict == cyc.VERDICT_STOP
+        assert lr.assignment.goal_index[bad_at] is None
+        unassigned = [r for r in cv.reasons
+                      if "unassigned non-carry command" in r and f"local index {bad_at}" in r]
+        assert unassigned, cv.reasons
+        # the unassigned index never reaches C7, so C7 itself does not fire on this path
+        assert "setup:C7" not in cv.reasons
+
+    @pytest.mark.parametrize("bad_at", [4, 3], ids=["a_mid_goto", "b_first_non_carry"])
+    def test_c7_fails_at_that_index_with_clean_assignment(self, bad_at):
+        c7 = _run_all_arm(_arm_targets(bad_at=bad_at), assignment=_asg(self.CLEAN))["C7"]
+        assert not c7.passed and c7.first_violation_index == bad_at
+        assert c7.detail == f"GRIPONLY: arm joint {ARM_J} moved during a gripper-only waypoint"
+        # same inputs, the bad value restored to exact S: passes
+        assert _run_all_arm(_arm_targets(), assignment=_asg(self.CLEAN))["C7"].passed
+
+    def test_first_non_carry_below_S_also_fails(self):
+        """Not only S + 1 ULP: S - 1 ULP as a fresh non-carry value (previous is exact S)."""
+        t = _arm_targets(lead=SP_ARM)
+        t[4][ARM_J] = SP_ARM       # previous command is exact S, so this is NOT a carry
+        c7 = _run_all_arm(t, assignment=_asg(self.CLEAN))["C7"]
+        assert not c7.passed and c7.first_violation_index == 4
+
+
+class TestGripperOnlyArmBranchRCarryPrime:
+    """A leading arm repeat whose chain origin the shipped classifier labels
+    ``genuine_echo`` is an ``echo_carry`` and gets no exemption; a fresh-origin
+    repeat is a clean carry."""
+
+    def _classify(self, evd, lr, leg):
+        return echo.classify_commands(
+            evd, [lr.goto_context[i] for i in range(len(evd.commands))],
+            leg_turn_on_state_index={0: ev.leg_turn_on_state_index(evd, leg.command_indices)})
+
+    def test_echo_origin_arm_repeat_gets_no_carry_exemption(self, tmp_path):
+        # state 0 already reports S - 1 ULP, so command 1's write of that value is a genuine echo
+        evd, leg = _build_arm_cycle(tmp_path, _arm_targets(), state0_arm=SP_ARM,
+                                    never_reported=None)
+        cv, lrs = cyc.evaluate_cycle("c7arm-echo", "B", evd, [leg], skip_gates=True)
+        lr = lrs["setup"]
+        assert lr.assignment.goal_index[2] == 1 and lr.assignment.goal_index[3] == 1
+        res = self._classify(evd, lr, leg)
+        assert res[1].joints[ARM_J].label == echo.GENUINE_ECHO
+        assert res[2].joints[ARM_J].label == echo.ECHO_CARRY
+        c7 = lr.pathcheck["C7"]
+        assert not c7.passed
+        assert c7.detail.startswith("R-carry′:"), c7.detail
+        assert c7.first_violation_index == 2
+        assert "arm joint r_shoulder_pitch moved during a gripper-only waypoint" in c7.detail
+        assert "setup:C7" in cv.reasons and cv.verdict == cyc.VERDICT_STOP
+
+    def test_fresh_origin_arm_repeat_is_a_clean_carry_c7_passes(self, tmp_path):
+        evd, leg = _build_arm_cycle(tmp_path, _arm_targets(), never_reported=SP_ARM)
+        cv, lrs = cyc.evaluate_cycle("c7arm-fresh", "B", evd, [leg], skip_gates=True)
+        lr = lrs["setup"]
+        assert lr.assignment.goal_index[2] == 1 and lr.assignment.goal_index[3] == 1
+        res = self._classify(evd, lr, leg)
+        assert res[1].joints[ARM_J].label == echo.FRESH
+        assert res[2].joints[ARM_J].label == echo.CARRY
+        assert lr.pathcheck["C7"].passed, lr.pathcheck["C7"].detail
+        assert "setup:C7" not in cv.reasons
+
+    def test_direct_check_c7_withdraw_flag_arm_branch(self):
+        t = _arm_targets()
+        asg = _asg(self.CLEAN)
+        assert pc.check_c7(t, START_ARM, ROUTE_ARM, asg).passed
+        wd = [{n: False for n in pc.R_JOINTS} for _ in t]
+        wd[2][ARM_J] = True
+        c7 = pc.check_c7(t, START_ARM, ROUTE_ARM, asg, carry_withdraw=wd)
+        assert not c7.passed and c7.first_violation_index == 2
+
+    CLEAN = [0, 0, 1, 1, 1, 1]
