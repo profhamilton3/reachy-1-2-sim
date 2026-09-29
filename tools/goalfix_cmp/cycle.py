@@ -1161,7 +1161,9 @@ def evaluate_cycle(
         c2_recheck, _c3_unused = pc.check_c2_c3(
             targets8, t_hi_s, leg.start_pose8, leg.route_rad, lr.assignment,
             carry_withdraw=withdraw_mask)
-        for check_id, recheck in (("C1", c1_recheck), ("C2", c2_recheck)):
+        c7_recheck = pc.check_c7(targets8, leg.start_pose8, leg.route_rad, lr.assignment,
+                                  carry_withdraw=withdraw_mask)
+        for check_id, recheck in (("C1", c1_recheck), ("C2", c2_recheck), ("C7", c7_recheck)):
             first_pass = lr.pathcheck.get(check_id)
             if (isinstance(first_pass, pc.CheckResult) and first_pass.passed
                     and not recheck.passed):
