@@ -1,8 +1,11 @@
 """Test-only helpers over a004_bridge_restart.json (real a004 rows).
 
-Only `wall_time_ns` is rewritten (to `time.monotonic_ns()`, the clock the
-native server stamps states with), so the freshness check is genuinely
-satisfied; everything else is the recorded data.
+The fixture states are a PROJECTION of the sealed lines: the gate's fields
+(type, seq, sim_step, wall_time_ns, cmd_seq) plus the 8 right-arm joints'
+name/position_rad/effort/compliant; their values equal the sealed lines.
+The 4 command rows are the sealed rows verbatim. At test time only
+`wall_time_ns` is rewritten (to `time.monotonic_ns()`, the clock the native
+server stamps states with), so the freshness check is genuinely satisfied.
 """
 import copy
 import json

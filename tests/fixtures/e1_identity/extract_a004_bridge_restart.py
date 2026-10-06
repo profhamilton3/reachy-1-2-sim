@@ -7,9 +7,10 @@ Reads, from the sealed session:
   e1_server_runs/run_20261002_035557/commands.jsonl   (all 4 rows)
   e1_server_runs/run_20261002_035557/states.jsonl     (streamed; keeps states seq 3723 and 3724 only)
   plan_S2-B4-c-r1.json                                (setup leg entry)
-and records each file's sha256. States are reduced to the fields the freshness
-gate reads (seq, sim_step, wall_time_ns, cmd_seq, and the 8 right-arm joints'
-name/position_rad/effort/compliant). The test rewrites only `wall_time_ns`.
+and records each file's sha256. States are a PROJECTION of the sealed lines
+(type, seq, sim_step, wall_time_ns, cmd_seq plus the 8 right-arm joints'
+name/position_rad/effort/compliant; values equal the sealed lines). The
+command rows are verbatim. The test rewrites only `wall_time_ns`.
 """
 import argparse, hashlib, json
 from pathlib import Path

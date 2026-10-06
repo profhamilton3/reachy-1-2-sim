@@ -700,18 +700,31 @@ def _a004_namespace(run_dir, ctrl, *, calls, turn_on_effect, compliance_timeout_
         calls["route"].append((a, kw))
         return {"ok": True}
 
-    ns = _build_namespace(ctrl, prev_ok=True, baseline=None,
-                          require_compliance_result=None,
-                          route_should_raise=False, calls={"turn_on": [], "require_compliance": [], "route": []})
-    ns["e1_identity"] = _real_e1_identity
-    ns["R"] = rig_routes
-    ns["reachy"] = types.SimpleNamespace(turn_on=fake_turn_on, r_arm=types.SimpleNamespace())
-    ns["rig_motion"] = types.SimpleNamespace(deploy_to_rest=fake_route, from_present=fake_route, to_present=fake_route)
-    ns["ident"] = types.SimpleNamespace(run_dir=str(run_dir))
-    ns["COMPLIANCE_TIMEOUT_S"] = compliance_timeout_s
-    ns["time"] = types.SimpleNamespace(
-        monotonic=time.monotonic, monotonic_ns=time.monotonic_ns,
-        time_ns=time.time_ns, sleep=lambda s: None)
+    # Built WITHOUT _build_namespace: that helper references the new
+    # capture_cmd_baseline API, which would make this reproduction die with
+    # an AttributeError (not the a004 reason) on the unrepaired code.
+    (ctrl / "go_leg").touch()
+    (ctrl / "recorder_leg.log").write_text("fly the route now")
+    ns = {
+        "reachy": types.SimpleNamespace(turn_on=fake_turn_on, r_arm=types.SimpleNamespace()),
+        "e1_identity": _real_e1_identity,
+        "R": rig_routes,
+        "primitives": types.SimpleNamespace(raise_to_side=fake_route),
+        "rig_motion": types.SimpleNamespace(
+            deploy_to_rest=fake_route, from_present=fake_route, to_present=fake_route),
+        "ident": types.SimpleNamespace(run_dir=str(run_dir)),
+        "CTRL": ctrl,
+        "wait_for": lambda pred, timeout_s, period=0.25: "ready" if pred() else "timeout",
+        "start_check": lambda kind: {"kind": kind, "ok": True, "why": "",
+                                      "posture_of": "stub", "pose": {}},
+        "_pose": lambda: {"r_shoulder_pitch": 0.0},
+        "PREV_OK": True, "CYCLE": "test_cycle", "LEAD_IN_S": 0.0,
+        "COMPLIANCE_TIMEOUT_S": compliance_timeout_s,
+        "time": types.SimpleNamespace(
+            monotonic=time.monotonic, monotonic_ns=time.monotonic_ns,
+            time_ns=time.time_ns, sleep=lambda s: None),
+        "json": json, "pathlib": __import__("pathlib"), "traceback": traceback,
+    }
     return ns
 
 
