@@ -650,9 +650,11 @@ objects:
     semantic_class: destination.tray
     tags: [tray, destination, placement-target, sort-target]
 
+  # Owner-confirmed 2026-10-06: diameter 6.6 cm, height 12.2 cm.
+  # See docs/scene-object-dimensions.md; centre keeps the base on the board.
   - id: soda_can
-    geometry: {kind: cylinder, radius: 0.033, length: 0.115}
-    pose: {position: [0.4318, 0.1524, 0.7975], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: cylinder, radius: 0.033, length: 0.122}
+    pose: {position: [0.4318, 0.1524, 0.8010], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.85, 0.85, 0.88, 1.0], roughness: 0.15}
     physics:
       dynamic: true

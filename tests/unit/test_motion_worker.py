@@ -379,10 +379,10 @@ def test_the_hover_is_derived_from_what_is_on_the_board():
     empty = SceneModel.from_yaml(scene)
     assert M.hover_height(empty) == pytest.approx(0.12)
 
-    # Heights are the scene's own geometry, not guesses: a 11.5 cm can wants
-    # 17.5 cm, a 5 cm block is under the floor and gets 12.
+    # Heights are the scene's own geometry, not guesses: a 12.2 cm can wants
+    # 18.2 cm, a 5 cm block is under the floor and gets 12.
     for oid, want in (("foam_block", 0.12), ("pool_cyl_1", 0.14),
-                      ("blue_cylinder", 0.16), ("soda_can", 0.175)):
+                      ("blue_cylinder", 0.16), ("soda_can", 0.182)):
         board = SceneModel.from_yaml(scene)
         cx, cy, cz = board.cell_center("cell_r2c2")
         obj = board.get(oid)
@@ -442,9 +442,9 @@ def test_pointing_at_an_object_aims_at_its_own_top(monkeypatch, validated):
     flat block and a tall can get the same AIR UNDER THE PAD rather than the
     same height above the table.
 
-    Measured against the scene's own geometry — the can is 11.5 cm, so its top
-    sits 11.5 cm over the 0.740 m surface and the pad goes 6 cm above that.
-    The board-wide rule would have answered 17.5 cm over the table, which is
+    Measured against the scene's own geometry — the can is 12.2 cm, so its top
+    sits 12.2 cm over the 0.740 m surface and the pad goes 6 cm above that.
+    The board-wide rule would have answered 18.2 cm over the table, which is
     the same place; put the can somewhere shorter than the tallest thing on
     the board and the two rules separate, which is the next test.
     """
@@ -477,7 +477,7 @@ def test_pointing_at_an_object_aims_at_its_own_top(monkeypatch, validated):
     assert seen["label"] == "soda_can"
     assert seen["xy"] == pytest.approx((cx, cy))
     # Its own top plus the clearance, not the board's floor.
-    assert seen["base_z"] == pytest.approx(0.740 + 0.115 + R.POINT_CLEARANCE,
+    assert seen["base_z"] == pytest.approx(0.740 + 0.122 + R.POINT_CLEARANCE,
                                            abs=2e-3)
     # NAMED TO THE GUARD.  Dropping the target from the check is the defect
     # that let blue_cylinder be hovered to 1.6 cm and moved 0.123 m while the

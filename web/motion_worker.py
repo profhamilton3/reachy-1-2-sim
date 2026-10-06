@@ -300,7 +300,7 @@ def _point_at_target(job, robot, arm, phase, *, should_abort=None, on_phase=None
     OVER A CELL the height comes from the whole board: `hover_height` takes the
     tallest thing actually standing on the grid, adds the air wanted under the
     pad, and floors it — so an empty board answers 12 cm and a board with a can
-    on it answers 17.5 cm.  That is right for a cell, because the arm has to
+    on it answers 18.2 cm.  That is right for a cell, because the arm has to
     cross whatever else is up there to get to it.
 
     OVER AN OBJECT the height comes from THAT OBJECT: the notebook uses

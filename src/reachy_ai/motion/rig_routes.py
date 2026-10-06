@@ -330,7 +330,7 @@ POINT_CLEARANCE = 0.06
 #:     red_cube                    6.0 cm          12.0 cm   (floor binds)
 #:     pool_cyl_1..3               8.0 cm          14.0 cm
 #:     blue_cylinder              10.0 cm          16.0 cm
-#:     soda_can                   11.5 cm          17.5 cm
+#:     soda_can                   12.2 cm          18.2 cm
 #:
 #: Which is what the notebook means by "17 cm over the table is barely 6 cm
 #: over a can".

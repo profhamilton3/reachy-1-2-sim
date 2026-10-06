@@ -9,7 +9,7 @@ name: B1_evidence
 objects:
 - id: soda_can
   pose:
-    position: [0.2794, 0.1524, 0.7975]
+    position: [0.2794, 0.1524, 0.8009999999999999]
 - id: foam_block
   pose:
     position: [0.4318, -0.1524, 0.765]
