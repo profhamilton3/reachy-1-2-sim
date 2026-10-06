@@ -865,6 +865,36 @@ class TestIKPolicyIsExplicit:
         assert new[0] == old[0]          # bit for bit, not approximately
         assert new[1] == old[1]
 
+    def test_fast_carries_the_orientation_and_the_seed_from_point_to_point(
+            self, monkeypatch):
+        """RV2.  Contract test with a spy on `solve`: the first call has
+        `prefer=None`; every later call gets exactly the orientation the
+        previous call returned, seeded with the previous solution.  The
+        exact-trajectory test above uses a segment on which `prefer` changes
+        nothing, so it cannot see the carry being dropped."""
+        planner = CartesianPlanner(arm=None, scene=_bare_scene())
+        calls, returned = [], []
+
+        def spy(xyz, seed=None, prefer=None, **kw):
+            i = len(calls)
+            calls.append((list(seed), prefer, kw))
+            q = [float(i)] * 7
+            orient = (0.1 * (i + 1), -0.1 * (i + 1))
+            returned.append((q, orient))
+            return q, orient
+
+        monkeypatch.setattr(planner, "solve", spy)
+        monkeypatch.setattr(planner, "check_arm_path", lambda *a, **k: None)
+        planner.plan_segment((0.4, -0.2, 1.5), (0.4, -0.1, 1.5), 5, PRESENT,
+                             ik=IKPolicy.FAST, gripper_deg=_HAND_OPEN)
+        assert len(calls) == 5
+        assert calls[0][1] is None and calls[0][0] == list(PRESENT)
+        for i in range(1, 5):
+            seed, prefer, kw = calls[i]
+            assert prefer == returned[i - 1][1]
+            assert seed == returned[i - 1][0]
+            assert kw.get("return_orientation") is True
+
     def test_max_clearance_asks_the_existing_solver_for_it(self, monkeypatch):
         planner = CartesianPlanner(arm=None, scene=_bare_scene())
         calls = []

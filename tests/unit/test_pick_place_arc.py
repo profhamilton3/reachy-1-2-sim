@@ -11,9 +11,11 @@ tracks the return (residual R2) -- only what the PLANNER and the sequence of
 commands do.
 """
 
+import dataclasses
 import os
 import sys
 
+import numpy as np
 import pytest
 
 pytest.importorskip("scipy")
@@ -31,9 +33,11 @@ from reachy_ai.motion.kinematics import (  # noqa: E402
     ArmClearanceError,
     CartesianPlanner,
     R_ARM_JOINTS,
+    link_capsules,
     link_frames,
 )
-from reachy_ai.scene.awareness import SceneModel  # noqa: E402
+from reachy_ai.scene.awareness import (  # noqa: E402
+    SceneModel, segment_object_distance)
 from reachy_ai.tasks import pick_place_live as L  # noqa: E402
 
 SEGMENT_NAMES = [
@@ -366,6 +370,37 @@ class TestReturnGuarantee:
         assert e.off_deg > 12.0
         assert spies.streams == 8                # no corrective stream at all
         assert spies.count("go_home") == 0
+
+    def test_c2_a_correction_through_the_placed_target_is_refused(
+            self, planned, monkeypatch):
+        """RV1.  The corrective move is checked with `hand_contact=False`, so
+        the object just placed counts as an obstacle for the hand too.  Put
+        the placed target on the hand tube only (clear of upper arm and
+        forearm) at the measured lagged pose: the correction must be refused
+        for the HAND, and never commanded."""
+        plan, robot, planner, spies, events, phases, kw = _execute(
+            planned, monkeypatch, lag_streams=range(8, 100))
+        arm = robot.r_arm
+        q_m = list(plan.end)
+        q_m[0] += arm.lag_offset["r_shoulder_pitch"]
+        _s, _e, wrist, rot = link_frames(q_m)
+        place = tuple(float(x) for x in wrist - rot @ np.array([0.0, 0.0, 0.10]))
+        plan = type(plan)(**{**plan.__dict__, "place": place})
+        # the geometry is meaningful: overlaps the hand, clear of the others
+        tgt = plan.scene.get(plan.object_id)
+        moved = dataclasses.replace(tgt, center=place)
+        dist = {name: segment_object_distance(moved, p0, p1, r)[0]
+                for name, p0, p1, r in link_capsules(q_m, "right", R.OPEN)}
+        assert dist["hand"] < 0
+        assert dist["upper_arm"] > 0 and dist["forearm"] > 0
+        with pytest.raises(L.ReturnArrivalError) as info:
+            L.execute_arc(robot, plan, planner, **kw)
+        e = info.value
+        assert isinstance(e.refusal, ArmClearanceError)
+        assert e.refusal.obstacle == plan.object_id
+        assert e.refusal.link == "hand"
+        assert spies.streams == 8                # no corrective stream
+        assert spies.count("go_home") == 0 and spies.count("stow") == 0
 
     def test_d_an_arm_that_never_arrives_gets_exactly_the_maximum_checked_attempts(
             self, planned, monkeypatch):
