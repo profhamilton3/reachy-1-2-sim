@@ -53,7 +53,15 @@ from reachy_ai.scene.awareness import SceneModel
 # unchanged: the place site this script used to look up internally is now
 # passed in from _PLACE_XY below.
 from reachy_ai.tasks.pick_place_live import CLEAR_Z as _CLEAR_Z  # noqa: F401
-from reachy_ai.tasks.pick_place_live import pick_and_place, side_hub
+# Issue #56: the demo preflights the COMPLETE planned job -- the raise footprint,
+# every arc with its return to the raised pose, and the stow footprint -- before
+# it turns the arm on, then executes the accepted arcs.
+from reachy_ai.tasks.pick_place_live import (
+    PreflightRefused,
+    ReturnArrivalError,
+    execute_arc,
+    preflight_pick_place,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -130,20 +138,39 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
 
     planner = CartesianPlanner(arm, scene=scene)
     attacher = MarkerAttacher(enabled=not physics)
-    attacher.reset()
 
+    # PREFLIGHT THE WHOLE JOB BEFORE ANY MOTION (#56).  Planning sends no motion
+    # command (IK service calls only).  A move whose arc is refused is skipped
+    # and logged with its full refusal; its object stays where it is.  The demo
+    # board and _PLACE_XY are NOT altered to avoid refusals: on a crowded board
+    # this may skip objects or refuse the whole job, and that is the point.
+    moves = []
+    for object_id in scene.manipulable_ids():
+        if object_id not in _PLACE_XY:
+            log.warning("OBJECT %s has no place site in _PLACE_XY; skipping",
+                        object_id)
+            continue
+        moves.append((object_id, _PLACE_XY[object_id]))
+    log.info("── Preflight: checking the whole job before moving anything")
+    try:
+        job = preflight_pick_place(planner, scene, moves, skip_refused=True)
+    except PreflightRefused as exc:
+        log.error("Preflight REFUSED the whole job — no motion made: %s", exc)
+        sys.exit(1)
+    for object_id, why in job.skipped:
+        log.warning("SKIPPED %s: %s", object_id, why)
+    if not job.arcs:
+        log.error("Preflight accepted no arcs — no motion made.")
+        sys.exit(1)
+
+    attacher.reset()
     robot.turn_on("r_arm")
     time.sleep(0.3)
     log.info("Right arm ON")
 
-    # Lift up the robot's RIGHT SIDE to the SIDE_HIGH transit hub — the hand
-    # swings out past the table's right edge before rising, so it never sweeps
-    # up through the tabletop (verified clear in kinematic and physics models).
-    log.info("── Raise arm up the side to the SIDE_HIGH hub")
+    # Raise to the PRESENT pose by the measured route out of the rail pocket.
+    log.info("── Raise arm to the raised pose")
     P.raise_to_side(arm, duration=3.0)
-    side_seed, side_pad = side_hub(planner)
-    log.info("   SIDE_HIGH pad=(%.2f, %.2f, %.2f)", *side_pad)
-    seed = side_seed
 
     # Tilt the head/cameras down to the centroid of all manipulable objects on
     # the table.  Using all object centres (not just the first one) ensures
@@ -155,21 +182,22 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
              gaze_x, gaze_y, scene.table_surface_z)
     P.look_at(robot, (gaze_x, gaze_y, scene.table_surface_z), duration=1.5)
 
-    for object_id in scene.manipulable_ids():
+    for arc in job.arcs:
         log.info("=" * 56)
-        px, py = _PLACE_XY.get(object_id, (None, None))
-        log.info("OBJECT: %s  → place (%.2f, %.2f)", object_id, px, py)
+        px, py = arc.place_xy
+        log.info("OBJECT: %s  → place (%.2f, %.2f)", arc.object_id, px, py)
         log.info("=" * 56)
-        seed = pick_and_place(robot, planner, scene, attacher, object_id, seed,
-                              side_pad, _PLACE_XY[object_id])
-        # pick_and_place already returned to the SIDE_HIGH hub via raise_to_side
-        # (closed-loop), so the next pick starts fully abducted and table-clear.
-        seed = side_seed
+        try:
+            execute_arc(robot, arc, planner, attacher)
+        except ReturnArrivalError as exc:
+            # The stow's precondition (the raised pose) is not met: stop here.
+            log.error("Arm did not arrive at the raised pose — NOT stowing: %s", exc)
+            sys.exit(1)
+        # Each arc ends at the raised pose by its own checked return, so the
+        # next pick starts from there and the stow below has its precondition.
 
     log.info("=" * 56)
-    log.info("── Stow: reverse the raise — lower the arm down the side by Reachy")
-    # Mirror of raise_to_side: SIDE_HIGH → ABDUCT_LOW → HOME, so the arm unflexes
-    # and comes down at the robot's side, never sweeping forward over the table.
+    log.info("── Stow: reverse the raise by the measured route")
     P.go_home(robot, arm, duration=3.0)
     log.info("Demo complete.")
 

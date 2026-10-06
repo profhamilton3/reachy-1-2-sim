@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Dict
+from typing import Dict, Tuple
 
 log = logging.getLogger(__name__)
 
@@ -556,6 +556,22 @@ def converge(arm, pose: Dict[str, float], duration: float = 2.0,
     return _reached(arm, guarded, tol)
 
 
+def stow_entry_ok(arm) -> Tuple[bool, str, float]:
+    """Is the arm where `stow_from_side` requires it to start?
+
+    Returns (ok, worst_joint, off_deg): ``worst_joint`` and ``off_deg`` name the
+    joint furthest from PRESENT whether or not it is within tolerance.  This is
+    the exact posture requirement of the stow -- PRESENT, judged on the placing
+    joints within 12 degrees -- and is the predicate `stow_from_side` itself
+    uses.  PRESENT and SIDE_HIGH are not interchangeable here.
+    """
+    from reachy_ai.motion import rig_routes as R
+
+    ok = _at(arm, R.PRESENT, tol=12.0)
+    joint, off = worst_joint(arm, dict(R.PRESENT), PLACING_JOINTS)
+    return ok, joint, off
+
+
 def stow_from_side(robot, arm, duration: float = 3.0) -> None:
     """Back into the rail pocket from the raised pose, by the measured route.
 
@@ -593,8 +609,8 @@ def stow_from_side(robot, arm, duration: float = 3.0) -> None:
     """
     from reachy_ai.motion import rig_routes as R
 
-    if not _at(arm, R.PRESENT, tol=12.0):
-        joint, off = worst_joint(arm, dict(R.PRESENT), PLACING_JOINTS)
+    ok, joint, off = stow_entry_ok(arm)
+    if not ok:
         raise RuntimeError(
             "the stow starts at the raised pose and the arm is not there: "
             f"{joint} is {off:.0f} deg off. A direct move to HOME from an "

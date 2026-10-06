@@ -549,41 +549,19 @@ class SimulatorExecutor:
         """
         _ensure_paths()
         from reachy_ai.motion import rig_routes as R
-        from reachy_ai.motion.kinematics import CartesianPlanner, hand_radius
+        from reachy_ai.motion.footprint import route_footprint_clearances
         from reachy_ai.scene.awareness import SceneModel
 
-        legs = [R.FOOTPRINT_LEGS[r] for r in route_names if r in R.FOOTPRINT_LEGS]
-        if not legs:
+        if not any(r in R.FOOTPRINT_LEGS for r in route_names):
             return None
 
         model = SceneModel.from_yaml(self._scene_file)
         model.update_poses({oid: o.position for oid, o in scene.objects.items()
                             if o.position is not None})
-        # arm=None: every clearance method is pure geometry over the scene and
-        # never touches the SDK, which is what makes this callable here rather
-        # than only from the motion process that actually owns an arm.
-        planner = CartesianPlanner(arm=None, scene=model, side="right")
-
-        worst: Dict[str, float] = {}
-        for waypoints in legs:
-            for a, b in zip(waypoints, waypoints[1:]):
-                qa = [a[j] for j in R.ARM7]
-                qb = [b[j] for j in R.ARM7]
-                # The waypoints carry the commanded gripper for each end of
-                # this leg.  Which one is "wider" is a question about the
-                # capsule radius `hand_radius` actually produces, not about
-                # the raw commanded degrees: the encoding is inverted (#82/A2
-                # — SHUT = +20 is a NARROWER hand than OPEN = -45), so
-                # comparing the degrees directly picks the wrong endpoint.
-                # Using the wider of the two for the whole leg is the
-                # conservative choice already documented in FOOTPRINT_LEGS —
-                # never narrower than either commanded end.
-                gripper_deg = max(a["r_gripper"], b["r_gripper"],
-                                   key=hand_radius)
-                for oid, c in planner.path_clearances(
-                        qa, qb, gripper_deg=gripper_deg).items():
-                    if oid not in worst or c.distance < worst[oid]:
-                        worst[oid] = c.distance
+        # The pure computation lives in `reachy_ai.motion.footprint`, shared
+        # with the pick/place job preflight (#56).
+        worst = {oid: c.distance for oid, c in
+                 route_footprint_clearances(model, route_names).items()}
 
         blocking = sorted((d, oid) for oid, d in worst.items()
                           if d < R.FOOTPRINT_MARGIN)
