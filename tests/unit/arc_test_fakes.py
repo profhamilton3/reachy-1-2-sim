@@ -69,9 +69,12 @@ class RecordingRobot:
     def __init__(self, arm=None):
         self.r_arm = arm if arm is not None else RecordingArm()
         self.turn_on_calls = []
+        self.events = None        # a shared, ordered event list, when wanted
 
     def turn_on(self, part):
         self.turn_on_calls.append(part)
+        if self.events is not None:
+            self.events.append(("turn_on", part))
 
     def turn_off(self, part):
         self.turn_on_calls.append(("off", part))

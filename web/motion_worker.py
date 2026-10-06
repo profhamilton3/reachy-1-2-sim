@@ -397,12 +397,26 @@ def run_pick_place(job: Dict[str, Any], conn: Connection, *,
     The scene document supplies geometry; the parent supplies where things
     actually are.  Planning against the YAML's initial poses would aim the
     gripper at where an object started.
+
+    THE WHOLE JOB IS PREFLIGHTED BEFORE THE ARM IS TURNED ON (#56): the
+    RAISE_TO_SIDE footprint, the complete arc -- approach, grasp, carry, place,
+    retract and the return to the raised pose, every segment against the whole
+    arm (tube hand model, 0 cm margin) -- and the STOW_FROM_SIDE footprint
+    against the predicted final board.  A refusal returns `failed` with
+    `refused_before_motion` and the segment, link, obstacle, clearance, margin
+    and model in the evidence; nothing has been turned on or commanded.  The
+    IK policy is FAST; nothing here searches for a clearance-optimal arc.
+
+    The arc ends at the raised pose by its own checked return, so the stow
+    that follows has its precondition.  If the arm does not arrive there, the
+    result is `failed_arrival` and the arm is NOT stowed.
     """
     _ensure_paths()
     from reachy_ai.motion import primitives as P
     from reachy_ai.motion.kinematics import CartesianPlanner
     from reachy_ai.scene.awareness import SceneModel
-    from reachy_ai.tasks.pick_place_live import pick_and_place, side_hub
+    from reachy_ai.tasks.pick_place_live import (
+        PreflightRefused, ReturnArrivalError, execute_arc, preflight_pick_place)
 
     phase = emit or (lambda _name: None)
     target_id = job["target_id"]
@@ -416,12 +430,21 @@ def run_pick_place(job: Dict[str, Any], conn: Connection, *,
     model.update_poses({oid: tuple(xyz) for oid, xyz in job["live"].items()})
 
     planner = CartesianPlanner(robot.r_arm, scene=model)
+
+    phase("checking the whole arc before moving")
+    try:
+        plan = preflight_pick_place(
+            planner, model, [(target_id, tuple(job["cell_xy"]))],
+            skip_refused=False)
+    except PreflightRefused as exc:
+        return _fail(str(exc), refused_before_motion=True, **exc.evidence())
+    arc, = plan.arcs
+
     robot.turn_on("r_arm")
     time.sleep(0.3)
 
     phase("raising to the transit hub")
     P.raise_to_side(robot.r_arm, duration=3.0)
-    seed, side_pad = side_hub(planner)
 
     cancelled = {"flag": False}
 
@@ -431,9 +454,14 @@ def run_pick_place(job: Dict[str, Any], conn: Connection, *,
             return True
         return False
 
-    pick_and_place(robot, planner, model, None, target_id, seed, side_pad,
-                   place_xy=tuple(job["cell_xy"]),
-                   should_abort=abort, on_phase=phase)
+    try:
+        execute_arc(robot, arc, planner, None, abort, phase)
+    except ReturnArrivalError as exc:
+        # The stow's precondition is not met, so it is not attempted.
+        return _fail(str(exc), failed_arrival=True,
+                     worst_joint=exc.worst_joint, off_deg=exc.off_deg,
+                     attempts=exc.attempts,
+                     refusal=str(exc.refusal) if exc.refusal else None)
 
     phase("returning home")
     P.go_home(robot, robot.r_arm, duration=3.0)
