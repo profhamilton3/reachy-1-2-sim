@@ -775,3 +775,265 @@ class TestJointLimits:
         from reachy_ai.motion.kinematics import within_limits
         for pose in (PRESENT, OLD_PRESENT):
             assert within_limits(pose)
+
+
+# ---------------------------------------------------------------------------
+# Issue #56: the whole-arm path check and the explicit IK policy.
+#
+# Offline.  `check_arm_path` is pure geometry over `link_capsules`; the one
+# test that needs inverse kinematics uses the host mirror of the simulator's
+# fake-server IK (`host_ik_arm.py`) and skips without scipy.
+# ---------------------------------------------------------------------------
+
+import dataclasses  # noqa: E402,F401
+
+import numpy as np  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from reachy_ai.motion.kinematics import (  # noqa: E402
+    ARM_PATH_MAX_SAMPLE_STEP_DEG,
+    WHOLE_ARM_MARGIN_M,
+    ArmClearanceError,
+    CollisionError,
+    IKPolicy,
+    TargetContact,
+    sample_count,
+    _TOOL,
+)
+
+_HAND_OPEN = -45.0
+
+
+def _box(oid, centre, size=(0.06, 0.06, 0.06), dynamic=True):
+    return SceneObject(id=oid, kind="box", center=tuple(centre), size=size,
+                       dynamic=dynamic, tracked=dynamic)
+
+
+def _bare_scene(*objs):
+    return SceneModel("pedestal", list(objs), None)
+
+
+def _mid(a, b, t=0.5):
+    return tuple(x + t * (y - x) for x, y in zip(a, b))
+
+
+def _frames(pose):
+    shoulder, elbow, wrist, R = link_frames(pose)
+    return shoulder, elbow, wrist, R
+
+
+class TestIKPolicyIsExplicit:
+    def test_plan_segment_without_ik_is_a_type_error(self):
+        planner = CartesianPlanner(arm=None, scene=_bare_scene())
+        with pytest.raises(TypeError):
+            planner.plan_segment((0.4, -0.2, 1.0), (0.4, -0.1, 1.0), 3, PRESENT)
+
+    @pytest.mark.parametrize("bad", ["fast", "max_clearance", None, 1])
+    def test_a_value_that_is_not_a_policy_member_is_a_value_error(self, bad):
+        planner = CartesianPlanner(arm=None, scene=_bare_scene())
+        with pytest.raises(ValueError):
+            planner.plan_segment((0.4, -0.2, 1.0), (0.4, -0.1, 1.0), 3, PRESENT,
+                                 ik=bad)
+
+    def test_fast_reproduces_the_pre_change_trajectory_exactly(self):
+        pytest.importorskip("scipy")
+        from host_ik_arm import HostIKArm
+        start = (0.40, -0.25, 1.00)
+        end = (0.43, -0.12, 1.00)
+        steps = 6
+
+        def old_plan_segment(planner, a, b, n, seed):
+            """The loop as it was before #56, copied verbatim."""
+            cart = planner.interpolate(a, b, n)
+            planner.check_collisions(cart)
+            traj = []
+            qq = list(seed)
+            prefer = None
+            for p in cart:
+                qq, prefer = planner.solve(p, seed=qq, prefer=prefer,
+                                           return_orientation=True)
+                traj.append(qq)
+            return traj, cart
+
+        scene = _bare_scene()
+        old = old_plan_segment(CartesianPlanner(HostIKArm(), scene=scene),
+                               start, end, steps, PRESENT)
+        new = CartesianPlanner(HostIKArm(), scene=scene).plan_segment(
+            start, end, steps, PRESENT, ik=IKPolicy.FAST,
+            gripper_deg=_HAND_OPEN)
+        assert new[0] == old[0]          # bit for bit, not approximately
+        assert new[1] == old[1]
+
+    def test_max_clearance_asks_the_existing_solver_for_it(self, monkeypatch):
+        planner = CartesianPlanner(arm=None, scene=_bare_scene())
+        calls = []
+
+        def spy(xyz, seed=None, **kw):
+            calls.append((xyz, list(seed), kw))
+            return list(PRESENT)
+
+        monkeypatch.setattr(planner, "solve", spy)
+        planner.plan_segment((0.4, -0.2, 1.5), (0.4, -0.1, 1.5), 3, PRESENT,
+                             ik=IKPolicy.MAX_CLEARANCE, gripper_deg=_HAND_OPEN)
+        assert len(calls) == 3
+        for _xyz, seed, kw in calls:
+            assert kw["maximise_clearance"] is True
+            assert kw["from_joints"] == seed
+            assert kw["gripper_deg"] == _HAND_OPEN
+            assert "prefer" not in kw
+
+
+class TestWholeArmPathCheck:
+    def test_a_forearm_through_an_object_is_refused_by_default(self, monkeypatch):
+        """The pad path is clear -- nothing under it -- but the forearm is not."""
+        _s, elbow, wrist, _R = _frames(PRESENT)
+        blocker = _box("blocker", _mid(elbow, wrist))
+        scene = _bare_scene(blocker)
+        planner = CartesianPlanner(arm=None, scene=scene)
+        pad_cart = [(0.4, -0.2, 1.5)]
+        planner.check_collisions(pad_cart)        # the pad rule sees nothing
+        monkeypatch.setattr(planner, "solve",
+                            lambda *a, **k: (list(PRESENT), (0.0, 0.0)))
+        with pytest.raises(ArmClearanceError) as info:
+            planner.plan_segment((0.4, -0.2, 1.5), (0.4, -0.1, 1.5), 2, PRESENT,
+                                 ik=IKPolicy.FAST, gripper_deg=_HAND_OPEN,
+                                 segment="descend to place")
+        e = info.value
+        assert isinstance(e, CollisionError)
+        assert (e.segment, e.link, e.obstacle) == (
+            "descend to place", "forearm", "blocker")
+        assert e.clearance_m < 0 and e.margin_m == 0.0 and e.model == "tube"
+        assert e.gripper_deg == _HAND_OPEN and e.pose_index == 0
+        text = str(e)
+        for part in ("descend to place", "forearm", "blocker", "tube",
+                     "margin 0.0 cm", "-45 deg"):
+            assert part in text
+
+    def test_with_no_scene_no_whole_arm_check_runs(self, monkeypatch):
+        planner = CartesianPlanner(arm=None, scene=None)
+        assert planner.check_arm_path(
+            [PRESENT, PRESENT], segment="s", gripper_deg=_HAND_OPEN) is None
+        monkeypatch.setattr(planner, "solve",
+                            lambda *a, **k: (list(PRESENT), (0.0, 0.0)))
+        traj, _ = planner.plan_segment((0.4, -0.2, 1.5), (0.4, -0.1, 1.5), 2,
+                                       PRESENT, ik=IKPolicy.FAST)
+        assert len(traj) == 2
+
+    def test_the_hand_may_overlap_the_target_only_inside_the_contact_window(self):
+        _s, _e, wrist, R = _frames(PRESENT)
+        tip = wrist + R @ np.array([0.0, 0.0, -_HAND_LEN])
+        tgt = _box("tgt", _mid(tuple(wrist), tuple(tip)))
+        planner = CartesianPlanner(arm=None, scene=_bare_scene(tgt))
+        seq = [PRESENT, PRESENT]
+        with pytest.raises(ArmClearanceError) as info:
+            planner.check_arm_path(seq, segment="s", gripper_deg=_HAND_OPEN,
+                                   target=TargetContact("tgt", hand_contact=False))
+        assert (info.value.link, info.value.obstacle) == ("hand", "tgt")
+        planner.check_arm_path(seq, segment="s", gripper_deg=_HAND_OPEN,
+                               target=TargetContact("tgt", hand_contact=True))
+
+    @pytest.mark.parametrize("which", ["upper_arm", "forearm"])
+    def test_the_arm_links_are_checked_against_the_target_even_in_contact(
+            self, which):
+        shoulder, elbow, wrist, _R = _frames(PRESENT)
+        a, b = (shoulder, elbow) if which == "upper_arm" else (elbow, wrist)
+        tgt = _box("tgt", _mid(a, b))
+        planner = CartesianPlanner(arm=None, scene=_bare_scene(tgt))
+        with pytest.raises(ArmClearanceError) as info:
+            planner.check_arm_path(
+                [PRESENT, PRESENT], segment="s", gripper_deg=_HAND_OPEN,
+                target=TargetContact("tgt", hand_contact=True))
+        assert (info.value.link, info.value.obstacle) == (which, "tgt")
+
+    def test_the_hand_is_refused_against_a_non_target_object_even_in_contact(self):
+        _s, _e, wrist, R = _frames(PRESENT)
+        tip = wrist + R @ np.array([0.0, 0.0, -_HAND_LEN])
+        other = _box("other", _mid(tuple(wrist), tuple(tip)))
+        tgt = _box("tgt", (5.0, 5.0, 0.0))
+        planner = CartesianPlanner(arm=None, scene=_bare_scene(other, tgt))
+        with pytest.raises(ArmClearanceError) as info:
+            planner.check_arm_path(
+                [PRESENT, PRESENT], segment="s", gripper_deg=_HAND_OPEN,
+                target=TargetContact("tgt", hand_contact=True))
+        assert (info.value.link, info.value.obstacle) == ("hand", "other")
+
+    def test_a_carried_target_is_judged_at_its_planned_pad_position(self):
+        shoulder, elbow, wrist, R = _frames(PRESENT)
+        stale = _box("held", _mid(elbow, wrist))     # where it USED to be
+        planner = CartesianPlanner(arm=None, scene=_bare_scene(stale))
+        seq = [PRESENT, PRESENT]
+        # not carried: the stale pose is under the forearm
+        with pytest.raises(ArmClearanceError):
+            planner.check_arm_path(
+                seq, segment="s", gripper_deg=_HAND_OPEN,
+                target=TargetContact("held", hand_contact=True))
+        # carried: it is at the pad, so the stale pick-site pose does not refuse
+        planner.check_arm_path(
+            seq, segment="s", gripper_deg=_HAND_OPEN,
+            target=TargetContact("held", hand_contact=True, carried=True))
+
+    def test_a_forearm_crossing_the_pad_following_position_is_refused(self):
+        big = _box("held", (5.0, 5.0, 0.0), size=(0.2, 0.2, 0.2))
+        planner = CartesianPlanner(arm=None, scene=_bare_scene(big))
+        with pytest.raises(ArmClearanceError) as info:
+            planner.check_arm_path(
+                [PRESENT, PRESENT], segment="s", gripper_deg=_HAND_OPEN,
+                target=TargetContact("held", hand_contact=True, carried=True))
+        assert info.value.link == "forearm"
+
+    def test_carried_and_a_fixed_centre_are_mutually_exclusive(self):
+        with pytest.raises(ValueError):
+            TargetContact("x", hand_contact=True, carried=True,
+                          center=(0.0, 0.0, 0.0))
+
+    def test_a_large_joint_step_is_densified_so_the_midpoint_is_judged(self):
+        qa = list(PRESENT)
+        qb = list(PRESENT)
+        qb[0] += 60.0                       # one huge step in shoulder pitch
+        qmid = [0.5 * (x + y) for x, y in zip(qa, qb)]
+        _s, elbow, wrist, _R = _frames(qmid)
+        blocker = _box("blocker", _mid(elbow, wrist, 0.9))
+        planner = CartesianPlanner(arm=None, scene=_bare_scene(blocker))
+        # both endpoints are clear on their own ...
+        planner.check_arm_path([qa], segment="s", gripper_deg=_HAND_OPEN)
+        planner.check_arm_path([qb], segment="s", gripper_deg=_HAND_OPEN)
+        # ... and the move between them is not.
+        with pytest.raises(ArmClearanceError) as info:
+            planner.check_arm_path([qa, qb], segment="s", gripper_deg=_HAND_OPEN)
+        assert info.value.obstacle == "blocker"
+        assert sample_count(qa, qb) == 31
+
+    def test_the_sample_count_rule(self):
+        assert sample_count([0.0] * 7, [0.0] * 7) == 2
+        assert sample_count([0.0] * 7, [2.0] + [0.0] * 6) == 2
+        assert sample_count([0.0] * 7, [2.1] + [0.0] * 6) == 3
+        assert sample_count([0.0] * 7, [0.0] * 6 + [-10.0]) == 6
+
+    def test_the_shared_scene_is_never_mutated(self):
+        _s, elbow, wrist, _R = _frames(PRESENT)
+        tgt = _box("held", _mid(elbow, wrist))
+        scene = _bare_scene(tgt, _box("other", (5.0, 5.0, 0.0)))
+        before = scene.objects
+        planner = CartesianPlanner(arm=None, scene=scene)
+        for target in (TargetContact("held", hand_contact=True, carried=True),
+                       TargetContact("held", hand_contact=False,
+                                     center=(0.5, 0.5, 0.5))):
+            planner.check_arm_path([PRESENT, PRESENT], segment="s",
+                                   gripper_deg=_HAND_OPEN, target=target)
+        assert scene.objects == before
+
+    def test_with_scene_shares_the_arm_and_leaves_both_scenes_alone(self):
+        scene_a, scene_b = _bare_scene(), _bare_scene(_box("o", (1.0, 1.0, 1.0)))
+        arm = object()
+        planner = CartesianPlanner(arm=arm, scene=scene_a)
+        other = planner.with_scene(scene_b)
+        assert other.scene is scene_b and planner.scene is scene_a
+        assert other._arm is arm
+
+    def test_scene_copy_is_independent(self):
+        scene = _bare_scene(_box("o", (1.0, 1.0, 1.0)))
+        clone = scene.copy()
+        clone.update_poses({"o": (2.0, 2.0, 2.0)})
+        assert scene.get("o").center == (1.0, 1.0, 1.0)
+        assert clone.get("o").center == (2.0, 2.0, 2.0)
