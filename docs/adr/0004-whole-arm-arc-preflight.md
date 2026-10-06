@@ -10,6 +10,32 @@
 arcs. It does **not** choose clearance-optimal trajectories, and it makes no
 claim of grasp reliability or validated physical safety. Nothing was flown.
 
+## Historical context
+
+The side-arm raise was a crude early solution from the initial table scene,
+which had no rails: the SIDE_HIGH hub and the roll -88 sweep. The TLH motion
+notebook later supplied the rail-pocket routes: `PLACE_ROUTE` +
+`LIFT_TO_PRESENT` = `RAISE_TO_SIDE`, and `STOW_ROUTE` = `STOW_FROM_SIDE`.
+Despite their legacy names, `P.raise_to_side` and `P.stow_from_side` now fly
+those notebook routes. `P.SIDE_HIGH` survives only as a legacy constant,
+numerically equal to PRESENT, and the arc does not use it. Historical use of
+the earlier raise is **not** a justification for anything in current motion.
+
+**Priority path.** The priority path is the `FWDCenterLabSivaPool` scene under
+MuJoCo, through the panel worker. Its RAISE_TO_SIDE and STOW_FROM_SIDE routes
+are recorded as validated for that scene in `rig_routes.ROUTE_COMPATIBILITY`
+(2026-09-10), and its default board keeps every manipulable in the pool, so
+neither footprint check blocks anything there.
+
+**The demo and the notebook are historical workflows.**
+`scripts/demo_pick_place.py` and `notebooks/pick_and_place_training.ipynb` are
+historical workflows on `tabletop_demo.yaml`. Both now refuse their default
+jobs before any motion: the RAISE_TO_SIDE footprint alone refuses the job
+(red_cube, hand, -6.8 cm), and the arcs are refused individually. The outputs
+retained in the notebook (code cells showing "episode completed", the task
+spec, and so on) describe earlier execution, not the current code. Modernizing
+them is separate work; the board was not and will not be re-laid in #56.
+
 ## Context
 
 Pick/place planned with the **pad point** only. `pick_place_live.run_segment`
@@ -187,7 +213,7 @@ gRPC or physics -- indicative only):
 | Automatic replanning / clearance-optimal trajectories | **Deferred** |
 | Swept (continuous) checking; realised-path deviation | **Deferred** (E1, continuous-protection roadmap) |
 | Switch to the `"shells"` hand model | **Not done** (waits on E1 and physical validation) |
-| Re-lay the demo board | **Not done** (owner decision; the board is unchanged) |
+| Demo and notebook | **Historical workflows**, now refused before any motion; modernizing them is separate work (the board is not re-laid in #56) |
 
 ## Deferred to #55
 
@@ -202,18 +228,20 @@ gRPC or physics -- indicative only):
 ## Consequences and residuals
 
 - **F1 (HIGH, accepted).** The demo's red_cube move is refused, and on
-  `tabletop_demo.yaml` the RAISE footprint refuses the whole job, so the demo may
-  move nothing until an owner decision re-lays the board.
+  `tabletop_demo.yaml` the RAISE footprint refuses the whole job, so the demo
+  and the notebook move nothing by default. They are historical workflows;
+  modernizing them is separate work and the board is not re-laid in #56.
 - **F2 (MEDIUM, accepted).** The tube reads up to ~4 cm too close; rail-side
   picks such as r1c1 are refused. The shells path waits on E1 and physical
   validation.
 - **F3 (MEDIUM, accepted interim).** The hand tube is exempt against the target
   from hover to retract.
 - **F4 (MEDIUM, unverified physics).** The return streams all joints on a joint
-  line. The original Cartesian swing-out stalled the shoulder roll under
-  physics. A stall becomes a checked correction or a reported failed arrival,
-  never an unchecked move; a stalled arm can still be left high over the
-  board's right side. Needs an owner-authorised simulator run.
+  line. Its behaviour under MuJoCo physics is unverified. Arrival is tested
+  immediately after the last setpoint, with at most 2 checked corrections, so a
+  lag can produce a reported failed arrival that is safe but possibly spurious.
+  A failed arrival is never followed by an unchecked move. An owner-authorised
+  simulator trial is needed.
 - **F6 (LOW).** Pick/place now runs the footprint checks abilities already run,
   so some boards will be refused for pick/place too.
 - **R1** the tube approximates the gripper surfaces; **R2** the return's
@@ -230,4 +258,4 @@ gRPC or physics -- indicative only):
   (the margin stays 0 cm until then).
 - #55 models contact surfaces, at which point the hand-target exemption is
   replaced.
-- An owner decision on re-laying the demo board, or on replanning.
+- An owner decision on replanning, or on modernizing the demo and notebook.
