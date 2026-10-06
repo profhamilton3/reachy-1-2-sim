@@ -317,7 +317,7 @@ def test_an_object_off_the_board_refuses(fake_sdk):
         scene = make_scene()
         from panel_scene import apply_snapshot
         apply_snapshot(scene, SimSnapshot(
-            objects={"soda_can": (0.55, 0.95, 0.0575)},   # parked in the pool
+            objects={"soda_can": (0.55, 0.95, 0.061)},   # parked in the pool
             received_at=time.monotonic(),
         ))
         return scene

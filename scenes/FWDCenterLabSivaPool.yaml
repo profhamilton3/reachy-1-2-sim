@@ -50,12 +50,14 @@ description: >-
 #
 # SIZES ARE PROVISIONAL AND THAT IS FINE HERE
 #
-# 4 cm is used rather than the 6 cm the MCC objects inherit, because a real cube
-# measured against a known 12.7 cm grid cell spans about a third of a cell.  But
-# no tape measure has been on these yet, and unlike the inherited objects these
-# do not have to match anything: placement.py's reshape() sets size, colour and
-# mass on the LIVE model, so a slot becomes whatever the run needs without a
-# recompile.  Treat these numbers as a starting shape, not a measurement.
+# 4 cm is used rather than the 6 cm the MCC objects inherit, simply as an
+# arbitrary stand-in distinct from them — these pool_box_*/pool_cyl_* slots
+# have no real-world counterpart to match, unlike the named manipulables
+# (red_cube, blue_cylinder, soda_can, foam_block; see
+# docs/scene-object-dimensions.md for their confirmed dimensions).
+# placement.py's reshape() sets size, colour and mass on the LIVE model, so a
+# slot becomes whatever the run needs without a recompile.  Treat these
+# numbers as a starting shape, not a measurement.
 #
 # reshape() — not a bare geom_size write — is the supported way to do that.
 # geom_rbound is computed by the compiler and is NOT recomputed when geom_size
@@ -134,10 +136,10 @@ objects:
   # that wants a cube on r2c2 asks for one; nothing is on the board by accident,
   # and "what is on the table" always has a caller who put it there.
   #
-  # Their sizes are NOT corrected here.  They are inherited, known to be ~1.5x
-  # too large, and shared with the motion work — that is one change against a
-  # tape measure, not a quiet fix in a scene file.  reshape() sets a real size
-  # at runtime once someone measures one.
+  # Dimensions were confirmed by the owner on 2026-10-06. The only correction
+  # is soda_can height 11.5 -> 12.2 cm, inherited from MCC. Its floor-resting
+  # centre below is half the corrected height. See docs/scene-object-dimensions.md.
+  # reshape() remains available for explicitly configured synthetic objects.
   #
   # Tags are restated in full, not appended: `objects` merges by id but any
   # other list REPLACES the inherited one, so a partial tag list would silently
@@ -153,7 +155,7 @@ objects:
     tags: [pool, manipulable, pickable, cylinder, detector-target]
 
   - id: soda_can
-    pose: {position: [0.55, 0.95, 0.0575], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    pose: {position: [0.55, 0.95, 0.061], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     tags: [pool, manipulable, pickable, recyclable, detector-target, sort-item]
 
   - id: foam_block

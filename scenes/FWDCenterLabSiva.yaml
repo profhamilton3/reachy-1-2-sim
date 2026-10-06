@@ -50,20 +50,11 @@ description: >-
 #     measurements, and a transfer result for those two classes means nothing
 #     until someone captures them on the real board.
 #
-#   * OBJECT SIZE IS WRONG, and it is inherited, so it is wrong for the motion
-#     work too.  FWDCenterLabMCC says the cube and cylinder are "deliberately at
-#     the same dimensions as the real ones".  Checked against a grid cell — a
-#     known 5 in / 12.7 cm — in the lab captures, the real cube spans about a
-#     THIRD of a cell (~4 cm) while this model is 6 cm, half a cell.  The
-#     cylinder looks similarly oversized: 7 cm modelled diameter against
-#     something nearer 4 cm.
-#
-#     Read off a barrel-distorted photo against a known reference, so the
-#     direction is certain and the magnitude is approximate.  A tape measure on
-#     the two objects settles it.  Not corrected here because object width sets
-#     gripper aperture and approach clearance as well as pixel scale, so
-#     changing it moves the motion routines' verified geometry, and that should
-#     happen once against a real measurement rather than twice against a guess.
+#   * DIMENSIONS: owner-confirmed on 2026-10-06. The earlier photo-based
+#     estimate that the cube/cylinder were ~1.5x oversized is superseded.
+#     Only the soda-can height changes, from 11.5 to 12.2 cm (diameter 6.6 cm).
+#     See docs/scene-object-dimensions.md. Appearance/photo limitations above
+#     remain separate; confirmation of dimensions is not detector validation.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # The trays are a planning fiction — flat coloured zones added so TaskType.sort
@@ -90,13 +81,13 @@ objects:
     semantic_class: cylinder
     material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
 
-  # UNMEASURED — no real counterpart photographed.  Bare aluminium, kept
+  # APPEARANCE UNVERIFIED — dimensions confirmed; no new photo supplied. Bare aluminium, kept
   # brighter than the board so it is at least separable from it.
   - id: soda_can
     semantic_class: can
     material: {rgba: [0.72, 0.73, 0.75, 1.0], roughness: 0.35}
 
-  # UNMEASURED — see above.  Off-white matte foam.
+  # APPEARANCE UNVERIFIED — see above. Off-white matte foam.
   - id: foam_block
     semantic_class: foam
     material: {rgba: [0.88, 0.86, 0.80, 1.0], roughness: 0.95}
