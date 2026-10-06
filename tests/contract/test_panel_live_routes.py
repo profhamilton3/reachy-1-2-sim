@@ -252,7 +252,7 @@ def test_losing_the_link_invalidates_an_open_proposal(live):
 def test_a_can_left_in_the_pool_is_not_a_candidate(live):
     host, link = live
     # Where FWDCenterLabSivaPool actually parks the can.
-    link.push({"soda_can": (0.55, 0.95, 0.0575)})
+    link.push({"soda_can": (0.55, 0.95, 0.061)})
     c = Client(host)
 
     _, task = c.post("/tasks", {"text": "put the recycle item on r2c2"})
