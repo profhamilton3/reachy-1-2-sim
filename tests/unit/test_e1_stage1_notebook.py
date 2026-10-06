@@ -25,6 +25,9 @@ _HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(_HERE, "../../scripts"))
 sys.path.insert(0, os.path.join(_HERE, "../../src"))
 
+sys.path.insert(0, os.path.join(_HERE, "../fixtures/e1_identity"))
+import a004_support  # noqa: E402
+import e1_identity as _real_e1_identity  # noqa: E402
 from e1_stage1 import make_cycle_notebook, plan, provenance  # noqa: E402
 import e1_tail_check  # noqa: E402
 from reachy_ai.motion import primitives, rig_routes  # noqa: E402
@@ -114,8 +117,8 @@ def test_generated_motion_cell_contains_the_gate(cycle, repo_two_commits, tmp_pa
     for leg, cell in zip(legs, motion_cells):
         src = cell.source
         assert "require_compliance(" in src
-        assert "min_cmd_seq=" in src
-        assert "min_cmd_seq=None" not in src
+        assert "cmd_baseline=" in src
+        assert "min_cmd_seq=" not in src
         route_fn = leg.tool.split(".")[-1]
         tree = ast.parse(src)
 
@@ -395,13 +398,14 @@ def _build_namespace(tmp_path, *, prev_ok, baseline, require_compliance_result,
     (tmp_path / f"go_leg").touch()
     (tmp_path / f"recorder_leg.log").write_text("fly the route now")
 
-    def fake_read_last_state(path):
-        return baseline
+    # Real capture_cmd_baseline over real files carrying the injected
+    # baseline (None -> unreadable stream); only the gate itself is faked.
+    a004_support.write_baseline_streams(tmp_path, baseline)
 
     def fake_require_compliance(run_dir, joints, *, compliant=False,
-                                 timeout_s=None, min_cmd_seq=None):
+                                 timeout_s=None, cmd_baseline=None):
         calls["require_compliance"].append(
-            {"run_dir": run_dir, "min_cmd_seq": min_cmd_seq})
+            {"run_dir": run_dir, "cmd_baseline": cmd_baseline})
         return require_compliance_result
 
     def fake_turn_on(*a, **kw):
@@ -430,7 +434,7 @@ def _build_namespace(tmp_path, *, prev_ok, baseline, require_compliance_result,
         "reachy": types.SimpleNamespace(
             turn_on=fake_turn_on, r_arm=types.SimpleNamespace()),
         "e1_identity": types.SimpleNamespace(
-            _read_last_state=fake_read_last_state,
+            capture_cmd_baseline=_real_e1_identity.capture_cmd_baseline,
             require_compliance=fake_require_compliance),
         "R": types.SimpleNamespace(R_JOINTS=("r_shoulder_pitch",)),
         "primitives": primitives_ns,
@@ -514,7 +518,8 @@ def test_valid_baseline_gate_refuses(cycle, leg_index, tmp_path):
     exec(compile(src, f"<{cycle} leg {leg_index} gate_refuses>", "exec"), ns)
 
     assert len(calls["turn_on"]) == 1
-    assert calls["require_compliance"][0]["min_cmd_seq"] == 3
+    assert calls["require_compliance"][0]["cmd_baseline"].cmd_seq == 3
+    assert ns["LEG"]["cmd_baseline"]["cmd_seq"] == 3
     assert calls["route"] == []
     assert ns["LEG"]["outcome"] == "STOP compliance_check"
     assert (tmp_path / "stop").exists()
@@ -666,3 +671,124 @@ class TestCheckBindingProvenance:
             self._ok_manifest(), git_is_ancestor=lambda a, b: True,
             required_sha="required", merge_time_iso="2026-09-16T01:35:22Z")
         assert ok is True
+
+
+# ── a004 reproduction: the REAL generated cell against the REAL gate ───────
+# (bridge restart between the baseline read and turn_on; real a004 rows)
+
+
+
+def _a004_leg():
+    """The plan entry matching plan_S2-B4-c-r1.json's setup leg
+    (PLACE_ROUTE via rig_motion.deploy_to_rest)."""
+    leg = plan.stage2_legs("B4", "c", 1)[0]
+    entry = a004_support.load()["plan_leg"]["plan_entry"]
+    assert leg.route == entry["route"] == "PLACE_ROUTE"
+    assert leg.tool == "rig_motion.deploy_to_rest"
+    return leg
+
+
+def _a004_namespace(run_dir, ctrl, *, calls, turn_on_effect, compliance_timeout_s=0.3):
+    """Real e1_identity module, real files. Only reachy / route / wait_for /
+    start_check are stubs. `turn_on_effect(run_dir)` plays what the bridge
+    and native server would write when turn_on is called."""
+    def fake_turn_on(*a, **kw):
+        calls["turn_on"].append((a, kw))
+        turn_on_effect(run_dir)
+
+    def fake_route(*a, **kw):
+        calls["route"].append((a, kw))
+        return {"ok": True}
+
+    ns = _build_namespace(ctrl, prev_ok=True, baseline=None,
+                          require_compliance_result=None,
+                          route_should_raise=False, calls={"turn_on": [], "require_compliance": [], "route": []})
+    ns["e1_identity"] = _real_e1_identity
+    ns["R"] = rig_routes
+    ns["reachy"] = types.SimpleNamespace(turn_on=fake_turn_on, r_arm=types.SimpleNamespace())
+    ns["rig_motion"] = types.SimpleNamespace(deploy_to_rest=fake_route, from_present=fake_route, to_present=fake_route)
+    ns["ident"] = types.SimpleNamespace(run_dir=str(run_dir))
+    ns["COMPLIANCE_TIMEOUT_S"] = compliance_timeout_s
+    ns["time"] = types.SimpleNamespace(
+        monotonic=time.monotonic, monotonic_ns=time.monotonic_ns,
+        time_ns=time.time_ns, sleep=lambda s: None)
+    return ns
+
+
+def _a004_turn_on_effect(run_dir):
+    d = a004_support.load()
+    a004_support.append_commands(run_dir, [d["commands"][3]])
+    a004_support.append_states(run_dir, [a004_support.fresh(d["post_state"])])
+
+
+def test_a004_bridge_restart_setup_leg_is_accepted(tmp_path):
+    """a004 (2026-10-02): after a bridge restart the new bridge's seq 1 moves
+    the native cmd_seq 2 -> 1. The real gate rejected this with
+    'cmd_seq=1 has not advanced past the pre-call baseline (min_cmd_seq=2)',
+    although the sample was fresh and all 8 joints were stiff."""
+    run_dir = tmp_path / "run"
+    ctrl = tmp_path / "ctrl"; ctrl.mkdir()
+    a004_support.write_pre_restart_run_dir(run_dir)
+    calls = {"turn_on": [], "route": []}
+    ns = _a004_namespace(run_dir, ctrl, calls=calls, turn_on_effect=_a004_turn_on_effect)
+    exec(compile(make_cycle_notebook.motion_cell_source(_a004_leg()._replace(name="leg")),
+                 "<a004 setup leg>", "exec"), ns)
+    assert len(calls["turn_on"]) == 1
+    reasons = ns["LEG"].get("compliance_check", {}).get("reasons")
+    assert ns["LEG"]["outcome"] == "returned", (ns["LEG"]["outcome"], reasons)
+    assert len(calls["route"]) == 1
+    assert not (ctrl / "stop").exists()
+    assert ns["PREV_OK"] is True
+
+
+def test_a004_received_but_not_applied_stops_on_the_real_gate(tmp_path):
+    """The new bridge's row is received but the native state never applies it
+    (cmd_seq stays 2): rows alone must not pass."""
+    run_dir = tmp_path / "run"
+    ctrl = tmp_path / "ctrl"; ctrl.mkdir()
+    a004_support.write_pre_restart_run_dir(run_dir)
+
+    def effect(rd):
+        d = a004_support.load()
+        a004_support.append_commands(rd, [d["commands"][3]])
+        a004_support.append_states(
+            rd, [a004_support.fresh({**d["post_state"], "cmd_seq": 2})])
+
+    calls = {"turn_on": [], "route": []}
+    ns = _a004_namespace(run_dir, ctrl, calls=calls, turn_on_effect=effect)
+    exec(compile(make_cycle_notebook.motion_cell_source(_a004_leg()._replace(name="leg")),
+                 "<a004 not applied>", "exec"), ns)
+    assert ns["LEG"]["outcome"] == "STOP compliance_check"
+    reasons = ns["LEG"]["compliance_check"]["reasons"]
+    assert any(r.startswith("bridge-restart path: (b) no appended state shows an applied change")
+               for r in reasons), reasons
+    assert calls["route"] == [] and (ctrl / "stop").exists()
+    assert ns["PREV_OK"] is False
+
+
+def test_a004_missing_commands_stream_stops_before_turn_on(tmp_path):
+    run_dir = tmp_path / "run"
+    ctrl = tmp_path / "ctrl"; ctrl.mkdir()
+    a004_support.write_pre_restart_run_dir(run_dir)
+    (run_dir / "commands.jsonl").unlink()
+    calls = {"turn_on": [], "route": []}
+    ns = _a004_namespace(run_dir, ctrl, calls=calls, turn_on_effect=_a004_turn_on_effect)
+    exec(compile(make_cycle_notebook.motion_cell_source(_a004_leg()._replace(name="leg")),
+                 "<a004 no commands>", "exec"), ns)
+    assert ns["LEG"]["outcome"] == "STOP no_valid_baseline_cmd_seq"
+    assert "commands.jsonl unreadable" in ns["LEG"]["baseline"]
+    assert calls["turn_on"] == [] and calls["route"] == []
+    assert (ctrl / "stop").exists()
+
+
+def test_a004_accepted_leg_records_the_cmd_baseline_and_evidence(tmp_path):
+    run_dir = tmp_path / "run"
+    ctrl = tmp_path / "ctrl"; ctrl.mkdir()
+    a004_support.write_pre_restart_run_dir(run_dir)
+    calls = {"turn_on": [], "route": []}
+    ns = _a004_namespace(run_dir, ctrl, calls=calls, turn_on_effect=_a004_turn_on_effect)
+    exec(compile(make_cycle_notebook.motion_cell_source(_a004_leg()._replace(name="leg")),
+                 "<a004 evidence>", "exec"), ns)
+    assert ns["LEG"]["cmd_baseline"]["cmd_seq"] == 2
+    assert ns["LEG"]["cmd_baseline"]["state_seq"] == 3723
+    assert ns["LEG"]["compliance_check"]["cmd_evidence"] == "bridge_restart"

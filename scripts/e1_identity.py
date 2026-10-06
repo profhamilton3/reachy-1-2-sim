@@ -471,6 +471,11 @@ class ComplianceCheck:
     per_joint: Dict[str, dict]
     waited_s: float
     last_state_age_s: float
+    #: Which "newly applied command" evidence passed when a `cmd_baseline`
+    #: was given: "advanced" (same-sequence cmd_seq advance) or
+    #: "bridge_restart" (see `require_compliance`). None on the legacy
+    #: `min_cmd_seq` path and when neither was given.
+    cmd_evidence: Optional[str] = None
 
     def as_dict(self) -> dict:
         return {
@@ -479,7 +484,227 @@ class ComplianceCheck:
             "per_joint": self.per_joint,
             "waited_s": self.waited_s,
             "last_state_age_s": self.last_state_age_s,
+            "cmd_evidence": self.cmd_evidence,
         }
+
+
+@dataclass(frozen=True)
+class CmdBaseline:
+    """Pre-`turn_on` position in the run directory's streams (see
+    `capture_cmd_baseline`): the baseline state's `cmd_seq` and `seq`, and
+    the byte offsets just past the last complete line of `states.jsonl`
+    (that line is the baseline state) and of `commands.jsonl`."""
+    cmd_seq: int
+    state_seq: int
+    states_offset: int
+    commands_offset: int
+
+    def as_dict(self) -> dict:
+        return {
+            "cmd_seq": self.cmd_seq,
+            "state_seq": self.state_seq,
+            "states_offset": self.states_offset,
+            "commands_offset": self.commands_offset,
+        }
+
+
+def _is_plain_int(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _tail_complete_line(
+    path: pathlib.Path, *, need_line: bool, tail_bytes: int = _TAIL_READ_BYTES,
+) -> Tuple[int, Optional[bytes]]:
+    """(byte offset just past the last complete newline-terminated line of
+    `path`, that line's bytes without the newline or None if `need_line` is
+    False). Offset 0 and None for a file with no complete line. Bounded tail
+    reads only (window grows geometrically, as in `_read_last_state`).
+    Raises OSError."""
+    tail_bytes = max(1, tail_bytes)
+    size = path.stat().st_size
+    if size == 0:
+        return 0, None
+    window = min(tail_bytes, size)
+    with open(path, "rb") as f:
+        while True:
+            start = size - window
+            f.seek(start)
+            data = f.read(window)
+            end_idx = data.rfind(b"\n")
+            if end_idx < 0:
+                if window >= size:
+                    return 0, None
+                window = min(size, window * 2)
+                continue
+            offset = start + end_idx + 1
+            if not need_line:
+                return offset, None
+            prev = data.rfind(b"\n", 0, end_idx)
+            if prev >= 0:
+                return offset, data[prev + 1:end_idx]
+            if start == 0:
+                return offset, data[:end_idx]
+            window = min(size, window * 2)
+
+
+def capture_cmd_baseline(
+    run_dir, *, tail_bytes: int = _TAIL_READ_BYTES,
+) -> Tuple[Optional[CmdBaseline], str]:
+    """Capture the pre-`turn_on` baseline for `require_compliance(...,
+    cmd_baseline=...)`. Returns `(baseline, "")`, or `(None, reason)` --
+    fail closed -- when the streams are missing/unreadable, hold no complete
+    state line, the last complete state line is not JSON, its `cmd_seq` is
+    not a non-negative non-bool int (absent, null, bool, str, float -- even
+    an integral float -- and non-finite all refuse), or its `seq` is not a
+    non-bool int.
+
+    Order: `commands.jsonl`'s offset is fixed FIRST, then `states.jsonl`'s
+    (whose last complete line is the baseline state), so every command row
+    written after the baseline state is also after the commands offset.
+    Bounded tail reads only; never reads a whole states file.
+    """
+    run_dir_path = pathlib.Path(run_dir)
+    try:
+        commands_offset, _ = _tail_complete_line(
+            run_dir_path / "commands.jsonl", need_line=False,
+            tail_bytes=tail_bytes)
+    except OSError as exc:
+        return None, f"commands.jsonl unreadable: {exc}"
+    try:
+        states_offset, raw = _tail_complete_line(
+            run_dir_path / "states.jsonl", need_line=True,
+            tail_bytes=tail_bytes)
+    except OSError as exc:
+        return None, f"states.jsonl unreadable: {exc}"
+    if raw is None:
+        return None, "states.jsonl has no complete state line"
+    try:
+        state = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return None, f"last complete states.jsonl line is not JSON: {exc}"
+    if not isinstance(state, dict):
+        return None, "last complete states.jsonl line is not a JSON object"
+    if "cmd_seq" not in state:
+        return None, "baseline state has no cmd_seq (missing_key)"
+    cmd_seq = state["cmd_seq"]
+    if not _is_plain_int(cmd_seq) or cmd_seq < 0:
+        return None, f"baseline state cmd_seq is not a non-negative int: {cmd_seq!r}"
+    state_seq = state.get("seq")
+    if not _is_plain_int(state_seq):
+        return None, f"baseline state seq is not an int: {state_seq!r}"
+    return CmdBaseline(
+        cmd_seq=cmd_seq, state_seq=state_seq,
+        states_offset=states_offset, commands_offset=commands_offset), ""
+
+
+class _AppendedLines:
+    """Incrementally reads the COMPLETE lines of a JSONL file appended after
+    a byte offset. An unterminated trailing line is ignored until its
+    newline arrives. `error` becomes sticky on the first complete line that
+    does not parse to a JSON object (or on an unreadable file)."""
+
+    def __init__(self, path: pathlib.Path, offset: int, label: str):
+        self.path, self.pos, self.label = path, offset, label
+        self.rows: List[dict] = []
+        self.error: Optional[str] = None
+
+    def poll(self) -> None:
+        if self.error:
+            return
+        try:
+            with open(self.path, "rb") as f:
+                f.seek(self.pos)
+                data = f.read()
+        except OSError as exc:
+            self.error = f"{self.label} unreadable: {exc}"
+            return
+        end = data.rfind(b"\n")
+        if end < 0:
+            return
+        for raw in data[:end].split(b"\n"):
+            try:
+                row = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                self.error = (f"{self.label}: a complete line after the "
+                              f"baseline is not JSON ({exc})")
+                return
+            if not isinstance(row, dict):
+                self.error = (f"{self.label}: a complete line after the "
+                              "baseline is not a JSON object")
+                return
+            self.rows.append(row)
+        self.pos += end + 1
+
+
+def _bridge_restart_reasons(
+    baseline: CmdBaseline, x_state: dict,
+    commands: _AppendedLines, states: _AppendedLines,
+) -> List[str]:
+    """Empty when the bridge-restart evidence (N2, see `require_compliance`)
+    holds for last state `x_state`; otherwise the failed parts, each
+    prefixed "bridge-restart path: "."""
+    pre = "bridge-restart path: "
+    commands.poll()
+    states.poll()
+    if commands.error:
+        return [pre + commands.error]
+    if states.error:
+        return [pre + states.error]
+
+    # (a) rows after the baseline are exactly one new sequence 1..m
+    seqs: List[int] = []
+    for row in commands.rows:
+        if row.get("type") == "reset":
+            return [pre + "(a) a reset row was appended after the baseline"]
+        if row.get("type") == "joint_command":
+            seq = row.get("seq")
+            if not _is_plain_int(seq):
+                return [pre + f"(a) a joint_command row has a non-int seq ({seq!r})"]
+            seqs.append(seq)
+    if not seqs:
+        return [pre + "(a) no joint_command row was appended after the baseline"]
+    m = len(seqs)
+    if seqs != list(range(1, m + 1)):
+        return [pre + f"(a) appended joint_command seqs {seqs[:12]} are not "
+                      "exactly 1..m of one new sequence"]
+
+    # (b) native proof of an applied change after the baseline
+    x_seq = x_state.get("seq")
+    if not _is_plain_int(x_seq) or x_seq <= baseline.state_seq:
+        return [pre + f"(b) last state seq {x_seq!r} is not past the baseline "
+                      f"state seq {baseline.state_seq}"]
+    considered = []
+    for row in states.rows:
+        seq = row.get("seq")
+        if _is_plain_int(seq) and baseline.state_seq < seq <= x_seq:
+            considered.append(row)
+    first = None
+    for i, row in enumerate(considered):
+        if row.get("cmd_seq") != baseline.cmd_seq or not _is_plain_int(row.get("cmd_seq")):
+            first = i
+            break
+    if first is None:
+        return [pre + "(b) no appended state shows an applied change of cmd_seq "
+                      f"away from the baseline ({baseline.cmd_seq}); a received "
+                      "command row alone is not evidence that it was applied"]
+    prev = None
+    for row in considered[first:]:
+        v = row.get("cmd_seq")
+        if not _is_plain_int(v) or not (1 <= v <= m):
+            return [pre + f"(b) state seq {row.get('seq')} has cmd_seq {v!r} "
+                          f"outside [1, {m}]"]
+        if prev is not None and v < prev:
+            return [pre + f"(b) cmd_seq decreased ({prev} -> {v}) within the new sequence"]
+        prev = v
+    last = considered[-1]
+    if last.get("seq") != x_seq or last.get("cmd_seq") != x_state.get("cmd_seq"):
+        return [pre + f"(b) the last state (seq {x_seq}) was not found among "
+                      "the states appended after the baseline"]
+
+    # (c)
+    if not (1 <= x_state["cmd_seq"] <= m):
+        return [pre + f"(c) cmd_seq={x_state['cmd_seq']} is outside [1, {m}]"]
+    return []
 
 
 def _commands_with_compliance_tail(
@@ -529,6 +754,7 @@ def require_compliance(
     timeout_s: float = 3.0,
     max_state_age_s: float = 0.5,
     min_cmd_seq: Optional[int] = None,
+    cmd_baseline: Optional[CmdBaseline] = None,
     read_last_state: Callable[[pathlib.Path], Optional[dict]] = _read_last_state,
     now_ns: Callable[[], int] = time.monotonic_ns,
     sleep: Callable[[float], None] = time.sleep,
@@ -572,7 +798,60 @@ def require_compliance(
     `require_compliance(min_cmd_seq=<old high>)` fails closed until the
     new counter overtakes that stale baseline -- read that as a bridge
     restart, not a physics fault.
+
+    `cmd_baseline` (assignment 2026-10-05; a004, 2026-10-02)
+    ---------------------------------------------------------
+    `min_cmd_seq` compares numbers from ONE bridge process, so it cannot
+    cross a bridge restart (the H4 caveat above): a004's r1 setup `turn_on`
+    after a container recreate moved the native `cmd_seq` 2 -> 1 and was
+    rejected although the sample was fresh and every joint stiff. Pass a
+    `CmdBaseline` from `capture_cmd_baseline` (taken immediately before the
+    call) INSTEAD of `min_cmd_seq` (passing both raises ValueError); the
+    legacy `min_cmd_seq` behaviour above is unchanged. Four questions, each
+    answered by its own evidence: sequence identity (command-row `seq` and
+    state `cmd_seq`, comparable only within one bridge), state freshness
+    (`wall_time_ns` age, unchanged), the compliance effect (every requested
+    joint's `compliant` equals the request, unchanged), and "a command was
+    newly applied", which is accepted by either:
+
+      N1 "advanced": last state X's `cmd_seq` (a non-bool int) is greater
+         than the baseline's -- the same-sequence case, as before; or
+      N2 "bridge_restart": X.cmd_seq <= baseline.cmd_seq AND, reading only
+         complete lines appended after the baseline offsets,
+         (a) the appended joint_command `seq` values are exactly 1..m (no
+             gap, no repeat, no old value; any appended `reset` row, a
+             non-int seq, or a complete unparseable line rejects);
+         (b) X.seq > baseline.state_seq and, among appended states up to X,
+             the first state F with cmd_seq != baseline.cmd_seq exists (the
+             native server changes cmd_seq only when it APPLIES a command,
+             so this -- not a received row -- is the proof of an apply),
+             and every state from F through X has a non-bool int cmd_seq in
+             [1, m], non-decreasing;
+         (c) X.cmd_seq is in [1, m].
+    N2 failures are reported with the prefix "bridge-restart path: ".
+    An old-bridge command in flight carries a seq above the baseline, so it
+    can never yield X.cmd_seq <= baseline; restart evidence from before the
+    baseline is excluded by the offsets.
+
+    Limits (fail closed, deliberately not papered over): if the new
+    sequence's final applied value equals the old baseline and no
+    intermediate change was sampled (old 1 -> new 1), N2 rejects. This is
+    still not causal proof that the gated call's own command landed -- the
+    concurrent-sender caveat above applies unchanged -- and N2 is not
+    evidence about any restart other than the one whose rows follow the
+    baseline. `ComplianceCheck.cmd_evidence` records which path passed.
     """
+    if min_cmd_seq is not None and cmd_baseline is not None:
+        raise ValueError(
+            "pass either min_cmd_seq (legacy) or cmd_baseline, not both")
+    appended_commands = appended_states = None
+    if cmd_baseline is not None:
+        appended_commands = _AppendedLines(
+            pathlib.Path(run_dir) / "commands.jsonl",
+            cmd_baseline.commands_offset, "commands.jsonl")
+        appended_states = _AppendedLines(
+            pathlib.Path(run_dir) / "states.jsonl",
+            cmd_baseline.states_offset, "states.jsonl")
     run_dir_path = pathlib.Path(run_dir)
     states_path = run_dir_path / "states.jsonl"
     commands_path = run_dir_path / "commands.jsonl"
@@ -586,6 +865,7 @@ def require_compliance(
         bad: List[str] = []
         fresh = False
         age_s = float("inf")
+        cmd_evidence: Optional[str] = None
 
         if state is None:
             bad.append("states.jsonl has no readable sample yet")
@@ -610,6 +890,28 @@ def require_compliance(
                         f"pre-call baseline (min_cmd_seq={min_cmd_seq}) -- "
                         "this sample may predate the current turn_on/"
                         "turn_off attempt")
+
+            if cmd_baseline is not None:
+                x_cmd_seq = state.get("cmd_seq")
+                if not _is_plain_int(x_cmd_seq):
+                    bad.append(
+                        f"state has no int cmd_seq ({x_cmd_seq!r}) to compare "
+                        "against cmd_baseline -- refusing to treat it as "
+                        "evidence of the current attempt")
+                elif x_cmd_seq > cmd_baseline.cmd_seq:
+                    cmd_evidence = "advanced"
+                else:
+                    restart_bad = _bridge_restart_reasons(
+                        cmd_baseline, state, appended_commands, appended_states)
+                    if restart_bad:
+                        bad.append(
+                            f"cmd_seq={x_cmd_seq} has not advanced past the "
+                            f"pre-call baseline (cmd_baseline.cmd_seq="
+                            f"{cmd_baseline.cmd_seq}) -- this sample may "
+                            "predate the current turn_on/turn_off attempt")
+                        bad.extend(restart_bad)
+                    else:
+                        cmd_evidence = "bridge_restart"
 
             server_joints = {j.get("name"): j for j in state.get("joints", [])}
             for name in joints:
@@ -650,7 +952,8 @@ def require_compliance(
         if fresh and not bad:
             return ComplianceCheck(
                 ok=True, reasons=(), per_joint=per_joint,
-                waited_s=waited_s, last_state_age_s=age_s)
+                waited_s=waited_s, last_state_age_s=age_s,
+                cmd_evidence=cmd_evidence)
 
         if waited_s >= timeout_s:
             reasons = list(bad)
