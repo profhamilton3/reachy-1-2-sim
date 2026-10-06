@@ -45,16 +45,17 @@ description: >-
 #   * BACKGROUND.  Beyond the board the real frames show lab benches, monitors,
 #     a structural column and a glass wall.  The sim shows a flat pale room.
 #     This is most of every frame and is the largest remaining domain gap.
-#   * THE CAN AND THE FOAM BLOCK have NO real reference at all — nobody has
-#     photographed them yet.  Their colours here are plausible guesses, not
-#     measurements, and a transfer result for those two classes means nothing
-#     until someone captures them on the real board.
+#   * THE CAN AND THE FOAM BLOCK colours are modelled values, not sampled
+#     from the August captures.  Owner ruling 2026-10-06: photographs of
+#     these two objects are NOT required and are not a prerequisite for
+#     merging scene corrections or for grasp work.  The ruling does not claim
+#     detector accuracy for these classes has been demonstrated.
 #
-#   * DIMENSIONS: owner-confirmed on 2026-10-06. The earlier photo-based
-#     estimate that the cube/cylinder were ~1.5x oversized is superseded.
-#     Only the soda-can height changes, from 11.5 to 12.2 cm (diameter 6.6 cm).
-#     See docs/scene-object-dimensions.md. Appearance/photo limitations above
-#     remain separate; confirmation of dimensions is not detector validation.
+#   * DIMENSIONS: owner-confirmed on 2026-10-06 and authoritative.  The
+#     earlier photo-based estimate that the cube/cylinder were ~1.5x oversized
+#     is superseded.  Only the soda-can height changes, from 11.5 to 12.2 cm
+#     (diameter 6.6 cm).  See docs/scene-object-dimensions.md.  Confirmed
+#     dimensions are not detector validation or grasp validation.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # The trays are a planning fiction — flat coloured zones added so TaskType.sort
@@ -81,13 +82,13 @@ objects:
     semantic_class: cylinder
     material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
 
-  # APPEARANCE UNVERIFIED — dimensions confirmed; no new photo supplied. Bare aluminium, kept
-  # brighter than the board so it is at least separable from it.
+  # Dimensions owner-confirmed; colour modelled (see above).  Bare aluminium,
+  # kept brighter than the board so it is at least separable from it.
   - id: soda_can
     semantic_class: can
     material: {rgba: [0.72, 0.73, 0.75, 1.0], roughness: 0.35}
 
-  # APPEARANCE UNVERIFIED — see above. Off-white matte foam.
+  # Dimensions owner-confirmed; colour modelled (see above).  Off-white matte foam.
   - id: foam_block
     semantic_class: foam
     material: {rgba: [0.88, 0.86, 0.80, 1.0], roughness: 0.95}
