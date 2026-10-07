@@ -138,6 +138,8 @@ class Action:
             # pattern at all, so the one path that would ask the slot question
             # was the one path that could not.
             return f"point to {cell}" if cell else "point to a cell"
+        if self.ability == "lift_object":
+            return f"pick up {obj} and put it back" if obj else ""
         if self.ability == "point_object":
             # No slot-less phrasing exists for this one, so an action with no
             # object is refused rather than guessed at.

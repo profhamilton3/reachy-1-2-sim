@@ -211,6 +211,25 @@ _register(Ability(
     end_posture="present",
 ))
 
+_register(Ability(
+    name="lift_object",
+    summary="pick up an object, hold it about 5 cm up, and put it back",
+    patterns=(
+        rf"{_POLITE}(?:pick\s+up|lift(?:\s+up)?)\s+(?:the\s+)?(?P<object>.+?)"
+        rf"\s+and\s+(?:put|set|place)\s+it\s+(?:back(?:\s+down)?|down(?:\s+again)?)"
+        rf"{_TRAIL}",
+        rf"{_POLITE}lift\s+(?:up\s+)?(?:the\s+)?(?P<object>.+?){_TRAIL}",
+    ),
+    slots=(SLOT_OBJECT, SLOT_ARM),
+    # The elevated, jaws-down grasp of #55 (tasks/crane_pick_live): planned
+    # and checked before the arm moves, aligned from the MEASURED hand, and
+    # put back where it was picked from.  It starts and ends at the raised
+    # pose, like the point abilities, and says so.
+    route="CRANE_LIFT",
+    start_postures=("present",),
+    end_posture="present",
+))
+
 #: Order matters: `point_cell` must be tried before `point_object`, whose
 #: pattern deliberately accepts anything after "point to".  Registry order is
 #: insertion order, which is the order above.

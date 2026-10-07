@@ -43,9 +43,46 @@ normal force on the two COLLISION PADS against any non-robot geom (object,
 table, rail); contacts of the forearm, upper arm or visual shells are not in
 it, and the state's ``contacts`` list is empty unless the server records them.
 A halt can therefore say "a pad touched something" or "the object moved"; the
-absence of either is NOT evidence that nothing touched.  The command panel's
-``SimLink`` carries positions only today; giving it the quaternion and the
-gripper block is the step that connects this module to the panel worker.
+absence of either is NOT evidence that nothing touched -- an arm link brushing
+the table, for instance, appears in neither, and is only found by replaying the
+recorded states offline.  In the panel, the parent's ``SimLink`` (which carries
+the quaternion and the gripper block) forwards these to the motion worker.
+
+Replacement and withdrawal (added after the 2026-10-06 attempt)
+---------------------------------------------------------------
+That attempt lifted the cube, then the thumb pad touched the table after the
+release and brushed the replaced cube on the way out.  The first was this
+module's own doing: the retreat started its line from the MEASURED pose, and
+commanding a pose the arm already sags short of lets it sag again (the hand
+dropped ~4 mm).  Every move now starts from the last COMMANDED pose.  The
+second came from the cube having been put down 2.9 mm from where it was picked
+up, under a ladder planned for the original spot.  So: the lowering stops when
+the object's lowest corner reaches the table (support contact, the one contact
+intended there) and never goes where the loaded hand's predicted pads would
+meet the table; the withdrawal is judged against the object's MEASURED pose
+after release, corrected at most once by a bounded sideways shift, or refused;
+and the pad-force / object monitor stays on through the withdrawal and the
+return.
+
+Tracking compensation (#55: "compensate in the commanded pose or fix the
+actuator model?")
+----------------------------------------------------------------------
+For THIS path the steady-state tracking error is compensated in the commanded
+pose, from measurement: the hover correction moves the commanded jaw-gap target
+by the error the measured joints show (2026-10-06: ~3.4 mm sideways and
+~8.8 mm up for a shoulder pitch settling ~1.1 deg short), re-solved and
+re-checked.  What it does NOT address: the actuator model itself (gains and
+force ranges are unchanged); the different offset of the LOADED arm while
+carrying, which is not corrected, only predicted against the table; and every
+other path, including ``pick_place_live``.  Whether the actuator model should
+change instead remains open.
+
+Hold slip is NOT addressed here.  The 2026-10-06 hold crept ~0.75 mm/s with
+the hand still, no measurable pivot and ~380 N of pad normal force on a 1.2 N
+cube; an offline step of that recorded state reproduced the creep, and the
+same step with MuJoCo's no-slip pass enabled (diagnostic only) removed it.
+That points to the contact model's soft-friction creep, which control code
+here does not change.
 """
 
 from __future__ import annotations
@@ -90,9 +127,14 @@ class CraneSpec:
     ``lean_bearing_deg`` is the hand's lean azimuth relative to the bearing
     from the shoulder to the object: 83.27 deg absolute at r2c2 in the
     recorded plan, whose bearing is 23.75 deg.  ``face_axis`` is the object's
-    own axis the jaw closes along ("x": pads on the object's +/-x faces); the
-    y faces were shown infeasible at this cell (pads staggered ~6 cm by the
-    lean, minimax margin -5.1 mm) and are not offered.
+    own axis the jaw closes along ("x": pads on the object's +/-x faces).  No
+    y-face straddle was found in what was examined (the lean staggers the pads
+    ~6 cm vertically; best worst-case margin -5.1 mm), so it is not offered.
+    That finding is
+    limited to what was examined: the cube at r2c2, opening -65 deg, a
+    48-case grid of tilt/lean/jaw-shift and a 12-start optimiser of the worst
+    margin, with this rig's joint limits.  It is not a claim about other
+    cells, openings or hand models.
     """
     face_axis: str = "x"
     tilt_deg: float = 30.0
@@ -112,6 +154,9 @@ class CraneSpec:
 #: below the measuring rung the prediction reaches (cm).  Max over every
 #: pre-contact rung pair of both recorded crane attempts (34 pairs; Reachy-Lab
 #: trial-2026-10-06-crane-aligned-55/data/02-prediction-tolerance.json).
+#: EMPIRICAL INPUTS FROM TWO RUNS, not guaranteed bounds: they are the largest
+#: errors seen so far, used as the go/no-go tolerance, and a later run can
+#: exceed them -- which is why every rung is re-measured rather than trusted.
 #: Nothing was recorded beyond 7 cm, so a check further away than that uses
 #: the 7 cm value AND the planner refuses a plan whose pads would reach the
 #: object's top more than 7 cm below a checkpoint (every rung is one).
@@ -614,17 +659,38 @@ class _Halt(Exception):
 #: state at ~50 Hz).
 FEEDBACK_STALE_S = 0.5
 
+#: In-hand slip bound for the hold: the tolerance to which the pad boxes this
+#: measurement is made from are verified against the compiled MJCF
+#: (tests/unit/test_crane_grasp_alignment.py, 0.1 mm).  The measurement itself
+#: read exactly zero spread over 286 static states in the recorded pause, so
+#: this, not sensor noise, is its resolution.
+SLIP_RESOLUTION_M = 0.0001
+
+
+def _in_hand(qm: Sequence[float], gm: float, o: Observation) -> np.ndarray:
+    """The object's centre in the thumb frame (m): where it sits in the hand."""
+    h = G.hand_frames(qm, gm)
+    return h.thumb_rot.T @ (np.asarray(o.position) - h.thumb.center)
+
 
 def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                        observe: Observe, *, on_event: Optional[EventLog] = None,
-                       should_abort: Optional[Callable[[], bool]] = None
-                       ) -> Dict[str, object]:
+                       should_abort: Optional[Callable[[], bool]] = None,
+                       stow: bool = True) -> Dict[str, object]:
     """Fly a checked crane plan from PRESENT and back.  See the module doc.
 
-    Returns an outcome dict.  A refusal or a halt is an outcome, not an
-    exception.  The arm must be at PRESENT and turned on.  All motion goes
-    through ``motion.primitives``; nothing is commanded that the plan's checks
-    (or a re-check made immediately before it) did not cover.
+    Returns an outcome dict, including ``criteria`` (the success criteria
+    fixed before motion, each judged from measurements).  A refusal or a halt
+    is an outcome, not an exception.  The arm must be at PRESENT and turned
+    on.  All motion goes through ``motion.primitives``; nothing is commanded
+    that the plan's checks, or a re-check made immediately before it, did not
+    cover.  Every connecting move starts from the LAST COMMANDED pose: the arm
+    sits short of its command under gravity, and commanding the measured pose
+    would let it sag by that much again (measured 2026-10-06: the thumb pad
+    dropped 4.3 mm onto the table that way).
+
+    ``stow`` ends with the documented stow to HOME; without it the arm is left
+    at PRESENT for the caller (the panel's abilities end there).
     """
     ev = on_event or (lambda *_a, **_k: None)
     arm = robot.r_arm
@@ -633,9 +699,12 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     outcome: Dict[str, object] = {"posture_held": None, "aligned_at_hover": None,
                                   "straddled_before_close": None, "closed": False,
                                   "lifted_and_held": None, "replaced": None,
-                                  "halt": None, "refusal": None, "final": None}
+                                  "withdrawal": None, "halt": None, "refusal": None,
+                                  "final": None, "criteria": None}
     first = observe()
     c0 = np.asarray(first.position, dtype=float)
+    rest_lowest = (G.object_box(scene.get(plan.object_id), first.position,
+                                first.quat_wxyz).lowest_z - scene.table_surface_z)
     if float(np.linalg.norm(c0 - plan.obj.center)) > lim.object_moved_m:
         outcome["refusal"] = "the object is not where the plan was made"
         ev("REFUSED", stage="start", reason=outcome["refusal"],
@@ -647,9 +716,11 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         ev("REFUSED", stage="start", reason=outcome["refusal"])
         return outcome
 
-    # `above`: the highest ladder rung the arm is at or below -- where a
-    # retreat rejoins the checked ladder.
-    st = {"monitor": False, "above": s.via_rungs}
+    # `cmd`: the last commanded arm pose -- every move starts from it.
+    # `ref`: where the object must stay while the monitor is on.
+    # `above`: the highest ladder rung the arm is at or below.
+    st = {"monitor": False, "cmd": list(plan.present), "ref": c0.copy(),
+          "above": s.via_rungs}
     cur = {"plan": plan}
 
     def P_() -> CranePlan:
@@ -663,16 +734,24 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
             return f"feedback stale ({o.age_s:.2f} s)"
         if o.grip_force_n > lim.contact_force_n:
             return f"grip force {o.grip_force_n:.3f} N (a pad touched something)"
-        moved = float(np.linalg.norm(np.asarray(o.position) - c0))
+        moved = float(np.linalg.norm(np.asarray(o.position) - st["ref"]))
         if moved > lim.object_moved_m:
             return f"object moved {1000 * moved:.2f} mm"
+        if st.get("finishing"):
+            # The way home is finished whatever is asked, as the pick arc
+            # finishes past its close; pad force and the object still stop it.
+            return None
         if time.monotonic() - t_start > lim.max_attempt_s:
             return "attempt time limit"
         if should_abort is not None and should_abort():
             return "aborted by the caller"
         return None
 
-    def stream(a, b, rate_hz: int, max_step_deg: float, check: bool = True) -> None:
+    def stream(b, rate_hz: int, max_step_deg: float, check: bool = True,
+               stop_when: Optional[Callable[[], bool]] = None) -> bool:
+        """Command the joint line from the last commanded pose to ``b``.
+        Returns False if ``stop_when`` ended it early."""
+        a = st["cmd"]
         n = max(2, math.ceil(max(abs(float(y) - float(x)) for x, y in zip(a, b))
                              / max_step_deg) + 1)
         for q in joint_path(a, b, n)[1:]:
@@ -681,8 +760,13 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                 if why:
                     raise _Halt(why)
             P.execute_trajectory(arm, [q], R_ARM_JOINTS, rate_hz=rate_hz)
+            st["cmd"] = list(q)
+            if stop_when is not None and stop_when():
+                return False
+        return True
 
-    def hold(q, seconds: float, check: bool = True) -> None:
+    def hold(seconds: float, check: bool = True) -> None:
+        q = st["cmd"]
         for _ in range(max(1, int(seconds * STEP_HZ))):
             if check:
                 why = monitor()
@@ -690,10 +774,10 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                     raise _Halt(why)
             P.execute_trajectory(arm, [q], R_ARM_JOINTS, rate_hz=STEP_HZ)
 
-    def measure(rung: int, label: str):
+    def measure(rung: Optional[int], label: str):
         plan_ = P_()
         qm, gm = _read(arm)
-        cmd = plan_.rungs[rung]
+        cmd = st["cmd"]
         off = G.joint_offset(qm, cmd)
         o = observe()
         live = G.object_box(scene.get(plan_.object_id), o.position, o.quat_wxyz)
@@ -708,6 +792,8 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
            gap_measured=[round(float(v), 5) for v in hm.gap_mid],
            gap_error_mm=[round(1000 * float(v), 2) for v in hm.gap_mid - hc.gap_mid],
            pads=pc.as_dict(), elbow_z=round(float(link_frames(qm)[1][2]), 4),
+           thumb_above_table_mm=round(1000 * (hm.thumb.lowest_z - scene.table_surface_z), 2),
+           finger_above_table_mm=round(1000 * (hm.finger.lowest_z - scene.table_surface_z), 2),
            grip_force_n=o.grip_force_n, object=[round(v, 5) for v in o.position],
            object_moved_mm=round(1000 * float(np.linalg.norm(np.asarray(o.position) - c0)), 3))
         return qm, gm, off, live, hm, pc
@@ -718,9 +804,9 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                                 gripper_open_deg=gm, from_rung=at_rung)
 
     def correct(at_rung: int, budget: int, label: str, m) -> Tuple:
-        """Judge; if the pads' route or the predicted straddle fails, make up
-        to ``budget`` measured corrections, each re-solved and re-checked
-        before it is commanded.  Returns the latest measurement."""
+        """Judge; if the pads' route, the predicted straddle or the predicted
+        hand-in-table fails, make up to ``budget`` measured corrections, each
+        re-solved and re-checked before it is commanded."""
         qm, gm, off, live, hm, pc = m
         for i in range(budget + 1):
             try:
@@ -746,54 +832,175 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                shift_mm=[round(1000 * float(v), 2) for v in d],
                cumulative_mm=[round(1000 * float(v), 2) for v in plan_.shift + d])
             new = replan(planner, scene, plan_, d, at_rung)
-            move = [qm, new.rungs[at_rung]]
+            move = [st["cmd"], new.rungs[at_rung]]
             try:
                 planner.check_arm_path(move, segment=f"{label} correction {i + 1}",
                                        gripper_deg=gm,
                                        target=TargetContact(plan_.object_id, hand_contact=True))
             except ArmClearanceError as exc2:
                 raise CraneRefused("check_arm_path", str(exc2)) from exc2
-            tr = G.table_clearance(scene, G.densify(move, 0.25), gm)
-            mv = G.route_clearance(move, gm, live)
+            pred = [list(np.asarray(q) + off) for q in G.densify(move, 0.25)]
+            tr = G.table_clearance(scene, pred, gm)
+            mv = G.route_clearance(move, gm, live, offset=off)
             if tr.worst_m < 0.0 or mv.min_m <= 0.0:
                 raise CraneRefused("correction", "the correcting move itself is not clear",
                                    table_m=tr.worst_m, pads_m=mv.min_m)
             cur["plan"] = new
             ev("CORRECTION_COMMANDED", label=label, iteration=i + 1,
-               q_from=[round(v, 3) for v in qm],
+               q_from=[round(v, 3) for v in st["cmd"]],
                q_to=[round(v, 3) for v in new.rungs[at_rung]])
-            stream(qm, new.rungs[at_rung], STEP_HZ, 0.05)
-            hold(new.rungs[at_rung], 1.5)
+            stream(new.rungs[at_rung], STEP_HZ, 0.05)
+            hold(1.5)
             qm, gm, off, live, hm, pc = measure(at_rung, f"{label} after correction {i + 1}")
         raise AssertionError("unreachable")
 
-    def retreat(opening: float) -> bool:
-        """Back up the checked ladder, via, PRESENT -- the documented route.
-        The one new line (measured pose -> the rung above) is checked first."""
+    def withdrawal_rungs() -> List[int]:
+        """The ladder rungs above the last commanded pose, up to the hover."""
+        plan_ = P_()
+        k = min(max(st["above"], 0), s.hover_rungs)
+        z_now = G.hand_frames(st["cmd"], s.opening_deg).gap_mid[2]
+        # skip a rung the hand is already level with or above
+        while k < s.hover_rungs and \
+                G.hand_frames(plan_.rungs[k], s.opening_deg).gap_mid[2] <= z_now + 1e-4:
+            k += 1
+        return list(range(k, s.hover_rungs + 1))
+
+    def withdrawal_path() -> List[List[float]]:
+        """Last commanded pose, then the ladder up to the hover."""
+        return [list(st["cmd"])] + [P_().rungs[j] for j in withdrawal_rungs()]
+
+    def onward(plan_: CranePlan) -> List[List[float]]:
+        """Hover -> via (rung by rung, as flown) -> PRESENT."""
+        return [plan_.rungs[j] for j in range(s.hover_rungs + 1, s.via_rungs + 1)] + \
+            [plan_.present]
+
+    def judge_withdrawal(label: str) -> Tuple[bool, Dict[str, object]]:
+        """Both pads against the MEASURED object and the table, along the
+        withdrawal as it will actually be flown, predicted from the measured
+        offset; plus the unchanged whole-arm check with the object where it
+        now is."""
+        plan_ = P_()
+        qm, gm = _read(arm)
+        off = G.joint_offset(qm, st["cmd"])
+        o = observe()
+        live = G.object_box(scene.get(plan_.object_id), o.position, o.quat_wxyz)
+        path = withdrawal_path()
+        route = G.route_clearance(path, gm, live, offset=off)
+        climb = (G.hand_frames(path[-1], gm).gap_mid[2]
+                 - G.hand_frames(path[0], gm).gap_mid[2])
+        tol = prediction_tolerance(max(climb, s.rung_m))
+        pred = [list(np.asarray(q) + off) for q in G.densify(path, 0.5)]
+        tab = G.table_clearance(scene, pred, gm)
+        rep = {"label": label, "route": route.as_dict(), "tolerance_mm": round(1000 * tol, 3),
+               "table_mm": {k: round(1000 * v, 2) for k, v in tab.by_link.items()},
+               "object": [round(v, 5) for v in o.position], "grip_force_n": o.grip_force_n,
+               "path_rungs": len(path) - 1}
+        ok = route.min_m >= tol and tab.worst_m >= 0.0
+        if ok:
+            try:
+                planner.check_arm_path(
+                    path + onward(plan_), segment=f"withdrawal ({label})",
+                    gripper_deg=gm,
+                    target=TargetContact(plan_.object_id, hand_contact=True,
+                                         center=tuple(o.position)))
+            except ArmClearanceError as exc:
+                ok = False
+                rep["check_arm_path"] = str(exc)
+        rep["ok"] = ok
+        rep["_live"], rep["_off"], rep["_gm"], rep["_route"] = live, off, gm, route
+        return ok, rep
+
+    def withdraw() -> Dict[str, object]:
+        """Re-judge, correct at most once, then climb with the monitor on.
+        Returns the withdrawal record; raises _Halt when it refuses or trips."""
+        ok, rep = judge_withdrawal("after release")
+        ev("WITHDRAWAL_JUDGED", **{k: v for k, v in rep.items() if not k.startswith("_")})
+        corrected = None
+        if not ok:
+            live, off, gm, route = rep["_live"], rep["_off"], rep["_gm"], rep["_route"]
+            end = route.end
+            n = np.asarray(end.face_normal)
+            d = 0.5 * (route.thumb_m - route.finger_m) * n      # equalise, laterally only
+            if float(np.linalg.norm(d)) > lim.max_lateral_correction_m or "check_arm_path" in rep:
+                raise _Halt("withdrawal refused: the pads' way out past the replaced "
+                            "object is not clear and no bounded sideways shift fixes it",
+                            withdrawal=_public(rep), shift_mm=(1000 * d).round(2).tolist())
+            plan_ = P_()
+            got = solve_gap(planner._arm, G.hand_rotation(st["cmd"]),
+                            G.hand_frames(st["cmd"], s.opening_deg).gap_mid + d,
+                            s.opening_deg, st["cmd"], lim.ik_position_tol_m,
+                            iters=20, relax=True)
+            if got is None:
+                raise _Halt("withdrawal refused: IK found no shifted pose")
+            shifted = replace(plan_, gap_targets=[t + d for t in plan_.gap_targets],
+                              rungs=_shift_ladder(planner, plan_, d), shift=plan_.shift + d,
+                              checks={})
+            path = [st["cmd"], got[0]] + [shifted.rungs[j] for j in withdrawal_rungs()]
+            r2 = G.route_clearance(path, gm, live, offset=off)
+            pred = [list(np.asarray(q) + off) for q in G.densify(path, 0.5)]
+            t2 = G.table_clearance(scene, pred, gm)
+            tol = prediction_tolerance(s.hover_rungs * s.rung_m)
+            corrected = {"shift_mm": (1000 * d).round(2).tolist(), "route": r2.as_dict(),
+                         "table_mm": round(1000 * t2.worst_m, 2), "tolerance_mm": round(1000 * tol, 3)}
+            ev("WITHDRAWAL_CORRECTION", **corrected)
+            if r2.min_m < tol or t2.worst_m < 0.0:
+                raise _Halt("withdrawal refused: a bounded sideways shift does not clear "
+                            "the replaced object", withdrawal=_public(rep), correction=corrected)
+            try:
+                planner.check_arm_path(path + onward(shifted),
+                                       segment="withdrawal (corrected)", gripper_deg=gm,
+                                       target=TargetContact(plan_.object_id, hand_contact=True,
+                                                            center=tuple(observe().position)))
+            except ArmClearanceError as exc:
+                raise _Halt(f"withdrawal refused: {exc}")
+            cur["plan"] = shifted
+            stream(got[0], STEP_HZ, 0.05)
+            hold(0.5)
+        # Climb, the monitor on: a pad force or the object moving stops it.
+        st["ref"] = np.asarray(observe().position, dtype=float)
+        st["monitor"] = True
+        for q in withdrawal_path()[1:]:
+            stream(q, STEP_HZ, 0.05)
+        st["above"] = s.hover_rungs
+        return {"judged": _public(rep), "corrected": corrected}
+
+    def back_to_present(opening: float) -> None:
+        """Hover -> via -> PRESENT by the checked ladder; pad force still watched."""
+        plan_ = P_()
+        st["finishing"] = True
+        for j in range(max(st["above"], s.hover_rungs), s.via_rungs):
+            stream(plan_.rungs[j + 1], CARRY_HZ, 2.0)
+        P.smooth_move(arm, {"r_gripper": s.transit_opening_deg}, 0.5)
+        stream(plan_.present, CARRY_HZ, 2.0)
+        st["monitor"] = False
+        hold(1.0, check=False)
+        ev("phase", name="back at PRESENT")
+
+    def retreat_after_halt() -> bool:
+        """After a halt before the close: the measured pose's way back to the
+        checked ladder is checked first, then the ladder is climbed."""
         st["monitor"] = False
         plan_ = P_()
         qm, gm = _read(arm)
         k = min(st["above"], s.via_rungs)
-        link = [qm, plan_.rungs[k]]
+        link = [st["cmd"], plan_.rungs[k]]
+        off = G.joint_offset(qm, st["cmd"])
         try:
             planner.check_arm_path(link, segment="retreat to the ladder", gripper_deg=gm,
                                    target=TargetContact(plan_.object_id, hand_contact=True))
-            tr = G.table_clearance(scene, G.densify(link, 0.25), gm)
+            pred = [list(np.asarray(q) + off) for q in G.densify(link, 0.25)]
+            tr = G.table_clearance(scene, pred, gm)
             if tr.worst_m < 0.0:
                 raise CraneRefused("table", f"retreat line puts {tr.link} in the table")
         except (ArmClearanceError, CraneRefused) as exc:
             ev("RETREAT_REFUSED", reason=str(exc))
             return False
-        P.smooth_move(arm, {"r_gripper": opening}, 0.8)
-        stream(qm, plan_.rungs[k], STEP_HZ, 0.05, check=False)
-        for j in range(k, s.via_rungs):
-            slow = j < s.hover_rungs
-            stream(plan_.rungs[j], plan_.rungs[j + 1], STEP_HZ if slow else CARRY_HZ,
-                   0.05 if slow else 2.0, check=False)
-        P.smooth_move(arm, {"r_gripper": s.transit_opening_deg}, 0.5)
-        stream(plan_.via, plan_.present, CARRY_HZ, 2.0, check=False)
-        hold(plan_.present, 1.0, check=False)
-        ev("phase", name="back at PRESENT")
+        P.smooth_move(arm, {"r_gripper": s.opening_deg}, 0.8)
+        stream(plan_.rungs[k], STEP_HZ, 0.05, check=False)
+        for j in range(k, s.hover_rungs):
+            stream(plan_.rungs[j + 1], STEP_HZ, 0.05, check=False)
+        st["above"] = max(k, s.hover_rungs)
+        back_to_present(s.opening_deg)
         return True
 
     # ── approach: PRESENT -> via -> hover ───────────────────────────────────
@@ -801,20 +1008,20 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     P.look_at(robot, tuple(plan.obj.center), duration=1.0)
     P.smooth_move(arm, {"r_gripper": s.transit_opening_deg}, 0.5)
     ev("phase", name="transit PRESENT -> via")
-    stream(plan.present, plan.via, CARRY_HZ, 2.0, check=False)
+    stream(plan.via, CARRY_HZ, 2.0, check=False)
     ev("phase", name="via -> hover")
     for k in range(s.via_rungs, s.hover_rungs, -1):
-        stream(plan.rungs[k], plan.rungs[k - 1], CARRY_HZ, 2.0, check=False)
+        stream(plan.rungs[k - 1], CARRY_HZ, 2.0, check=False)
     st["above"] = s.hover_rungs
     P.smooth_move(arm, {"r_gripper": s.opening_deg}, 0.8)
-    hold(plan.hover, 1.5, check=False)
+    hold(1.5, check=False)
     st["monitor"] = True
 
     halt: Optional[_Halt] = None
     try:
         # ── the visible pause at the elevated approach ─────────────────────
         ev("phase", name=f"HOVER pause ({s.pause_s:.0f} s)")
-        hold(plan.hover, s.pause_s)
+        hold(s.pause_s)
         m = measure(s.hover_rungs, "hover after pause")
         qm, gm, off, live, hm, pc = m
         outcome["posture_held"] = {
@@ -839,10 +1046,10 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         rung = s.hover_rungs
         while rung > 0:
             st["above"] = rung
-            stream(P_().rungs[rung], P_().rungs[rung - 1], STEP_HZ, 0.05)
+            stream(P_().rungs[rung - 1], STEP_HZ, 0.05)
             rung -= 1
             st["above"] = rung
-            hold(P_().rungs[rung], 0.6)
+            hold(0.6)
             m = measure(rung, "descent rung")
             if rung == 0:
                 break
@@ -862,7 +1069,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                     raise _Halt(f"refused at rung +{rung} -- {exc2.stage}: {exc2.reason}")
 
         # ── straddle on the MEASURED hand, then (only then) close ──────────
-        hold(P_().rungs[0], 1.0)
+        hold(1.0)
         qm, gm, off, live, hm, pc = measure(0, "grasp depth")
         sc = G.straddle_check(hm, live, scene.table_surface_z, 0.0,
                               P_().jaw_face_limit_deg)
@@ -881,31 +1088,30 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         ev("HALT", reason=halt.reason, above_rung=st["above"],
            q_measured=[round(v, 3) for v in qm], object=list(o.position),
            quat=list(o.quat_wxyz), grip_force_n=o.grip_force_n)
-        if not retreat(s.opening_deg):
+        if not retreat_after_halt():
             outcome["final"] = "left at the halt pose (retreat refused)"
-            ev("ATTEMPT_END", outcome=outcome)
-            return outcome
-        return _finish(arm, robot, observe, outcome, ev)
+            return _end(outcome, ev, observe)
+        return _finish(arm, robot, observe, outcome, ev, stow)
 
-    # ── close, lift, hold, replace ────────────────────────────────────────
+    # ── close, lift, hold ──────────────────────────────────────────────────
     plan = P_()
     st["monitor"] = False
     ev("phase", name="close")
     z0 = float(observe().position[2])
     P.smooth_move(arm, {"r_gripper": s.close_deg}, 0.8)
-    hold(plan.rungs[0], 1.0, check=False)
+    hold(1.0, check=False)
     o = observe()
     qm, gm = _read(arm)
     outcome["closed"] = True
     ev("CLOSED", gripper_measured_deg=round(gm, 2), grip_force_n=o.grip_force_n,
-       grasping=o.grasping, object=list(o.position))
+       grasping=o.grasping, object=list(o.position), quat=list(o.quat_wxyz))
 
     ev("phase", name="lift")
     lifted, k = True, 0
     for k in range(1, s.lift_rungs + 1):
         st["above"] = k
-        stream(plan.rungs[k - 1], plan.rungs[k], STEP_HZ, 0.05, check=False)
-        hold(plan.rungs[k], 0.4, check=False)
+        stream(plan.rungs[k], STEP_HZ, 0.05, check=False)
+        hold(0.4, check=False)
         o = observe()
         rise = float(o.position[2]) - z0
         ev("LIFT_RUNG", rung=k, object_rise_mm=round(1000 * rise, 2),
@@ -916,52 +1122,172 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                                f"object up {1000 * rise:.1f} mm")
             ev("HALT", reason=outcome["halt"])
             break
+    hold_rec = None
     if lifted:
         ev("phase", name=f"hold ({s.hold_s:.0f} s)")
         o1 = observe()
-        hold(plan.rungs[s.lift_rungs], s.hold_s, check=False)
+        q1, g1 = _read(arm)
+        hold(s.hold_s, check=False)
         o2 = observe()
+        q2, g2 = _read(arm)
         r1, r2 = float(o1.position[2]) - z0, float(o2.position[2]) - z0
         need = s.lift_rungs * s.rung_m - lim.lift_lag_m
-        outcome["lifted_and_held"] = {
+        slip = _in_hand(q2, g2, o2) - _in_hand(q1, g1, o1)
+        hand_move = float(np.linalg.norm(G.hand_frames(q2, g2).thumb.center
+                                         - G.hand_frames(q1, g1).thumb.center))
+        hold_rec = {
             "ok": bool(r1 >= need and r2 >= need), "rise_start_mm": round(1000 * r1, 2),
             "rise_end_mm": round(1000 * r2, 2), "required_mm": round(1000 * need, 1),
+            "in_hand_slip_mm": round(1000 * float(np.linalg.norm(slip)), 3),
+            "in_hand_slip_vector_mm": (1000 * slip).round(3).tolist(),
+            "hand_moved_mm": round(1000 * hand_move, 3),
+            "slip_bound_mm": round(1000 * SLIP_RESOLUTION_M, 3),
             "grasping": o2.grasping, "grip_force_n": o2.grip_force_n,
             "object": list(o2.position), "quat": list(o2.quat_wxyz)}
-        ev("HELD", **outcome["lifted_and_held"])
-        ev("phase", name="replace")
-        for k in range(s.lift_rungs, 0, -1):
-            stream(plan.rungs[k], plan.rungs[k - 1], STEP_HZ, 0.05, check=False)
-            st["above"] = k - 1
-        k = 0
-        hold(plan.rungs[0], 0.6, check=False)
+        outcome["lifted_and_held"] = hold_rec
+        ev("HELD", **hold_rec)
     else:
         outcome["lifted_and_held"] = {"ok": False}
-    P.smooth_move(arm, {"r_gripper": s.opening_deg}, 0.8)
-    hold(plan.rungs[k], 0.8, check=False)
+
+    # ── replace: lower until the object meets the table, then open ─────────
+    ev("phase", name="replace")
+    qm, gm = _read(arm)
+    off = G.joint_offset(qm, st["cmd"])
+    lower = [st["cmd"]] + [plan.rungs[j] for j in range(k - 1, -1, -1)] if k > 0 else [st["cmd"]]
+    dense = G.densify(lower, 0.05)
+    # Both pads stay out of the table on the way down, predicted from the
+    # loaded hand's measured offset: lower no further than that allows.
+    floor = len(dense) - 1
+    for i, q in enumerate(dense):
+        if G.table_clearance(scene, [list(np.asarray(q) + off)], s.close_deg).worst_m < 0.0:
+            floor = max(i - 1, 0)
+            break
+    ev("REPLACE_PLAN", setpoints=len(dense), floor_index=floor,
+       pads_table_limited=floor < len(dense) - 1)
+
+    def supported() -> bool:
+        o_ = observe()
+        b = G.object_box(scene.get(plan.object_id), o_.position, o_.quat_wxyz)
+        return b.lowest_z - scene.table_surface_z <= rest_lowest + lim.object_moved_m
+
+    reached_support = supported()
+    for q in dense[1:floor + 1]:
+        if reached_support:
+            break
+        P.execute_trajectory(arm, [q], R_ARM_JOINTS, rate_hz=STEP_HZ)
+        st["cmd"] = list(q)
+        reached_support = supported()
+    hold(0.3, check=False)
     o = observe()
-    outcome["replaced"] = {"object": list(o.position), "quat": list(o.quat_wxyz),
-                           "offset_from_start_mm": round(1000 * float(np.linalg.norm(
-                               np.asarray(o.position) - c0)), 2)}
+    qm, gm = _read(arm)
+    hm = G.hand_frames(qm, gm)
+    ev("SUPPORTED", reached=reached_support, object=list(o.position), quat=list(o.quat_wxyz),
+       thumb_above_table_mm=round(1000 * (hm.thumb.lowest_z - scene.table_surface_z), 2),
+       finger_above_table_mm=round(1000 * (hm.finger.lowest_z - scene.table_surface_z), 2),
+       grip_force_n=o.grip_force_n)
+    # Height of the hand above the grasp rung: where `above` sits now.
+    z_cmd = G.hand_frames(st["cmd"], s.close_deg).gap_mid[2]
+    st["above"] = max([j for j in range(0, s.hover_rungs + 1)
+                       if G.hand_frames(plan.rungs[j], s.close_deg).gap_mid[2] <= z_cmd + 1e-4]
+                      or [0])
+    P.smooth_move(arm, {"r_gripper": s.opening_deg}, 0.8)
+    hold(0.8, check=False)
+    o = observe()
+    qm, gm = _read(arm)
+    hm = G.hand_frames(qm, gm)
+    placed = G.object_box(scene.get(plan.object_id), o.position, o.quat_wxyz)
+    w, x, y, z = o.quat_wxyz
+    tilt = math.degrees(math.acos(max(-1.0, min(1.0, 1 - 2 * (x * x + y * y)))))
+    outcome["replaced"] = {
+        "supported_before_open": reached_support, "object": list(o.position),
+        "quat": list(o.quat_wxyz), "tilt_deg": round(tilt, 3),
+        "lowest_above_table_mm": round(1000 * (placed.lowest_z - scene.table_surface_z), 3),
+        "offset_from_start_mm": round(1000 * float(np.linalg.norm(np.asarray(o.position) - c0)), 2),
+        "grip_force_after_open_n": o.grip_force_n,
+        "thumb_above_table_mm": round(1000 * (hm.thumb.lowest_z - scene.table_surface_z), 2),
+        "finger_above_table_mm": round(1000 * (hm.finger.lowest_z - scene.table_surface_z), 2)}
     ev("RELEASED", **outcome["replaced"])
-    st["above"] = k
-    if not retreat(s.opening_deg):
-        outcome["final"] = "left at the release pose (retreat refused)"
-        ev("ATTEMPT_END", outcome=outcome)
-        return outcome
-    return _finish(arm, robot, observe, outcome, ev)
+
+    # ── withdraw: re-judged against where the object now is ────────────────
+    ev("phase", name="withdrawal")
+    try:
+        outcome["withdrawal"] = withdraw()
+        outcome["withdrawal"]["clean"] = True
+        ev("WITHDRAWN", **outcome["withdrawal"])
+        back_to_present(s.opening_deg)
+    except _Halt as h:
+        st["monitor"] = False
+        o = observe()
+        qm, gm = _read(arm)
+        outcome["halt"] = outcome["halt"] or h.reason
+        outcome["withdrawal"] = {"clean": False, "reason": h.reason, **_public(h.detail)}
+        ev("HALT", reason=h.reason, stage="withdrawal", object=list(o.position),
+           grip_force_n=o.grip_force_n, q_measured=[round(v, 3) for v in qm])
+        outcome["final"] = "left beside the object (withdrawal refused or stopped)"
+        outcome["criteria"] = _criteria(outcome, arm)
+        return _end(outcome, ev, observe)
+    outcome["criteria"] = _criteria(outcome, arm)
+    return _finish(arm, robot, observe, outcome, ev, stow)
 
 
-def _finish(arm, robot, observe, outcome, ev):
-    ok, joint, off_deg = P.stow_entry_ok(arm)
-    if ok:
-        ev("phase", name="stow_from_side (documented PRESENT -> HOME route)")
-        P.stow_from_side(robot, arm)
-        outcome["final"] = "HOME"
-    else:
-        ev("left_at_pose", why=f"not at PRESENT ({joint} {off_deg:.0f} deg off); not stowing")
-        outcome["final"] = f"not at PRESENT ({joint} {off_deg:.0f} deg off)"
+def _public(d):
+    """A record without the private (non-JSON) working values."""
+    if isinstance(d, dict):
+        return {k: _public(v) for k, v in d.items() if not str(k).startswith("_")}
+    return d
+
+
+def _shift_ladder(planner, plan: CranePlan, d: np.ndarray) -> List[List[float]]:
+    """The ladder's rungs re-solved with the gap moved by ``d``, keeping each
+    rung's own orientation; rungs that cannot be re-solved keep their pose
+    (and the caller's route check judges them)."""
+    out = []
+    prev = None
+    for k, q in enumerate(plan.rungs):
+        got = solve_gap(planner._arm, G.hand_rotation(q),
+                        G.hand_frames(q, plan.spec.opening_deg).gap_mid + d,
+                        plan.spec.opening_deg, prev or q, plan.limits.ik_position_tol_m,
+                        iters=20, relax=True)
+        out.append(got[0] if got is not None else list(q))
+        prev = out[-1]
+    return out
+
+
+def _criteria(outcome, arm) -> Dict[str, object]:
+    """The success criteria, fixed before motion (see the report), judged."""
+    held = outcome.get("lifted_and_held") or {}
+    rep = outcome.get("replaced") or {}
+    wd = outcome.get("withdrawal") or {}
+    at_present = P.stow_entry_ok(arm)[0]
+    return {
+        "retained_height": bool(held.get("ok")),
+        "slip_within_resolution": (held.get("in_hand_slip_mm") is not None
+                                   and held["in_hand_slip_mm"] <= held["slip_bound_mm"]),
+        "clean_placement": bool(rep.get("supported_before_open")
+                                and rep.get("grip_force_after_open_n", 1.0) == 0.0
+                                and rep.get("thumb_above_table_mm", -1.0) >= 0.0
+                                and rep.get("finger_above_table_mm", -1.0) >= 0.0),
+        "clean_withdrawal": bool(wd.get("clean")),
+        "returned_to_present": bool(at_present),
+    }
+
+
+def _end(outcome, ev, observe):
     o = observe()
     outcome["final_object"] = list(o.position)
     ev("ATTEMPT_END", outcome=outcome)
     return outcome
+
+
+def _finish(arm, robot, observe, outcome, ev, stow: bool = True):
+    ok, joint, off_deg = P.stow_entry_ok(arm)
+    if ok and stow:
+        ev("phase", name="stow_from_side (documented PRESENT -> HOME route)")
+        P.stow_from_side(robot, arm)
+        outcome["final"] = "HOME"
+    elif ok:
+        outcome["final"] = "PRESENT"
+    else:
+        ev("left_at_pose", why=f"not at PRESENT ({joint} {off_deg:.0f} deg off); not stowing")
+        outcome["final"] = f"not at PRESENT ({joint} {off_deg:.0f} deg off)"
+    return _end(outcome, ev, observe)

@@ -160,6 +160,9 @@ class _Arm:
     def q(self):
         return [getattr(self, n).goal_position for n in R_ARM_JOINTS]
 
+    def inverse_kinematics(self, M, q0=None):
+        raise ValueError("this fake arm has no IK service")   # as reachy_sdk raises
+
 
 class _Robot:
     def __init__(self, arm):
@@ -266,3 +269,144 @@ def test_aligned_clean_insertion_does_close(rig):
     assert out["straddled_before_close"] is True
     assert out["closed"] is True
     assert plan.spec.close_deg in arm.gripper_goals
+
+
+# ── hold, replacement and withdrawal (after the 2026-10-06 attempt) ───────────
+
+class _Cube:
+    """The cube as the observer reports it: still until the gripper closes,
+    then riding the hand (optionally slipping ``slip_m`` down in it), never
+    below the table, and left where the hand put it -- plus ``shift_after``
+    -- once the gripper opens again."""
+
+    def __init__(self, arm, plan, *, slip_m=0.0, shift_after=(0.0, 0.0, 0.0),
+                 force_when=None):
+        self.arm, self.plan = arm, plan
+        self.c0 = np.asarray(plan.obj.center, dtype=float)
+        self.rest_z = float(self.c0[2])
+        self.slip, self.shift = slip_m, np.asarray(shift_after, dtype=float)
+        self.force_when = force_when
+        self.state, self.ref_gap, self.pos = "free", None, self.c0.copy()
+
+    def _gap(self):
+        return G.hand_frames(self.arm.q(), -65.0).gap_mid
+
+    def __call__(self):
+        g = self.arm.r_gripper.goal_position
+        close = self.plan.spec.close_deg
+        if self.state == "free" and g == close:
+            self.state, self.ref_gap = "held", self._gap()
+        elif self.state == "held" and g != close:
+            self.state = "released"
+            self.pos = np.array([self.pos[0], self.pos[1], self.rest_z]) + self.shift
+        if self.state == "held":
+            d = self._gap() - self.ref_gap
+            rise = max(0.0, d[2] - (self.slip if d[2] > self.slip else d[2]))
+            self.pos = np.array([self.c0[0] + d[0], self.c0[1] + d[1],
+                                 max(self.rest_z, self.rest_z + rise)])
+        f = 0.0
+        if self.state == "held":
+            f = 200.0
+        elif self.force_when is not None and self.force_when(self):
+            f = 0.3
+        return C.Observation(tuple(self.pos), (1.0, 0.0, 0.0, 0.0), f,
+                             self.state == "held", 0.0)
+
+
+def _goal_log(monkeypatch):
+    goals = []
+    real = P.execute_trajectory
+
+    def execute(a, traj, names, rate_hz=25, on_step=None):
+        real(a, traj, names, rate_hz, on_step)
+        goals.append(list(a.q()))
+    monkeypatch.setattr(P, "execute_trajectory", execute)
+    return goals
+
+
+def test_replacement_stops_at_support_and_withdraws_cleanly(rig, monkeypatch):
+    """The cube slipped 7 mm down in the hand while held: lowering stops when
+    its bottom reaches the table -- not at the grasp rung, which would push
+    the hand 7 mm further down -- then opens there and climbs out clean."""
+    _scene_, arm, _planner, plan = rig
+    goals = _goal_log(monkeypatch)
+    cube = _Cube(arm, plan, slip_m=0.007)
+    out, events, arm = _run(rig, cube)
+    kinds = [k for k, _ in events]
+    sup = dict(events[kinds.index("SUPPORTED")][1])
+    assert sup["reached"] is True
+    # the lowest commanded jaw-gap height after the lift is ~7 mm above the
+    # grasp rung's, not the grasp rung itself
+    z0 = G.hand_frames(plan.rungs[0], -65.0).gap_mid[2]
+    i_rel = kinds.index("RELEASED")
+    lowest = min(G.hand_frames(g, -65.0).gap_mid[2] for g in goals[-400:])
+    assert out["replaced"]["supported_before_open"] is True
+    assert lowest - z0 > 0.005
+    assert out["withdrawal"]["clean"] is True
+    assert out["criteria"]["clean_placement"] and out["criteria"]["clean_withdrawal"]
+    assert out["criteria"]["returned_to_present"]
+    assert i_rel < kinds.index("WITHDRAWN")
+
+
+def test_moves_start_from_the_commanded_pose_not_the_measured_one(rig, monkeypatch):
+    """With the shoulder settling 1.1 deg short (as recorded), no setpoint is
+    ever the previous setpoint plus that error: a line started from the
+    MEASURED pose is how the thumb pad was dropped onto the table."""
+    _scene_, arm, _planner, plan = rig
+    goals = _goal_log(monkeypatch)
+    arm.r_shoulder_pitch.offset = 1.1
+    top = plan.obj.highest_z
+    cube = _Cube(arm, plan)
+    # a pad force near the bottom halts the descent, so the retreat runs too
+    cube.force_when = lambda c: (c.state == "free" and
+                                 min(G.hand_frames(c.arm.q(), -65.0).thumb.lowest_z,
+                                     G.hand_frames(c.arm.q(), -65.0).finger.lowest_z)
+                                 < top - 0.04)
+    out, events, arm = _run(rig, cube)
+    # A line started from the measured pose shows up as a setpoint where the
+    # shoulder pitch alone jumps by about the offset; every planned stream
+    # moves it in steps of <= 0.05 deg, or moves several joints at once.
+    assert len(goals) > 100
+    for a, b in zip(goals, goals[1:]):
+        d = np.abs(np.asarray(b) - np.asarray(a))
+        assert not (d[0] > 0.5 and int(np.sum(d[1:] > 0.06)) == 0), (a, b)
+
+
+def test_obstructed_withdrawal_is_refused_before_it_moves(rig, monkeypatch):
+    """After release the cube sits 8 mm toward the thumb: the pads' way out is
+    blocked and the sideways shift that would clear it exceeds the 6 mm cap.
+    The withdrawal is refused -- the hand stays where it opened -- and the
+    attempt reports it rather than climbing through the cube."""
+    _scene_, arm, _planner, plan = rig
+    goals = _goal_log(monkeypatch)
+    pc = G.pad_clearance(G.hand_frames(plan.rungs[0], -65.0), plan.obj)
+    toward_thumb = -0.008 * np.asarray(pc.face_normal)
+    cube = _Cube(arm, plan, shift_after=toward_thumb)
+    out, events, arm = _run(rig, cube)
+    kinds = [k for k, _ in events]
+    assert "WITHDRAWAL_JUDGED" in kinds
+    judged = dict(events[kinds.index("WITHDRAWAL_JUDGED")][1])
+    assert judged["ok"] is False
+    assert out["withdrawal"]["clean"] is False
+    assert "withdrawal refused" in out["halt"]
+    assert "WITHDRAWN" not in kinds
+    # nothing climbed: the last commanded pose is still down beside the cube
+    assert out["criteria"]["clean_withdrawal"] is False
+    assert G.hand_frames(goals[-1], -65.0).gap_mid[2] < \
+        G.hand_frames(plan.rungs[2], -65.0).gap_mid[2]
+
+
+def test_pad_force_during_withdrawal_stops_the_climb(rig, monkeypatch):
+    """The monitor stays on through the withdrawal: a pad reading force on the
+    way out stops it there (the live feed cannot say WHAT was touched; the
+    stop does not depend on knowing)."""
+    _scene_, arm, _planner, plan = rig
+    top = plan.obj.highest_z
+    cube = _Cube(arm, plan, force_when=lambda c: (
+        c.state == "released" and
+        G.hand_frames(c.arm.q(), -65.0).thumb.lowest_z > top - 0.03))
+    out, events, arm = _run(rig, cube)
+    kinds = [k for k, _ in events]
+    assert "WITHDRAWAL_JUDGED" in kinds and "WITHDRAWN" not in kinds
+    assert out["withdrawal"]["clean"] is False
+    assert "grip force" in out["halt"]
