@@ -326,13 +326,28 @@ def _observer(object_id: str):
     return observe
 
 
-def _crane_phases(phase):
+#: The crane events kept in the panel's evidence (every MEASURE is not: the
+#: hover and grasp-depth ones are, with the corrections, the straddle, the
+#: hold, the placement and the withdrawal).  Phases are live lines; this is
+#: what remains on the task afterwards.
+KEPT_CRANE_EVENTS = ("CORRECTION", "CORRECTION_COMMANDED", "ALIGNED", "ALIGN_REFUSED",
+                     "DESCENT_CHECK_FAILED", "STRADDLE", "CLOSED", "HELD", "SUPPORTED",
+                     "RELEASED", "WITHDRAWAL_JUDGED", "WITHDRAWAL_CORRECTION",
+                     "WITHDRAWN", "HALT", "REFUSED", "RETREAT_REFUSED")
+
+
+def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
     """The crane module's events, as the sentences the panel shows.  The
-    numbers are the measured ones -- the corrected path is the point."""
+    numbers are the measured ones -- the corrected path is the point.  With
+    ``kept``, the key events are also appended there for the evidence."""
     def mm(v):
         return "(" + ", ".join(f"{x:+.1f}" for x in v) + ") mm"
 
     def on_event(kind, **kw):
+        if kept is not None and (kind in KEPT_CRANE_EVENTS or (
+                kind == "MEASURE" and kw.get("label") in ("hover after pause", "grasp depth"))):
+            kept.append(json.loads(json.dumps(dict(kind=kind, t=round(time.time(), 3), **kw),
+                                              default=str)))
         if kind == "phase":
             phase(f"lift: {kw.get('name')}")
         elif kind == "MEASURE" and kw.get("label") in ("hover after pause", "grasp depth"):
@@ -405,10 +420,11 @@ def _crane_lift(robot, arm, phase, crane, *, should_abort=None, on_phase=None):
     ability ends raised).  The outcome rides back in the result."""
     from reachy_ai.tasks import crane_pick_live as CP
 
+    kept: List[Dict[str, Any]] = []
     out = CP.execute_crane_pick(robot, crane["planner"], crane["model"], crane["plan"],
-                                crane["observe"], on_event=_crane_phases(phase),
+                                crane["observe"], on_event=_crane_phases(phase, kept),
                                 should_abort=should_abort, stow=False)
-    crane["outcome"] = json.loads(json.dumps(out, default=lambda v: (
+    crane["outcome"] = json.loads(json.dumps(dict(out, events=kept), default=lambda v: (
         v.tolist() if hasattr(v, "tolist") else str(v))))
     held = out.get("lifted_and_held") or {}
     return [f"lift: {out.get('halt') or out.get('refusal') or 'completed the sequence'}",

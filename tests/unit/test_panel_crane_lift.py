@@ -113,7 +113,26 @@ def test_a_lift_is_judged_by_its_criteria_not_by_finishing():
     assert _judge_lift(_proposal(), crane, "present", {}).status == "completed"
     crane["criteria"]["slip_within_resolution"] = False
     res = _judge_lift(_proposal(), crane, "present", {})
-    assert res.status == "failed" and "no slip in the hand" in res.detail
+    assert res.status == "failed" and \
+        "did not keep it from slipping more than 0.1 mm" in res.detail
     assert res.evidence["crane"] is crane
     stopped = _judge_lift(_proposal(), {"halt": "grip force 0.3 N"}, "present", {})
     assert stopped.status == "failed" and "grip force" in stopped.detail
+
+
+def test_the_corrected_path_is_shown_and_kept():
+    """The measured correction, the way-out judgement and the hold are phases
+    the panel shows, and the key events stay in the evidence afterwards."""
+    shown, kept = [], []
+    on_event = motion_worker._crane_phases(shown.append, kept)
+    on_event("MEASURE", label="descent rung", rung=5, gap_error_mm=[0, 0, 0],
+             pads={"thumb_side_mm": 1, "finger_side_mm": 1})
+    on_event("CORRECTION", label="hover", iteration=1, because="finger route -1.6 mm",
+             shift_mm=[3.4, 0.4, 8.8], cumulative_mm=[3.4, 0.4, 8.8], predicted_route={})
+    on_event("WITHDRAWAL_JUDGED", ok=False, route={"route_thumb_mm": -0.46,
+                                                   "route_finger_mm": 5.65})
+    on_event("HELD", rise_end_mm=40.5, in_hand_slip_mm=1.69)
+    assert any("correcting the commanded path by (+3.4, +0.4, +8.8) mm" in p for p in shown)
+    assert any("-0.5 / 5.7 mm (NOT clear)" in p for p in shown)
+    assert any("slip in the hand 1.69 mm" in p for p in shown)
+    assert [e["kind"] for e in kept] == ["CORRECTION", "WITHDRAWAL_JUDGED", "HELD"]

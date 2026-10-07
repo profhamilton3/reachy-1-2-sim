@@ -1049,11 +1049,11 @@ _observed_board = _P.observed_board
 #: The lift's success criteria, in the order they are reported (#55; fixed
 #: before motion, each judged from measurements by tasks.crane_pick_live).
 LIFT_CRITERIA = (
-    ("retained_height", "kept the object at least 4 cm up through the hold"),
-    ("slip_within_resolution", "no slip in the hand beyond 0.1 mm during the hold"),
-    ("clean_placement", "set it down on the table with neither pad touching the table"),
-    ("clean_withdrawal", "withdrew without a pad touching anything"),
-    ("returned_to_present", "came back to the raised pose"),
+    ("retained_height", "keep it at least 4 cm up through the hold"),
+    ("slip_within_resolution", "keep it from slipping more than 0.1 mm in my hand during the hold"),
+    ("clean_placement", "set it down without a pad touching the table"),
+    ("clean_withdrawal", "withdraw without a pad touching anything"),
+    ("returned_to_present", "come back to the raised pose"),
 )
 
 
@@ -1080,7 +1080,7 @@ def _judge_lift(proposal, crane: Dict[str, Any], end: str,
         return ExecutionResult(
             status="failed",
             detail=("I lifted and put back " + proposal.object_id + ", but I did "
-                    "not " + "; did not ".join(failed) + ". " + numbers),
+                    "not " + "; and did not ".join(failed) + ". " + numbers),
             evidence=evidence)
     return ExecutionResult(
         status="completed",
