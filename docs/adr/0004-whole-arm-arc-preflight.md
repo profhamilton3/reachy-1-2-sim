@@ -3,8 +3,9 @@
 - Status: Accepted (implementation; simulator-only, unflown)
 - Date: 2026-10-06
 - Decision owners: IITG Reachy 1.2 simulation project
-- Relates to: #56 (addressed, not closed), #55 (deferred items below), #74;
-  ADR-0002, ADR-0003
+- Relates to: #56 (closed as an owner-amended simulator scope, 2026-10-06;
+  deferred items in `docs/roadmap/continuous-whole-arm-protection.md`), #55
+  (deferred items below), #74; ADR-0002, ADR-0003
 
 **This change addresses #56; it does not close it.** It refuses unsafe planned
 arcs. It does **not** choose clearance-optimal trajectories, and it makes no
@@ -209,7 +210,7 @@ gRPC or physics -- indicative only):
 | Return to the raised pose repaired | **Done here** (checked, PRESENT, arrival tested, <= 2 checked corrections) |
 | Worker, demo and notebook preflight the complete arc | **Done here** |
 | Footprint checks for the pick/place job | **Done here** (scoped as stated above) |
-| Move the compensations (CLEAR_Z, 8 Hz) | **Not complete** -- moved, not re-derived |
+| Move the compensations (CLEAR_Z, 8 Hz) | **Not complete** -- moved, not re-derived; re-derivation deferred by owner decision (2026-10-06) |
 | Automatic replanning / clearance-optimal trajectories | **Deferred** |
 | Swept (continuous) checking; realised-path deviation | **Deferred** (E1, continuous-protection roadmap) |
 | Switch to the `"shells"` hand model | **Not done** (waits on E1 and physical validation) |
