@@ -67,6 +67,34 @@ Acceptance:
 
 Each issue should name its prerequisites and exclusions. Keep gripper tuning, general autonomous replanning, physical deployment, and human-safety certification outside this milestone unless explicitly added later.
 
+## Deferred from #56 (owner scope amendment, 2026-10-06)
+
+#56 was closed as completion of an **explicitly amended simulator scope**: PR #152 (`41fbb9e`), PR #153 (`e593f77`), and ADR-0004. These items were deferred by owner decision. They are tracked here and are **not** completed. Nothing in this entry authorizes implementation, experiments or physical motion, and none of #56's conclusions extend to the physical robot.
+
+1. **Re-derive the transit constants.** `CLEAR_Z = 1.00` and `CARRY_HZ = 8` are in `motion/transit.py`, moved but **not re-derived**. #56's box 3 asks to "re-derive both", and that is still outstanding.
+   - Whole-arm preflight now checks the planned arc. The retained height and rate remain operating choices; their effects have not been separately established.
+   - Both date from `8acc2e7` (2026-09-09), when the pre-#141 bridge echo was live.
+   - Unmeasured costs: the carry, which runs at `CLEAR_Z`, found no IK solution for r1c2 or r1c3, and each transit takes about 5 s.
+2. **Swept checking.** `check_arm_path` samples the planned geometry at ≤ 2° joint steps. Contact between samples is not seen.
+3. **Execution monitoring and replanning.**
+   - Realised deviation from the planned path is not covered: in the #153 re-trial, the pad deviated a median of 0.3–2.2 cm per segment, with a maximum of 9.5 cm.
+   - Nothing is re-checked during execution (ADR-0004 R4).
+   - Monitoring is Milestones A–B above.
+   - Automatic replanning of refused arcs, and clearance-optimal trajectories, are deferred as a separate item. They sit outside Milestones A–C, as stated under "Suggested issue sequence".
+4. **Margin assessment.** The whole-arm margin stays 0 cm (`WHOLE_ARM_MARGIN_M`).
+   - The evidence is one trial, in which the cube was not carried. After the grasp, the planned and realised clearances were measured against different cube positions.
+   - The 2.2 cm planned-versus-realised difference is therefore not a margin.
+   - Milestone A's envelope derivation applies.
+5. **Atomic pose delivery.** The bridge's 20 ms batching delivered 242 of 245 planned poses whole. The blended intermediate commands are not checked.
+
+Other documented follow-ups are unchanged (ADR-0004 and the #153 PR text):
+- a guard against running a stale image (the next sim launch must recreate the container so the #153 mounts apply);
+- the `"shells"` hand model, which waits on E1 and physical validation;
+- the tabletop check, which remains pad-point only (R7);
+- modernizing the historical demo and notebook.
+
+Grasp-related items stay under #55: contact surfaces, carried-object protection, unintended hand–target contact, jaw orientation and grasp reliability.
+
 ## Source references
 
 - Simulator roadmap: `reachy-1-2-sim/docs/ROADMAP.md` (R12-503; camera and research instrumentation).
