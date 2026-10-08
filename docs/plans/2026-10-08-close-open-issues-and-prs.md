@@ -79,6 +79,8 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 | #149 historical toolkit docs | Lift the hold: a004 has run, and `main` is already past M′. Merge it, then verify its 14 file hashes on `main`. | H-0a, H-5 | Merged and verified |
 | #146, #148 goalfix C2 | Keep unmerged. Mark #146 as draft. | H-0c | Both draft, labelled `prep-only` |
 
+**Status 2026-10-08:** H-0a was decided as Option A. #132, #133 and #149 are merged (`5fd0793`, `351deef`, `dfa971f`), and `main` is now at `dfa971f`. All 14 #149 files on `main` match the sha256 and blob IDs in `HISTORICAL.md`.
+
 **Owner action:** after the merges, approve the new host pin and the rev 7 §10 amendment (combine this with the #150 decision, H-0d). Then reserve the next B4 attempt.
 
 ### Phase 1: Observation delivery (top technical priority)
