@@ -415,6 +415,20 @@ def _crane_preflight(job, arm, phase, crane: Dict[str, Any]) -> Optional[Dict[st
     return None
 
 
+def _arm_state(arm) -> Dict[str, Any]:
+    """The arm as MEASURED when the lift returned (a read; nothing is sent):
+    joints, gripper, and whether any arm motor is still on.  What the panel
+    reports about a stopped lift comes from this, not from the plan."""
+    from reachy_ai.motion.kinematics import R_ARM_JOINTS
+    try:
+        joints = [round(float(getattr(arm, n).present_position), 2) for n in R_ARM_JOINTS]
+        gripper = round(float(arm.r_gripper.present_position), 1)
+        on = [not bool(getattr(arm, n).compliant) for n in R_ARM_JOINTS]
+        return {"joints_deg": joints, "gripper_deg": gripper, "motors_on": any(on)}
+    except Exception as exc:          # a report must not turn into a failure
+        return {"unreadable": str(exc)}
+
+
 def _crane_lift(robot, arm, phase, crane, *, should_abort=None, on_phase=None):
     """Fly the checked lift from PRESENT and back to PRESENT (no stow: the
     ability ends raised).  The outcome rides back in the result."""
@@ -424,8 +438,8 @@ def _crane_lift(robot, arm, phase, crane, *, should_abort=None, on_phase=None):
     out = CP.execute_crane_pick(robot, crane["planner"], crane["model"], crane["plan"],
                                 crane["observe"], on_event=_crane_phases(phase, kept),
                                 should_abort=should_abort, stow=False)
-    crane["outcome"] = json.loads(json.dumps(dict(out, events=kept), default=lambda v: (
-        v.tolist() if hasattr(v, "tolist") else str(v))))
+    crane["outcome"] = json.loads(json.dumps(dict(out, events=kept, arm_state=_arm_state(arm)),
+                                         default=lambda v: (v.tolist() if hasattr(v, "tolist") else str(v))))
     held = out.get("lifted_and_held") or {}
     return [f"lift: {out.get('halt') or out.get('refusal') or 'completed the sequence'}",
             f"lift: held {held.get('rise_end_mm', 0) / 10:.1f} cm up" if held.get("rise_end_mm")

@@ -184,3 +184,68 @@ def test_other_abilities_evidence_is_unchanged():
     import dataclasses
     p = dataclasses.replace(p, task_type="point_object")
     assert "contact_model" not in ex._with_contact_model(p, {"x": 1})
+
+
+#: The 2026-10-07 repeatability attempt 2 outcome, abridged from its evidence:
+#: picked up, held, put back, then the withdrawal refused at the model boundary.
+_ATTEMPT_2 = {
+    "lifted_and_held": {"ok": True, "rise_start_mm": 48.95, "rise_end_mm": 48.97,
+                        "in_hand_slip_mm": 0.061},
+    "replaced": {"supported_before_open": True, "offset_from_start_mm": 3.99},
+    "withdrawal": {"clean": False, "reason": "withdrawal refused: a bounded sideways "
+                   "shift does not clear the replaced object"},
+    "halt": "withdrawal refused: a bounded sideways shift does not clear the replaced object",
+    "final": "left beside the object (withdrawal refused or stopped)",
+    "arm_state": {"joints_deg": [-70.8, -16.81, 90.45, -77.06, -39.94, 40.24, 35.58],
+                  "gripper_deg": -64.96, "motors_on": True},
+}
+
+
+def test_a_refused_withdrawal_is_reported_as_what_it_was():
+    """#55: the stopped lift used to say only 'the route stopped before present:
+    my arm is at no posture I recognise'.  Pickup and placement succeeded; the
+    withdrawal was refused; the arm is held there with its motors on."""
+    from panel_executor import _lift_stopped_detail
+    text = _lift_stopped_detail("red_cube", _ATTEMPT_2, None, "present")
+    assert "I picked up red_cube" in text and "4.9 cm" in text
+    assert "put it back on the table, 4.0 mm" in text
+    assert "refused to withdraw my hand, before moving it: a bounded sideways shift" in text
+    assert "withdrawal refused: withdrawal refused" not in text
+    assert "gripper is at -65 degrees" in text and "motors are on" in text
+    assert "needs a reset" in text
+
+
+def test_a_stopped_lift_at_a_named_posture_does_not_ask_for_a_reset():
+    from panel_executor import _lift_stopped_detail
+    crane = dict(_ATTEMPT_2, arm_state=dict(_ATTEMPT_2["arm_state"], motors_on=False))
+    text = _lift_stopped_detail("red_cube", crane, "hover", "present")
+    assert "motors are off" in text and "at hover" in text
+    assert "reset" not in text
+
+
+def test_a_lift_that_never_picked_up_says_so():
+    from panel_executor import _lift_stopped_detail
+    text = _lift_stopped_detail("red_cube", {"halt": "pad force 0.4 N before the close"},
+                                None, "present")
+    assert text.startswith("I did not lift red_cube.")
+    assert "pad force" in text and "could not read its state" in text
+
+
+def test_the_worker_reads_the_arm_state_without_commanding_it():
+    import motion_worker as W
+
+    class _J:
+        def __init__(self, p, c):
+            self.present_position, self.compliant = p, c
+
+    class _A:
+        pass
+    a = _A()
+    from reachy_ai.motion.kinematics import R_ARM_JOINTS
+    for n in R_ARM_JOINTS:
+        setattr(a, n, _J(1.0, n != "r_elbow_pitch"))
+    a.r_gripper = _J(-64.96, False)
+    st = W._arm_state(a)
+    assert st["motors_on"] is True and st["gripper_deg"] == -65.0
+    assert len(st["joints_deg"]) == 7
+    assert not any(hasattr(getattr(a, n), "goal_position") for n in R_ARM_JOINTS)

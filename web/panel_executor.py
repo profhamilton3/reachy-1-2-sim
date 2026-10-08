@@ -864,11 +864,12 @@ class SimulatorExecutor:
             evidence["crane"] = crane
         evidence = self._with_contact_model(proposal, evidence)
         if posture != end:
-            return ExecutionResult(
-                status="failed",
-                detail=(f"the route stopped before {end}: my arm is at "
-                        f"{posture or 'no posture I recognise'}."),
-                evidence=evidence)
+            if proposal.task_type == "lift_object" and crane:
+                detail = _lift_stopped_detail(proposal.object_id, crane, posture, end)
+            else:
+                detail = (f"the route stopped before {end}: my arm is at "
+                          f"{posture or 'no posture I recognise'}.")
+            return ExecutionResult(status="failed", detail=detail, evidence=evidence)
         if drift:
             names = ", ".join(f"{k} by {v * 100:.0f} cm" for k, v in drift.items())
             return ExecutionResult(
@@ -1104,6 +1105,52 @@ def _judge_lift(proposal, crane: Dict[str, Any], end: str,
         detail=(f"I lifted {proposal.object_id}, held it, and put it back. "
                 + numbers + f" My arm is at {end}."),
         evidence=evidence)
+
+
+def _lift_stopped_detail(object_id: str, crane: Dict[str, Any],
+                         posture: Optional[str], end: str) -> str:
+    """A lift that did not get back to ``end``: what DID happen, phase by
+    phase, then where the arm actually is (measured) and what is needed.
+
+    Pickup, hold and placement are reported as achieved when they were; a
+    refused withdrawal is a refusal, not a failed pickup.  The arm's state
+    comes from the motion process's measured read (``arm_state``).  A reset is
+    called for only when the arm is at no named posture, because from there
+    the next request is refused rather than guessed.
+    """
+    held = crane.get("lifted_and_held") or {}
+    rep = crane.get("replaced") or {}
+    wd = crane.get("withdrawal") or {}
+    arm = crane.get("arm_state") or {}
+    said = []
+    if held.get("rise_start_mm"):
+        said.append(f"I picked up {object_id}: it rose {held['rise_start_mm'] / 10:.1f} cm and "
+                    f"was {held.get('rise_end_mm', 0) / 10:.1f} cm up after the hold "
+                    f"(slip in the hand {held.get('in_hand_slip_mm', 0):.2f} mm).")
+    else:
+        said.append(f"I did not lift {object_id}.")
+    if rep.get("supported_before_open"):
+        said.append(f"I put it back on the table, {rep.get('offset_from_start_mm', 0):.1f} mm "
+                    "from where I picked it up.")
+    why = wd.get("reason") if wd and not wd.get("clean") else None
+    why = why or crane.get("halt") or crane.get("refusal")
+    if wd and not wd.get("clean"):
+        reason = str(why or "the way out was not clear")
+        reason = reason.split("withdrawal refused: ", 1)[-1]
+        said.append(f"Then I refused to withdraw my hand, before moving it: {reason}.")
+    elif why:
+        said.append(f"Then I stopped: {why}.")
+    if "joints_deg" in arm:
+        g = arm.get("gripper_deg")
+        state = ("on, holding it where it is" if arm.get("motors_on") else "off")
+        said.append(f"My arm is not at {end}: it is {'at ' + posture if posture else 'stopped beside the object, at no posture I have a route from'}; "
+                    f"the gripper is at {g:.0f} degrees and the arm's motors are {state}.")
+    else:
+        said.append(f"My arm is not at {end}, and I could not read its state.")
+    if not posture:
+        said.append("I will not guess a way out from here: the simulator needs a reset "
+                    "before the next request.")
+    return " ".join(said)
 
 
 def _euclid(a, b) -> float:

@@ -213,7 +213,10 @@ _register(Ability(
 
 _register(Ability(
     name="lift_object",
-    summary="pick up an object, hold it about 5 cm up, and put it back",
+    summary=("pick up an object, hold it about 5 cm up, and put it back "
+             "(evaluated in simulation for the 60 mm red cube at r2c2 only; "
+             "anything else is planned and checked first, and refused if a "
+             "check fails)"),
     patterns=(
         rf"{_POLITE}(?:pick\s+up|lift(?:\s+up)?)\s+(?:the\s+)?(?P<object>.+?)"
         rf"\s+and\s+(?:put|set|place)\s+it\s+(?:back(?:\s+down)?|down(?:\s+again)?)"
