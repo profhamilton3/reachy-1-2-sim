@@ -77,12 +77,14 @@ carrying, which is not corrected, only predicted against the table; and every
 other path, including ``pick_place_live``.  Whether the actuator model should
 change instead remains open.
 
-Hold slip is NOT addressed here.  The 2026-10-06 hold crept ~0.75 mm/s with
-the hand still, no measurable pivot and ~380 N of pad normal force on a 1.2 N
-cube; an offline step of that recorded state reproduced the creep, and the
-same step with MuJoCo's no-slip pass enabled (diagnostic only) removed it.
-That points to the contact model's soft-friction creep, which control code
-here does not change.
+Hold slip is not addressed by this control code.  The 2026-10-06 hold crept
+~0.75 mm/s with the hand still and no measurable pivot, at about 250 N of pad
+normal force summed over both pads (about 125 N per side) on a 1.2 N cube, by
+the server's ``grip_force_n`` (the sum over every pad contact point; an earlier
+"~380 N" figure was wrong).  An offline step of that recorded state reproduced
+the creep, and MuJoCo's no-slip pass removed it.  That pass is now the
+simulator default (ADR-0005), so a hold made with it is a different physics
+configuration from the earlier ones.  Physical force realism is unvalidated.
 """
 
 from __future__ import annotations

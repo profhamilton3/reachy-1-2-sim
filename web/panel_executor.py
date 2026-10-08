@@ -770,7 +770,8 @@ class SimulatorExecutor:
                 return ExecutionResult(
                     status=out.get("status", "failed"),
                     detail=out.get("detail", "the motion failed"),
-                    evidence=out.get("evidence") or {})
+                    evidence=self._with_contact_model(
+                        proposal, out.get("evidence") or {}))
 
             return self._verify_posture(proposal, out.get("flown") or [],
                                         out.get("final_posture"), before,
@@ -784,6 +785,21 @@ class SimulatorExecutor:
                 detail=f"the motion failed: {exc.__class__.__name__}: {exc}")
         finally:
             self._link.release_control()
+
+    def _with_contact_model(self, proposal, evidence: Dict[str, Any]) -> Dict[str, Any]:
+        """A lift's evidence names the simulator's contact model (ADR-0005).
+
+        Slip and release behaviour depend on it, so every answer a lift gives,
+        completed or failed, says which one it was measured under.  ``None``
+        when the server did not advertise one -- never a guessed value.
+        """
+        if proposal.task_type != "lift_object":
+            return evidence
+        try:
+            contact_model = self._link.status.get("contact_model")
+        except Exception:   # a link without a status must not break a result
+            contact_model = None
+        return dict(evidence, contact_model=contact_model)
 
     def _observation_feed(self, object_id: str):
         """New simulator observations of ``object_id`` and the right gripper,
@@ -846,6 +862,7 @@ class SimulatorExecutor:
             # The lift's measurements travel with every answer, including a
             # failed one: where it stopped and why is the useful part.
             evidence["crane"] = crane
+        evidence = self._with_contact_model(proposal, evidence)
         if posture != end:
             return ExecutionResult(
                 status="failed",

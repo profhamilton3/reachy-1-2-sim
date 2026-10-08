@@ -136,3 +136,51 @@ def test_the_corrected_path_is_shown_and_kept():
     assert any("-0.5 / 5.7 mm (NOT clear)" in p for p in shown)
     assert any("slip in the hand 1.69 mm" in p for p in shown)
     assert [e["kind"] for e in kept] == ["CORRECTION", "WITHDRAWAL_JUDGED", "HELD"]
+
+
+# -- the lift's evidence names the simulator's contact model (ADR-0005) ---------
+
+class _StatusLink:
+    def __init__(self, contact_model):
+        self.status = {"contact_model": contact_model}
+
+    def snapshot(self):
+        return None
+
+
+def _lift_proposal():
+    import dataclasses
+    return dataclasses.replace(_proposal(), end_posture="present")
+
+
+def _executor(contact_model):
+    from panel_executor import SimulatorExecutor
+    scene = type("Scene", (), {"objects": {}})()
+    return SimulatorExecutor(_StatusLink(contact_model), lambda: scene, "scene.yaml")
+
+
+def test_lift_evidence_carries_the_contact_model_completed_and_failed():
+    cm = {"noslip_iterations": 10, "source": "model"}
+    ex = _executor(cm)
+    crane = {"criteria": {k: True for k, _ in LIFT_CRITERIA},
+             "lifted_and_held": {}, "replaced": {}}
+    done = ex._verify_posture(_lift_proposal(), ["a"], "present", {}, crane=crane)
+    assert done.status == "completed" and done.evidence["contact_model"] == cm
+    failed = ex._verify_posture(_lift_proposal(), ["a"], "home", {}, crane={"halt": "x"})
+    assert failed.status == "failed" and failed.evidence["contact_model"] == cm
+    early = ex._with_contact_model(_proposal(), {"halted": True})
+    assert early == {"halted": True, "contact_model": cm}
+
+
+def test_lift_evidence_contact_model_is_none_when_not_advertised():
+    ex = _executor(None)
+    res = ex._verify_posture(_lift_proposal(), [], "present", {}, crane={"halt": "x"})
+    assert "contact_model" in res.evidence and res.evidence["contact_model"] is None
+
+
+def test_other_abilities_evidence_is_unchanged():
+    ex = _executor({"noslip_iterations": 10})
+    p = _proposal()
+    import dataclasses
+    p = dataclasses.replace(p, task_type="point_object")
+    assert "contact_model" not in ex._with_contact_model(p, {"x": 1})
