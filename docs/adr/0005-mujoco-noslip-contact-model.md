@@ -54,11 +54,26 @@ physically realistic is **unvalidated**.
 In an offline open-loop comparison using the same support-stop rule, no-slip
 *increased* cube displacement on opening (10.7 mm versus 5.3 mm; the live
 trial with no-slip off measured 7.6 mm), and the open-loop raise touched the
-cube (about 1.08 N). The magnitude under the live controller is unverified.
+cube (about 1.08 N). The magnitude under the live controller was unverified when this was decided
+(one live run since: below).
 The finger closing edge-on and the reported ~13 mm overlap are findings that
 need careful interpretation of geometry and contact state; they are **not**
 proof of physical pad penetration. A withdrawal refused by the existing 6 mm
 correction cap is a safe outcome and remains unfinished work.
+
+**One live panel trial with no-slip on (2026-10-07, `lift_object`, #155
+code):**
+- **Hold:** in-hand slip 0.03 mm over the 2 s hold (1.69 mm with no-slip off).
+- **Rise:** 48.8 mm, unchanged at the end of the hold.
+- **Release:** opening moved the cube 9.1 mm (8.5 mm sideways and a 3.1 mm
+  drop as the tilted cube settled flat), against 7.6 mm in the no-slip-off
+  trial. The offline replay shows the opening finger dragging the cube while
+  it still clamps.
+- **Withdrawal:** judged clear without a correction.
+- **Return:** to PRESENT.
+
+That is one run: it measures this configuration once and does not establish
+a release or withdrawal rate.
 
 ## Decision
 
