@@ -27,6 +27,7 @@ import mujoco
 import numpy as np
 
 from actuator import ActuatorController
+from contact_model import apply_contact_model
 from gripper import GripperModel
 from joint_map import JOINT_TABLE, NUM_JOINTS
 from objects import ObjectTracker, build_scene_model_xml
@@ -42,7 +43,26 @@ _FIXTURE_CONTYPE = 8
 def load_world(
     model_path: str,
     scene_path: Optional[str] = None,
+    *,
+    noslip_iterations: Optional[int] = None,
 ) -> Tuple[mujoco.MjModel, List[str], List[Dict[str, Any]], Optional[str]]:
+    """Load robot model + optional scene YAML into a compiled MjModel.
+
+    Returns (model, tracked_ids, interactive_specs, compiled_xml); see
+    ``_load_world`` for details.  ``noslip_iterations`` optionally overrides
+    the model file's no-slip setting (ADR-0005).
+    """
+    model, tracked, specs, xml, _ = _load_world(
+        model_path, scene_path, noslip_iterations=noslip_iterations)
+    return model, tracked, specs, xml
+
+
+def _load_world(
+    model_path: str,
+    scene_path: Optional[str] = None,
+    *,
+    noslip_iterations: Optional[int] = None,
+) -> Tuple[mujoco.MjModel, List[str], List[Dict[str, Any]], Optional[str], Dict[str, Any]]:
     """Load robot model + optional scene YAML into a compiled MjModel.
 
     Returns:
@@ -50,6 +70,10 @@ def load_world(
         tracked_ids     — list of object IDs that have dynamic free-joints
         interactive_specs — list of interactive control spec dicts
         compiled_xml    — the MJCF string used for hashing (None if model-only)
+        contact_model   — the effective contact-model dict (contact_model.py)
+
+    ``noslip_iterations`` optionally overrides the model file's no-slip
+    setting (ADR-0005).
     """
     import yaml
     from scene_compiler import (
@@ -68,15 +92,17 @@ def load_world(
             scene_doc = yaml.safe_load(f)
         compiled_xml = build_scene_model_xml(scene_doc, model_path)
         model = mujoco.MjModel.from_xml_string(compiled_xml)
+        cm = apply_contact_model(model, noslip_iterations)
         tracked = tracked_object_ids(scene_doc)
         specs = _interactive_specs(scene_doc)
         log.info("Scene: %d tracked objects, %d interactive controls",
                  len(tracked), len(specs))
-        return model, tracked, specs, compiled_xml
+        return model, tracked, specs, compiled_xml, cm
     else:
         log.info("Loading model %s (no scene)", model_path)
         model = mujoco.MjModel.from_xml_path(model_path)
-        return model, [], [], None
+        cm = apply_contact_model(model, noslip_iterations)
+        return model, [], [], None, cm
 
 
 def contact_records(model: mujoco.MjModel, data: mujoco.MjData) -> List[ContactRecord]:
@@ -145,6 +171,9 @@ class SimulationCore:
         self.data = mujoco.MjData(model)
         self.step = 0
         self.scene_revision = scene_revision
+        # Effective contact model as compiled/overridden (from_paths replaces
+        # this with the load-time description, including the override source).
+        self.contact_model: Dict[str, Any] = apply_contact_model(model)
 
         self._reset_physics()
         self.controller = ActuatorController(model)
@@ -164,10 +193,14 @@ class SimulationCore:
         cls,
         model_path: str,
         scene_path: Optional[str] = None,
+        noslip_iterations: Optional[int] = None,
     ) -> "SimulationCore":
         """Load model and optional scene from file paths."""
-        model, tracked_ids, specs, _ = load_world(model_path, scene_path)
-        return cls(model, tracked_ids=tracked_ids, interactive_specs=specs)
+        model, tracked_ids, specs, _, cm = _load_world(
+            model_path, scene_path, noslip_iterations=noslip_iterations)
+        core = cls(model, tracked_ids=tracked_ids, interactive_specs=specs)
+        core.contact_model = cm          # effective setting (ADR-0005)
+        return core
 
     # ------------------------------------------------------------------
     # Reset
