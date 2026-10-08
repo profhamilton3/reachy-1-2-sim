@@ -112,8 +112,15 @@ initial poses). No container recreation is needed.
   wedges it, and the thumb never touches it. With no-slip off it grasps only
   at the tuned friction 2.5 (at 1.0 the cube flips); with no-slip on it grasps
   at the geom default 1.0 and passes every exit-gate assertion unchanged.
-  The fixture's friction was tuned to the soft model. How that test is
-  configured is an owner decision recorded on the PR.
+  The fixture's friction was tuned to the soft model. Resolved (owner-approved):
+  the gate runs under both contact models with unchanged assertions, namely
+  the original fixture (mu = 2.5) with no-slip off, and the default with
+  mu = 1.0. mu = 1.0 is MuJoCo's default sliding friction, carried by the
+  pads. Because MuJoCo combines two geoms' frictions by taking the larger, it
+  gives the same effective pad-cube friction as the live scene's red_cube
+  (0.8). That makes it a representative test configuration, not a physical
+  measurement. A separate test records that the original fixture does not
+  grasp with no-slip on.
 - Release behaviour under no-slip is the first acceptance item of the next
   delivery, not a reason to switch the pass off.
 - Tests: `tests/unit/test_contact_model_noslip.py` (including a recorded-hold
