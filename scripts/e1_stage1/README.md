@@ -213,17 +213,21 @@ does `reachy.turn_on("r_arm")` still advance `cmd_seq`, and can that make
    `require_compliance(min_cmd_seq=baseline)` does **not** falsely time out
    for *this* reason: the already-stiff case still produces a fresh
    `cmd_seq` past the baseline, same as a genuine compliance transition.
-4. **Residual false STOP that does exist** (separate from the already-stiff
-   path, not "fixed" by this branch, per the assignment's scope): a bridge
-   container restart resets `MujocoRemoteBackend._cmd_seq` to 0 while the
-   native server's own counter and any baseline read from an existing run
-   directory stay at their old, higher value. The operator symptom is
-   `require_compliance`'s reason string, `cmd_seq=k has not advanced past
-   the pre-call baseline (min_cmd_seq=N)` with `k < N`, persisting past
-   `timeout_s` on the very first attempt after the restart. Recovery:
-   restart the native server too, so both counters start from 0 together --
-   never lower the baseline by hand to work around it, since that reopens
-   the gap `min_cmd_seq` exists to close.
+4. **Bridge-restart false STOP (a004, 2026-10-02) -- repaired by the
+   `cmd_baseline` path.** A bridge container restart resets
+   `MujocoRemoteBackend._cmd_seq` to 0 while the native server's own counter
+   keeps its old, higher value, so the next `turn_on` moved the native
+   `cmd_seq` *down* (2 -> 1) and `require_compliance(min_cmd_seq=2)` refused
+   it (`cmd_seq=1 has not advanced past the pre-call baseline`). The
+   generated cells now capture `e1_identity.capture_cmd_baseline` (baseline
+   `cmd_seq`/`seq` plus byte offsets into `commands.jsonl`/`states.jsonl`)
+   immediately before `turn_on` and call
+   `require_compliance(..., cmd_baseline=...)`, which accepts either a
+   same-sequence advance or native evidence of a new bridge sequence
+   (appended `joint_command` rows exactly `1..m`, and an applied `cmd_seq`
+   change after the baseline) -- see that function's docstring for the exact
+   contract and its fail-closed limit (old final value == new final value
+   with no sampled change). Never lower the baseline by hand.
 
 (Evidence trail: `reachy_sdk` 0.7.0 source read read-only from the copy
 noted in the assignment's verified facts; `mujoco_remote_backend.py` and

@@ -26,6 +26,9 @@ _HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(_HERE, "../../scripts"))
 sys.path.insert(0, os.path.join(_HERE, "../../src"))
 
+sys.path.insert(0, os.path.join(_HERE, "../fixtures/e1_identity"))
+import a004_support  # noqa: E402
+import e1_identity as _real_e1_identity  # noqa: E402
 from e1_stage1 import gating, make_cycle_notebook, plan, start_variant  # noqa: E402
 from reachy_ai.motion import rig_routes  # noqa: E402
 
@@ -507,15 +510,16 @@ class TestArmonCell:
     def test_armon_cell_requires_compliance_gate_before_turn_on(self):
         src = make_cycle_notebook.armon_cell_source("stage0-B4-sess1-armon")
         assert "require_compliance(" in src
-        assert "min_cmd_seq=" in src
+        assert "cmd_baseline=" in src
+        assert "min_cmd_seq=" not in src
         tree = ast.parse(src)
-        # turn_on must be nested under the baseline-cmd_seq validity check,
-        # same shape as every leg's motion cell.
+        # turn_on must be nested under the baseline validity check, same
+        # shape as every leg's motion cell.
         found_turn_on_if = False
         for node in ast.walk(tree):
             if isinstance(node, ast.If):
                 src_if = ast.unparse(node.test)
-                if "baseline_cmd_seq" in src_if or "isinstance" in src_if:
+                if "cmd_baseline" in src_if or "isinstance" in src_if:
                     if "turn_on" in ast.unparse(node):
                         found_turn_on_if = True
         assert found_turn_on_if
@@ -529,13 +533,12 @@ class TestArmonCell:
         (tmp_path / f"go_{leg_name}").touch()
         (tmp_path / f"recorder_{leg_name}.log").write_text("fly the route now")
 
-        def fake_read_last_state(path):
-            return baseline
+        a004_support.write_baseline_streams(tmp_path, baseline)
 
         def fake_require_compliance(run_dir, joints, *, compliant=False,
-                                     timeout_s=None, min_cmd_seq=None):
+                                     timeout_s=None, cmd_baseline=None):
             calls["require_compliance"].append(
-                {"run_dir": run_dir, "min_cmd_seq": min_cmd_seq})
+                {"run_dir": run_dir, "cmd_baseline": cmd_baseline})
             return require_compliance_result
 
         def fake_turn_on(*a, **kw):
@@ -551,7 +554,7 @@ class TestArmonCell:
             "reachy": types.SimpleNamespace(
                 turn_on=fake_turn_on, r_arm=types.SimpleNamespace()),
             "e1_identity": types.SimpleNamespace(
-                _read_last_state=fake_read_last_state,
+                capture_cmd_baseline=_real_e1_identity.capture_cmd_baseline,
                 require_compliance=fake_require_compliance),
             "R": types.SimpleNamespace(R_JOINTS=("r_shoulder_pitch",)),
             "ident": types.SimpleNamespace(run_dir=str(tmp_path)),
@@ -613,6 +616,46 @@ class TestArmonCell:
         assert ns["LEG"]["outcome"] == "returned"
         assert not (tmp_path / "stop").exists()
         assert ns["PREV_OK"] is True
+
+    def test_a004_bridge_restart_is_accepted_by_the_real_gate(self, tmp_path):
+        """The turn_on-only cell against the real e1_identity gate and the
+        real a004 rows (new bridge seq 1 after native cmd_seq 2)."""
+        leg_name = "stage0-B4-sess1-armon"
+        run_dir = tmp_path / "run"
+        ctrl = tmp_path / "ctrl"; ctrl.mkdir()
+        a004_support.write_pre_restart_run_dir(run_dir)
+        (ctrl / f"go_{leg_name}").touch()
+        (ctrl / f"recorder_{leg_name}.log").write_text("fly the route now")
+        calls = {"turn_on": 0}
+
+        def turn_on(*a, **kw):
+            calls["turn_on"] += 1
+            d = a004_support.load()
+            a004_support.append_commands(run_dir, [d["commands"][3]])
+            a004_support.append_states(run_dir, [a004_support.fresh(d["post_state"])])
+
+        ns = {
+            "reachy": types.SimpleNamespace(turn_on=turn_on, r_arm=types.SimpleNamespace()),
+            "e1_identity": _real_e1_identity,
+            "R": rig_routes,
+            "ident": types.SimpleNamespace(run_dir=str(run_dir)),
+            "CTRL": ctrl,
+            "wait_for": lambda pred, timeout_s, period=0.25: "ready" if pred() else "timeout",
+            "_pose": lambda: {"r_shoulder_pitch": 0.0},
+            "PREV_OK": True, "CYCLE": "test_stage0", "LEAD_IN_S": 0.0,
+            "COMPLIANCE_TIMEOUT_S": 0.3,
+            "time": types.SimpleNamespace(
+                monotonic=time.monotonic, monotonic_ns=time.monotonic_ns,
+                time_ns=time.time_ns, sleep=lambda s: None),
+            "json": json, "pathlib": pathlib, "traceback": traceback,
+        }
+        src = make_cycle_notebook.armon_cell_source(leg_name)
+        exec(compile(src, "<armon a004>", "exec"), ns)
+        assert calls["turn_on"] == 1
+        reasons = ns["LEG"].get("compliance_check", {}).get("reasons")
+        assert ns["LEG"]["outcome"] == "returned", reasons
+        assert ns["LEG"]["compliance_check"]["cmd_evidence"] == "bridge_restart"
+        assert not (ctrl / "stop").exists()
 
     def test_stage0_stop_blocks_a_later_cycles_go_wait(self, tmp_path):
         """End-to-end-ish: a failed armon compliance check writes

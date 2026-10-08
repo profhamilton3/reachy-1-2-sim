@@ -999,3 +999,390 @@ class TestReadLastStateTailReading:
         p.write_text(json.dumps({"seq": 1}) + "\n")
         result = ei._read_last_state(p, tail_bytes=-1)
         assert result == {"seq": 1}
+
+
+# ── Bridge-restart-safe freshness (a004, 2026-10-02): CmdBaseline ───────────
+# Real files, the real gate. Only the clock is injected.
+
+_NOW = 10_000_000_000
+
+
+def _bs_state(seq, cmd_seq, *, wall=_NOW, compliant=None, drop_cmd_seq=False,
+              drop_compliant=None):
+    st = {"type": "state", "seq": seq, "sim_step": seq * 10, "wall_time_ns": wall,
+          "joints": []}
+    if not drop_cmd_seq:
+        st["cmd_seq"] = cmd_seq
+    for n in R.R_JOINTS:
+        j = {"name": n, "effort": 0.0,
+             "compliant": (compliant or {}).get(n, False)}
+        if n == drop_compliant:
+            del j["compliant"]
+        st["joints"].append(j)
+    return st
+
+
+def _bs_cmd(seq):
+    return {"type": "joint_command", "seq": seq, "compliant": [False] * 8}
+
+
+_BS_RESET = {"type": "reset", "seed": None}
+
+
+def _bs_write(path, rows, mode="w", raw_tail=""):
+    with open(path, mode) as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+        f.write(raw_tail)
+
+
+def _bs_scenario(tmp_path, *, pre_commands, pre_states, new_commands,
+                 new_states, commands_tail="", states_tail=""):
+    """Write the pre-baseline streams, capture the REAL baseline, then append
+    what the bridge / native server wrote after it."""
+    _bs_write(tmp_path / "commands.jsonl", pre_commands)
+    _bs_write(tmp_path / "states.jsonl", pre_states)
+    baseline, why = ei.capture_cmd_baseline(tmp_path)
+    assert baseline is not None, why
+    _bs_write(tmp_path / "commands.jsonl", new_commands, "a", commands_tail)
+    _bs_write(tmp_path / "states.jsonl", new_states, "a", states_tail)
+    return baseline
+
+
+def _bs_gate(tmp_path, baseline=None, *, joints=R.R_JOINTS, **kw):
+    now = {"ns": _NOW}
+
+    def sleep(s):
+        now["ns"] += int(s * 1e9)
+
+    return ei.require_compliance(
+        str(tmp_path), joints, compliant=False, timeout_s=0.3,
+        max_state_age_s=0.5, now_ns=lambda: now["ns"], sleep=sleep,
+        cmd_baseline=baseline, **kw)
+
+
+def _bs_restart(tmp_path, *, new_states, new_commands=None, old=2, **kw):
+    """The a004 shape: old bridge commands 1,2 then a reset; baseline state
+    cmd_seq=`old`; then the new bridge's rows."""
+    return _bs_scenario(
+        tmp_path,
+        pre_commands=[_bs_cmd(1), _bs_cmd(2), _BS_RESET],
+        pre_states=[_bs_state(9, old - 1 if old > 1 else old), _bs_state(10, old)],
+        new_commands=[_bs_cmd(1)] if new_commands is None else new_commands,
+        new_states=new_states, **kw)
+
+
+class TestCmdBaselineCapture:
+
+    def test_offsets_are_just_past_the_last_complete_lines(self, tmp_path):
+        _bs_write(tmp_path / "commands.jsonl", [_bs_cmd(1)], raw_tail='{"type":"jo')
+        _bs_write(tmp_path / "states.jsonl", [_bs_state(1, 0), _bs_state(2, 1)],
+                  raw_tail='{"type":"state","se')
+        b, why = ei.capture_cmd_baseline(tmp_path)
+        assert why == ""
+        assert (b.cmd_seq, b.state_seq) == (1, 2)
+        cmds = (tmp_path / "commands.jsonl").read_bytes()
+        states = (tmp_path / "states.jsonl").read_bytes()
+        assert b.commands_offset == cmds.rindex(b"\n") + 1
+        assert b.states_offset == states.rindex(b"\n") + 1
+        assert b.as_dict() == {"cmd_seq": 1, "state_seq": 2,
+                               "states_offset": b.states_offset,
+                               "commands_offset": b.commands_offset}
+
+    @pytest.mark.parametrize("name,state", [
+        ("missing_key", {"seq": 1}),
+        ("explicit_null", {"seq": 1, "cmd_seq": None}),
+        ("bool", {"seq": 1, "cmd_seq": True}),
+        ("string", {"seq": 1, "cmd_seq": "3"}),
+        ("float", {"seq": 1, "cmd_seq": 3.0}),
+        ("negative", {"seq": 1, "cmd_seq": -1}),
+        ("nan", {"seq": 1, "cmd_seq": float("nan")}),
+        ("inf", {"seq": 1, "cmd_seq": float("inf")}),
+        ("seq_missing", {"cmd_seq": 3}),
+        ("seq_bool", {"seq": True, "cmd_seq": 3}),
+        ("seq_float", {"seq": 1.0, "cmd_seq": 3}),
+    ])
+    def test_invalid_baseline_state_is_refused_with_a_reason(
+            self, tmp_path, name, state):
+        _bs_write(tmp_path / "commands.jsonl", [])
+        _bs_write(tmp_path / "states.jsonl", [state])
+        b, why = ei.capture_cmd_baseline(tmp_path)
+        assert b is None and why
+
+    def test_missing_commands_stream_is_refused(self, tmp_path):
+        _bs_write(tmp_path / "states.jsonl", [_bs_state(1, 1)])
+        b, why = ei.capture_cmd_baseline(tmp_path)
+        assert b is None and "commands.jsonl unreadable" in why
+
+    def test_missing_states_stream_is_refused(self, tmp_path):
+        _bs_write(tmp_path / "commands.jsonl", [])
+        b, why = ei.capture_cmd_baseline(tmp_path)
+        assert b is None and "states.jsonl unreadable" in why
+
+    def test_no_complete_state_line_and_unparseable_line_are_refused(self, tmp_path):
+        _bs_write(tmp_path / "commands.jsonl", [])
+        (tmp_path / "states.jsonl").write_text('{"seq":1,"cmd_seq":1')  # torn only
+        b, why = ei.capture_cmd_baseline(tmp_path)
+        assert b is None and "no complete state line" in why
+        (tmp_path / "states.jsonl").write_text("not json\n")
+        b, why = ei.capture_cmd_baseline(tmp_path)
+        assert b is None and "not JSON" in why
+
+    def test_bounded_read_on_large_files(self, tmp_path, monkeypatch):
+        """A10: capture reads a bounded tail of each stream, never the file."""
+        filler = "\n".join(json.dumps({"seq": i, "cmd_seq": 1}) for i in range(20_000))
+        (tmp_path / "states.jsonl").write_text(
+            filler + "\n" + json.dumps({"seq": 999999, "cmd_seq": 4}) + "\n")
+        (tmp_path / "commands.jsonl").write_text(
+            "\n".join(json.dumps({"type": "joint_command", "seq": i}) for i in range(20_000)) + "\n")
+        assert (tmp_path / "states.jsonl").stat().st_size > 200_000
+
+        class _Counting:
+            def __init__(self, f):
+                self._f, self.total_read = f, 0
+
+            def seek(self, *a, **kw):
+                return self._f.seek(*a, **kw)
+
+            def read(self, n=-1):
+                data = self._f.read(n)
+                self.total_read += len(data)
+                return data
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                self._f.close()
+                return False
+
+        import builtins
+        real_open = builtins.open
+        opened = []
+
+        def spy_open(path, mode="r", *a, **kw):
+            f = real_open(path, mode, *a, **kw)
+            if mode == "rb":
+                opened.append(_Counting(f))
+                return opened[-1]
+            return f
+
+        monkeypatch.setattr(ei, "open", spy_open, raising=False)
+        tail = 1024
+        b, why = ei.capture_cmd_baseline(tmp_path, tail_bytes=tail)
+        assert b is not None, why
+        assert (b.cmd_seq, b.state_seq) == (4, 999999)
+        assert len(opened) == 2
+        assert all(o.total_read <= 2 * tail for o in opened)
+
+
+class TestRequireComplianceCmdBaseline:
+
+    def test_a1_a004_shape_is_accepted_via_bridge_restart(self, tmp_path):
+        b = _bs_restart(tmp_path, new_states=[_bs_state(11, 1)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is True, r.reasons
+        assert r.cmd_evidence == "bridge_restart"
+        assert r.as_dict()["cmd_evidence"] == "bridge_restart"
+
+    def test_a2a_no_appended_rows_rejects(self, tmp_path):
+        b = _bs_restart(tmp_path, new_commands=[], new_states=[_bs_state(11, 2)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False and r.cmd_evidence is None
+        assert any(x.startswith("bridge-restart path: (a) no joint_command")
+                   for x in r.reasons), r.reasons
+        assert any("has not advanced past the pre-call baseline" in x for x in r.reasons)
+
+    def test_a2b_received_but_not_applied_rejects_on_part_b(self, tmp_path):
+        b = _bs_restart(tmp_path, new_states=[_bs_state(11, 2), _bs_state(12, 2)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: (b) no appended state shows an applied change")
+                   for x in r.reasons), r.reasons
+
+    def test_a2b_two_rows_received_none_applied_rejects_on_part_b_alone(self, tmp_path):
+        """Rows 1,2 received, native cmd_seq never moves off 2: the value 2 is
+        inside [1, m] so only the applied-change requirement (b) can reject."""
+        b = _bs_restart(tmp_path, new_commands=[_bs_cmd(1), _bs_cmd(2)],
+                        new_states=[_bs_state(11, 2), _bs_state(12, 2)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: (b) no appended state shows an applied change")
+                   for x in r.reasons), r.reasons
+
+    def test_a3_stale_state_on_a_valid_restart_path_rejects(self, tmp_path):
+        b = _bs_restart(tmp_path, new_states=[_bs_state(11, 1, wall=_NOW - 10_000_000_000)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any("state stream is stale" in x for x in r.reasons), r.reasons
+
+    @pytest.mark.parametrize("label,kw", [
+        ("missing", dict(drop_cmd_seq=True)),
+    ])
+    def test_a3_x_cmd_seq_missing_rejects(self, tmp_path, label, kw):
+        b = _bs_restart(tmp_path, new_states=[_bs_state(11, 1, **kw)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any("no int cmd_seq" in x for x in r.reasons), r.reasons
+
+    @pytest.mark.parametrize("bad", [True, float("nan"), float("inf"), 1.0])
+    def test_a3_x_cmd_seq_not_a_plain_int_rejects(self, tmp_path, bad):
+        b = _bs_restart(tmp_path, new_states=[_bs_state(11, bad)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any("no int cmd_seq" in x for x in r.reasons), r.reasons
+
+    def test_a3_x_seq_not_past_baseline_state_seq_rejects(self, tmp_path):
+        b = _bs_restart(tmp_path, new_states=[_bs_state(10, 1)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: (b) last state seq 10 is not past")
+                   for x in r.reasons), r.reasons
+
+    def test_a4_a_requested_joint_still_compliant_rejects(self, tmp_path):
+        b = _bs_restart(tmp_path, new_states=[
+            _bs_state(11, 1, compliant={"r_wrist_roll": True})])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("r_wrist_roll: compliant=True (want False)")
+                   for x in r.reasons), r.reasons
+
+    def test_a4_a_requested_joint_without_compliant_rejects(self, tmp_path):
+        b = _bs_restart(tmp_path, new_states=[
+            _bs_state(11, 1, drop_compliant="r_gripper")])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("r_gripper: compliant field is missing or not a bool")
+                   for x in r.reasons), r.reasons
+
+    def test_a5_same_bridge_advance_is_accepted_and_matches_legacy(self, tmp_path):
+        b = _bs_scenario(
+            tmp_path, pre_commands=[_bs_cmd(i) for i in range(1, 6)],
+            pre_states=[_bs_state(9, 4), _bs_state(10, 5)],
+            new_commands=[_bs_cmd(6)], new_states=[_bs_state(11, 6)])
+        assert b.cmd_seq == 5
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is True and r.cmd_evidence == "advanced", r.reasons
+        legacy = _bs_gate(tmp_path, None, min_cmd_seq=5)
+        assert legacy.ok is True and legacy.cmd_evidence is None
+        assert legacy.ok == r.ok
+
+    def test_a5_same_bridge_no_advance_rejects_like_legacy(self, tmp_path):
+        b = _bs_scenario(
+            tmp_path, pre_commands=[_bs_cmd(i) for i in range(1, 6)],
+            pre_states=[_bs_state(10, 5)],
+            new_commands=[], new_states=[_bs_state(11, 5)])
+        assert _bs_gate(tmp_path, b).ok is False
+        assert _bs_gate(tmp_path, None, min_cmd_seq=5).ok is False
+
+    @pytest.mark.parametrize("label,rows,states,old", [
+        # state cmd_seq values are chosen so parts (b)/(c) alone would pass:
+        # only the exact-1..m rule (a) can reject these.
+        ("rows_1_2_1_second_restart", [1, 2, 1], [1, 2, 2], 3),
+        ("rows_start_at_2", [2, 3], [1, 2], 5),
+        ("rows_with_a_gap", [1, 3], [1, 2], 5),
+    ])
+    def test_a6_unrelated_or_repeated_restart_rows_reject(
+            self, tmp_path, label, rows, states, old):
+        b = _bs_scenario(
+            tmp_path, pre_commands=[_bs_cmd(i) for i in range(1, old + 1)],
+            pre_states=[_bs_state(10, old)],
+            new_commands=[_bs_cmd(s) for s in rows],
+            new_states=[_bs_state(11 + i, c) for i, c in enumerate(states)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: (a) appended joint_command seqs")
+                   for x in r.reasons), r.reasons
+
+    def test_a6_iii_new_sequence_rows_only_before_the_offset_reject(self, tmp_path):
+        b = _bs_scenario(
+            tmp_path, pre_commands=[_bs_cmd(1), _bs_cmd(2), _BS_RESET, _bs_cmd(1)],
+            pre_states=[_bs_state(10, 2)],
+            new_commands=[], new_states=[_bs_state(11, 1)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: (a) no joint_command")
+                   for x in r.reasons), r.reasons
+
+    def test_a6_iv_changed_cmd_seq_only_before_the_baseline_rejects(self, tmp_path):
+        b = _bs_scenario(
+            tmp_path, pre_commands=[_bs_cmd(1), _bs_cmd(2), _BS_RESET, _bs_cmd(1)],
+            pre_states=[_bs_state(8, 1), _bs_state(9, 1), _bs_state(10, 2)],
+            new_commands=[_bs_cmd(1)], new_states=[_bs_state(11, 2)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: (b) no appended state shows an applied change")
+                   for x in r.reasons), r.reasons
+
+    def test_a6_v_reset_row_after_the_baseline_rejects(self, tmp_path):
+        b = _bs_restart(tmp_path, new_commands=[_BS_RESET, _bs_cmd(1)],
+                        new_states=[_bs_state(11, 1)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: (a) a reset row")
+                   for x in r.reasons), r.reasons
+
+    def test_a6_vi_after_f_value_outside_range_rejects(self, tmp_path):
+        b = _bs_scenario(
+            tmp_path, pre_commands=[_bs_cmd(i) for i in range(1, 6)],
+            pre_states=[_bs_state(10, 5)],
+            new_commands=[_bs_cmd(1), _bs_cmd(2)],
+            new_states=[_bs_state(11, 1), _bs_state(12, 4)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any("outside [1, 2]" in x for x in r.reasons), r.reasons
+
+    def test_a6_vi_after_f_decreasing_value_rejects(self, tmp_path):
+        b = _bs_scenario(
+            tmp_path, pre_commands=[_bs_cmd(i) for i in range(1, 6)],
+            pre_states=[_bs_state(10, 5)],
+            new_commands=[_bs_cmd(1), _bs_cmd(2), _bs_cmd(3)],
+            new_states=[_bs_state(11, 1), _bs_state(12, 3), _bs_state(13, 2)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any("cmd_seq decreased (3 -> 2)" in x for x in r.reasons), r.reasons
+
+    def test_a7_old_equals_new_final_without_a_sampled_change_rejects(self, tmp_path):
+        b = _bs_scenario(
+            tmp_path, pre_commands=[_bs_cmd(1), _BS_RESET],
+            pre_states=[_bs_state(10, 1)],
+            new_commands=[_bs_cmd(1)],
+            new_states=[_bs_state(11, 1), _bs_state(12, 1)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: (b) no appended state shows an applied change")
+                   for x in r.reasons), r.reasons
+
+    def test_a7b_old_2_rows_1_2_states_2_1_2_is_accepted(self, tmp_path):
+        b = _bs_restart(tmp_path, new_commands=[_bs_cmd(1), _bs_cmd(2)],
+                        new_states=[_bs_state(11, 2), _bs_state(12, 1), _bs_state(13, 2)])
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is True, r.reasons
+        assert r.cmd_evidence == "bridge_restart"
+
+    def test_a8_both_min_cmd_seq_and_cmd_baseline_raise(self, tmp_path):
+        b = _bs_restart(tmp_path, new_states=[_bs_state(11, 1)])
+        with pytest.raises(ValueError, match="not both"):
+            _bs_gate(tmp_path, b, min_cmd_seq=2)
+
+    def test_a9_unterminated_trailing_lines_are_ignored(self, tmp_path):
+        b = _bs_restart(tmp_path, new_states=[_bs_state(11, 1)],
+                        commands_tail='{"type":"joint_command","seq":2,"comp',
+                        states_tail='{"type":"state","seq":12,"cmd_seq":99')
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is True, r.reasons
+        assert r.cmd_evidence == "bridge_restart"
+
+    def test_a9_complete_unparseable_appended_lines_reject(self, tmp_path):
+        b = _bs_restart(tmp_path, new_states=[_bs_state(11, 1)],
+                        commands_tail="garbage\n")
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: commands.jsonl: a complete line")
+                   for x in r.reasons), r.reasons
+        b = _bs_restart(tmp_path, new_states=[_bs_state(11, 1)],
+                        states_tail="garbage\n")
+        r = _bs_gate(tmp_path, b)
+        assert r.ok is False
+        assert any(x.startswith("bridge-restart path: states.jsonl: a complete line")
+                   for x in r.reasons), r.reasons
