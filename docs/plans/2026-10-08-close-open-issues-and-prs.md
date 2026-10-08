@@ -42,7 +42,7 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 
 | Gate | Question | Recommended default |
 |---|---|---|
-| **H-0a** | Does merging #132/#133 move the `origin/main` hash that the next B4 preflight checks? If so, merge before or after the next B4 attempt? | Merge #132 and #133 **before** the next B4 attempt. Then re-baseline the preflight hash once. #149 stays held. |
+| **H-0a** | The next B4 attempt needs a new host pin, wrapper bundle and reservation, and an amendment to B4 plan rev 7 §10. Merge #132, #133 and #149 before that new pin is set? | **Yes.** Merge all three, then set the new pin once (see the note below this table). |
 | **H-0b** | #133 stopped at reset 18 (17/18 cycles). Merge it as a partial-session record? | Merge, with "partial: 17/18" kept in the title and the stop reason in the evidence README. |
 | **H-0c** | #146 is marked *ready for review*, but the proposal says to keep it as a prep branch. Convert it to draft? | Convert to draft, add a `prep-only` label. |
 | **H-0d** | #150: change the host pin (a004 STOP repair)? | Owner decision. The agent writes a one-page summary of the trade-offs and does nothing else. |
@@ -53,6 +53,14 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 | **H-3** | #127 and #115 list several items (M1–M3, items 1–7). Fix them all, or close some as won't-fix? | Fix everything that has a reproducer. Close the others with a reason. |
 | **H-4** | #28: amend `EPIC-8.md` to CLI/exporter scope, or build the browser research UI? | Amend the scope now. Open a new issue for the UI later. |
 | **H-5** | Before each merge: does the PR pass review, and is CI green? | Owner approves every merge. |
+
+**Note on H-0a (verified 2026-10-08).**
+- **What the B4 preflight checks.** The B4 comparison wrapper (bundle r6) requires `main == origin/main == M′` (`dbc878c`). B4 plan rev 7 §10 also requires the host pin to differ from `67730a1` only in `tools/goalfix_cmp/`, `tests/` and two docs, and requires `scripts/` to be tree-equal to `67730a1`.
+- **Where this is recorded.** The rules are quoted in the bodies of PR #149 and PR #150. The pin `M_PRIME_SHA` is in `tests/fixtures/goalfix_cmp/c2ps_common.py` on the #148 branch. The rev 7 plan itself is not in this repository.
+- **The attempt #149 was waiting for has already happened.** That was a004, on 2026-10-02. It ended in a STOP, and its grant is used up.
+- **`main` already fails both checks.** `main` is at `fb67972`, 43 commits past M′, after #151–#158 were merged. Since `67730a1`, those merges also changed `scripts/`, `native_mujoco/` and `scenes/`.
+- **Conclusion.** Holding #132, #133 or #149 no longer protects any B4 attempt.
+- **#133.** Its stop was a harness bug: `reset.sh` ran `tail -1` on a file that was still being written. That fix goes with #127/#115.
 
 ---
 
@@ -66,10 +74,10 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 | #132 E1 Stage 2 B4, 18/18 | Review the evidence manifest (hashes, seeds, raw output present). Merge. | H-0a, H-5 | Merged |
 | #133 E1 Stage 2 B1, 17/18 | Same review. Merge as partial. | H-0a, H-0b, H-5 | Merged |
 | #150 a004 STOP repair | Leave as draft. Post the trade-off summary for the owner. | H-0d | Owner has decided. Then it is carried through Phase 1 (it overlaps #130). |
-| #149 historical toolkit docs | Leave on hold. Re-check after the next B4 attempt. | H-0a | Merged after B4, or rebased |
+| #149 historical toolkit docs | Lift the hold: a004 has run, and `main` is already past M′. Merge it, then verify its 14 file hashes on `main`. | H-0a, H-5 | Merged and verified |
 | #146, #148 goalfix C2 | Keep unmerged. Mark #146 as draft. | H-0c | Both draft, labelled `prep-only` |
 
-**Owner action:** run the next B4 attempt once #132/#133 are in.
+**Owner action:** after the merges, approve the new host pin and the rev 7 §10 amendment (combine this with the #150 decision, H-0d). Then reserve the next B4 attempt.
 
 ### Phase 1: Observation delivery (top technical priority)
 **Problem:** in the 2026-10-08 measurement, attempt 5, an observation reached the motion worker 0.67 s old. The live-feedback guard (`FEEDBACK_STALE_S` = 0.5 s) correctly halted the crane lift. The details are in `docs/roadmap/continuous-whole-arm-protection.md`. The root cause has not been investigated yet.
@@ -114,7 +122,7 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 ## 4. Order and dependencies
 
 ```
-Phase 0 ─┬─> owner B4 attempt ─> #149
+Phase 0 (merge #132/#133/#149) ─┬─> new pin + §10 amendment (with #150) ─> next B4 attempt
          └─> Phase 1 (1.1 → 1.2 → H-1 → 1.3; #130 in parallel) ─> owner re-measure
                  └─> Phase 2 (#107 first → #74 → #2 → placement)
                          └─> Phase 3 (recovery → #127, #115)
@@ -132,4 +140,4 @@ The Lead keeps a checklist comment on a single tracking issue (to be created whe
 - Docker, Apple-Silicon, and hardware results come only from the owner.
 - #150 and #130 both change `e1_identity`, so there is a merge-conflict risk. Sequence them at H-0d.
 - The Phase 1 root cause may be in the panel/hardware path, which the sim cannot reproduce. If that happens, the agent reports it and the owner collects traces.
-- Merging evidence PRs changes `main`. Confirm how that interacts with any preflight hash pin (H-0a).
+- Every merge after the new pin is set breaks the B4 preflight again. Freeze `main` from the moment the pin is set until the B4 attempt has finished.
