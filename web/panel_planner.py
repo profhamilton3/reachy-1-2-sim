@@ -512,7 +512,8 @@ class DeterministicPlanner:
             if not obj:
                 scene = self._scene_provider()
                 choices = [] if scene.error else sorted(scene.objects)
-                return _clarify("Which object should I point to?", choices,
+                verb = "lift" if match.name == "lift_object" else "point to"
+                return _clarify(f"Which object should I {verb}?", choices,
                                 SLOT_OBJECT)
             match.slots[SLOT_OBJECT] = obj
 

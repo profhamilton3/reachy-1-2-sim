@@ -95,6 +95,18 @@ Other documented follow-ups are unchanged (ADR-0004 and the #153 PR text):
 
 Grasp-related items stay under #55: contact surfaces, carried-object protection, unintended hand–target contact, jaw orientation and grasp reliability.
 
+### Deferred under #55: checked retreat from a refused withdrawal (2026-10-07)
+
+**What happened.** In the 2026-10-07 repeatability series (attempt 2), the crane lift's withdrawal judgement refused after release:
+- the open finger's predicted clearance at the hand's **current** pose was 0.46 mm, against a 0.494 mm uncertainty allowance;
+- the permitted bounded sideways correction cannot change the pose the hand is already in.
+
+That is a refusal at the model's boundary, not a detected collision. Recovery was a simulator reset.
+
+**What a general "checked retreat" would need.** A principled rule for leaving a poorly cleared starting state. For example, a start below the allowance could be accepted only if the motion strictly increases the violating clearance from the first step, keeps every other clearance at or above the allowance, and keeps the contact monitor on. Re-applying the unchanged clearance rule to the start state simply rejects it again.
+
+**Status.** Deferred; not implemented, and nothing here authorizes it. Prevention, meaning not accepting a release whose own withdrawal cannot start, is proposed separately under #55.
+
 ## Source references
 
 - Simulator roadmap: `reachy-1-2-sim/docs/ROADMAP.md` (R12-503; camera and research instrumentation).
@@ -106,3 +118,21 @@ Grasp-related items stay under #55: contact surfaces, carried-object protection,
 ## Next action
 
 Review and incorporate this milestone into the simulator roadmap, cross-linking the IITG perception dependencies. Open the contract/design issue first. This proposal does not authorize new coding, services, motion, or changes to PR #144.
+
+### #55 owner decisions (2026-10-08)
+
+Recorded by owner decision. Simulator only.
+
+1. **Measurement scope amendment.** For #55's measurement criterion, the delivered crane lift ("pick up the red cube and put it back", the panel `lift_object` ability) replaces the original pick-and-place arc. The original `pick_place_live` arc **remains unmeasured**.
+2. **Steady-state tracking error.** On this path it is compensated through measured-state corrections to the **commanded** poses: bounded, re-solved inside the joint travel, and re-checked. The actuator model is unchanged. **This is not a general compensation claim.**
+3. **Grasp geometry.** The pad and closure geometry limits the **tested** grasp set: 15 attitudes, the planner's 36 starting guesses and its current rules, at r2c2 and r2c3. Specifically:
+   - the pads are face-parallel only at 0° and about 36–39° apart at contact on the 60 mm cube;
+   - the finger's first contact is a corner about 2.4 mm below the top edge.
+
+   This does **not** establish that every possible grasp of the cube is infeasible.
+4. **Evaluated scope.** The 60 mm red cube at r2c2. Other objects and cells are planned and checked, and refused when a check fails. They are not a supported claim.
+
+### Unfinished capabilities tracked here (from #55)
+
+- **Destination transfer:** pick from one cell and place in another (e.g. r2c2 → r2c1). This needs a carry between ladders, destination-ladder planning, and a held-object return or abort route. Not implemented.
+- **Robust withdrawal and recovery:** the release currently drags the cube (quasi-static, about 7.6–9.7 mm recorded), and a withdrawal can be refused at the model boundary, leaving the open hand held beside the object until a simulator reset. Prevention (release/withdrawal continuity) and general checked retreat (above) are both unfinished.
