@@ -353,7 +353,9 @@ def hand_radius(gripper_deg: Optional[float] = None,
     return max(_hand_radius_at(g, r) for g in grippers for r in rolls)
 
 
-# Joint travel, in degrees, read from the MJCF `range` attributes.
+# Joint travel, in degrees: the MJCF `range` attributes (radians), converted
+# exactly.  The simulator's actuator ctrlrange is the same interval, and a
+# command outside it is clipped there silently.
 #
 # THE IK DOES NOT ENFORCE THESE and the SDK exposes no `limits` on a joint, so
 # nothing was checking them.  Measured cost: solve() happily returned
@@ -362,15 +364,25 @@ def hand_radius(gripper_deg: Optional[float] = None,
 # its target by 20 cm — while every clearance check passes, because the guard is
 # asked about the pose that was COMMANDED and the arm never went there.
 #
+# The same failure at small scale (#55, 2026-10-07): these limits were rounded
+# (+/-90 for a +/-1.570 rad stop, i.e. +/-89.954) and the check allowed 0.5 deg
+# beyond them, so the crane plan commanded r_arm_yaw 90.1-90.5 and
+# r_wrist_pitch up to 45.3 (stop 44.977).  The simulator clipped both, and the
+# code's predictions were about poses the arm was never given.
+#
 # Left/right differ only in the sign of the roll and yaw axes; mirrored below.
+_MJCF_RANGE_RAD: Dict[str, Tuple[float, float]] = {
+    "r_shoulder_pitch": (-2.618, 1.57),
+    "r_shoulder_roll": (-3.14, 0.174),
+    "r_arm_yaw": (-1.57, 1.57),
+    "r_elbow_pitch": (-2.182, 0.0),
+    "r_forearm_yaw": (-1.745, 1.745),
+    "r_wrist_pitch": (-0.785, 0.785),
+    "r_wrist_roll": (-0.785, 0.785),
+}
 JOINT_LIMITS_DEG: Dict[str, Tuple[float, float]] = {
-    "r_shoulder_pitch": (-150.0, 90.0),
-    "r_shoulder_roll": (-180.0, 10.0),
-    "r_arm_yaw": (-90.0, 90.0),
-    "r_elbow_pitch": (-125.0, 0.0),
-    "r_forearm_yaw": (-100.0, 100.0),
-    "r_wrist_pitch": (-45.0, 45.0),
-    "r_wrist_roll": (-45.0, 45.0),
+    name: (math.degrees(lo), math.degrees(hi))
+    for name, (lo, hi) in _MJCF_RANGE_RAD.items()
 }
 
 
@@ -387,15 +399,123 @@ def joint_limits(side: str = "right") -> List[Tuple[float, float]]:
 
 
 def within_limits(joints: Sequence[float], side: str = "right",
-                  tol: float = 0.5) -> bool:
-    """True if every joint is inside its travel, allowing ``tol`` degrees.
+                  tol: float = 0.0) -> bool:
+    """True if every joint is inside its travel (stops included).
 
-    ``tol`` exists because a solution sitting exactly on a stop is reachable in
-    principle and unreachable in practice; half a degree keeps the check from
-    rejecting poses the arm can actually hold.
+    This judges poses that will be COMMANDED, so it allows nothing beyond a
+    stop: the simulator clips such a command and the arm is never given the
+    pose that was checked.  ``tol`` (degrees) remains for callers judging a
+    MEASURED reading, which can sit a little past a stop under load; it must
+    not be used to accept a command.
     """
     return all(lo - tol <= v <= hi + tol
                for v, (lo, hi) in zip(list(joints)[:7], joint_limits(side)))
+
+
+def _rotvec(R: np.ndarray) -> np.ndarray:
+    """Rotation vector (axis * angle, radians) of a rotation matrix."""
+    c = max(-1.0, min(1.0, (float(np.trace(R)) - 1.0) / 2.0))
+    a = math.acos(c)
+    if a < 1e-9:
+        return np.zeros(3)
+    w = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+    return a * w / (2.0 * math.sin(a))
+
+
+def pad_point(joints: Sequence[float], side: str = "right") -> np.ndarray:
+    """World position of the tool (pad) point -- the point solve() targets."""
+    _s, _e, wrist, R = link_frames(joints, side)
+    return wrist - R @ _TOOL
+
+
+#: The re-solve drives position this close before stopping, whatever the
+#: caller's acceptance tolerance: it must not stop at "good enough" and leave
+#: the attitude to absorb the rest.
+_RESOLVE_CONVERGED_M = 2e-4
+
+#: Attitude weight (m per rad) in the planner's re-solve: strong, so the
+#: solver prefers holding the attitude to closing the last millimetres.
+_RESOLVE_ROT_WEIGHT_M = 0.5
+
+#: A re-solved pose must hold the requested hand attitude to this (degrees).
+#: The re-solve exists to respect the stops, not to change the attitude the
+#: caller asked for; a pose that only reaches the point by turning the hand is
+#: a different solution, and is rejected rather than reported as this one.
+RESOLVE_MAX_ATTITUDE_DEG = 1.0
+
+
+def attitude_error_deg(joints: Sequence[float], rot_target: np.ndarray,
+                       side: str = "right") -> float:
+    """Angle (degrees) between the hand rotation at ``joints`` and ``rot_target``."""
+    R = link_frames(joints, side)[3]
+    return math.degrees(float(np.linalg.norm(_rotvec(np.asarray(rot_target) @ R.T))))
+
+
+def resolve_within_limits(residual, q0: Sequence[float], side: str = "right",
+                          tol_m: float = 1e-3, iters: int = 300,
+                          damping: float = 1e-6) -> Tuple[List[float], float]:
+    """Re-solve a pose INSIDE the joint travel, on the local kinematic chain.
+
+    The IK service minimises without the joints' stops, so near a stop it
+    answers with a pose a little past it.  Clipping that answer moves the hand
+    somewhere nobody checked; this instead solves again with the stops as hard
+    bounds.  ``residual(q)`` returns the error vector to drive to zero: its
+    first three entries are a position error in metres (the target), the rest
+    a weighted orientation error (soft -- the attitude gives way as far as the
+    stops require).  Projected damped least squares from ``q0`` clipped into
+    the travel; a joint resting on a stop whose step points outward is frozen
+    for that step.  Returns (joints, position error in m); the caller decides
+    whether that error, and any attitude drift, is acceptable.
+    """
+    lims = joint_limits(side)
+    lo = np.array([a for a, _ in lims])
+    hi = np.array([b for _, b in lims])
+    q = np.clip(np.asarray(list(q0)[:7], dtype=float), lo, hi)
+    r = np.asarray(residual(q), dtype=float)
+    h = 1e-3                                       # degrees
+    for _ in range(iters):
+        if float(np.linalg.norm(r[:3])) < min(0.5 * tol_m, _RESOLVE_CONVERGED_M):
+            break
+        J = np.zeros((len(r), 7))
+        for i in range(7):
+            dq = q.copy()
+            dq[i] += h
+            J[:, i] = -(np.asarray(residual(dq)) - r) / h
+        free = np.ones(7, dtype=bool)
+        step = np.zeros(7)
+        for _k in range(3):
+            Jf = J[:, free]
+            s = np.linalg.solve(Jf.T @ Jf + damping * np.eye(int(free.sum())), Jf.T @ r)
+            step = np.zeros(7)
+            step[free] = s
+            push = ((q <= lo + 1e-9) & (step < 0)) | ((q >= hi - 1e-9) & (step > 0))
+            if not push.any():
+                break
+            free &= ~push
+        alpha, moved = 1.0, False
+        while alpha > 1e-3:
+            qn = np.clip(q + alpha * step, lo, hi)
+            rn = np.asarray(residual(qn), dtype=float)
+            if np.linalg.norm(rn) < np.linalg.norm(r):
+                q, r, moved = qn, rn, True
+                break
+            alpha *= 0.5
+        if not moved:
+            break
+    return [float(v) for v in q], float(np.linalg.norm(r[:3]))
+
+
+def pad_residual(pad_target: Sequence[float], rot_target: np.ndarray,
+                 side: str = "right", rot_weight_m: float = 0.05):
+    """Residual for resolve_within_limits: pad position, soft attitude."""
+    pt = np.asarray(pad_target, dtype=float)
+    Rt = np.asarray(rot_target, dtype=float)
+
+    def f(q):
+        _s, _e, wrist, R = link_frames(q, side)
+        return np.concatenate([pt - (wrist - R @ _TOOL),
+                               rot_weight_m * _rotvec(Rt @ R.T)])
+    return f
 
 
 def link_capsules(joints: Sequence[float], side: str = "right",
@@ -655,6 +775,24 @@ class CartesianPlanner:
             pairs = [prefer] + [c for c in pairs if c != prefer]
         return pairs
 
+    def _resolve_inside(self, R: np.ndarray, pad: np.ndarray,
+                        q_service: Sequence[float]) -> Optional[List[float]]:
+        """The service's out-of-travel answer, re-solved inside the travel.
+
+        Accepted only as the SAME solution the service was asked for: the pad
+        point within ``tol`` and the hand attitude within
+        ``RESOLVE_MAX_ATTITUDE_DEG`` of the swept orientation ``R``.  Position
+        alone is not enough -- a pose that reaches the point by turning the
+        hand is another orientation, which the sweep tries on its own terms.
+        Clearances are not judged here: callers check the returned joints."""
+        q, err = resolve_within_limits(
+            pad_residual(pad, R, self.side, rot_weight_m=_RESOLVE_ROT_WEIGHT_M),
+            q_service, self.side, tol_m=self._tol)
+        if (err <= self._tol and within_limits(q, self.side)
+                and attitude_error_deg(q, R, self.side) <= RESOLVE_MAX_ATTITUDE_DEG):
+            return q
+        return None
+
     def solve(
         self,
         xyz: XYZ,
@@ -721,9 +859,13 @@ class CartesianPlanner:
                 continue
             # A pose outside the joint travel is not a solution.  The arm
             # clamps it, ends up somewhere else, and every downstream check is
-            # then answering questions about a pose that never existed.
+            # then answering questions about a pose that never existed.  So it
+            # is re-solved inside the travel (never clipped), and the FK check
+            # below judges the re-solved pose like any other.
             if not within_limits(q, self.side):
-                continue
+                q = self._resolve_inside(R, pad, q)
+                if q is None:
+                    continue
             F = self._arm.forward_kinematics(q)
             pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
             err = float(np.linalg.norm(pad_fk - pad))
@@ -766,7 +908,9 @@ class CartesianPlanner:
             except Exception:
                 continue
             if not within_limits(q, self.side):
-                continue
+                q = self._resolve_inside(R, pad, q)
+                if q is None:
+                    continue
             F = self._arm.forward_kinematics(q)
             pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
             err = float(np.linalg.norm(pad_fk - pad))

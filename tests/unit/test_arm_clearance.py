@@ -734,8 +734,10 @@ class TestJointLimits:
             assert m, f"{name} not in the MJCF"
             r = re.search(r'range="([-\d.]+)\s+([-\d.]+)"', m.group(0))
             assert r, f"{name} has no range"
-            assert math.degrees(float(r.group(1))) == pytest.approx(lo, abs=0.5)
-            assert math.degrees(float(r.group(2))) == pytest.approx(hi, abs=0.5)
+            # Exact: a rounded limit is how +90 was accepted against a
+            # +89.954 stop and clipped by the simulator (#55).
+            assert math.degrees(float(r.group(1))) == pytest.approx(lo, abs=1e-9)
+            assert math.degrees(float(r.group(2))) == pytest.approx(hi, abs=1e-9)
 
     def test_a_pose_inside_the_travel_passes(self):
         from reachy_ai.motion.kinematics import within_limits
@@ -753,19 +755,37 @@ class TestJointLimits:
     def test_a_pose_exactly_on_a_stop_is_allowed(self):
         """Reachable in principle; rejecting it would refuse poses the arm can
         actually hold."""
+        from reachy_ai.motion.kinematics import JOINT_LIMITS_DEG, within_limits
+        assert within_limits(q(r_arm_yaw=JOINT_LIMITS_DEG["r_arm_yaw"][1]))
+        assert within_limits(q(r_forearm_yaw=JOINT_LIMITS_DEG["r_forearm_yaw"][0]))
+
+    def test_a_command_past_a_stop_is_rejected(self):
+        """#55, 2026-10-07: the crane plan commanded these, the old check
+        (rounded limits, +0.5 deg) accepted them, and the simulator clipped
+        them.  A command must be inside the travel, not near it."""
         from reachy_ai.motion.kinematics import within_limits
-        assert within_limits(q(r_arm_yaw=90.0))
-        assert within_limits(q(r_forearm_yaw=-100.0))
+        assert not within_limits(q(r_arm_yaw=90.0))        # stop is 89.954
+        assert not within_limits(q(r_arm_yaw=90.495))      # recorded hover rung
+        assert not within_limits(q(r_wrist_pitch=45.26))   # recorded rung +8 (stop 44.977)
+
+    def test_a_measured_reading_may_use_an_explicit_tolerance(self):
+        """A reading can sit slightly past a stop under load; only a caller
+        judging a measurement may opt into that, never a command."""
+        from reachy_ai.motion.kinematics import within_limits
+        assert within_limits(q(r_arm_yaw=90.44), tol=0.5)
+        assert not within_limits(q(r_arm_yaw=90.44))
 
     def test_the_left_arm_mirrors_roll_and_yaw(self):
         from reachy_ai.motion.kinematics import joint_limits
         right = dict(zip(R_ARM_JOINTS, joint_limits("right")))
         left = dict(zip(R_ARM_JOINTS, joint_limits("left")))
-        # shoulder_roll is -180..+10 on the right, so +(-10)..+180 on the left
-        assert left["r_shoulder_roll"] == (-10.0, 180.0)
-        assert right["r_shoulder_roll"] == (-180.0, 10.0)
+        # shoulder_roll is -179.9..+9.97 on the right, so -9.97..+179.9 on the left
+        lo, hi = right["r_shoulder_roll"]
+        assert left["r_shoulder_roll"] == (-hi, -lo)
+        assert right["r_shoulder_roll"] == pytest.approx((math.degrees(-3.14), math.degrees(0.174)))
         # symmetric joints are unchanged by mirroring
-        assert left["r_arm_yaw"] == right["r_arm_yaw"] == (-90.0, 90.0)
+        assert left["r_arm_yaw"] == right["r_arm_yaw"]
+        assert right["r_arm_yaw"] == pytest.approx((math.degrees(-1.57), math.degrees(1.57)))
         # pitch axes are shared
         assert left["r_elbow_pitch"] == right["r_elbow_pitch"]
 
