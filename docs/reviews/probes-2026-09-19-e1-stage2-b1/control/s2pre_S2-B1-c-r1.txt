@@ -1,0 +1,8 @@
+=== S2-B1-c-r1 C1 reset gen 3 (2026-09-19T09:23:30Z) ===
+reset gen=3 ack=3 resets_recorded 2->3 sim_step 91620->580
+=== S2-B1-c-r1 C2 settle ===
+{"settled_after_s": 15.7, "sim_step": 7840, "seq": 60200, "max_spread_deg": 0.0, "pose_deg": {"r_shoulder_pitch": -0.0, "r_shoulder_roll": 0.01, "r_arm_yaw": -0.0, "r_elbow_pitch": -0.0, "r_forearm_yaw": -0.0, "r_wrist_pitch": -0.0, "r_wrist_roll": 0.05, "r_gripper": -0.0}}
+=== S2-B1-c-r1 C3 parked ===
+PARKED S2-B1-c-r1-parked ok, cycle S2-B1-c-r1 stiff-zero: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_PLACE_ROUTE_20260919T092350Z.json
+=== S2-B1-c-r1 notebook ===
+binding_ok {'ok': True, 'provenance_ok': True, 'reasons': [], 'provenance_reasons': []}

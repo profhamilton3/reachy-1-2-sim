@@ -1,0 +1,10 @@
+# Stop analysis: reset 18 (cycle S2-B1-c-r6) 'not verified' -- from the server's own record, read-only, after shutdown
+commands.jsonl reset entries: 18; #17 at sim_step 397371 wall 7595.0s; #18 at sim_step 282875 wall 8160.8s
+states.jsonl 2.41 GB
+sim_step drops (one per reset expected): 18
+  line 340002: sim_step 366970 -> 10, seq 340003, wall None
+  line 379739: sim_step 397370 -> 10, seq 379740, wall None
+  line 408026: sim_step 282870 -> 10, seq 408027, wall None
+reset_18 verification output (control/reset_18.txt): ack=18, resets_recorded 17->18, sim_step 282740-> <empty>: the post-reset `tail -1 states.jsonl | json.loads` raised 'Extra data: line 2 column 1 (char 5862)' -> tail returned two records (file growing at ~20 Hz x ~5.9 KB records), so step_now was empty and the [ -lt ] test failed -> STOP.
+Server-side: the reset WAS executed and recorded (ack 18, commands.jsonl #18, sim_step restarted). The failure is in reset.sh's host-side read of a growing 2.4 GB states.jsonl, not a simulator, robot, board, or contact event.
+Consequence under the authorized stop rules (plan section 6: any non-zero exit or control/stop ends the session; no retry, no cycle redo, no extra reset): S2-B1-c-r6 not flown; session closed with 17/18 cycles, 46/49 recordings.

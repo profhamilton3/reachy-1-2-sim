@@ -1,0 +1,10 @@
+stage0-B1-s1   armon   RAISE_TO_SIDE (label only)   contacts=0 disp_max=1.08e-07 gate=yes tail=STAGE0_INIT_OK=yes     sv=-          nb=returned el=0.06 pass
+S2-B1-a-r1     parked  RAISE_TO_SIDE                contacts=0 disp_max=1.79e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-a-r1     setup   RAISE_TO_SIDE                contacts=0 disp_max=6.3e-08 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=33.25 pass
+S2-B1-a-r1     flight  LOWER_TO_REST                contacts=0 disp_max=1.17e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=6.7 pass
+S2-B1-b-r1     parked  PLACE_ROUTE                  contacts=0 disp_max=2.42e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-b-r1     flight  PLACE_ROUTE                  contacts=0 disp_max=5.4e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.57 pass
+S2-B1-c-r1     parked  PLACE_ROUTE                  contacts=0 disp_max=2.42e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-c-r1     setup   PLACE_ROUTE                  contacts=0 disp_max=1.11e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.62 pass
+S2-B1-c-r1     flight  LIFT_TO_PRESENT              contacts=0 disp_max=3.37e-08 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=3.38 pass
+rows=9 pass=9

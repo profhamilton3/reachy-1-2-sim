@@ -1,0 +1,10 @@
+caffeinate pid 48760 started 2026-09-19T09:03:27Z (before start_sim.sh)
+   PreventUserIdleDisplaySleep    1
+   PreventUserIdleSystemSleep     1
+   pid 48511(caffeinate): [0x0005cfb40001a7bd] 00:02:00 PreventUserIdleSystemSleep named: "caffeinate command-line tool"  
+	Details: caffeinate asserting for 300 secs
+	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
+   pid 11778(NewsScoringService): [0x0005d0230001a7c3] 00:00:08 PreventUserIdleSystemSleep named: "E10AB8B2-2991-4438-8615-4601155C1898"  
+   pid 48760(caffeinate): [0x0005d02b0001a7c4] 00:00:06 PreventUserIdleSystemSleep named: "caffeinate command-line tool"  
+   pid 48760(caffeinate): [0x0005d02b0005a7c5] 00:00:06 PreventUserIdleDisplaySleep named: "caffeinate command-line tool"  
+   pid 48760(caffeinate): [0x0005d02b0007a7c6] 00:00:06 PreventSystemSleep named: "caffeinate command-line tool"  
