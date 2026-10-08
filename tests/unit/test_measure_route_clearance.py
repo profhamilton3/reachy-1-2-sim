@@ -980,18 +980,23 @@ class TestB2S2FingerClearanceRootCause:
             "PLACE_ROUTE", 200, scene, "finger", hand="shells")
         assert footprint_only["soda_can"] * 100 == pytest.approx(43.28, abs=0.01)
 
-    def test_place_route_full_route_finger_corrected_is_31_66cm(self, mrc):
+    def test_place_route_full_route_finger_corrected_is_31_61cm(self, mrc):
         """The fix: comparing against `full_route_poses("PLACE_ROUTE")`
         (the whole flown route, HOME included) rather than
-        `FOOTPRINT_LEGS`'s scoped-down subset gives 31.66 cm, matching the
+        `FOOTPRINT_LEGS`'s scoped-down subset gives 31.61 cm, matching the
         realised worst sample (31.38 cm, near SWING_2) to within 0.3 cm --
         not the footprint-only 43.28 cm, an 11.89 cm route-scope
-        artefact."""
+        artefact.
+
+        31.61 cm is for the 12.2 cm soda can after #151 (can centre z
+        0.7975 -> 0.8010 in B1_evidence.yaml). The analysis of 2026-09-22
+        measured 31.66 cm at the old can height; #151 alone accounts for
+        the change."""
         scene = SceneModel.from_yaml(_B1_SCENE_PATH)
         full = mrc.full_route_poses("PLACE_ROUTE")
         result = mrc.planned_clearance_by_link(
             "PLACE_ROUTE", 200, scene, "finger", hand="shells", waypoints=full)
-        assert result["soda_can"] * 100 == pytest.approx(31.66, abs=0.01)
+        assert result["soda_can"] * 100 == pytest.approx(31.61, abs=0.01)
 
     def test_full_route_poses_starts_with_the_departed_posture(self, mrc):
         """PLACE_ROUTE and RAISE_TO_SIDE leave the rail pocket (HOME);

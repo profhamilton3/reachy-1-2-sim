@@ -317,7 +317,7 @@ TRIPWIRE_SOURCES: Dict[str, str] = {
     # wording ("ack mismatch or other STOP"); the old pattern matched only
     # the first.
     "reset_sh_mismatch": "reset_sh",
-    # "Execution lease granted to %r (mover %r, %.0fs)" (server.py:1059).
+    # "Execution lease granted to %r (mover %r, %.0fs)" (server.py:1072).
     "lease_acquisition": "native",
     # "Server error: [%s] %s" % ("control_held", …) -- the BRIDGE's own
     # log of a native refusal sent to ITS connection
@@ -372,7 +372,7 @@ TRIPWIRE_SOURCE_LINES: Dict[str, tuple] = {
     "reset_sh_mismatch": (
         ("scripts/e1_stage1/reset.sh", 50, "STOP: reset $GEN not verified"),),
     "lease_acquisition": (
-        ("native_mujoco/server.py", 1059, "Execution lease granted to %r"),),
+        ("native_mujoco/server.py", 1072, "Execution lease granted to %r"),),
     "control_held_refusal": (
         ("mujoco_remote_backend.py", 486, "Server error: [%s] %s"),),
 }
