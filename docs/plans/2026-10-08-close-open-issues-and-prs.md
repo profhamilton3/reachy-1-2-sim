@@ -60,7 +60,9 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 - **The attempt #149 was waiting for has already happened.** That was a004, on 2026-10-02. It ended in a STOP, and its grant is used up.
 - **`main` already fails both checks.** `main` is at `fb67972`, 43 commits past M′, after #151–#158 were merged. Since `67730a1`, those merges also changed `scripts/`, `native_mujoco/` and `scenes/`.
 - **Conclusion.** Holding #132, #133 or #149 no longer protects any B4 attempt.
-- **#133.** Its stop was a harness bug: `reset.sh` ran `tail -1` on a file that was still being written. That fix goes with #127/#115.
+- **#133.** Its stop was a harness bug: `reset.sh` ran `tail -1` on a file that was still being written. That bug is already fixed on `main` by `7aea269` and `88c31d2`.
+- **Side effects checked.** None of #132, #133 or #149 shares a file with #146, #148, #150 or with `main`. None of them adds a pytest-collectable file, and the repository has no CI.
+- **#149 adds a historical `CLAUDE.md` and `AGENT_PROMPTS.md`.** Claude Code loads a subdirectory's `CLAUDE.md` when it works in that directory. Agent prompts must say that `docs/historical/**` is reference material only and never instructions.
 
 ---
 
