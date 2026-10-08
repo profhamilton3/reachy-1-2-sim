@@ -110,7 +110,7 @@ from reachy_ai.motion.kinematics import (
     sample_count,
     within_limits,
 )
-from reachy_ai.motion.kinematics import _rotvec
+from reachy_ai.motion.kinematics import RESOLVE_MAX_ATTITUDE_DEG, _rotvec
 from reachy_ai.motion.transit import CARRY_HZ, STEP_HZ
 from reachy_ai.scene.awareness import SceneModel
 from reachy_ai.tasks.pick_place_live import present_joints
@@ -319,7 +319,10 @@ def solve_gap(arm, rot: np.ndarray, gap_target: np.ndarray, gripper_deg: float,
         if not within_limits(q1):
             w = _RESOLVE_ROT_WEIGHT_RELAX_M if relax else _RESOLVE_ROT_WEIGHT_STRICT_M
             q2, e2 = _gap_resolve(rot, gap_target, gripper_deg, q1, tol, w)
-            if e2 < tol and within_limits(q2):
+            # Without relax the attitude is a requirement, not a preference:
+            # checked here, because not every caller re-checks it.
+            if e2 < tol and within_limits(q2) and (
+                    relax or _rot_err_deg(G.hand_rotation(q2), rot) <= RESOLVE_MAX_ATTITUDE_DEG):
                 return q2, e2
             return None
         q = q1
