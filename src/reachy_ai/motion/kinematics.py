@@ -428,6 +428,29 @@ def pad_point(joints: Sequence[float], side: str = "right") -> np.ndarray:
     return wrist - R @ _TOOL
 
 
+#: The re-solve drives position this close before stopping, whatever the
+#: caller's acceptance tolerance: it must not stop at "good enough" and leave
+#: the attitude to absorb the rest.
+_RESOLVE_CONVERGED_M = 2e-4
+
+#: Attitude weight (m per rad) in the planner's re-solve: strong, so the
+#: solver prefers holding the attitude to closing the last millimetres.
+_RESOLVE_ROT_WEIGHT_M = 0.5
+
+#: A re-solved pose must hold the requested hand attitude to this (degrees).
+#: The re-solve exists to respect the stops, not to change the attitude the
+#: caller asked for; a pose that only reaches the point by turning the hand is
+#: a different solution, and is rejected rather than reported as this one.
+RESOLVE_MAX_ATTITUDE_DEG = 1.0
+
+
+def attitude_error_deg(joints: Sequence[float], rot_target: np.ndarray,
+                       side: str = "right") -> float:
+    """Angle (degrees) between the hand rotation at ``joints`` and ``rot_target``."""
+    R = link_frames(joints, side)[3]
+    return math.degrees(float(np.linalg.norm(_rotvec(np.asarray(rot_target) @ R.T))))
+
+
 def resolve_within_limits(residual, q0: Sequence[float], side: str = "right",
                           tol_m: float = 1e-3, iters: int = 300,
                           damping: float = 1e-6) -> Tuple[List[float], float]:
@@ -451,7 +474,7 @@ def resolve_within_limits(residual, q0: Sequence[float], side: str = "right",
     r = np.asarray(residual(q), dtype=float)
     h = 1e-3                                       # degrees
     for _ in range(iters):
-        if float(np.linalg.norm(r[:3])) < 0.5 * tol_m:
+        if float(np.linalg.norm(r[:3])) < min(0.5 * tol_m, _RESOLVE_CONVERGED_M):
             break
         J = np.zeros((len(r), 7))
         for i in range(7):
@@ -754,10 +777,21 @@ class CartesianPlanner:
 
     def _resolve_inside(self, R: np.ndarray, pad: np.ndarray,
                         q_service: Sequence[float]) -> Optional[List[float]]:
-        """The service's out-of-travel answer, re-solved inside the travel."""
-        q, err = resolve_within_limits(pad_residual(pad, R, self.side), q_service,
-                                       self.side, tol_m=self._tol)
-        return q if err <= self._tol and within_limits(q, self.side) else None
+        """The service's out-of-travel answer, re-solved inside the travel.
+
+        Accepted only as the SAME solution the service was asked for: the pad
+        point within ``tol`` and the hand attitude within
+        ``RESOLVE_MAX_ATTITUDE_DEG`` of the swept orientation ``R``.  Position
+        alone is not enough -- a pose that reaches the point by turning the
+        hand is another orientation, which the sweep tries on its own terms.
+        Clearances are not judged here: callers check the returned joints."""
+        q, err = resolve_within_limits(
+            pad_residual(pad, R, self.side, rot_weight_m=_RESOLVE_ROT_WEIGHT_M),
+            q_service, self.side, tol_m=self._tol)
+        if (err <= self._tol and within_limits(q, self.side)
+                and attitude_error_deg(q, R, self.side) <= RESOLVE_MAX_ATTITUDE_DEG):
+            return q
+        return None
 
     def solve(
         self,

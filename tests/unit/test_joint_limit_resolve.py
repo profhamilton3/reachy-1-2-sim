@@ -25,6 +25,9 @@ from reachy_ai.motion.kinematics import (  # noqa: E402
 #: and rung +8): both past a stop.
 HOVER_RUNG = [-82.732, -19.523, 90.495, -84.137, -49.905, 44.11, 35.163]
 RUNG_8 = [-81.55, -18.86, 90.479, -83.35, -47.78, 45.26, 36.38]
+#: Only r_arm_yaw past its stop: the arm's redundancy can hold the same point
+#: AND the same hand attitude inside the travel.
+YAW_ONLY = [-75.0, -17.5, 90.4, -80.0, -40.0, 40.0, 38.0]
 
 
 def _overshoot(q):
@@ -76,14 +79,34 @@ class _ServiceArm:
 
 
 def test_the_planner_resolves_rather_than_skips_or_clips(monkeypatch):
-    target = pad_point(RUNG_8)
-    planner = K.CartesianPlanner(_ServiceArm(RUNG_8), tol=1e-3)
-    # The swept orientations are the planner's own; make the first one the
+    target = pad_point(YAW_ONLY)
+    planner = K.CartesianPlanner(_ServiceArm(YAW_ONLY), tol=1e-3)
+    # The swept orientations are the planner's own; make the only one the
     # attitude the service answered with, so the test is about the stops.
-    R8 = link_frames(RUNG_8)[3]
-    monkeypatch.setattr(planner, "_R0", R8)
+    R = link_frames(YAW_ONLY)[3]
+    monkeypatch.setattr(planner, "_R0", R)
     monkeypatch.setattr(planner, "_orientations", lambda prefer: [(0.0, 0.0)])
     q = planner.solve(tuple(target))
     assert within_limits(q)
     assert float(np.linalg.norm(pad_point(q) - target)) <= 1e-3
-    assert q != [min(max(v, lo), hi) for v, (lo, hi) in zip(RUNG_8, joint_limits("right"))]
+    assert K.attitude_error_deg(q, R) <= K.RESOLVE_MAX_ATTITUDE_DEG
+    assert q != [min(max(v, lo), hi) for v, (lo, hi) in zip(YAW_ONLY, joint_limits("right"))]
+
+
+def test_the_planner_rejects_a_resolve_that_would_turn_the_hand():
+    """Position alone is not acceptance.  RUNG_8 has the wrist pitch past its
+    stop too: inside the travel its point is reachable only by changing the
+    hand's attitude, which is a different solution -- refused here, not
+    reported as the requested orientation (the sweep tries others itself)."""
+    planner = K.CartesianPlanner(_ServiceArm(RUNG_8), tol=1e-3)
+    R8 = link_frames(RUNG_8)[3]
+    assert planner._resolve_inside(R8, pad_point(RUNG_8), RUNG_8) is None
+
+
+def test_an_accepted_resolve_holds_the_attitude_and_the_point():
+    planner = K.CartesianPlanner(_ServiceArm(YAW_ONLY), tol=1e-3)
+    R = link_frames(YAW_ONLY)[3]
+    q = planner._resolve_inside(R, pad_point(YAW_ONLY), YAW_ONLY)
+    assert q is not None and within_limits(q)
+    assert K.attitude_error_deg(q, R) <= K.RESOLVE_MAX_ATTITUDE_DEG
+    assert float(np.linalg.norm(pad_point(q) - pad_point(YAW_ONLY))) <= 1e-3
