@@ -34,7 +34,7 @@
 
   <!-- implicitfast is A-stable: handles stiff actuators (antennas) without NaN -->
   <!-- noslip_iterations: MuJoCo's no-slip post-processing pass suppresses the
-       soft-contact creep that let a held object slide out of the grasp (#55,
+       soft-contact creep that let a held object slide within the grasp (#55,
        ADR-0005).  Override with --noslip-iterations N (0 = previous behaviour). -->
   <option timestep="0.002" gravity="0 0 -9.81" iterations="50" solver="Newton"
           integrator="implicitfast" noslip_iterations="10"/>
