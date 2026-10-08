@@ -104,12 +104,13 @@ from reachy_ai.motion.kinematics import (
     ArmClearanceError,
     R_ARM_JOINTS,
     TargetContact,
-    joint_limits,
     joint_path,
     link_frames,
+    resolve_within_limits,
     sample_count,
     within_limits,
 )
+from reachy_ai.motion.kinematics import _rotvec
 from reachy_ai.motion.transit import CARRY_HZ, STEP_HZ
 from reachy_ai.scene.awareness import SceneModel
 from reachy_ai.tasks.pick_place_live import present_joints
@@ -267,10 +268,26 @@ def _ik(arm, rot: np.ndarray, wrist: np.ndarray, q0) -> Optional[List[float]]:
     return q if q is not None and within_limits(q) else None
 
 
-def _inside_limits(q: Sequence[float]) -> List[float]:
-    """``q`` with each joint moved inside the planner's travel.  Used ONLY to
-    derive an orientation target that the arm can hold; never commanded."""
-    return [min(max(float(v), lo), hi) for v, (lo, hi) in zip(q, joint_limits("right"))]
+def _gap_resolve(rot: np.ndarray, gap_target: np.ndarray, gripper_deg: float,
+                 q_service: Sequence[float], tol: float,
+                 rot_weight_m: float) -> Tuple[List[float], float]:
+    """An out-of-travel IK answer for the jaw-gap centre, re-solved INSIDE the
+    travel (``kinematics.resolve_within_limits``): the gap position is the
+    target, the hand rotation a soft term weighted by ``rot_weight_m``."""
+    tgt = np.asarray(gap_target, dtype=float)
+    Rt = np.asarray(rot, dtype=float)
+
+    def residual(q):
+        return np.concatenate([tgt - G.hand_frames(list(q), gripper_deg).gap_mid,
+                               rot_weight_m * _rotvec(Rt @ G.hand_rotation(list(q)).T)])
+    return resolve_within_limits(residual, q_service, "right", tol_m=tol)
+
+
+#: Soft-attitude weights (m per rad) for the bounded re-solve.  Strict solves
+#: must hold the orientation (judged <= 1 deg by the caller); relaxed ones let
+#: it give way as far as the stops require (the plan's checks judge the drift).
+_RESOLVE_ROT_WEIGHT_STRICT_M = 0.5
+_RESOLVE_ROT_WEIGHT_RELAX_M = 0.05
 
 
 def solve_gap(arm, rot: np.ndarray, gap_target: np.ndarray, gripper_deg: float,
@@ -282,12 +299,14 @@ def solve_gap(arm, rot: np.ndarray, gap_target: np.ndarray, gripper_deg: float,
     it depends on the wrist roll and the opening, so the wrist target is
     corrected by the remaining gap error and re-solved, warm-started.
 
-    The service minimises position AND orientation error together, so where
-    ``rot`` cannot be held at that position (a joint at its stop) it returns a
-    compromise that misses the position.  With ``relax`` the orientation
-    target then becomes the compromise's own orientation, which lets the
-    position converge while the hand's attitude drifts only as far as reach
-    requires; the caller judges the drift.  Returns (joints, gap error m).
+    The service minimises without the joints' stops, so near one it answers
+    with a pose slightly past it.  Such an answer is never commanded and never
+    clipped: it is re-solved inside the exact travel on the local chain, with
+    the gap position as the target and the attitude soft.  Without ``relax``
+    the attitude must still be held (the caller judges it, <= 1 deg); with
+    ``relax`` it may drift as far as reach and the stops require, and the
+    rest of the ladder takes the achieved attitude as its target.  Returns
+    (joints, gap error m), or None.
     """
     h = G.hand_frames(q0, gripper_deg)
     W = np.asarray(gap_target) + (h.wrist - h.gap_mid)
@@ -298,14 +317,11 @@ def solve_gap(arm, rot: np.ndarray, gap_target: np.ndarray, gripper_deg: float,
         if q1 is None:
             return None
         if not within_limits(q1):
-            if not relax:
-                return None
-            # The service's bounds are wider than the joints' travel: aim at
-            # the attitude the arm can actually hold and solve again.
-            q = _inside_limits(q1)
-            rot = G.hand_rotation(q)
-            err = math.inf
-            continue
+            w = _RESOLVE_ROT_WEIGHT_RELAX_M if relax else _RESOLVE_ROT_WEIGHT_STRICT_M
+            q2, e2 = _gap_resolve(rot, gap_target, gripper_deg, q1, tol, w)
+            if e2 < tol and within_limits(q2):
+                return q2, e2
+            return None
         q = q1
         e = np.asarray(gap_target) - G.hand_frames(q, gripper_deg).gap_mid
         err = float(np.linalg.norm(e))
@@ -428,6 +444,15 @@ def check_crane_plan(planner, scene: SceneModel, plan: CranePlan,
     off = np.zeros(7) if offset is None else np.asarray(offset, dtype=float)
     g_open = s.opening_deg if gripper_open_deg is None else gripper_open_deg
     rep: Dict[str, object] = {}
+
+    # 0. Every commanded pose inside the exact joint travel.  The streamed
+    # lines between them are joint-space interpolations, so they stay inside
+    # a box of limits whenever their ends do.
+    for name, q in [(f"rung +{k}", r) for k, r in enumerate(plan.rungs)] + [("PRESENT", plan.present)]:
+        if not within_limits(q):
+            raise CraneRefused("joint_limits", f"{name} is outside the joint travel",
+                               pose=[round(float(v), 3) for v in q])
+    rep["joint_limits"] = "pass (every rung and PRESENT inside the travel)"
 
     # 1. The existing whole-arm preflight (tube hand, objects + rails).
     for name, (seq, grip, tgt, _rate) in _segments(plan).items():

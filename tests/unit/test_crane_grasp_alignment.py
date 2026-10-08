@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.join(_HERE, "../../native_mujoco"))
 
 from reachy_ai.motion import grasp_alignment as G  # noqa: E402
 from reachy_ai.motion import primitives as P  # noqa: E402
-from reachy_ai.motion.kinematics import CartesianPlanner, R_ARM_JOINTS  # noqa: E402
+from reachy_ai.motion.kinematics import CartesianPlanner, R_ARM_JOINTS, within_limits  # noqa: E402
 from reachy_ai.scene.awareness import SceneModel  # noqa: E402
 from reachy_ai.tasks import crane_pick_live as C  # noqa: E402
 
@@ -169,7 +169,9 @@ class _Robot:
         self.r_arm = arm
 
 
-def _offline_plan(scene):
+def _recorded_offline_plan(scene):
+    """The recorded offline plan exactly as recorded (2026-10-06).  It predates
+    the exact joint travel: its grasp rung commands r_arm_yaw past the stop."""
     rungs = REC["offline_plan"]["rungs"]
     spec = C.CraneSpec(pause_s=0.2, hold_s=0.2)
     obj = G.object_box(scene.get("red_cube"), REC["offline_plan"]["cube"], (1, 0, 0, 0))
@@ -178,6 +180,36 @@ def _offline_plan(scene):
                        G.hand_rotation(rungs[0]), targets, rungs, C.present_joints())
     plan.insertion_rung = C._insertion_rung(plan)
     return plan
+
+
+def _offline_plan(scene):
+    """The recorded plan with each rung re-solved INSIDE the joint travel to
+    the same jaw-gap target, by the planner's own re-solve with the attitude
+    soft (as the ladder solves it); check_crane_plan then judges the result.  The recorded data are unchanged; only rungs past a stop
+    move, by as much as the stops require."""
+    rec = _recorded_offline_plan(scene)
+    spec, tol = rec.spec, rec.limits.ik_position_tol_m
+    rungs = []
+    for q, tgt in zip(rec.rungs, rec.gap_targets):
+        if not within_limits(q):
+            q, err = C._gap_resolve(G.hand_rotation(q), tgt, spec.opening_deg, q, tol,
+                                    C._RESOLVE_ROT_WEIGHT_RELAX_M)   # as the ladder does
+            assert err < tol and within_limits(q)
+        rungs.append(list(q))
+    plan = C.CranePlan("red_cube", spec, rec.limits, rec.obj, G.hand_rotation(rungs[0]),
+                       rec.gap_targets, rungs, C.present_joints())
+    plan.insertion_rung = C._insertion_rung(plan)
+    return plan
+
+
+def test_the_recorded_plan_past_a_stop_is_refused(monkeypatch):
+    """#55: the recorded rungs command r_arm_yaw past its 89.954 deg stop.  The
+    plan check refuses that instead of letting the simulator clip it."""
+    scene = _scene(REC["offline_plan"]["cube"])
+    planner = CartesianPlanner(_Arm(C.present_joints(), -45.0), scene=scene)
+    with pytest.raises(C.CraneRefused) as info:
+        C.check_crane_plan(planner, scene, _recorded_offline_plan(scene))
+    assert info.value.stage == "joint_limits"
 
 
 @pytest.fixture
