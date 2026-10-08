@@ -95,6 +95,18 @@ Other documented follow-ups are unchanged (ADR-0004 and the #153 PR text):
 
 Grasp-related items stay under #55: contact surfaces, carried-object protection, unintended hand–target contact, jaw orientation and grasp reliability.
 
+### Deferred under #55: checked retreat from a refused withdrawal (2026-10-07)
+
+**What happened.** In the 2026-10-07 repeatability series (attempt 2), the crane lift's withdrawal judgement refused after release:
+- the open finger's predicted clearance at the hand's **current** pose was 0.46 mm, against a 0.494 mm uncertainty allowance;
+- the permitted bounded sideways correction cannot change the pose the hand is already in.
+
+That is a refusal at the model's boundary, not a detected collision. Recovery was a simulator reset.
+
+**What a general "checked retreat" would need.** A principled rule for leaving a poorly cleared starting state. For example, a start below the allowance could be accepted only if the motion strictly increases the violating clearance from the first step, keeps every other clearance at or above the allowance, and keeps the contact monitor on. Re-applying the unchanged clearance rule to the start state simply rejects it again.
+
+**Status.** Deferred; not implemented, and nothing here authorizes it. Prevention, meaning not accepting a release whose own withdrawal cannot start, is proposed separately under #55.
+
 ## Source references
 
 - Simulator roadmap: `reachy-1-2-sim/docs/ROADMAP.md` (R12-503; camera and research instrumentation).
