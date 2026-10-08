@@ -11,8 +11,9 @@ by itself make a grasp, release or withdrawal reliable.
 
 ## Context
 
-In a recorded 2026-10-06 hold, the cube crept down out of the grasp even
-though the hand was still. MuJoCo's documentation describes the *NoSlip
+In a recorded 2026-10-06 hold, the cube crept downward in the grasp (about
+0.75 mm/s) while the hand was still; the 2026-10-07 panel trial measured
+1.69 mm of in-hand slip over its 2.1 s hold. MuJoCo's documentation describes the *NoSlip
 post-processing pass* as a PGS sweep over the friction dimensions with R = 0
 (hard constraints), run after the main solver, which "suppresses the contact
 slip that is inherent to soft-constraint models". It also warns that the
@@ -88,7 +89,16 @@ initial poses). No container recreation is needed.
 
 ## Consequences
 
-- Hold-stability criteria become meaningful in the simulator.
+- A hold-slip criterion now measures the grasp rather than solver creep, in
+  the simulator only.
+- The synthetic exit-gate scenario in `tests/unit/test_gripper.py`
+  (`TestGraspScenario`: a 20 g cube with friction 2.5 on a support pillar)
+  no longer grasps under the default: the closing finger tips the cube and
+  wedges it, and the thumb never touches it. With no-slip off it grasps only
+  at the tuned friction 2.5 (at 1.0 the cube flips); with no-slip on it grasps
+  at the geom default 1.0 and passes every exit-gate assertion unchanged.
+  The fixture's friction was tuned to the soft model. How that test is
+  configured is an owner decision recorded on the PR.
 - Release behaviour under no-slip is the first acceptance item of the next
   delivery, not a reason to switch the pass off.
 - Tests: `tests/unit/test_contact_model_noslip.py` (including a recorded-hold
