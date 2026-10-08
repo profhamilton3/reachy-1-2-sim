@@ -82,6 +82,14 @@ class SimSnapshot:
     objects: Dict[str, Vec3] = field(default_factory=dict)
     received_at: float = 0.0            # time.monotonic() when ingested
     dropped_objects: Tuple[str, ...] = ()   # ids whose pose was not finite
+    #: Orientation, [w, x, y, z], for the objects in ``objects`` that carried a
+    #: finite one (#55: a grasp that closes on two faces needs to know which
+    #: way the faces point).  Absent ids have no orientation, not identity.
+    quats: Dict[str, Tuple[float, float, float, float]] = field(default_factory=dict)
+    #: The state's gripper block by side: ``grip_force_n`` (pad normal force
+    #: against anything non-robot) and ``grasping``.  Contact feedback for a
+    #: grasp in progress; NOT a full contact feed -- arm links are not in it.
+    grippers: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def age_s(self) -> float:
         return max(0.0, time.monotonic() - self.received_at)
@@ -164,6 +172,7 @@ class SimLink:
         with self._lock:
             snap = self._snapshot
             state, detail = self._state, self._detail
+            contact_model = self._server_capabilities.get("contact_model")
         live = snap is not None and snap.age_s() <= self._stale_after
         return {
             "state": state,
@@ -173,6 +182,10 @@ class SimLink:
             "age_s": round(snap.age_s(), 2) if snap else None,
             "scene_revision": snap.scene_revision if snap else "",
             "sim_step": snap.sim_step if snap else 0,
+            # The server's effective contact model (ADR-0005), exactly as it
+            # advertised it; None for an older server or before the handshake.
+            "contact_model": (dict(contact_model)
+                              if isinstance(contact_model, dict) else None),
         }
 
     # -- internals ---------------------------------------------------------
@@ -342,6 +355,7 @@ class SimLink:
 
     def _ingest_state(self, msg: dict) -> None:
         objects: Dict[str, Vec3] = {}
+        quats: Dict[str, Tuple[float, float, float, float]] = {}
         dropped = []
         for entry in msg.get("objects") or []:
             oid = entry.get("object_id")
@@ -357,6 +371,19 @@ class SimLink:
                 dropped.append(oid)
                 continue
             objects[oid] = (float(pos[0]), float(pos[1]), float(pos[2]))
+            q = entry.get("quat_wxyz")
+            if (isinstance(q, (list, tuple)) and len(q) == 4
+                    and all(isinstance(v, (int, float)) and math.isfinite(v) for v in q)):
+                quats[oid] = (float(q[0]), float(q[1]), float(q[2]), float(q[3]))
+
+        grippers: Dict[str, Dict[str, Any]] = {}
+        for g in msg.get("grippers") or []:
+            side = g.get("side") if isinstance(g, dict) else None
+            force = g.get("grip_force_n") if isinstance(g, dict) else None
+            if (isinstance(side, str) and isinstance(force, (int, float))
+                    and math.isfinite(force)):
+                grippers[side] = {"grip_force_n": float(force),
+                                  "grasping": bool(g.get("grasping"))}
 
         snap = SimSnapshot(
             sim_step=int(msg.get("sim_step") or 0),
@@ -366,6 +393,8 @@ class SimLink:
             objects=objects,
             received_at=time.monotonic(),
             dropped_objects=tuple(dropped),
+            quats=quats,
+            grippers=grippers,
         )
         with self._lock:
             self._snapshot = snap

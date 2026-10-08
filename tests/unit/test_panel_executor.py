@@ -317,7 +317,7 @@ def test_an_object_off_the_board_refuses(fake_sdk):
         scene = make_scene()
         from panel_scene import apply_snapshot
         apply_snapshot(scene, SimSnapshot(
-            objects={"soda_can": (0.55, 0.95, 0.0575)},   # parked in the pool
+            objects={"soda_can": (0.55, 0.95, 0.061)},   # parked in the pool
             received_at=time.monotonic(),
         ))
         return scene
@@ -921,6 +921,26 @@ def test_a_cancelled_arc_is_reported_as_cancelled_not_as_a_failure(fake_sdk):
     out = ex.execute(a_proposal())
     assert out.status == "cancelled"
     assert "back at rest" in out.detail
+
+
+def test_a_preflight_refusal_reaches_the_operator_through_the_detail(fake_sdk):
+    """Issue #56: the worker preflights the whole arc and answers `failed` with
+    the segment, link, obstacle and model.  The panel needs no pick/place check
+    of its own: it relays the worker's detail, and the evidence travels with it.
+    """
+    detail = ("soda_can: descend to place: hand would come within -1.2 cm of "
+              "red_cube (tube hand model, margin 0.0 cm, gripper -45 deg)")
+    evidence = {"refused_before_motion": True, "segment": "descend to place",
+                "link": "hand", "obstacle": "red_cube", "clearance_m": -0.012,
+                "margin_m": 0.0, "model": "tube"}
+    worker = StubWorker({"status": "failed", "detail": detail,
+                         "evidence": evidence})
+    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml", worker=worker)
+    out = ex.execute(a_proposal())
+    assert out.status == "failed"
+    assert out.detail == detail
+    assert out.evidence["refused_before_motion"] is True
+    assert out.evidence["obstacle"] == "red_cube" and out.evidence["model"] == "tube"
 
 
 # ---------------------------------------------------------------------------

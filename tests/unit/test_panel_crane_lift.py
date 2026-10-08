@@ -1,0 +1,251 @@
+"""Issue #55: the crane lift reaches the panel (lift_object).
+
+Focused on the joins, not on the arm logic (test_crane_grasp_alignment.py):
+the simulator link carries what the grasp needs (orientation, grip force),
+the request maps onto the ability and reads back, the motion process gets
+live feedback over its existing pipe without a socket of its own, a missing
+feed is treated as stale (which halts), and the panel judges a lift by its
+measured criteria rather than by "the motion finished".
+"""
+
+import json
+import os
+import sys
+import textwrap
+import time
+
+_HERE = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(_HERE, "../../web"))
+sys.path.insert(0, os.path.join(_HERE, "../../src"))
+
+import motion_worker  # noqa: E402
+import panel_abilities as abilities  # noqa: E402
+from panel_executor import LIFT_CRITERIA, MotionWorker, _judge_lift  # noqa: E402
+from panel_language import Action  # noqa: E402
+from panel_sim_link import SimLink  # noqa: E402
+from tasks import Proposal  # noqa: E402
+
+
+def test_the_link_keeps_orientation_and_grip_force():
+    link = SimLink("ws://unused")
+    link._ingest_state({
+        "seq": 7, "objects": [
+            {"object_id": "red_cube", "pos_xyz": [0.43, 0.0, 0.77],
+             "quat_wxyz": [1.0, 0.0, 0.0, 0.0]},
+            {"object_id": "soda_can", "pos_xyz": [0.5, 0.9, 0.06],
+             "quat_wxyz": [float("nan"), 0.0, 0.0, 0.0]}],
+        "grippers": [{"side": "right", "grip_force_n": 0.25, "grasping": False},
+                     {"side": "left", "grip_force_n": float("inf")}]})
+    snap = link.snapshot()
+    assert snap.quats == {"red_cube": (1.0, 0.0, 0.0, 0.0)}   # NaN dropped, not identity
+    assert snap.grippers == {"right": {"grip_force_n": 0.25, "grasping": False}}
+    assert snap.objects["soda_can"] == (0.5, 0.9, 0.06)       # positions unchanged
+
+
+def test_the_request_maps_onto_the_lift_and_reads_back():
+    m = abilities.match("pick up the red cube and put it back")
+    assert m.name == "lift_object" and m.slots[abilities.SLOT_OBJECT] == "red cube"
+    assert abilities.REGISTRY["lift_object"].end_posture == "present"
+    act = Action(ability="lift_object", arguments={abilities.SLOT_OBJECT: "red cube"})
+    ok, why = act.reads_back()
+    assert ok, why
+    # pointing is unchanged
+    assert abilities.match("point to the red cube").name == "point_object"
+
+
+def test_no_forwarded_feedback_reads_as_stale(monkeypatch):
+    monkeypatch.setattr(motion_worker, "OBSERVATIONS", motion_worker.Observations())
+    observe = motion_worker._observer("red_cube")
+    assert observe().age_s > 1.0                       # halts a monitored move
+    motion_worker.OBSERVATIONS.put({
+        "object_id": "red_cube", "position": [0.43, 0.0, 0.77],
+        "quat_wxyz": [1.0, 0.0, 0.0, 0.0], "age_s": 0.01,
+        "grippers": {"right": {"grip_force_n": 0.4, "grasping": False}}})
+    o = observe()
+    assert o.position == (0.43, 0.0, 0.77) and o.grip_force_n == 0.4
+    assert o.age_s < 0.5
+    # an observation of a different object is not feedback on this one
+    assert motion_worker._observer("soda_can")().age_s > 1.0
+
+
+def test_the_parent_forwards_observations_over_the_worker_pipe(tmp_path):
+    child = tmp_path / "child.py"
+    child.write_text(textwrap.dedent("""
+        import json, sys
+        seen = 0
+        for line in sys.stdin:
+            msg = json.loads(line)
+            if "observe" in msg:
+                seen += 1
+                if seen >= 3:
+                    print(json.dumps({"result": {"status": "moved", "seen": seen,
+                                                 "last": msg["observe"]}}), flush=True)
+            elif "job" in msg:
+                print(json.dumps({"phase": "started"}), flush=True)
+    """))
+    worker = MotionWorker(argv=[sys.executable, "-u", str(child)], deadline_s=10)
+    n = {"i": 0}
+
+    def feed():
+        n["i"] += 1
+        time.sleep(0.01)
+        return {"seq": n["i"], "object_id": "red_cube"}
+    try:
+        out = worker.run({"kind": "ability"}, feed=feed)
+    finally:
+        worker.close()
+    assert out["status"] == "moved" and out["seen"] >= 3
+    assert out["last"]["object_id"] == "red_cube"
+
+
+def _proposal():
+    return Proposal(plan_id="p", plan_version=0, task_type="lift_object",
+                    target_id=None, destination=None, destination_kind="",
+                    brief_reason="", arm="right", route="CRANE_LIFT",
+                    route_version=1, object_id="red_cube", summary="lift")
+
+
+def test_a_lift_is_judged_by_its_criteria_not_by_finishing():
+    crane = {"criteria": {k: True for k, _ in LIFT_CRITERIA},
+             "lifted_and_held": {"rise_start_mm": 42.4, "rise_end_mm": 42.3,
+                                 "in_hand_slip_mm": 0.05},
+             "replaced": {"offset_from_start_mm": 0.8}}
+    assert _judge_lift(_proposal(), crane, "present", {}).status == "completed"
+    crane["criteria"]["slip_within_resolution"] = False
+    res = _judge_lift(_proposal(), crane, "present", {})
+    assert res.status == "failed" and \
+        "did not keep it from slipping more than 0.1 mm" in res.detail
+    assert res.evidence["crane"] is crane
+    stopped = _judge_lift(_proposal(), {"halt": "grip force 0.3 N"}, "present", {})
+    assert stopped.status == "failed" and "grip force" in stopped.detail
+
+
+def test_the_corrected_path_is_shown_and_kept():
+    """The measured correction, the way-out judgement and the hold are phases
+    the panel shows, and the key events stay in the evidence afterwards."""
+    shown, kept = [], []
+    on_event = motion_worker._crane_phases(shown.append, kept)
+    on_event("MEASURE", label="descent rung", rung=5, gap_error_mm=[0, 0, 0],
+             pads={"thumb_side_mm": 1, "finger_side_mm": 1})
+    on_event("CORRECTION", label="hover", iteration=1, because="finger route -1.6 mm",
+             shift_mm=[3.4, 0.4, 8.8], cumulative_mm=[3.4, 0.4, 8.8], predicted_route={})
+    on_event("WITHDRAWAL_JUDGED", ok=False, route={"route_thumb_mm": -0.46,
+                                                   "route_finger_mm": 5.65})
+    on_event("HELD", rise_end_mm=40.5, in_hand_slip_mm=1.69)
+    assert any("correcting the commanded path by (+3.4, +0.4, +8.8) mm" in p for p in shown)
+    assert any("-0.5 / 5.7 mm (NOT clear)" in p for p in shown)
+    assert any("slip in the hand 1.69 mm" in p for p in shown)
+    assert [e["kind"] for e in kept] == ["CORRECTION", "WITHDRAWAL_JUDGED", "HELD"]
+
+
+# -- the lift's evidence names the simulator's contact model (ADR-0005) ---------
+
+class _StatusLink:
+    def __init__(self, contact_model):
+        self.status = {"contact_model": contact_model}
+
+    def snapshot(self):
+        return None
+
+
+def _lift_proposal():
+    import dataclasses
+    return dataclasses.replace(_proposal(), end_posture="present")
+
+
+def _executor(contact_model):
+    from panel_executor import SimulatorExecutor
+    scene = type("Scene", (), {"objects": {}})()
+    return SimulatorExecutor(_StatusLink(contact_model), lambda: scene, "scene.yaml")
+
+
+def test_lift_evidence_carries_the_contact_model_completed_and_failed():
+    cm = {"noslip_iterations": 10, "source": "model"}
+    ex = _executor(cm)
+    crane = {"criteria": {k: True for k, _ in LIFT_CRITERIA},
+             "lifted_and_held": {}, "replaced": {}}
+    done = ex._verify_posture(_lift_proposal(), ["a"], "present", {}, crane=crane)
+    assert done.status == "completed" and done.evidence["contact_model"] == cm
+    failed = ex._verify_posture(_lift_proposal(), ["a"], "home", {}, crane={"halt": "x"})
+    assert failed.status == "failed" and failed.evidence["contact_model"] == cm
+    early = ex._with_contact_model(_proposal(), {"halted": True})
+    assert early == {"halted": True, "contact_model": cm}
+
+
+def test_lift_evidence_contact_model_is_none_when_not_advertised():
+    ex = _executor(None)
+    res = ex._verify_posture(_lift_proposal(), [], "present", {}, crane={"halt": "x"})
+    assert "contact_model" in res.evidence and res.evidence["contact_model"] is None
+
+
+def test_other_abilities_evidence_is_unchanged():
+    ex = _executor({"noslip_iterations": 10})
+    p = _proposal()
+    import dataclasses
+    p = dataclasses.replace(p, task_type="point_object")
+    assert "contact_model" not in ex._with_contact_model(p, {"x": 1})
+
+
+#: The 2026-10-07 repeatability attempt 2 outcome, abridged from its evidence:
+#: picked up, held, put back, then the withdrawal refused at the model boundary.
+_ATTEMPT_2 = {
+    "lifted_and_held": {"ok": True, "rise_start_mm": 48.95, "rise_end_mm": 48.97,
+                        "in_hand_slip_mm": 0.061},
+    "replaced": {"supported_before_open": True, "offset_from_start_mm": 3.99},
+    "withdrawal": {"clean": False, "reason": "withdrawal refused: a bounded sideways "
+                   "shift does not clear the replaced object"},
+    "halt": "withdrawal refused: a bounded sideways shift does not clear the replaced object",
+    "final": "left beside the object (withdrawal refused or stopped)",
+    "arm_state": {"joints_deg": [-70.8, -16.81, 90.45, -77.06, -39.94, 40.24, 35.58],
+                  "gripper_deg": -64.96, "motors_on": True},
+}
+
+
+def test_a_refused_withdrawal_is_reported_as_what_it_was():
+    """#55: the stopped lift used to say only 'the route stopped before present:
+    my arm is at no posture I recognise'.  Pickup and placement succeeded; the
+    withdrawal was refused; the arm is held there with its motors on."""
+    from panel_executor import _lift_stopped_detail
+    text = _lift_stopped_detail("red_cube", _ATTEMPT_2, None, "present")
+    assert "I picked up red_cube" in text and "4.9 cm" in text
+    assert "put it back on the table, 4.0 mm" in text
+    assert "refused to withdraw my hand, before moving it: a bounded sideways shift" in text
+    assert "withdrawal refused: withdrawal refused" not in text
+    assert "gripper is at -65 degrees" in text and "motors are on" in text
+    assert "needs a reset" in text
+
+
+def test_a_stopped_lift_at_a_named_posture_does_not_ask_for_a_reset():
+    from panel_executor import _lift_stopped_detail
+    crane = dict(_ATTEMPT_2, arm_state=dict(_ATTEMPT_2["arm_state"], motors_on=False))
+    text = _lift_stopped_detail("red_cube", crane, "hover", "present")
+    assert "motors are off" in text and "at hover" in text
+    assert "reset" not in text
+
+
+def test_a_lift_that_never_picked_up_says_so():
+    from panel_executor import _lift_stopped_detail
+    text = _lift_stopped_detail("red_cube", {"halt": "pad force 0.4 N before the close"},
+                                None, "present")
+    assert text.startswith("I did not lift red_cube.")
+    assert "pad force" in text and "could not read its state" in text
+
+
+def test_the_worker_reads_the_arm_state_without_commanding_it():
+    import motion_worker as W
+
+    class _J:
+        def __init__(self, p, c):
+            self.present_position, self.compliant = p, c
+
+    class _A:
+        pass
+    a = _A()
+    from reachy_ai.motion.kinematics import R_ARM_JOINTS
+    for n in R_ARM_JOINTS:
+        setattr(a, n, _J(1.0, n != "r_elbow_pitch"))
+    a.r_gripper = _J(-64.96, False)
+    st = W._arm_state(a)
+    assert st["motors_on"] is True and st["gripper_deg"] == -65.0
+    assert len(st["joints_deg"]) == 7
+    assert not any(hasattr(getattr(a, n), "goal_position") for n in R_ARM_JOINTS)

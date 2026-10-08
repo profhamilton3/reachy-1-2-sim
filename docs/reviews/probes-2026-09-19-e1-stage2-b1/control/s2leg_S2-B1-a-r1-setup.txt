@@ -1,0 +1,15 @@
+LEG S2-B1-a-r1-setup ok: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_RAISE_TO_SIDE_20260919T091738Z.json
+leg.sh exit=0
+EXPERIMENT_ACCEPTED=yes
+gate exit=0
+tail_samples=60 (last 3.0s)  max_gross_err_deg=1.0  max_spread_deg=0.0  r_gripper=-45.0 (target -45.0)
+PARKED_AT_PRESENT=yes
+tailcheck exit=0 (mode=end)
+contacts=0 (evidence on 2984/2984 states, reset_in_window=False)
+{'outcome': 'returned', 'elapsed_s': 33.247933375, 'returned': None}
+start_check: True home
+compliance: True
+phases: []
+end_pose: {'r_shoulder_pitch': -68.1, 'r_shoulder_roll': -24.7, 'r_arm_yaw': 0.1, 'r_elbow_pitch': -79.5, 'r_forearm_yaw': -0.0, 'r_wrist_pitch': 0.1, 'r_wrist_roll': 0.0, 'r_gripper': -45.0}
+recorder_logs: 6 files
+no stop marker

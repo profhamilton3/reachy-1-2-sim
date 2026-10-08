@@ -1,0 +1,4 @@
+sidecar=/Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_LOWER_TO_REST_20260919T110605Z.link.json
+evidence_ok=True contacts=0 max_displacement_mm=0.00
+EXPERIMENT_ACCEPTED=yes
+gate exit=0

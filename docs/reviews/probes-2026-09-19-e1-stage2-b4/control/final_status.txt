@@ -1,0 +1,11 @@
+date_utc=2026-09-19T07:32:49Z
+{"backend": "mujoco-remote", "frames_stale": false, "left_age_ms": 49, "right_age_ms": 46, "left_seq": 47536, "right_seq": 47536}
+--- final state ---
+{'sim_step': 486610, 'seq': 430997, 'cmd_seq': 27657}
+{'r_shoulder_pitch': -69.0, 'r_shoulder_roll': -24.8, 'r_arm_yaw': 0.1, 'r_elbow_pitch': -79.7, 'r_forearm_yaw': -0.0, 'r_wrist_pitch': 0.1, 'r_wrist_roll': -0.0, 'r_gripper': -45.0, 'r_antenna': -0.0}
+compliant: {False}
+--- resets recorded ---
+18
+--- clients ---
+4
+       0

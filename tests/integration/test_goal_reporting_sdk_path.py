@@ -608,3 +608,46 @@ def test_kinematic_backend_through_the_same_path():
         assert st.compliant.value is False
     finally:
         rig.server.stop(0)
+
+
+# ── #56: the streamed path the pick/place arc flies ──────────────────────────
+
+def test_streamed_trajectory_delivers_every_target_on_all_seven_joints(make_rig):
+    """`primitives.execute_trajectory` -- the single-shot streamed path every
+    pick/place arc segment uses -- must deliver every step's target on every
+    one of the seven arm joints, not only the first joint written each step.
+
+    The PR #152 simulator trial (2026-10-06) ran an image whose baked bridge
+    predated #141: only r_shoulder_pitch followed the plan, and the targets for
+    the other six were the measured pose echoed back.  Each step here moves all
+    seven joints by a different amount, under sag, so an echo or a dropped
+    write cannot match by accident."""
+    from reachy_ai.motion import primitives as P
+    from reachy_ai.motion.kinematics import R_ARM_JOINTS
+
+    rig = make_rig(bias=SAG)
+    reachy = rig.client()
+    reachy.turn_on("r_arm")
+    time.sleep(0.3)
+    rig_motion.sdk_move(reachy.r_arm, HOVERISH, 1.0)
+    time.sleep(0.3)
+
+    deltas = (1.5, -1.1, 0.9, -1.3, 2.1, -0.7, 0.5)          # deg per step
+    start = [HOVERISH[n] for n in R_ARM_JOINTS]
+    traj = [[s + (k + 1) * d for s, d in zip(start, deltas)] for k in range(12)]
+
+    a = _ncmd(rig.stub)
+    P.execute_trajectory(reachy.r_arm, traj, R_ARM_JOINTS, rate_hz=8)
+    time.sleep(0.3)
+    cmds = _commands(rig.stub, a)
+    assert cmds, "no commands reached the native side"
+
+    arm7 = [IDX[n] for n in R_ARM_JOINTS]
+    missing = [(k, n) for k, step in enumerate(traj)
+               for n, i, v in zip(R_ARM_JOINTS, arm7, step)
+               if not any(abs(c["target"][i] - math.radians(v)) < TOL for c in cmds)]
+    assert not missing, (f"{len(missing)} of {len(traj) * 7} streamed targets never reached "
+                         f"the simulator, e.g. {missing[:5]}")
+    last = cmds[-1]["target"]
+    assert all(abs(last[i] - math.radians(v)) < TOL for i, v in zip(arm7, traj[-1]))
+    assert _echoes(rig.stub, cmds) == 0, "a measured position was sent back as a target"

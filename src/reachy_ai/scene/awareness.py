@@ -538,7 +538,12 @@ class SceneModel:
         surface_margin: float = 0.005,
         ignore: Sequence[str] = (),
     ) -> Optional[CollisionViolation]:
-        """Return a CollisionViolation if a gripper point is unsafe, else None.
+        """Return a CollisionViolation if a gripper PAD POINT is unsafe, else None.
+
+        THE PAD-POINT RULE, NOT A CLEARANCE MODEL.  It asks only about one
+        point; it knows nothing of the forearm, the upper arm, the hand or any
+        manipulable object (``CartesianPlanner.check_arm_path`` and
+        ``clearances`` are the whole-arm checks).
 
         Two checks:
           * below_table  — point is under the tabletop surface within its XY
@@ -578,13 +583,25 @@ class SceneModel:
         ignore: Sequence[str] = (),
         surface_margin: float = 0.005,
     ) -> List[CollisionViolation]:
-        """Check every point of a planned trajectory; return all violations."""
+        """Check every PAD POINT of a planned trajectory; return all violations.
+
+        The pad-point rule of ``check_point`` applied along a path: the pad
+        against the tabletop surface and static boxes only.  It is NOT a
+        clearance model and does not see any other part of the arm.
+        """
         out: List[CollisionViolation] = []
         for p in points:
             v = self.check_point(p, surface_margin=surface_margin, ignore=ignore)
             if v is not None:
                 out.append(v)
         return out
+
+    def copy(self) -> "SceneModel":
+        """An independent copy: poses can be updated on it without touching
+        this model.  Objects are immutable, so copying the dict is enough."""
+        other = SceneModel(self.frame_id, [], self._table_id)
+        other._objects = dict(self._objects)
+        return other
 
     # ── Keeping the model honest ──────────────────────────────────────────────
 

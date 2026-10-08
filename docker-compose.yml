@@ -34,6 +34,18 @@ services:
       # and every click after that went nowhere with the status bar still
       # reading "connected".
       - ./web:/opt/web
+      # And the joint-command path: the gRPC server the SDK talks to and the
+      # bridge to the native server.  They are COPYed in at build time and were
+      # NOT mounted, so a container on an image built before #141 kept the
+      # pre-#141 bridge -- goal_position reported as the present pose, the
+      # requested stream fields ignored -- however current src/ was.  The PR
+      # #152 trial ran exactly that: every arc step delivered r_shoulder_pitch
+      # and echoed the measured pose back as the target for the other six
+      # joints.  Read-only: nothing in the container edits them.
+      - ./fake_reachy_server.py:/opt/fake_reachy_server.py:ro
+      - ./mujoco_remote_backend.py:/opt/mujoco_remote_backend.py:ro
+      - ./kinematic_backend.py:/opt/kinematic_backend.py:ro
+      - ./reset_watcher.py:/opt/reset_watcher.py:ro
       # The robot MJCF, read-only.  `model_sha256` MEANS this file: the panel
       # hashes it to say which robot an episode was recorded against, even
       # though it never loads it (it talks to the simulator over the SDK

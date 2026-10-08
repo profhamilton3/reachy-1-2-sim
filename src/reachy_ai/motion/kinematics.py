@@ -17,14 +17,22 @@ unit-tested separately on the host.
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 import functools
 import logging
 import math
+from dataclasses import dataclass
+from enum import Enum
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..scene.awareness import ARM_BASE_IN_WORLD, SceneModel
+from ..scene.awareness import (
+    ARM_BASE_IN_WORLD,
+    SceneModel,
+    segment_object_distance,
+)
 
 log = logging.getLogger(__name__)
 
@@ -345,7 +353,9 @@ def hand_radius(gripper_deg: Optional[float] = None,
     return max(_hand_radius_at(g, r) for g in grippers for r in rolls)
 
 
-# Joint travel, in degrees, read from the MJCF `range` attributes.
+# Joint travel, in degrees: the MJCF `range` attributes (radians), converted
+# exactly.  The simulator's actuator ctrlrange is the same interval, and a
+# command outside it is clipped there silently.
 #
 # THE IK DOES NOT ENFORCE THESE and the SDK exposes no `limits` on a joint, so
 # nothing was checking them.  Measured cost: solve() happily returned
@@ -354,15 +364,25 @@ def hand_radius(gripper_deg: Optional[float] = None,
 # its target by 20 cm — while every clearance check passes, because the guard is
 # asked about the pose that was COMMANDED and the arm never went there.
 #
+# The same failure at small scale (#55, 2026-10-07): these limits were rounded
+# (+/-90 for a +/-1.570 rad stop, i.e. +/-89.954) and the check allowed 0.5 deg
+# beyond them, so the crane plan commanded r_arm_yaw 90.1-90.5 and
+# r_wrist_pitch up to 45.3 (stop 44.977).  The simulator clipped both, and the
+# code's predictions were about poses the arm was never given.
+#
 # Left/right differ only in the sign of the roll and yaw axes; mirrored below.
+_MJCF_RANGE_RAD: Dict[str, Tuple[float, float]] = {
+    "r_shoulder_pitch": (-2.618, 1.57),
+    "r_shoulder_roll": (-3.14, 0.174),
+    "r_arm_yaw": (-1.57, 1.57),
+    "r_elbow_pitch": (-2.182, 0.0),
+    "r_forearm_yaw": (-1.745, 1.745),
+    "r_wrist_pitch": (-0.785, 0.785),
+    "r_wrist_roll": (-0.785, 0.785),
+}
 JOINT_LIMITS_DEG: Dict[str, Tuple[float, float]] = {
-    "r_shoulder_pitch": (-150.0, 90.0),
-    "r_shoulder_roll": (-180.0, 10.0),
-    "r_arm_yaw": (-90.0, 90.0),
-    "r_elbow_pitch": (-125.0, 0.0),
-    "r_forearm_yaw": (-100.0, 100.0),
-    "r_wrist_pitch": (-45.0, 45.0),
-    "r_wrist_roll": (-45.0, 45.0),
+    name: (math.degrees(lo), math.degrees(hi))
+    for name, (lo, hi) in _MJCF_RANGE_RAD.items()
 }
 
 
@@ -379,15 +399,123 @@ def joint_limits(side: str = "right") -> List[Tuple[float, float]]:
 
 
 def within_limits(joints: Sequence[float], side: str = "right",
-                  tol: float = 0.5) -> bool:
-    """True if every joint is inside its travel, allowing ``tol`` degrees.
+                  tol: float = 0.0) -> bool:
+    """True if every joint is inside its travel (stops included).
 
-    ``tol`` exists because a solution sitting exactly on a stop is reachable in
-    principle and unreachable in practice; half a degree keeps the check from
-    rejecting poses the arm can actually hold.
+    This judges poses that will be COMMANDED, so it allows nothing beyond a
+    stop: the simulator clips such a command and the arm is never given the
+    pose that was checked.  ``tol`` (degrees) remains for callers judging a
+    MEASURED reading, which can sit a little past a stop under load; it must
+    not be used to accept a command.
     """
     return all(lo - tol <= v <= hi + tol
                for v, (lo, hi) in zip(list(joints)[:7], joint_limits(side)))
+
+
+def _rotvec(R: np.ndarray) -> np.ndarray:
+    """Rotation vector (axis * angle, radians) of a rotation matrix."""
+    c = max(-1.0, min(1.0, (float(np.trace(R)) - 1.0) / 2.0))
+    a = math.acos(c)
+    if a < 1e-9:
+        return np.zeros(3)
+    w = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+    return a * w / (2.0 * math.sin(a))
+
+
+def pad_point(joints: Sequence[float], side: str = "right") -> np.ndarray:
+    """World position of the tool (pad) point -- the point solve() targets."""
+    _s, _e, wrist, R = link_frames(joints, side)
+    return wrist - R @ _TOOL
+
+
+#: The re-solve drives position this close before stopping, whatever the
+#: caller's acceptance tolerance: it must not stop at "good enough" and leave
+#: the attitude to absorb the rest.
+_RESOLVE_CONVERGED_M = 2e-4
+
+#: Attitude weight (m per rad) in the planner's re-solve: strong, so the
+#: solver prefers holding the attitude to closing the last millimetres.
+_RESOLVE_ROT_WEIGHT_M = 0.5
+
+#: A re-solved pose must hold the requested hand attitude to this (degrees).
+#: The re-solve exists to respect the stops, not to change the attitude the
+#: caller asked for; a pose that only reaches the point by turning the hand is
+#: a different solution, and is rejected rather than reported as this one.
+RESOLVE_MAX_ATTITUDE_DEG = 1.0
+
+
+def attitude_error_deg(joints: Sequence[float], rot_target: np.ndarray,
+                       side: str = "right") -> float:
+    """Angle (degrees) between the hand rotation at ``joints`` and ``rot_target``."""
+    R = link_frames(joints, side)[3]
+    return math.degrees(float(np.linalg.norm(_rotvec(np.asarray(rot_target) @ R.T))))
+
+
+def resolve_within_limits(residual, q0: Sequence[float], side: str = "right",
+                          tol_m: float = 1e-3, iters: int = 300,
+                          damping: float = 1e-6) -> Tuple[List[float], float]:
+    """Re-solve a pose INSIDE the joint travel, on the local kinematic chain.
+
+    The IK service minimises without the joints' stops, so near a stop it
+    answers with a pose a little past it.  Clipping that answer moves the hand
+    somewhere nobody checked; this instead solves again with the stops as hard
+    bounds.  ``residual(q)`` returns the error vector to drive to zero: its
+    first three entries are a position error in metres (the target), the rest
+    a weighted orientation error (soft -- the attitude gives way as far as the
+    stops require).  Projected damped least squares from ``q0`` clipped into
+    the travel; a joint resting on a stop whose step points outward is frozen
+    for that step.  Returns (joints, position error in m); the caller decides
+    whether that error, and any attitude drift, is acceptable.
+    """
+    lims = joint_limits(side)
+    lo = np.array([a for a, _ in lims])
+    hi = np.array([b for _, b in lims])
+    q = np.clip(np.asarray(list(q0)[:7], dtype=float), lo, hi)
+    r = np.asarray(residual(q), dtype=float)
+    h = 1e-3                                       # degrees
+    for _ in range(iters):
+        if float(np.linalg.norm(r[:3])) < min(0.5 * tol_m, _RESOLVE_CONVERGED_M):
+            break
+        J = np.zeros((len(r), 7))
+        for i in range(7):
+            dq = q.copy()
+            dq[i] += h
+            J[:, i] = -(np.asarray(residual(dq)) - r) / h
+        free = np.ones(7, dtype=bool)
+        step = np.zeros(7)
+        for _k in range(3):
+            Jf = J[:, free]
+            s = np.linalg.solve(Jf.T @ Jf + damping * np.eye(int(free.sum())), Jf.T @ r)
+            step = np.zeros(7)
+            step[free] = s
+            push = ((q <= lo + 1e-9) & (step < 0)) | ((q >= hi - 1e-9) & (step > 0))
+            if not push.any():
+                break
+            free &= ~push
+        alpha, moved = 1.0, False
+        while alpha > 1e-3:
+            qn = np.clip(q + alpha * step, lo, hi)
+            rn = np.asarray(residual(qn), dtype=float)
+            if np.linalg.norm(rn) < np.linalg.norm(r):
+                q, r, moved = qn, rn, True
+                break
+            alpha *= 0.5
+        if not moved:
+            break
+    return [float(v) for v in q], float(np.linalg.norm(r[:3]))
+
+
+def pad_residual(pad_target: Sequence[float], rot_target: np.ndarray,
+                 side: str = "right", rot_weight_m: float = 0.05):
+    """Residual for resolve_within_limits: pad position, soft attitude."""
+    pt = np.asarray(pad_target, dtype=float)
+    Rt = np.asarray(rot_target, dtype=float)
+
+    def f(q):
+        _s, _e, wrist, R = link_frames(q, side)
+        return np.concatenate([pt - (wrist - R @ _TOOL),
+                               rot_weight_m * _rotvec(Rt @ R.T)])
+    return f
 
 
 def link_capsules(joints: Sequence[float], side: str = "right",
@@ -519,6 +647,91 @@ class CollisionError(RuntimeError):
     """Raised when a planned path would collide with a static obstacle."""
 
 
+# ── Whole-arm path check (issue #56) ──────────────────────────────────────────
+
+#: Largest joint-space spacing, in degrees, between two consecutive samples of
+#: ``CartesianPlanner.check_arm_path``.  The check is SAMPLED at this spacing
+#: along the commanded joint sequence; it is geometry only and it is not a
+#: swept check (see docs/adr/0004-whole-arm-arc-preflight.md).
+ARM_PATH_MAX_SAMPLE_STEP_DEG = 2.0
+
+#: Clearance below which ``check_arm_path`` refuses, in metres.  Zero margin,
+#: the same value as the forearm-footprint guard (``rig_routes.
+#: FOOTPRINT_MARGIN``; a test pins the two equal).  Named so the choice is
+#: visible, not because it has been validated: nothing here relaxes it.
+WHOLE_ARM_MARGIN_M = 0.0
+
+#: The only hand model the whole-arm preflight uses.  Every refusal reports it.
+WHOLE_ARM_HAND_MODEL = "tube"
+
+
+class ArmClearanceError(CollisionError):
+    """A planned arm path would bring a link inside an obstacle.
+
+    Carries everything an operator needs to act on: which segment, which arm
+    link, which obstacle, by how much, under which hand model and aperture.
+    """
+
+    def __init__(self, *, segment: str, link: str, obstacle: str,
+                 clearance_m: float, margin_m: float, model: str,
+                 gripper_deg: Optional[float], pose_index: int) -> None:
+        self.segment = segment
+        self.link = link
+        self.obstacle = obstacle
+        self.clearance_m = clearance_m
+        self.margin_m = margin_m
+        self.model = model
+        self.gripper_deg = gripper_deg
+        self.pose_index = pose_index
+        grip = "widest" if gripper_deg is None else f"{gripper_deg:.0f} deg"
+        super().__init__(
+            f"{segment}: {link} would come within {clearance_m * 100:.1f} cm "
+            f"of {obstacle} ({model} hand model, margin "
+            f"{margin_m * 100:.1f} cm, gripper {grip})")
+
+
+class IKPolicy(str, Enum):
+    """How ``plan_segment`` picks an IK solution at each point.
+
+    Required, with no default, so a caller can never inherit one by accident.
+    """
+    FAST = "fast"                    # the original rule, unchanged
+    MAX_CLEARANCE = "max_clearance"  # solve(maximise_clearance=True) per point
+
+
+@dataclass(frozen=True)
+class TargetContact:
+    """How ``check_arm_path`` treats the object being moved.
+
+    ``hand_contact`` is True ONLY inside the interim contact window (descent to
+    hover, grasp, carry, release and retract): the target may then overlap the
+    HAND capsule.  It is checked against the upper arm and forearm always.
+    This does NOT protect against unintended hand-target contact -- see
+    docs/adr/0004-whole-arm-arc-preflight.md ("Deferred to #55").
+
+    ``carried`` makes the target's centre follow each sample's planned pad
+    point; ``center`` pins it at a fixed pose (for example, where it was
+    placed).  With neither, the scene's own pose is used.  The two are
+    mutually exclusive.
+    """
+    object_id: str
+    hand_contact: bool
+    carried: bool = False
+    center: Optional[XYZ] = None
+
+    def __post_init__(self) -> None:
+        if self.carried and self.center is not None:
+            raise ValueError("TargetContact: `carried` and `center` are "
+                             "mutually exclusive")
+
+
+def sample_count(q_from: Sequence[float], q_to: Sequence[float]) -> int:
+    """Samples along q_from -> q_to under the ARM_PATH_MAX_SAMPLE_STEP_DEG rule."""
+    widest = max(abs(float(b) - float(a))
+                 for a, b in zip(list(q_from)[:7], list(q_to)[:7]))
+    return max(2, math.ceil(widest / ARM_PATH_MAX_SAMPLE_STEP_DEG) + 1)
+
+
 class CartesianPlanner:
     """Plans one-arm joint trajectories for Cartesian gripper targets.
 
@@ -561,6 +774,24 @@ class CartesianPlanner:
         if prefer is not None:
             pairs = [prefer] + [c for c in pairs if c != prefer]
         return pairs
+
+    def _resolve_inside(self, R: np.ndarray, pad: np.ndarray,
+                        q_service: Sequence[float]) -> Optional[List[float]]:
+        """The service's out-of-travel answer, re-solved inside the travel.
+
+        Accepted only as the SAME solution the service was asked for: the pad
+        point within ``tol`` and the hand attitude within
+        ``RESOLVE_MAX_ATTITUDE_DEG`` of the swept orientation ``R``.  Position
+        alone is not enough -- a pose that reaches the point by turning the
+        hand is another orientation, which the sweep tries on its own terms.
+        Clearances are not judged here: callers check the returned joints."""
+        q, err = resolve_within_limits(
+            pad_residual(pad, R, self.side, rot_weight_m=_RESOLVE_ROT_WEIGHT_M),
+            q_service, self.side, tol_m=self._tol)
+        if (err <= self._tol and within_limits(q, self.side)
+                and attitude_error_deg(q, R, self.side) <= RESOLVE_MAX_ATTITUDE_DEG):
+            return q
+        return None
 
     def solve(
         self,
@@ -628,9 +859,13 @@ class CartesianPlanner:
                 continue
             # A pose outside the joint travel is not a solution.  The arm
             # clamps it, ends up somewhere else, and every downstream check is
-            # then answering questions about a pose that never existed.
+            # then answering questions about a pose that never existed.  So it
+            # is re-solved inside the travel (never clipped), and the FK check
+            # below judges the re-solved pose like any other.
             if not within_limits(q, self.side):
-                continue
+                q = self._resolve_inside(R, pad, q)
+                if q is None:
+                    continue
             F = self._arm.forward_kinematics(q)
             pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
             err = float(np.linalg.norm(pad_fk - pad))
@@ -673,7 +908,9 @@ class CartesianPlanner:
             except Exception:
                 continue
             if not within_limits(q, self.side):
-                continue
+                q = self._resolve_inside(R, pad, q)
+                if q is None:
+                    continue
             F = self._arm.forward_kinematics(q)
             pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
             err = float(np.linalg.norm(pad_fk - pad))
@@ -711,7 +948,15 @@ class CartesianPlanner:
     def check_collisions(
         self, points: Sequence[XYZ], ignore: Sequence[str] = ()
     ) -> None:
-        """Raise CollisionError if any point violates the scene collision model."""
+        """Raise CollisionError if a PAD POINT violates the pad-point rule.
+
+        THIS IS NOT A CLEARANCE MODEL.  It asks only whether the gripper pad
+        point goes below the tabletop surface or inside a static box
+        (``SceneModel.check_point``).  It says nothing about the forearm, the
+        upper arm, the hand, or any manipulable object; that is
+        ``check_arm_path``'s job, and the arm against the tabletop is still
+        covered by this pad-point rule alone.
+        """
         if self._scene is None:
             return
         violations = self._scene.validate_path(points, ignore=ignore)
@@ -836,6 +1081,109 @@ class CartesianPlanner:
         b = np.asarray(list(q_to)[:7], dtype=float)
         return list(a + frac * (b - a)), frac, c
 
+    def with_scene(self, scene: Optional[SceneModel]) -> "CartesianPlanner":
+        """A planner identical to this one but guarding ``scene``.
+
+        Shares the arm and every setting; never mutates either planner or the
+        scenes involved.
+        """
+        other = copy.copy(self)
+        other._scene = scene
+        return other
+
+    def check_arm_path(
+        self,
+        joints_seq: Sequence[Sequence[float]],
+        *,
+        segment: str,
+        gripper_deg: Optional[float],
+        target: Optional[TargetContact] = None,
+    ) -> None:
+        """Refuse a joint sequence whose WHOLE ARM would hit an object.
+
+        ``joints_seq`` is every pose the arm will be commanded through,
+        starting pose included, in order.  Between each consecutive pair the
+        joint-space line is sampled so that no two samples are more than
+        ``ARM_PATH_MAX_SAMPLE_STEP_DEG`` apart in any joint.  That is a SAMPLED
+        check of GEOMETRY ONLY: it says nothing about how far the realised
+        path strays from the commanded one.
+
+        What is checked, with ``hand="tube"`` and ``WHOLE_ARM_MARGIN_M``:
+
+          * every obstacle in ``scene.obstacle_ids(include_static=True)`` --
+            the manipulable objects and the rig rails, NOT the tabletop --
+            minus the target, against all three links;
+          * the target (``TargetContact``) against the upper arm and forearm
+            always, and against the hand unless ``hand_contact`` is True.
+
+        The tabletop is NOT covered here: it keeps the pad-point rule of
+        ``check_collisions`` (see its docstring).
+
+        Raises ``ArmClearanceError`` for the worst (object, link) pair when it
+        is below the margin.  With no scene (``scene is None``) nothing is
+        checked, exactly like every other clearance method on this class.
+        The shared SceneModel is never mutated.
+        """
+        if self._scene is None:
+            return
+        scene = self._scene
+        seq = [list(q)[:7] for q in joints_seq]
+        if not seq:
+            return
+        skip = {target.object_id} if target is not None else set()
+        ids = [oid for oid in scene.obstacle_ids(include_static=True)
+               if oid not in skip]
+        tgt_obj = None
+        if target is not None:
+            tgt_obj = scene.get(target.object_id)
+            if not tgt_obj.collides:
+                tgt_obj = None
+
+        # (distance, obstacle, link, pose_index)
+        worst: Optional[Tuple[float, str, str, int]] = None
+
+        def consider(d: float, oid: str, link: str, idx: int) -> None:
+            nonlocal worst
+            if worst is None or d < worst[0]:
+                worst = (d, oid, link, idx)
+
+        def samples():
+            if len(seq) == 1:
+                yield 0, seq[0]
+                return
+            for i, (u, v) in enumerate(zip(seq, seq[1:])):
+                for q in joint_path(u, v, sample_count(u, v)):
+                    yield i, q
+
+        for idx, q in samples():
+            caps = link_capsules(q, self.side, gripper_deg,
+                                 hand=WHOLE_ARM_HAND_MODEL)
+            for oid, c in scene.clearances(caps, ids=ids).items():
+                consider(c.distance, oid, c.link, idx)
+            if tgt_obj is None:
+                continue
+            if target.carried:
+                _s, _e, wrist, R = link_frames(q, self.side)
+                pad = wrist - R @ _TOOL
+                centre = (float(pad[0]), float(pad[1]), float(pad[2]))
+            elif target.center is not None:
+                centre = target.center
+            else:
+                centre = tgt_obj.center
+            moved = dataclasses.replace(tgt_obj, center=centre)
+            for link, p0, p1, radius in caps:
+                if link == "hand" and target.hand_contact:
+                    continue
+                d, _at = segment_object_distance(moved, p0, p1, radius)
+                consider(d, target.object_id, link, idx)
+
+        if worst is not None and worst[0] < WHOLE_ARM_MARGIN_M:
+            d, oid, link, idx = worst
+            raise ArmClearanceError(
+                segment=segment, link=link, obstacle=oid, clearance_m=d,
+                margin_m=WHOLE_ARM_MARGIN_M, model=WHOLE_ARM_HAND_MODEL,
+                gripper_deg=gripper_deg, pose_index=idx)
+
     def plan_segment(
         self,
         start_xyz: XYZ,
@@ -843,18 +1191,57 @@ class CartesianPlanner:
         steps: int,
         seed: Sequence[float],
         ignore: Sequence[str] = (),
+        *,
+        ik: IKPolicy,
+        gripper_deg: Optional[float] = None,
+        target: Optional[TargetContact] = None,
+        segment: str = "segment",
     ) -> Tuple[List[List[float]], List[XYZ]]:
-        """Plan a collision-checked Cartesian segment.
+        """Plan a Cartesian segment, checked against the pad AND the whole arm.
 
-        Returns (joint_trajectory, cartesian_points).  Warm-starts each IK call
-        from the previous solution.  Raises CollisionError/UnreachableError.
+        Returns (joint_trajectory, cartesian_points).  Raises
+        CollisionError / ArmClearanceError / UnreachableError.
+
+        ``ik`` is REQUIRED and has no default (omitting it is a TypeError; a
+        value that is not an ``IKPolicy`` is a ValueError):
+
+          * ``IKPolicy.FAST`` -- today's rule, bit for bit: warm-start each IK
+            call from the previous solution and carry the winning orientation
+            from point to point.
+          * ``IKPolicy.MAX_CLEARANCE`` -- the existing
+            ``solve(maximise_clearance=True)`` at every point.  Measured
+            offline on the demo arc it is about 37x slower (135 s against
+            3.7 s to plan one arc) and produced joint steps of up to 86 deg
+            mid-segment, for an improvement of only 0.4-1.0 cm on the legs
+            that failed.  NOTHING selects it automatically and no production
+            caller selects it: automatic replanning is deferred.
+
+        Order of operations: interpolate; ``check_collisions`` (pad point vs
+        the tabletop and static boxes -- NOT a clearance model); solve every
+        point under ``ik``; ``check_arm_path`` over [seed] + trajectory.  The
+        whole-arm check runs whenever there is a scene; there is no switch to
+        turn it off.
+
+        ``gripper_deg=None`` means the widest hand.  ``target`` and ``segment``
+        are passed to ``check_arm_path``.
         """
+        if not isinstance(ik, IKPolicy):
+            raise ValueError(f"ik must be an IKPolicy member, got {ik!r}")
         cart = self.interpolate(start_xyz, end_xyz, steps)
         self.check_collisions(cart, ignore=ignore)
         traj: List[List[float]] = []
         q = list(seed)
-        prefer: Optional[Tuple[float, float]] = None
-        for p in cart:
-            q, prefer = self.solve(p, seed=q, prefer=prefer, return_orientation=True)
-            traj.append(q)
+        if ik is IKPolicy.FAST:
+            prefer: Optional[Tuple[float, float]] = None
+            for p in cart:
+                q, prefer = self.solve(p, seed=q, prefer=prefer,
+                                       return_orientation=True)
+                traj.append(q)
+        else:
+            for p in cart:
+                q = self.solve(p, seed=q, maximise_clearance=True,
+                               from_joints=q, gripper_deg=gripper_deg)
+                traj.append(q)
+        self.check_arm_path([list(seed)] + traj, segment=segment,
+                            gripper_deg=gripper_deg, target=target)
         return traj, cart

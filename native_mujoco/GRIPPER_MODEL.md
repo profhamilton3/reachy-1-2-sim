@@ -35,6 +35,20 @@ force sensors:
 
 Exposed in the `state` message as `force_sensors: [{uid, force}]`.
 
+`grip_force_n` is therefore a sum over **every contact point of both pads**: for
+the reported 2026-10-06 hold it is about 250 N summed (about 125 N per side;
+an earlier "~380 N" figure was wrong). Physical force realism is unvalidated.
+
+## Contact model: no-slip (ADR-0005)
+
+The model file runs MuJoCo's no-slip post-processing pass by default
+(`noslip_iterations="10"`, tolerance 1e-6) because soft contacts otherwise let
+a held cube creep within the grasp (#55). Override with
+`--noslip-iterations N` (0..50; 0 = previous behaviour). Recordings made with
+0 and 10 are different physics configurations (`physics_profile_id`). The
+release/opening behaviour under no-slip is an open item, and none of this is
+physical-robot validation. See `docs/adr/0005-mujoco-noslip-contact-model.md`.
+
 ## Grasp detection
 
 A gripper is **grasping** when the same object geom is in contact with *both* its

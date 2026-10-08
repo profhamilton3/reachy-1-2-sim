@@ -91,7 +91,7 @@ def on_cell(scene, name, z_offset=0.03):
     return (c.x, c.y, c.top_z + z_offset)
 
 
-IN_POOL = (0.55, 0.95, 0.0575)      # where the pool scene parks objects
+IN_POOL = (0.55, 0.95, 0.061)      # where the pool scene parks objects
 
 
 def plan(scene, text, answers=()):

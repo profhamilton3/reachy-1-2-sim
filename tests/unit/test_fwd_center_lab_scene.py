@@ -473,7 +473,7 @@ class TestSortDestinations:
         assert any(c.startswith("nonrecyclable.") for c in classes)
 
     def test_sort_items_rest_on_the_board(self, doc):
-        for oid, half in (("soda_can", 0.115 / 2), ("foam_block", 0.05 / 2)):
+        for oid, half in (("soda_can", 0.122 / 2), ("foam_block", 0.05 / 2)):
             z = self._obj(doc, oid)["pose"]["position"][2]
             assert z == pytest.approx(self.SURFACE_Z + half, abs=1e-4), oid
 

@@ -38,6 +38,13 @@ from actuator import ActuatorController
 from gripper import GripperModel
 from joint_map import JOINT_TABLE, NUM_JOINTS
 from contact_accumulator import ContactAccumulator
+from contact_model import (
+    NOSLIP_ITERATIONS_MAX,
+    apply_contact_model,
+    describe_contact_model,
+    physics_profile_id,
+    validate_noslip_iterations,
+)
 from objects import ObjectTracker
 from protocol import (
     PROTOCOL_VERSION,
@@ -495,6 +502,7 @@ class ReachyMujocoServer:
         effects: Optional[EffectConfig] = None,
         record_dir: Optional[str] = None,
         enable_distortion: bool = False,
+        noslip_iterations: Optional[int] = None,
     ) -> None:
         self._calibration = calibration
         self._enable_distortion = enable_distortion
@@ -555,6 +563,11 @@ class ReachyMujocoServer:
         else:
             log.info("Loading model: %s", model_path)
             self._model = mujoco.MjModel.from_xml_path(model_path)
+
+        # Contact model (ADR-0005): apply any override before anything uses
+        # the model, then report the EFFECTIVE setting.
+        self._contact_model = apply_contact_model(self._model, noslip_iterations)
+        log.info(describe_contact_model(self._contact_model))
 
         # Apply calibration intrinsics (fov_y) to model cameras.
         if self._calibration is None:
@@ -979,7 +992,7 @@ class ReachyMujocoServer:
             num_joints=NUM_JOINTS,
             # Advertised so a client can tell an arbitrating server from an
             # older one rather than assuming its lease request was honoured.
-            capabilities={"execution_lease": True},
+            capabilities=self._hello_capabilities(),
         )
         await ws.send(ack.encode())
         self._connected_ws = ws
@@ -1167,6 +1180,15 @@ class ReachyMujocoServer:
             self._frame_qs.pop(conn_id, None)
             log.info("Handler exited for %s", addr)
 
+    def _hello_capabilities(self) -> dict:
+        """What the handshake advertises (older clients ignore unknown keys)."""
+        return {
+            "execution_lease": True,
+            # The EFFECTIVE contact model (ADR-0005): clients and recordings
+            # can tell no-slip on from off without guessing.
+            "contact_model": dict(self._contact_model),
+        }
+
     def _build_recorder_manifest(self) -> dict:
         """Build a provenance manifest with actual model/scene paths and versions.
 
@@ -1204,6 +1226,8 @@ class ReachyMujocoServer:
             "depth_enabled": self._enable_depth,
             "seg_enabled": self._enable_seg,
             "contacts_tracked": bool(self._record_contacts),
+            "contact_model": dict(self._contact_model),
+            "physics_profile_id": physics_profile_id(self._contact_model),
             "effects": {
                 "blur_sigma": self._effects.blur_sigma,
                 "noise_std": self._effects.noise_std,
@@ -1272,6 +1296,11 @@ def main() -> None:
     # R12-602: sensor effects
     ap.add_argument("--effects", default=None,
                     help="sensor effect config YAML file (R12-602)")
+    ap.add_argument("--noslip-iterations", type=validate_noslip_iterations,
+                    default=None, metavar="N",
+                    help="override the model file's MuJoCo no-slip iterations "
+                         f"(0..{NOSLIP_ITERATIONS_MAX}; 0 = previous behaviour, "
+                         "no no-slip pass; default: model file value) (ADR-0005)")
     # R12-603: recording
     ap.add_argument("--record", default=None, metavar="DIR",
                     help="record states+commands to timestamped run dir under DIR (R12-603)")
@@ -1304,6 +1333,7 @@ def main() -> None:
         effects=effects,
         enable_distortion=args.distortion,
         record_dir=args.record,
+        noslip_iterations=args.noslip_iterations,
     )
     try:
         asyncio.run(server.run())

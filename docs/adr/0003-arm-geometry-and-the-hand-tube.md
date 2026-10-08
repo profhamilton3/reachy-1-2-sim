@@ -426,6 +426,11 @@ here.
 
 ## What is still open
 
+- **Pick/place now preflights the whole arm** (#56, implementation only; see
+  `docs/adr/0004-whole-arm-arc-preflight.md`): the tube hand model, zero
+  margin, enforced in code for the pick/place arc, with the rest of this
+  list unchanged.
+
 - **E1 (simulator)** — realised motion and clearance against the native
   MuJoCo backend, reached through the SDK bridge
   (`scripts/measure_route_clearance.py`), reporting per-link realised

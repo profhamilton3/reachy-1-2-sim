@@ -174,3 +174,17 @@ class TestTheRealVariant:
         p = {o["id"] for o in parent["objects"]}
         c = {o["id"] for o in child["objects"]}
         assert {i for i in p if i.startswith(("cell_", "rig_", "grid_"))} <= c
+
+
+@pytest.mark.parametrize("name,support_z", [
+    ("FWDCenterLabMCC", 0.740),
+    ("FWDCenterLabSiva", 0.740),
+    ("FWDCenterLabSivaPool", 0.0),
+])
+def test_confirmed_can_dimensions_and_resting_height(name, support_z):
+    """Owner dimensions survive inheritance without initial penetration."""
+    doc = load_scene(os.path.join(_REPO, "scenes", name + ".yaml"))
+    can = next(o for o in doc["objects"] if o["id"] == "soda_can")
+    assert can["geometry"]["radius"] == pytest.approx(0.033)
+    assert can["geometry"]["length"] == pytest.approx(0.122)
+    assert can["pose"]["position"][2] - 0.061 == pytest.approx(support_z)

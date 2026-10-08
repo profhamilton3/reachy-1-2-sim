@@ -1,0 +1,18 @@
+# Offline validation of the B1 wrapper copies (2026-09-19T09:03:11Z) -- scratch evidence dir, no server, no motion
+scratch: /private/tmp/claude-501/-Users-terrancehamilton-IITG-Reachy-Project/c7d33b3d-02e7-4951-9b57-2494895462c3/scratchpad/b1-offline-validate ; repo ~/reachy-1-2-sim-stage2 @ e6c30b7
+generated: e1_stage1_S2-B1-a-r1.ipynb e1_stage1_S2-B1-b-r1.ipynb e1_stage1_S2-B1-c-r1.ipynb e1_stage1_stage0-B1-s1.ipynb plan_S2-B1-a-r1.json plan_S2-B1-b-r1.json plan_S2-B1-c-r1.json plan_stage0-B1-s1.json 
+plan_*.json board/scene_rel:
+  plan_S2-B1-a-r1.json B1 scenes/e1_boards/B1_evidence.yaml ['S2-B1-a-r1-setup', 'S2-B1-a-r1-flight']
+  plan_S2-B1-b-r1.json B1 scenes/e1_boards/B1_evidence.yaml ['S2-B1-b-r1-flight']
+  plan_S2-B1-c-r1.json B1 scenes/e1_boards/B1_evidence.yaml ['S2-B1-c-r1-setup', 'S2-B1-c-r1-flight']
+  plan_stage0-B1-s1.json B1 scenes/e1_boards/B1_evidence.yaml ['stage0-B1-s1-armon']
+sessions ledger: {"B1":"s1"}
+board/scene refs in notebooks (uniq -c):
+   4 B1_evidence.yaml\
+   1 stage0-B1-s1
+   6 stage0-B1-s1-armon
+B4/pool_box literals in B1 wrappers: /Users/terrancehamilton/e1-stage2-B1-s1-2026-09-19/control/tools/s2_ledger.py:1 /Users/terrancehamilton/e1-stage2-B1-s1-2026-09-19/control/tools/s2_leg.sh:1 /Users/terrancehamilton/e1-stage2-B1-s1-2026-09-19/control/tools/s2_cycle_pre.sh:1  (only the comment line naming the B4 origin)
+s2_cycle_pre.sh refuses cycle id not naming the board: rc=9 (tested S2-B4-a-r1 with board B1)
+s2_leg.sh refuses on control/stop (rc=9) and on missing binding_ok (rc=9)
+ledger.csv header: cycle,shape,rep,session,role,leg,route,board,board_sha256,code,run_dir,log,samples,tool,identity_ok,settled_pose_ok,contacts,contacts_recorded,evidence_N_N,covered,seq_contiguous,reset_in_window,displacement_soda_can_m,displacement_foam_block_m,displacement_max_m,object_disturbance_gt_1mm,gate_accepted,tail_target,tail_mode,tail_line,tail_verdict,start_variant,droop_class,notebook_outcome,elapsed_s,compliance_waited_s,outcome
+ledger rows: 9 (9 for stage0+r1 skeleton); board column values: B1_evidence ; sha: f577fc47616ab1b4d68e0173c1adec6d1110039372f0f68bed31e7f7d6715346

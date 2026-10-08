@@ -1,0 +1,55 @@
+=== set r4 generate (2026-09-19T10:03:13Z) ===
+/Users/terrancehamilton/e1-stage2-B1-s1-2026-09-19/e1_stage1_S2-B1-a-r4.ipynb
+/Users/terrancehamilton/e1-stage2-B1-s1-2026-09-19/e1_stage1_S2-B1-b-r4.ipynb
+/Users/terrancehamilton/e1-stage2-B1-s1-2026-09-19/e1_stage1_S2-B1-c-r4.ipynb
+=== S2-B1-a-r4 (2026-09-19T10:03:13Z) ===
+reset gen=10 ack=10 resets_recorded 9->10 sim_step 229660->610
+{"settled_after_s": 16.7, "sim_step": 8330, "seq": 179402, "max_spread_deg": 0.0, "pose_deg": {"r_shoulder_pitch": -0.0, "r_shoulder_roll": 0.01, "r_arm_yaw": -0.0, "r_elbow_pitch": -0.0, "r_forearm_yaw": -0.0, "r_wrist_pitch": -0.0, "r_wrist_roll": 0.05, "r_gripper": -0.0}}
+PARKED S2-B1-a-r4-parked ok, cycle S2-B1-a-r4 stiff-zero: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_RAISE_TO_SIDE_20260919T100334Z.json
+binding_ok {'ok': True, 'provenance_ok': True, 'reasons': [], 'provenance_reasons': []}
+--- leg S2-B1-a-r4-setup (2026-09-19T10:04:13Z)
+EXPERIMENT_ACCEPTED=yes
+PARKED_AT_PRESENT=yes
+contacts=0 (evidence on 2983/2983 states, reset_in_window=False)
+{'outcome': 'returned', 'elapsed_s': 33.241418166, 'returned': None}
+start_check: True home
+compliance: True
+--- leg S2-B1-a-r4-flight (2026-09-19T10:08:26Z)
+EXPERIMENT_ACCEPTED=yes
+PARKED_AT_REST=yes
+contacts=0 (evidence on 1874/1874 states, reset_in_window=False)
+{'outcome': 'returned', 'elapsed_s': 6.718576666, 'returned': ['REST_SHUT', 'REST']}
+start_check: True present
+compliance: True
+=== S2-B1-b-r4 (2026-09-19T10:11:23Z) ===
+reset gen=11 ack=11 resets_recorded 10->11 sim_step 244870->610
+{"settled_after_s": 15.7, "sim_step": 7870, "seq": 203855, "max_spread_deg": 0.0, "pose_deg": {"r_shoulder_pitch": -0.0, "r_shoulder_roll": 0.01, "r_arm_yaw": -0.0, "r_elbow_pitch": -0.0, "r_forearm_yaw": -0.0, "r_wrist_pitch": 0.0, "r_wrist_roll": 0.05, "r_gripper": -0.0}}
+PARKED S2-B1-b-r4-parked ok, cycle S2-B1-b-r4 stiff-zero: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_PLACE_ROUTE_20260919T101144Z.json
+binding_ok {'ok': True, 'provenance_ok': True, 'reasons': [], 'provenance_reasons': []}
+--- leg S2-B1-b-r4-flight (2026-09-19T10:12:27Z)
+EXPERIMENT_ACCEPTED=yes
+PARKED_AT_REST=yes
+contacts=0 (evidence on 3209/3209 states, reset_in_window=False)
+{'outcome': 'returned', 'elapsed_s': 34.417758084, 'returned': ['GRIP_SHUT', 'BACK', 'CURL', 'CURL_HIGH', 'TUCK', 'SWING_1', 'SWING_2', 'SWING_3', 'HOVER', 'REST_SHUT', 'REST']}
+start_check: True home
+compliance: True
+=== S2-B1-c-r4 (2026-09-19T10:17:17Z) ===
+reset gen=12 ack=12 resets_recorded 11->12 sim_step 176750->610
+{"settled_after_s": 16.4, "sim_step": 8210, "seq": 221578, "max_spread_deg": 0.0, "pose_deg": {"r_shoulder_pitch": -0.0, "r_shoulder_roll": 0.01, "r_arm_yaw": -0.0, "r_elbow_pitch": -0.0, "r_forearm_yaw": -0.0, "r_wrist_pitch": 0.0, "r_wrist_roll": 0.05, "r_gripper": -0.0}}
+PARKED S2-B1-c-r4-parked ok, cycle S2-B1-c-r4 stiff-zero: /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_PLACE_ROUTE_20260919T101738Z.json
+binding_ok {'ok': True, 'provenance_ok': True, 'reasons': [], 'provenance_reasons': []}
+--- leg S2-B1-c-r4-setup (2026-09-19T10:18:25Z)
+EXPERIMENT_ACCEPTED=yes
+PARKED_AT_REST=yes
+contacts=0 (evidence on 3208/3208 states, reset_in_window=False)
+{'outcome': 'returned', 'elapsed_s': 33.59747775, 'returned': ['GRIP_SHUT', 'BACK', 'CURL', 'CURL_HIGH', 'TUCK', 'SWING_1', 'SWING_2', 'SWING_3', 'HOVER', 'REST_SHUT', 'REST']}
+start_check: True home
+compliance: True
+--- leg S2-B1-c-r4-flight (2026-09-19T10:23:35Z)
+EXPERIMENT_ACCEPTED=yes
+PARKED_AT_PRESENT=yes
+contacts=0 (evidence on 1708/1708 states, reset_in_window=False)
+{'outcome': 'returned', 'elapsed_s': 3.368819584, 'returned': ['PRESENT']}
+start_check: True rest
+compliance: True
+=== set r4 complete (2026-09-19T10:26:43Z) ===
