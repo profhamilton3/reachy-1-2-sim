@@ -286,7 +286,7 @@ def aggregate(
 #: Every pattern here is anchored to a real, cited source line -- never a
 #: bare word search. The old "lease acquisition" pattern matched nothing
 #: the native server ever logs (it logs "Execution lease granted to …",
-#: server.py:1059); "pause" was a bare substring that happened to match
+#: server.py:1072); "pause" was a bare substring that happened to match
 #: unrelated log noise. Both are fixed below.
 #:
 #: MB7 (merge verdict, 2026-09-25 stage-repairs assignment §3; owner
@@ -341,7 +341,7 @@ _TRIPWIRE_PATTERN_TEXT: Dict[str, str] = {
 #: checkpoint/final. Blind spots are ALWAYS listed, never folded into a
 #: 0 count.
 MB7_OBSERVABLE_SCOPE: Dict[str, str] = {
-    "lease_acquisition": "native log: 'Execution lease granted to %r' (server.py:1059)",
+    "lease_acquisition": "native log: 'Execution lease granted to %r' (server.py:1072)",
     "control_held_refusal": ("bridge log: 'Server error: [control_held]' "
                               "(mujoco_remote_backend.py:486-488)"),
     "pause": ("states.jsonl: rows with paused==true (server.py:863), plus "
