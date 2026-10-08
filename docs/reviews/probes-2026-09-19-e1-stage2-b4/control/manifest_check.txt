@@ -1,0 +1,13 @@
+date_utc=2026-09-19T04:40:08Z
+run_dir=/Users/terrancehamilton/e1-stage2-B4-s1-2026-09-18/e1_server_runs/run_20260919_043924
+format_version = 1
+started_at = 2026-09-19T04:39:24.641690+00:00
+code_sha = e6c30b74e09c38e616dee0819a7e205d12c5853e
+code_sha_dirty = False
+contacts_tracked = True
+scene_sha256 = 818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083
+scene = None
+backend = None
+all keys: ['calibration_provenance', 'code_sha', 'code_sha_dirty', 'command_count', 'contacts_tracked', 'depth_enabled', 'effects', 'format_version', 'model_path', 'model_sha256', 'mujoco_version', 'platform', 'protocol_version', 'python_version', 'scene_path', 'scene_revision', 'scene_sha256', 'seeds', 'seg_enabled', 'started_at', 'state_count', 'total_duration_s', 'total_steps']
+expected code_sha=e6c30b74e09c38e616dee0819a7e205d12c5853e
+expected scene sha=818d8e5755b4a8e892bf4b48a73a0321df717c3dcaf3c2313f9ed367056ab083

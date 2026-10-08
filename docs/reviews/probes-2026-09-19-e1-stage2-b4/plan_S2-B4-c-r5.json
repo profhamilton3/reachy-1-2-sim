@@ -1,0 +1,38 @@
+{
+  "cycle": "S2-B4-c-r5",
+  "board": "B4",
+  "shape": "c",
+  "rep": 5,
+  "session": "s1",
+  "scene_rel": "scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+  "repo": "/Users/terrancehamilton/reachy-1-2-sim-stage2",
+  "repo_sha": "e6c30b74e09c38e616dee0819a7e205d12c5853e",
+  "required_sha": "3d7fc744f81eae14c39b70f22fab3c95fd02626d",
+  "merge_time_iso": "2026-09-16T02:20:18Z",
+  "generated_at": "2026-09-19T06:25:13.529690+00:00",
+  "lead_in_s": 3.0,
+  "compliance_timeout_s": 3.0,
+  "margin_s": 5.0,
+  "route_budget_s": {
+    "RAISE_TO_SIDE": 45.6,
+    "LOWER_TO_REST": 23.4,
+    "PLACE_ROUTE": 50.099999999999994,
+    "LIFT_TO_PRESENT": 20.1
+  },
+  "unflown_routes": [
+    "RAISE_TO_SIDE",
+    "LOWER_TO_REST",
+    "PLACE_ROUTE",
+    "LIFT_TO_PRESENT"
+  ],
+  "legs": {
+    "S2-B4-c-r5-setup": {
+      "route": "PLACE_ROUTE",
+      "dur_s": 64.1
+    },
+    "S2-B4-c-r5-flight": {
+      "route": "LIFT_TO_PRESENT",
+      "dur_s": 34.1
+    }
+  }
+}

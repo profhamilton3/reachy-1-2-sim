@@ -1,0 +1,27 @@
+cycle           reset->LEG ok (min)   per-leg go->LEG ok (s)
+S2-B4-a-r1           4.4             116 / 77
+S2-B4-b-r1           3.2             146
+S2-B4-c-r1          37.1             1990 / 76  <- host sleep in this cycle
+S2-B4-a-r2           4.6             142 / 98
+S2-B4-b-r2           3.5             173
+S2-B4-c-r2           5.7             197 / 108
+S2-B4-a-r3           6.5             187 / 147
+S2-B4-b-r3           4.4             214
+S2-B4-c-r3           7.0             236 / 135
+S2-B4-a-r4           7.8             244 / 172
+S2-B4-b-r4           5.7             283
+S2-B4-c-r4           9.0             296 / 179
+S2-B4-a-r5           9.8             310 / 208
+S2-B4-b-r5           7.1             350
+S2-B4-c-r5          11.6             383 / 234
+S2-B4-a-r6          12.7             393 / 275
+S2-B4-b-r6           9.3             460
+S2-B4-c-r6          15.9             483 / 358
+
+per set (reset of a -> LEG ok of c), min:
+  r1: 45.5
+  r2: 14.1
+  r3: 18.2
+  r4: 22.8
+  r5: 28.7
+  r6: 38.3

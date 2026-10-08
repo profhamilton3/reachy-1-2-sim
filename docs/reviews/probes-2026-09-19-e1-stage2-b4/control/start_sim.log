@@ -1,0 +1,27 @@
+▶ Stopping any existing native server on :8765 …
+▶ Starting native MuJoCo server …
+    scene        : B4_pool_box_1_r2c3.yaml
+    calibration  : calibration_measured_2026_08_27.yaml
+    distortion   : off
+    depth        : off
+    segmentation : off
+    effects      : off
+    recording    : /Users/terrancehamilton/e1-stage2-B4-s1-2026-09-18/e1_server_runs
+▶ Waiting for ws://0.0.0.0:8765 …
+  server up (log: /Users/terrancehamilton/e1-stage2-B4-s1-2026-09-18/native_server.log)
+▶ Bringing up the Docker container (physics backend, noVNC scene: /opt/scenes/e1_boards/B4_pool_box_1_r2c3.yaml) …
+ Network reachy-1-2-sim-stage2_default Creating 
+ Network reachy-1-2-sim-stage2_default Created 
+ Container reachy-1-2-sim Creating 
+ Container reachy-1-2-sim Created 
+ Container reachy-1-2-sim Starting 
+ Container reachy-1-2-sim Started 
+▶ Restarting the container so the bridge drops its stale joint goals …
+ Container reachy-1-2-sim Restarting 
+ Container reachy-1-2-sim Started 
+
+✓ Sim running with the MuJoCo physics backend.
+    RViz   : http://localhost:6080
+    Camera : http://localhost:8080
+    Demo   : docker compose exec reachy-sim python3 /opt/scripts/demo_pick_place.py
+./scripts/start_sim.sh: line 172: 41727 Terminated: 15          nohup mjpython server.py --scene "$SCENE" --calibration "$CALIB" $DISTORT_ARGS $EXTRA_ARGS $EFFECTS_ARGS $RECORD_ARGS --host 0.0.0.0 --port 8765 --log-level INFO > "$LOG" 2>&1
