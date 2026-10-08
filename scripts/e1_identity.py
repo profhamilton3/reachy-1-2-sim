@@ -244,12 +244,17 @@ def _read_last_state(
 
 def _live_run_dirs(
     record_root: pathlib.Path, now_ns_value: int, max_state_age_s: float,
+    rejected: Optional[List[str]] = None,
 ) -> List[pathlib.Path]:
     """`run_*` directories under `record_root` with a `states.jsonl` whose
     last sample is fresh -- liveness alone, independent of whether
     `manifest.json` exists (a missing manifest is reported as its own,
     distinct reason once a single live candidate is chosen, not folded into
-    "no live directory")."""
+    "no live directory").
+
+    A candidate whose last sample has an unusable `wall_time_ns` is not
+    live; when `rejected` is given, the explicit reason is appended to it
+    (issue #130)."""
     if not record_root.is_dir():
         return []
     live = []
@@ -261,7 +266,10 @@ def _live_run_dirs(
         if last is None:
             continue
         wall_time_ns = last.get("wall_time_ns")
-        if not isinstance(wall_time_ns, (int, float)):
+        problem = _wall_time_ns_problem(wall_time_ns)
+        if problem is not None:
+            if rejected is not None:
+                rejected.append(f"{candidate}: latest sample's {problem}")
             continue
         age_s = abs(now_ns_value - wall_time_ns) / 1e9
         if age_s <= max_state_age_s:
@@ -332,13 +340,16 @@ def verify_simulator_identity(
     manifest: dict = {}
     joint_agreement: Dict[str, float] = {}
 
-    live = _live_run_dirs(root_p, now_ns(), max_state_age_s)
+    rejected_run_dirs: List[str] = []
+    live = _live_run_dirs(root_p, now_ns(), max_state_age_s,
+                          rejected=rejected_run_dirs)
     if len(live) == 0:
         reasons.append(
             f"no live physics run directory under {record_root!r} "
             f"(expected a run_* whose states.jsonl has a sample within "
             f"{max_state_age_s}s of now) -- is the native server running "
             "with --record set to this path?")
+        reasons.extend(rejected_run_dirs)
     elif len(live) > 1:
         reasons.append(
             f"{len(live)} run directories under {record_root!r} all look "
@@ -372,9 +383,9 @@ def verify_simulator_identity(
                                "readable sample")
                 break
             wall_time_ns = state.get("wall_time_ns")
-            if not isinstance(wall_time_ns, (int, float)):
-                reasons.append(f"round {round_i}: latest sample has no "
-                               "numeric wall_time_ns")
+            problem = _wall_time_ns_problem(wall_time_ns)
+            if problem is not None:
+                reasons.append(f"round {round_i}: latest sample's {problem}")
                 break
             age_s = abs(now_ns() - wall_time_ns) / 1e9
             if age_s > max_round_age_s:
@@ -510,6 +521,35 @@ class CmdBaseline:
 
 def _is_plain_int(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _is_finite_number(v) -> bool:
+    """The numeric rule shared by `cmd_seq` (H3, issue #119) and
+    `wall_time_ns` (issue #130): never a bool (`True` is an `int`), and
+    either an int or a finite float. `math.isfinite` is only ever called on
+    a float, so an int too large for a float (`10**400`) cannot raise
+    `OverflowError` here."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return True
+    return isinstance(v, float) and math.isfinite(v)
+
+
+def _wall_time_ns_problem(v) -> Optional[str]:
+    """Why `v` cannot be used as a sample's `wall_time_ns`, or None if it
+    can (issue #130). Callers compute `abs(now - v) / 1e9`, so on top of
+    `_is_finite_number` an int must also fit in a float: `10**400` would
+    otherwise pass and then raise `OverflowError` in that division. Every
+    caller rejects on this reason explicitly -- never by letting a NaN, an
+    infinity or `True` (1 ns) fall through an age comparison."""
+    if not _is_finite_number(v):
+        brief = repr(v) if len(repr(v)) <= 40 else repr(v)[:37] + "..."
+        return f"wall_time_ns is not a finite number ({brief})"
+    if isinstance(v, int) and abs(v) > sys.float_info.max:
+        return (f"wall_time_ns is out of range (an int with "
+                f"{len(str(abs(v)))} digits)")
+    return None
 
 
 def _tail_complete_line(
@@ -866,20 +906,23 @@ def require_compliance(
         fresh = False
         age_s = float("inf")
         cmd_evidence: Optional[str] = None
+        wall_problem: Optional[str] = None
 
         if state is None:
             bad.append("states.jsonl has no readable sample yet")
         else:
             wall_time_ns = state.get("wall_time_ns")
-            if isinstance(wall_time_ns, (int, float)):
+            wall_problem = _wall_time_ns_problem(wall_time_ns)
+            if wall_problem is not None:
+                bad.append(f"latest sample's {wall_problem} -- refusing to "
+                           "judge its freshness")
+            else:
                 age_s = abs(now_ns() - wall_time_ns) / 1e9
-            fresh = age_s <= max_state_age_s
+                fresh = age_s <= max_state_age_s
 
             if min_cmd_seq is not None:
                 state_cmd_seq = state.get("cmd_seq")
-                if not (isinstance(state_cmd_seq, (int, float))
-                        and not isinstance(state_cmd_seq, bool)
-                        and math.isfinite(state_cmd_seq)):
+                if not _is_finite_number(state_cmd_seq):
                     bad.append(
                         f"state has no numeric cmd_seq to compare against "
                         f"min_cmd_seq={min_cmd_seq} -- refusing to treat it "
@@ -957,7 +1000,7 @@ def require_compliance(
 
         if waited_s >= timeout_s:
             reasons = list(bad)
-            if not fresh:
+            if not fresh and wall_problem is None:
                 reasons.append(
                     f"state stream is stale (last sample {age_s:.3f}s old, "
                     f"> {max_state_age_s}s max) -- refusing to pass on old "

@@ -1386,3 +1386,176 @@ class TestRequireComplianceCmdBaseline:
         assert r.ok is False
         assert any(x.startswith("bridge-restart path: states.jsonl: a complete line")
                    for x in r.reasons), r.reasons
+
+
+#: Issue #130: every `wall_time_ns` value the predicate must refuse, with an
+#: id per case. `10**400` is an int too large for a float; before #130 it
+#: passed `isinstance(x, (int, float))` and then raised `OverflowError` in
+#: the age arithmetic instead of failing closed.
+_BAD_WALL_TIME_NS = [
+    pytest.param(True, id="true"),
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="+inf"),
+    pytest.param(float("-inf"), id="-inf"),
+    pytest.param(10 ** 400, id="int-10e400"),
+    pytest.param("10000000000", id="string"),
+]
+
+
+class TestFiniteNumberPredicate:
+    """Issue #130: the shared rule for `cmd_seq` (H3, #119) and
+    `wall_time_ns`."""
+
+    @pytest.mark.parametrize("v", [0, 1, 10_000_000_000, 10 ** 400, 0.5, -3.0])
+    def test_ints_and_finite_floats_pass(self, v):
+        assert ei._is_finite_number(v) is True
+
+    @pytest.mark.parametrize("v", [True, False, float("nan"), float("inf"),
+                                   float("-inf"), "1", None, [1], {"a": 1}])
+    def test_bools_non_finite_and_non_numbers_fail(self, v):
+        assert ei._is_finite_number(v) is False
+
+    def test_a_huge_int_never_reaches_math_isfinite(self):
+        with pytest.raises(OverflowError):
+            math.isfinite(10 ** 400)  # the gap #130 closes
+        assert ei._is_finite_number(10 ** 400) is True
+
+    @pytest.mark.parametrize("v", _BAD_WALL_TIME_NS)
+    def test_wall_time_ns_problem_names_the_field(self, v):
+        problem = ei._wall_time_ns_problem(v)
+        assert problem is not None and "wall_time_ns" in problem
+
+    def test_a_valid_int_wall_time_ns_has_no_problem(self):
+        assert ei._wall_time_ns_problem(10_000_000_000) is None
+
+
+def _write_states_only(tmp_path, wall_time_ns):
+    run_dir = tmp_path / "run_20261008_000000"
+    run_dir.mkdir()
+    (run_dir / "states.jsonl").write_text(
+        json.dumps({"sim_step": 1, "wall_time_ns": wall_time_ns,
+                    "joints": _rad_joints(_POSE_DEG)}) + "\n")
+    return run_dir
+
+
+class TestWallTimeNsLiveRunDirs:
+    """Issue #130, site 1: `_live_run_dirs` (and the "no live directory"
+    reason `verify_simulator_identity` builds from it)."""
+
+    @pytest.mark.parametrize("v", _BAD_WALL_TIME_NS)
+    def test_unusable_wall_time_ns_is_not_live_and_says_why(self, tmp_path, v):
+        run_dir = _write_states_only(tmp_path, v)
+        rejected = []
+        live = ei._live_run_dirs(tmp_path, 10_000_000_000, 1.0,
+                                 rejected=rejected)
+        assert live == []
+        assert len(rejected) == 1
+        assert rejected[0].startswith(f"{run_dir}: latest sample's wall_time_ns")
+
+    @pytest.mark.parametrize("v", _BAD_WALL_TIME_NS)
+    def test_verify_reports_the_rejected_run_dir(self, tmp_path, v):
+        # `now` = 1 ns: before #130 a `True` sample (1 ns) looked 0 s old.
+        result = ei.verify_simulator_identity(
+            host="localhost", port=50051, scene_path=_BOARD_SCENE,
+            record_root=str(_write_states_only(tmp_path, v).parent),
+            read_sdk_joints=_never_call, http_get=_good_http_get,
+            now_ns=lambda: 1, wall_clock_ns=lambda: 0, min_reads=1,
+        )
+        assert result.ok is False
+        assert any("no live physics run directory" in r for r in result.reasons)
+        assert any("latest sample's wall_time_ns" in r for r in result.reasons), \
+            result.reasons
+
+    def test_a_valid_int_is_still_live(self, tmp_path):
+        run_dir = _write_states_only(tmp_path, 10_000_000_000)
+        rejected = []
+        live = ei._live_run_dirs(tmp_path, 10_000_000_000, 1.0,
+                                 rejected=rejected)
+        assert live == [run_dir]
+        assert rejected == []
+
+
+class TestWallTimeNsIdentityRounds:
+    """Issue #130, site 2: the per-round freshness read in
+    `verify_simulator_identity`, after the run directory was found live."""
+
+    @staticmethod
+    def _verify(tmp_path, monkeypatch, round_wall_time_ns):
+        wall = 10_000_000_000
+        _write_run_dir(tmp_path, manifest_meta=_manifest_for(_BOARD_SCENE),
+                       wall_time_ns=wall, sim_step=100)
+        real_read = ei._read_last_state
+        calls = {"n": 0}
+
+        def read(path, *a, **kw):
+            calls["n"] += 1
+            state = real_read(path, *a, **kw)
+            if calls["n"] > 1:  # call 1 is `_live_run_dirs`
+                state = dict(state, wall_time_ns=round_wall_time_ns)
+            return state
+
+        monkeypatch.setattr(ei, "_read_last_state", read)
+        return ei.verify_simulator_identity(
+            host="localhost", port=50051, scene_path=_BOARD_SCENE,
+            record_root=str(tmp_path),
+            read_sdk_joints=lambda: _sdk_joints(_POSE_DEG),
+            http_get=_good_http_get,
+            now_ns=lambda: wall, wall_clock_ns=lambda: 0, min_reads=1,
+        )
+
+    @pytest.mark.parametrize("v", _BAD_WALL_TIME_NS)
+    def test_unusable_wall_time_ns_fails_the_round_with_its_reason(
+            self, tmp_path, monkeypatch, v):
+        result = self._verify(tmp_path, monkeypatch, v)
+        assert result.ok is False
+        assert any(r.startswith("round 0: latest sample's wall_time_ns")
+                   for r in result.reasons), result.reasons
+
+    def test_a_valid_int_passes_the_round(self, tmp_path, monkeypatch):
+        result = self._verify(tmp_path, monkeypatch, 10_000_000_000)
+        assert result.ok is True, result.reasons
+
+
+class TestWallTimeNsRequireCompliance:
+    """Issue #130, site 3: `require_compliance`'s freshness read. An
+    unusable `wall_time_ns` is its own reason, never the generic "stale"
+    line produced by an `inf`/NaN age."""
+
+    @staticmethod
+    def _check(wall_time_ns, **kw):
+        now = {"ns": 10_000_000_000}
+
+        def sleep(seconds):
+            now["ns"] += int(seconds * 1e9)
+
+        state = {
+            "seq": 5, "sim_step": 200, "wall_time_ns": wall_time_ns,
+            "joints": [{"name": n, "compliant": False, "effort": 1.0}
+                       for n in R.R_JOINTS],
+            **kw,
+        }
+        return ei.require_compliance(
+            run_dir="/unused", joints=R.R_JOINTS, compliant=False,
+            timeout_s=0.01, max_state_age_s=0.5,
+            read_last_state=lambda p: state, now_ns=lambda: now["ns"],
+            sleep=sleep, **({"min_cmd_seq": 3} if "cmd_seq" in kw else {}))
+
+    @pytest.mark.parametrize("v", _BAD_WALL_TIME_NS)
+    def test_unusable_wall_time_ns_fails_closed_with_its_reason(self, v):
+        result = self._check(v)
+        assert result.ok is False
+        assert any(r.startswith("latest sample's wall_time_ns")
+                   for r in result.reasons), result.reasons
+        assert not any("state stream is stale" in r for r in result.reasons)
+
+    def test_a_valid_int_still_passes(self):
+        result = self._check(10_000_000_000)
+        assert result.ok is True, result.reasons
+
+    def test_min_cmd_seq_with_a_huge_int_does_not_raise(self):
+        """The H3 `cmd_seq` rule shared the overflow gap: before #130,
+        `math.isfinite(10**400)` raised `OverflowError` out of the gate.
+        A huge int is an int (as the `cmd_baseline` path already treats
+        it), so it is compared, not crashed on."""
+        result = self._check(10_000_000_000, cmd_seq=10 ** 400)
+        assert result.ok is True, result.reasons
