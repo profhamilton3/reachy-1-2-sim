@@ -31,6 +31,7 @@ def _stub_server(*, record_contacts):
         _enable_depth=False,
         _enable_seg=False,
         _record_contacts=record_contacts,
+        _contact_model={"noslip_iterations": 10, "model_default_noslip_iterations": 10},
         _effects=types.SimpleNamespace(
             blur_sigma=0.0, noise_std=0.0, drop_probability=0.0, latency_ms=0.0),
     )

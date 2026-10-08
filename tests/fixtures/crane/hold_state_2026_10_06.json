@@ -1,0 +1,137 @@
+{
+ "description": "Recorded 2026-10-06 crane hold state (red_cube held in the right gripper) and the commanded arm targets, for the no-slip hold-creep test (#55, ADR-0005).",
+ "scene": "FWDCenterLabSivaPool",
+ "joints": [
+  {
+   "name": "r_shoulder_pitch",
+   "position_rad": -1.34471,
+   "velocity_rad_s": -0.000424
+  },
+  {
+   "name": "r_shoulder_roll",
+   "position_rad": -0.317451,
+   "velocity_rad_s": -0.000157
+  },
+  {
+   "name": "r_arm_yaw",
+   "position_rad": 1.580748,
+   "velocity_rad_s": 0.000167
+  },
+  {
+   "name": "r_elbow_pitch",
+   "position_rad": -1.413904,
+   "velocity_rad_s": -0.000207
+  },
+  {
+   "name": "r_forearm_yaw",
+   "position_rad": -0.797294,
+   "velocity_rad_s": -0.00061
+  },
+  {
+   "name": "r_wrist_pitch",
+   "position_rad": 0.752404,
+   "velocity_rad_s": 5.2e-05
+  },
+  {
+   "name": "r_wrist_roll",
+   "position_rad": 0.621339,
+   "velocity_rad_s": 1.2e-05
+  },
+  {
+   "name": "r_gripper",
+   "position_rad": -0.438175,
+   "velocity_rad_s": -0.003862
+  },
+  {
+   "name": "l_shoulder_pitch",
+   "position_rad": 0.0,
+   "velocity_rad_s": 0.0
+  },
+  {
+   "name": "l_shoulder_roll",
+   "position_rad": -0.0,
+   "velocity_rad_s": 0.0
+  },
+  {
+   "name": "l_arm_yaw",
+   "position_rad": 0.0,
+   "velocity_rad_s": 0.0
+  },
+  {
+   "name": "l_elbow_pitch",
+   "position_rad": -0.0,
+   "velocity_rad_s": 0.0
+  },
+  {
+   "name": "l_forearm_yaw",
+   "position_rad": 0.0,
+   "velocity_rad_s": 0.0
+  },
+  {
+   "name": "l_wrist_pitch",
+   "position_rad": -0.0,
+   "velocity_rad_s": -0.0
+  },
+  {
+   "name": "l_wrist_roll",
+   "position_rad": -0.700805,
+   "velocity_rad_s": -0.0
+  },
+  {
+   "name": "l_gripper",
+   "position_rad": 0.700805,
+   "velocity_rad_s": 0.0
+  },
+  {
+   "name": "neck_roll",
+   "position_rad": -6e-06,
+   "velocity_rad_s": -0.0
+  },
+  {
+   "name": "neck_pitch",
+   "position_rad": 0.804622,
+   "velocity_rad_s": 0.0
+  },
+  {
+   "name": "neck_yaw",
+   "position_rad": 0.001143,
+   "velocity_rad_s": 0.0
+  },
+  {
+   "name": "l_antenna",
+   "position_rad": 0.0,
+   "velocity_rad_s": -0.0
+  },
+  {
+   "name": "r_antenna",
+   "position_rad": -0.0,
+   "velocity_rad_s": -0.0
+  }
+ ],
+ "objects": [
+  {
+   "object_id": "red_cube",
+   "pos_xyz": [
+    0.425548,
+    0.002393,
+    0.812367
+   ],
+   "quat_wxyz": [
+    0.999374,
+    0.02307,
+    -0.025782,
+    -0.007458
+   ]
+  }
+ ],
+ "commanded_targets_rad": {
+  "r_shoulder_pitch": -1.365842,
+  "r_shoulder_roll": -0.317248,
+  "r_arm_yaw": 1.57673,
+  "r_elbow_pitch": -1.416178,
+  "r_forearm_yaw": -0.796149,
+  "r_wrist_pitch": 0.749654,
+  "r_wrist_roll": 0.619871,
+  "r_gripper": -0.087266
+ }
+}

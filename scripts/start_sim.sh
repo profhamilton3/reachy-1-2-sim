@@ -26,6 +26,9 @@
 #   REACHY_SIM_SEGMENTATION=1           add a uint16 body-ID map to every frame
 #   REACHY_SIM_EFFECTS=<path.yaml>      sensor noise/blur/dropout profile
 #   REACHY_SIM_RECORD=<dir>             record states+commands under <dir>
+#   REACHY_SIM_NOSLIP_ITERATIONS=<0..50>  override the model's no-slip contact
+#                                       iterations (default: the model file's 10;
+#                                       0 = the pre-ADR-0005 behaviour)
 #
 # The measured lab scene with the full camera model:
 #   REACHY_SIM_SCENE=FWDCenterLabMCC REACHY_SIM_DISTORTION=1 ./scripts/start_sim.sh
@@ -157,6 +160,14 @@ if [ -n "${REACHY_SIM_RECORD:-}" ]; then
     RECORD_NOTE="$REACHY_SIM_RECORD"
 fi
 
+# Contact model (ADR-0005): the model file's no-slip default unless overridden.
+NOSLIP_ARGS=""
+NOSLIP_NOTE="model default"
+if [ -n "${REACHY_SIM_NOSLIP_ITERATIONS:-}" ]; then
+    NOSLIP_ARGS="--noslip-iterations $REACHY_SIM_NOSLIP_ITERATIONS"
+    NOSLIP_NOTE="override: $REACHY_SIM_NOSLIP_ITERATIONS iterations"
+fi
+
 echo "▶ Starting native MuJoCo server …"
 echo "    scene        : $(basename "$SCENE")"
 echo "    calibration  : $(basename "$CALIB")"
@@ -165,9 +176,10 @@ echo "    depth        : $DEPTH_NOTE"
 echo "    segmentation : $SEG_NOTE"
 echo "    effects      : $EFFECTS_NOTE"
 echo "    recording    : $RECORD_NOTE"
+echo "    no-slip      : $NOSLIP_NOTE"
 ( cd "$REPO/native_mujoco" && nohup mjpython server.py \
     --scene "$SCENE" --calibration "$CALIB" \
-    $DISTORT_ARGS $EXTRA_ARGS $EFFECTS_ARGS $RECORD_ARGS \
+    $DISTORT_ARGS $EXTRA_ARGS $EFFECTS_ARGS $RECORD_ARGS $NOSLIP_ARGS \
     --host 0.0.0.0 --port 8765 --log-level INFO \
     >"$LOG" 2>&1 & )
 

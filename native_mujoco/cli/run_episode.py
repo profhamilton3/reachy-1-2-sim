@@ -43,6 +43,8 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-7s  %(message)s",
     datefmt="%H:%M:%S",
 )
+from contact_model import validate_noslip_iterations  # noqa: E402
+
 log = logging.getLogger("reachy12.cli.run_episode")
 
 
@@ -66,6 +68,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                    help="Path to write EpisodeResult JSON (stdout if omitted)")
     p.add_argument("--record-dir", default=None,
                    help="Directory for recorder trace output (disabled by default)")
+    p.add_argument("--noslip-iterations", type=validate_noslip_iterations,
+                   default=None, metavar="N",
+                   help="override the model file's MuJoCo no-slip iterations "
+                        "(0..50; 0 = previous behaviour; default: model file "
+                        "value). Recorded in the simulator identity "
+                        "(physics_profile_id) (ADR-0005)")
     p.add_argument("--verbose", action="store_true",
                    help="Log every 100th snapshot")
     return p
@@ -99,18 +107,24 @@ def main() -> None:
         sys.exit(1)
 
     from simulation_core import SimulationCore, load_world
+    from contact_model import describe_contact_model, physics_profile_id
     from episode_runner import EpisodeRunner, StepCommand
     from reachy_ai.experience.identity import build_simulator_identity
     from reachy_ai.experience.models import EpisodeConfig
 
     log.info("Loading world: model=%s scene=%s", args.model, args.scene)
-    _, _, _, compiled_xml = load_world(args.model, args.scene)
+    _, _, _, compiled_xml = load_world(
+        args.model, args.scene, noslip_iterations=args.noslip_iterations)
+    core = SimulationCore.from_paths(
+        args.model, args.scene, noslip_iterations=args.noslip_iterations)
+    log.info(describe_contact_model(core.contact_model))
 
     identity = build_simulator_identity(
         model_path=args.model,
         scene_path=args.scene or "",
         backend_name="native_mujoco",
         compiled_xml=compiled_xml,
+        physics_profile_id=physics_profile_id(core.contact_model),
     )
     log.info("Identity: model_sha256=%s...  scene_sha256=%s...",
              identity.model_sha256[:12] if identity.model_sha256 else "—",
@@ -123,8 +137,6 @@ def main() -> None:
         render_mode="off",
         record_trace=bool(args.record_dir),
     )
-
-    core = SimulationCore.from_paths(args.model, args.scene)
 
     if args.recipe:
         commands = _load_recipe_commands(args.recipe)

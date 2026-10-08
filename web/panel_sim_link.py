@@ -164,6 +164,7 @@ class SimLink:
         with self._lock:
             snap = self._snapshot
             state, detail = self._state, self._detail
+            contact_model = self._server_capabilities.get("contact_model")
         live = snap is not None and snap.age_s() <= self._stale_after
         return {
             "state": state,
@@ -173,6 +174,10 @@ class SimLink:
             "age_s": round(snap.age_s(), 2) if snap else None,
             "scene_revision": snap.scene_revision if snap else "",
             "sim_step": snap.sim_step if snap else 0,
+            # The server's effective contact model (ADR-0005), exactly as it
+            # advertised it; None for an older server or before the handshake.
+            "contact_model": (dict(contact_model)
+                              if isinstance(contact_model, dict) else None),
         }
 
     # -- internals ---------------------------------------------------------
