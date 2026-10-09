@@ -29,8 +29,11 @@ scene's own name rather than by claiming the arm is unavailable.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 #: Named postures.  `REST` is the forearm supported on the tabletop; `HOME` is
 #: stored in the rail pocket.  They are eleven waypoints apart, and the
@@ -110,6 +113,16 @@ CORRIDOR_REALISED_MARGIN = 0.010
 #: The realised figure is the worst over at least this many flights.  Four was
 #: what #74 had, and four is not a distribution.
 CORRIDOR_MIN_FLIGHTS = 20
+
+#: Scenes where the corridor margin is REPORTED and NOT ENFORCED (owner
+#: decision, 2026-10-09, "Option B").  FWDCenterLabSivaPool's corridor was
+#: flown twenty times per route with the moved SWING_1 and did not meet the
+#: realised margin -- every reading under +2.31 cm came from a flight where
+#: `r_forearm_yaw` swung 24-52 deg off its command (docs/adr/0006 §3).  Until
+#: that fix lands, `check_route` there still names the shortfall but lets the
+#: route fly.  The forearm-yaw fix is what removes the scene from this tuple,
+#: with the re-flown figures in the rows.  Anywhere else the margin refuses.
+CORRIDOR_REPORT_ONLY_SCENES: Tuple[str, ...] = ("FWDCenterLabSivaPool",)
 
 #: How far an object may move before the board counts as disturbed, in metres.
 #:
@@ -504,8 +517,10 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     # ── FWDCenterLabSivaPool, accepted 2026-09-10 ───────────────────────────
     #
     # SUPERSEDED FOR THE CORRIDOR BY docs/adr/0006 (2026-10-09).  These rows carry
-    # no corridor-margin figures, so `check_route` REFUSES the four corridor
-    # routes here (PLACE_ROUTE, STOW_ROUTE, RAISE_TO_SIDE, STOW_FROM_SIDE).  The
+    # no corridor-margin figures, so `check_route` REPORTS the four corridor
+    # routes here as short of the margin (PLACE_ROUTE, STOW_ROUTE, RAISE_TO_SIDE,
+    # STOW_FROM_SIDE) and, by owner decision, does not refuse them until the
+    # forearm-yaw fix (`CORRIDOR_REPORT_ONLY_SCENES`).  The
     # 2026-10-09 campaign flew the moved SWING_1 twenty times per route and did
     # not meet the realised margin (PLACE_ROUTE +0.03 cm, STOW_FROM_SIDE -1.09
     # cm, both on flights where r_forearm_yaw swung 46-52 deg off its command),
@@ -736,6 +751,11 @@ def validation_for(route: str, scene: str) -> Optional[RouteValidation]:
     return None
 
 
+#: (route, scene) pairs whose report-only shortfall has been logged in this
+#: process -- once each, because `check_route` runs on every panel request.
+_REPORTED: set = set()
+
+
 def corridor_shortfall(row: RouteValidation) -> str:
     """Why this record does not meet the corridor margin, or "" if it does.
 
@@ -768,7 +788,10 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
     sends them to the robot, which is fine.
 
     A route that crosses the rig corridor needs more than a row: the row must
-    carry figures that meet the corridor margin (`corridor_shortfall`).
+    carry figures that meet the corridor margin (`corridor_shortfall`).  In a
+    scene listed in `CORRIDOR_REPORT_ONLY_SCENES` a shortfall is REPORTED, not
+    enforced: the answer is (True, note), the note naming the shortfall, and
+    it is logged once per route and scene.
     """
     if not route:
         return False, "that action names no route"
@@ -776,6 +799,14 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
     if row is not None:
         if route in CORRIDOR_ROUTES:
             short = corridor_shortfall(row)
+            if short and scene in CORRIDOR_REPORT_ONLY_SCENES:
+                note = (f"REPORTED, NOT ENFORCED in {scene} (owner decision "
+                        f"2026-10-09, until the forearm-yaw fix): the {route} "
+                        f"route does not meet the corridor margin (#74): {short}")
+                if (route, scene) not in _REPORTED:
+                    _REPORTED.add((route, scene))
+                    log.warning("%s", note)
+                return True, note
             if short:
                 return False, (
                     f"the {route} route crosses the rig corridor at SWING_1, "

@@ -18,7 +18,7 @@ arm: right
 source: baseline
 parent_recipe_id: ""
 route: STOW_ROUTE
-route_version: 1
+route_version: 2   # SWING_1 moved for margin (#74, docs/adr/0006)
 expected_start_posture: rest
 
 bounded_parameters:

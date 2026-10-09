@@ -1,7 +1,8 @@
 # ADR-0006: The rig corridor flies at a stated margin, and SWING_1 moved to meet it
 
-- Status: Proposed. D1 and D2 are owner decisions (2026-10-09). The margin is enforced; **D1's realised
-  half is NOT met** (§3), so no corridor route is listed as meeting it. Simulator only.
+- Status: Accepted (owner decisions D1, D2 and "Option B", 2026-10-09).
+  **D1's realised half is NOT met** (§3). In FWDCenterLabSivaPool the margin is
+  **reported, not enforced**, until the forearm-yaw fix lands (§4). Simulator only.
 - Date: 2026-10-09
 - Decision owners: IITG Reachy 1.2 simulation project
 - Relates to: #74; ADR-0002 (whose SWING_1 graze this replaces), ADR-0003 (hand
@@ -115,7 +116,7 @@ neither waits for it nor stops on it. The cause of the excursion is not
 established: a lost or echoed command, and coupling through the ±45° wrist
 flip, are both open.
 
-**Not done, by the D1 rule ("stop and report; do not loosen").**
+**Not done, by the D1 rule ("stop and report; do not loosen").** (See §4 for what the panel scene does meanwhile.)
 - No figures were added to any row, and the SivaPool corridor rows still carry
   only the 2026-09-10 evidence, so `check_route` refuses all four corridor
   routes in SivaPool.
@@ -123,18 +124,35 @@ flip, are both open.
   they cross the same corridor with the same failure mode. Listing them alone
   would certify a corridor that has failed.
 
+### 4. Report, do not refuse, in the panel scene until the forearm-yaw fix (Option B)
+
+Owner decision, 2026-10-09. `rig_routes.CORRIDOR_REPORT_ONLY_SCENES =
+("FWDCenterLabSivaPool",)`. In that scene `check_route` answers a corridor
+route that is short of the margin with `(True, note)`:
+- the note begins `REPORTED, NOT ENFORCED in FWDCenterLabSivaPool` and names
+  the shortfall;
+- it is logged as a warning once per route and scene per process.
+
+Every other scene refuses, FWDCenterLabMCC included.
+
+The exemption ends with the forearm-yaw fix. That change removes the scene
+from the tuple, which turns refusal on, re-flies ≥ 20 flights per route, and
+puts the figures in the rows.
+
+`route_version` moved to 2 for `rest_forearm` (PLACE_ROUTE) and `stow_arm`
+(STOW_ROUTE), the abilities whose own route crosses SWING_1. The same change
+is made in their baseline recipes. A stored version-1 trial describes the old
+corridor and is no longer reused. WAVE, POINT and CRANE_LIFT name routes
+whose own geometry did not change, so they stay at 1.
+
 ## Consequences
 
-- **Merging this as it stands refuses the panel's `rest your arm`, `store your
-  arm`, and `wave` or `point` from the pocket in FWDCenterLabSivaPool.** Every
-  one of them needs a corridor route, and none has qualifying evidence. That is
-  D1 applied. Whether to merge before the forearm-yaw excursion is fixed is the
-  owner's decision.
+- The panel keeps flying the corridor in FWDCenterLabSivaPool, on the moved
+  SWING_1, with the D1 shortfall reported rather than enforced (§4). That is a
+  stated, temporary exception, not a passed margin.
 - ADR-0002's §4 graze acceptance is superseded. Its revisit tripwires become
   this ADR's margin.
-- `route_version` is **not** bumped. Stored `rest_forearm`/`stow_arm`
-  experiences keyed on version 1 describe the old corridor. Bumping is an owner
-  decision, raised with this change.
+- `route_version` is 2 for `rest_forearm` and `stow_arm` (§4).
 - The torso is still not in `SceneModel` (#74's remaining owner item).
 
 ## Revisit conditions

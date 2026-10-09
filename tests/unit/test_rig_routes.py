@@ -19,6 +19,7 @@ import pytest
 
 _HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(_HERE, "../../src"))
+sys.path.insert(0, os.path.join(_HERE, "../../web"))
 
 from reachy_ai.motion import rig_routes as R  # noqa: E402
 
@@ -197,21 +198,43 @@ def test_the_notebook_scene_rows_do_not_meet_the_corridor_margin(route):
     assert "corridor margin (#74)" in why and "records no planned" in why
 
 
-@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE",
-                                   "STOW_FROM_SIDE"])
-def test_the_panel_scene_corridor_is_refused_until_its_evidence_meets_the_margin(route):
-    """FWDCenterLabSivaPool's corridor rows still rest on the 2026-09-10 flights
-    (ADR-0002), which carry no figures and flew the notebook's SWING_1.  The
-    2026-10-09 campaign (docs/adr/0006) flew the moved SWING_1 twenty times per
-    route and did NOT meet the realised margin, so no figures were added: the
-    corridor is refused here until it does.  Off-corridor routes are not."""
+_CORRIDOR = ["PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE", "STOW_FROM_SIDE"]
+
+
+@pytest.mark.parametrize("route", _CORRIDOR)
+def test_the_panel_scene_corridor_is_reported_not_refused_until_the_forearm_yaw_fix(route):
+    """FWDCenterLabSivaPool's corridor rows carry no figures: the 2026-10-09
+    campaign (docs/adr/0006) flew the moved SWING_1 twenty times per route
+    and did NOT meet the realised margin.  By owner decision ("Option B") the
+    panel scene REPORTS the shortfall and does not refuse until the
+    forearm-yaw fix; the answer says so, every time."""
+    assert R.CORRIDOR_REPORT_ONLY_SCENES == ("FWDCenterLabSivaPool",)
     ok, why = R.check_route(route, "FWDCenterLabSivaPool")
-    assert not ok
-    assert "corridor margin (#74)" in why
+    assert ok
+    assert why.startswith("REPORTED, NOT ENFORCED in FWDCenterLabSivaPool")
+    assert "corridor margin (#74)" in why and "forearm-yaw fix" in why
     row = R.validation_for(route, "FWDCenterLabSivaPool")
     assert row is not None and row.realised_worst_m is None
+
+
+@pytest.mark.parametrize("route", _CORRIDOR)
+def test_without_the_report_only_exemption_the_panel_scene_corridor_is_refused(
+        monkeypatch, route):
+    monkeypatch.setattr(R, "CORRIDOR_REPORT_ONLY_SCENES", ())
+    ok, why = R.check_route(route, "FWDCenterLabSivaPool")
+    assert not ok and "corridor margin (#74)" in why
+
+
+def test_off_corridor_routes_in_the_panel_scene_carry_no_report():
     for other in ("LIFT_TO_PRESENT", "LOWER_TO_REST", "WAVE"):
-        assert R.check_route(other, "FWDCenterLabSivaPool")[0]
+        assert R.check_route(other, "FWDCenterLabSivaPool") == (True, "")
+
+
+def test_the_corridor_routes_ability_versions_moved_with_swing_1():
+    import panel_abilities as A
+    for name, a in A.REGISTRY.items():
+        if a.route in R.CORRIDOR_ROUTES:
+            assert a.route_version == 2, name
 
 
 def test_a_rejected_route_says_it_was_flown_and_why_it_failed():

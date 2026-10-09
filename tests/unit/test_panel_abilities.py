@@ -641,7 +641,8 @@ def test_each_ability_carries_its_route_identity(text, action, route):
     assert out.kind == "proposal", out.message
     assert out.proposal.task_type == action
     assert out.proposal.route == route
-    assert out.proposal.route_version == 1
+    # The corridor routes moved with SWING_1 (#74, docs/adr/0006).
+    assert out.proposal.route_version == (2 if route in ("STOW_ROUTE", "PLACE_ROUTE") else 1)
 
 
 def test_the_reason_names_the_route_because_the_route_is_the_claim():
