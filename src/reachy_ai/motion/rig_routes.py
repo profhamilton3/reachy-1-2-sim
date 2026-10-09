@@ -503,6 +503,14 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     ),
     # ── FWDCenterLabSivaPool, accepted 2026-09-10 ───────────────────────────
     #
+    # SUPERSEDED FOR THE CORRIDOR BY docs/adr/0006 (2026-10-09).  These rows carry
+    # no corridor-margin figures, so `check_route` REFUSES the four corridor
+    # routes here (PLACE_ROUTE, STOW_ROUTE, RAISE_TO_SIDE, STOW_FROM_SIDE).  The
+    # 2026-10-09 campaign flew the moved SWING_1 twenty times per route and did
+    # not meet the realised margin (PLACE_ROUTE +0.03 cm, STOW_FROM_SIDE -1.09
+    # cm, both on flights where r_forearm_yaw swung 46-52 deg off its command),
+    # so no figures were added.  The text below is the 2026-09-10 record.
+    #
     # THE DECISION THESE ROWS REST ON IS RECORDED IN docs/adr/0002.  In short:
     # the SWING_1 crossing has about 6 mm of modelled budget and the physics
     # arm's tracking error is the same size, so every flight of every route

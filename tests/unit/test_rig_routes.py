@@ -197,22 +197,21 @@ def test_the_notebook_scene_rows_do_not_meet_the_corridor_margin(route):
     assert "corridor margin (#74)" in why and "records no planned" in why
 
 
-@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE"])
-def test_the_panel_scene_is_validated_on_flights_through_the_flight(route):
-    """FWDCenterLabSivaPool is where the panel runs, and it is listed now.
-
-    It was not, and the verdict changed on evidence rather than on wishing.
-    The first round sampled the WAYPOINTS of an empty board and found SWING_1
-    2 mm inside `rig_rail_outer_right`.  The second sampled at 20 Hz THROUGH
-    eighteen legs with objects on the board and found the same few millimetres
-    of graze and nothing moved, at the one rail #73 already documents as
-    disagreeing with the model in both directions.  See docs/adr/0002.
-    """
+@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE",
+                                   "STOW_FROM_SIDE"])
+def test_the_panel_scene_corridor_is_refused_until_its_evidence_meets_the_margin(route):
+    """FWDCenterLabSivaPool's corridor rows still rest on the 2026-09-10 flights
+    (ADR-0002), which carry no figures and flew the notebook's SWING_1.  The
+    2026-10-09 campaign (docs/adr/0006) flew the moved SWING_1 twenty times per
+    route and did NOT meet the realised margin, so no figures were added: the
+    corridor is refused here until it does.  Off-corridor routes are not."""
     ok, why = R.check_route(route, "FWDCenterLabSivaPool")
-    assert ok, why
+    assert not ok
+    assert "corridor margin (#74)" in why
     row = R.validation_for(route, "FWDCenterLabSivaPool")
-    assert "2026-09-10" in row.evidence
-    assert "undisturbed" in row.evidence or "RAISE_TO_SIDE" in row.evidence
+    assert row is not None and row.realised_worst_m is None
+    for other in ("LIFT_TO_PRESENT", "LOWER_TO_REST", "WAVE"):
+        assert R.check_route(other, "FWDCenterLabSivaPool")[0]
 
 
 def test_a_rejected_route_says_it_was_flown_and_why_it_failed():
