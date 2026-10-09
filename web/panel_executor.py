@@ -193,6 +193,8 @@ class MotionWorker:
         self._deadline = MOTION_DEADLINE_S if deadline_s is None else deadline_s
         self._argv = argv or [sys.executable, "-u", WORKER_SCRIPT]
         self._proc = None
+        self._write_lock = threading.Lock()   # job, cancel and observe lines share stdin
+        self.observations_dropped = 0
         self._lines: Optional[queue.Queue] = None
 
     # -- the process -------------------------------------------------------
@@ -258,24 +260,44 @@ class MotionWorker:
             ) -> Dict[str, Any]:
         """Send one job, forward its phases, and always return a result.
 
-        ``feed``, when given, is polled while the job runs and whatever it
-        returns (a new simulator observation, or None for nothing new) is
-        written to the child as ``{"observe": ...}``.  It is how a job that
-        needs live feedback -- the crane lift watches pad force and the
-        object -- gets it without a WebSocket in the motion process (#79).
+        ``feed``, when given, is called by a forwarding thread while the job
+        runs (woken by ``feed.wait`` when it has one) and whatever it returns
+        (a new simulator observation, or None for nothing new) is written to
+        the child as ``{"observe": ...}``, never blocking: a line that does
+        not fit in a full pipe is dropped, since a newer one follows.  It is
+        how a job that needs live feedback -- the crane lift watches pad
+        force and the object -- gets it without a WebSocket in the motion
+        process (#79).
         """
         if self._proc is None or self._proc.poll() is not None:
             self.close()
             self._start()
         try:
-            self._proc.stdin.write(json.dumps({"job": job}) + "\n")
-            self._proc.stdin.flush()
+            with self._write_lock:
+                self._proc.stdin.write(json.dumps({"job": job}) + "\n")
+                self._proc.stdin.flush()
         except Exception:                         # noqa: BLE001 - dead pipe
             self.close()
             return _worker_failure(
                 "I could not reach the process that moves the arm.",
                 worker_died=True)
 
+        # Feedback is forwarded on a thread of its own, never by this loop:
+        # the loop takes the task lock and handles phases, and neither may
+        # delay an observation (attempt 5, 2026-10-08).
+        forwarding = _Forwarder(self, feed) if feed is not None else None
+        dropped_before = self.observations_dropped
+        try:
+            return self._wait_for_result(on_phase, should_cancel, forwarding)
+        finally:
+            if forwarding is not None:
+                forwarding.stop()
+                dropped = self.observations_dropped - dropped_before
+                if dropped:
+                    log.warning("motion worker: %d observation(s) dropped on a full pipe",
+                                dropped)
+
+    def _wait_for_result(self, on_phase, should_cancel, forwarding) -> Dict[str, Any]:
         deadline = time.monotonic() + self._deadline
         cancelled = False
         while True:
@@ -289,17 +311,15 @@ class MotionWorker:
                     timed_out=True, recovery_needed=True)
             if not cancelled and should_cancel is not None and should_cancel():
                 cancelled = self._send_cancel()
-            if feed is not None:
-                obs = feed()
-                if obs is not None and not self._send_observation(obs):
-                    self.close()
-                    return _worker_failure(
-                        "I lost the pipe to the process that moves the arm "
-                        "while it was relying on live feedback. My arm is "
-                        "wherever it stopped.", worker_died=True,
-                        recovery_needed=True)
+            if forwarding is not None and forwarding.lost.is_set():
+                self.close()
+                return _worker_failure(
+                    "I lost the pipe to the process that moves the arm "
+                    "while it was relying on live feedback. My arm is "
+                    "wherever it stopped.", worker_died=True,
+                    recovery_needed=True)
             try:
-                line = self._lines.get(timeout=min(0.02 if feed else 0.2, left))
+                line = self._lines.get(timeout=min(0.02 if forwarding else 0.2, left))
             except queue.Empty:
                 continue
             if line is None:
@@ -319,12 +339,33 @@ class MotionWorker:
                 return message["result"]
 
     def _send_observation(self, obs: Dict[str, Any]) -> bool:
-        try:
-            self._proc.stdin.write(json.dumps({"observe": obs}) + "\n")
-            self._proc.stdin.flush()
-            return True
-        except Exception:                         # noqa: BLE001 - dead pipe
-            return False
+        """Never blocks: if the pipe is full the line is dropped (a newer one
+        follows) and counted.  False only for a dead pipe."""
+        line = json.dumps({"observe": obs}) + "\n"
+        with self._write_lock:
+            if self._proc is None:                # closed under the forwarder
+                return False
+            stdin = self._proc.stdin
+            try:
+                fd = stdin.fileno()
+            except Exception:                     # noqa: BLE001 - not a real pipe
+                fd = None
+            try:
+                if fd is None:
+                    stdin.write(line)
+                    stdin.flush()
+                    return True
+                stdin.flush()                     # nothing of ours left buffered
+                os.set_blocking(fd, False)
+                try:
+                    os.write(fd, line.encode())   # < PIPE_BUF: all or nothing
+                except BlockingIOError:
+                    self.observations_dropped += 1
+                finally:
+                    os.set_blocking(fd, True)
+                return True
+            except Exception:                     # noqa: BLE001 - dead pipe
+                return False
 
     def _send_cancel(self) -> bool:
         """A Stop is a message, not a kill.
@@ -335,11 +376,43 @@ class MotionWorker:
         them to, and the deadline is what covers a child that will not.
         """
         try:
-            self._proc.stdin.write(json.dumps({"cancel": True}) + "\n")
-            self._proc.stdin.flush()
+            with self._write_lock:
+                self._proc.stdin.write(json.dumps({"cancel": True}) + "\n")
+                self._proc.stdin.flush()
             return True
         except Exception:                         # noqa: BLE001 - dead pipe
             return False
+
+
+class _Forwarder:
+    """Forwards observations to the worker on a thread of its own (F1).
+
+    The job loop takes the task lock (should_cancel, on_phase) and handles
+    phases; none of that may delay feedback, so forwarding does not run on
+    it.  Woken by SimLink on every new state; sends only the latest."""
+
+    def __init__(self, worker: "MotionWorker", feed) -> None:
+        self._worker, self._feed = worker, feed
+        self._stop = threading.Event()
+        self.lost = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="observe-forwarder",
+                                        daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        wait = getattr(self._feed, "wait", None) or (lambda t: self._stop.wait(t))
+        while not self._stop.is_set():
+            obs = self._feed()
+            if obs is None:
+                wait(0.05)
+                continue
+            if not self._worker._send_observation(obs):
+                self.lost.set()
+                return
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=1.0)
 
 
 def _worker_failure(detail: str, **evidence) -> Dict[str, Any]:
@@ -815,9 +888,13 @@ class SimulatorExecutor:
             if pos is None:
                 return None
             return {"seq": snap.seq, "age_s": round(snap.age_s(), 4),
+                    # SimLink's ingest stamp: the worker shares this
+                    # container's CLOCK_MONOTONIC, so its age is end to end.
+                    "ingest_mono": snap.received_at,
                     "object_id": object_id, "position": list(pos),
                     "quat_wxyz": list(snap.quats.get(object_id) or ()),
                     "grippers": snap.grippers}
+        feed.wait = lambda timeout: self._link.wait_newer(last["seq"], timeout)
         return feed
 
     def _verify_posture(self, proposal, flown, posture, before,

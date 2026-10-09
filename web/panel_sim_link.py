@@ -108,6 +108,8 @@ class SimLink:
         self.url = url or DEFAULT_URL
         self._stale_after = stale_after_s
         self._lock = threading.Lock()
+        #: Notified on every ingested state, so a forwarder waits instead of polling.
+        self._fresh = threading.Condition(self._lock)
         self._snapshot: Optional[SimSnapshot] = None
         # never_started|connecting|connected|unavailable|stopped.  The first
         # value matters: the request that lazily builds the panel also starts
@@ -153,6 +155,13 @@ class SimLink:
             self._state = "stopped"
 
     # -- reads -------------------------------------------------------------
+
+    def wait_newer(self, seq, timeout: float) -> None:
+        """Return when a snapshot other than ``seq`` is held, or after
+        ``timeout`` (real time; a bound, not a measurement)."""
+        with self._lock:
+            if self._snapshot is None or self._snapshot.seq == seq:
+                self._fresh.wait(timeout)
 
     def snapshot(self) -> Optional[SimSnapshot]:
         """The latest snapshot, or None when there is no live one.
@@ -398,3 +407,4 @@ class SimLink:
         )
         with self._lock:
             self._snapshot = snap
+            self._fresh.notify_all()

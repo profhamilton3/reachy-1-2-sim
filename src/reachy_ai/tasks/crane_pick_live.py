@@ -220,6 +220,8 @@ class Observation:
     grip_force_n: float
     grasping: bool
     age_s: float = 0.0
+    #: Why it is stale (`feedback.latest`): None when fresh.
+    stale_reason: Optional[str] = None
 
 
 Observe = Callable[[], Observation]
@@ -761,7 +763,8 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
             return None
         o = observe()
         if o.age_s > FEEDBACK_STALE_S:
-            return f"feedback stale ({o.age_s:.2f} s)"
+            return (f"feedback stale ({o.age_s:.2f} s"
+                    + (f", {o.stale_reason})" if o.stale_reason else ")"))
         if o.grip_force_n > lim.contact_force_n:
             return f"grip force {o.grip_force_n:.3f} N (a pad touched something)"
         moved = float(np.linalg.norm(np.asarray(o.position) - st["ref"]))
