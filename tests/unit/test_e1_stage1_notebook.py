@@ -195,6 +195,11 @@ class _StubArm:
     def __init__(self):
         for name in rig_routes.R_JOINTS:
             setattr(self, name, _StubJoint(-9999.0))
+        # Except the forearm yaw, which starts where every corridor route
+        # commands it (0): a corridor route refuses to START with it off
+        # (rig_routes.corridor_entry_refusal, #74), and this test is about the
+        # time budget, not the entry check.
+        self.r_forearm_yaw = _StubJoint(0.0)
 
 
 def _scripted_mover(clock, bad_pose, calls):
