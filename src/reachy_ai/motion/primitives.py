@@ -628,3 +628,38 @@ def go_home(robot, arm, duration: float = 2.5) -> None:
     Routes through the side-clearing stow path so the hand never crosses the
     tabletop on the way down."""
     stow_from_side(robot, arm, duration)
+
+
+# ── Bounded single-joint nudge (#107) ────────────────────────────────────────
+# Kept at the end of the module so no existing line moves: tests and
+# tools/goalfix_cmp cite line numbers in this file.
+
+class MotionRefused(RuntimeError):
+    """`safety.gate_check()` refused motion; nothing was commanded."""
+
+
+#: The largest single-joint nudge `nudge_joint` will command (degrees).
+NUDGE_MAX_DEG = 10.0
+
+
+def nudge_joint(arm, joint_name: str, delta_deg: float, *,
+                max_delta_deg: float = NUDGE_MAX_DEG) -> float:
+    """Command one joint ``delta_deg`` from its present position.
+
+    A bounded, single-joint move for checks such as the host smoke test
+    (#107), not a planned motion.  Refuses before sending anything: a
+    non-finite or larger-than-``max_delta_deg`` step raises ``ValueError``,
+    and a refused ``safety.gate_check()`` raises ``MotionRefused``.
+
+    Returns the commanded target (degrees).
+    """
+    delta = float(delta_deg)
+    if not math.isfinite(delta) or abs(delta) > max_delta_deg:
+        raise ValueError(f"nudge of {delta_deg!r} deg is outside +/-{max_delta_deg} deg")
+    from reachy_ai.motion import safety
+    if not safety.gate_check():
+        raise MotionRefused("safety.gate_check() refused motion")
+    joint = getattr(arm, joint_name)
+    target = float(joint.present_position) + delta
+    joint.goal_position = target
+    return target
