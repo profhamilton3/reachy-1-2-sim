@@ -114,6 +114,11 @@ MOTION_DEADLINE_S = float(os.environ.get("REACHY_PANEL_MOTION_DEADLINE", "180"))
 #: child that is wedged inside grpc, which will not go at all.
 WORKER_EXIT_GRACE_S = 2.0
 
+#: Start the next job in a fresh motion worker after every lift: a backstop
+#: for per-process heap growth (the reachy_sdk poll leak, `sdk_compat`).  A
+#: fresh worker costs ~1.7 s at the next job's start (measured, emulated).
+RESTART_WORKER_AFTER_LIFT = True
+
 #: How close to the destination cell the object must end up to count as placed.
 #: The cell's own half-extent decides that, so this only bounds the wait for a
 #: fresh snapshot after the arm has finished.
@@ -340,10 +345,6 @@ class MotionWorker:
             return True
         except Exception:                         # noqa: BLE001 - dead pipe
             return False
-
-
-#: Start the next job in a fresh motion worker after every lift (backstop).
-RESTART_WORKER_AFTER_LIFT = True
 
 
 def _worker_failure(detail: str, **evidence) -> Dict[str, Any]:
