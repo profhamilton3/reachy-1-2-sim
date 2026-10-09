@@ -310,19 +310,26 @@ OBSERVATION_STALE_S = 0.5
 
 
 def _observer(object_id: str):
-    """`tasks.crane_pick_live.Observe` over what the parent forwards."""
+    """`tasks.crane_pick_live.Observe` over what the parent forwards.  The
+    age is end to end (since SimLink ingested it, in the panel process; same
+    container kernel, same CLOCK_MONOTONIC), and a stale one says why."""
+    from reachy_ai.feedback import latest as L
     from reachy_ai.tasks.crane_pick_live import Observation
 
     def observe():
-        obs, at = OBSERVATIONS.latest()
+        r = OBSERVATIONS.latest()
+        now = time.monotonic()
+        obs = r.value if r is not None else None
         if obs is None or obs.get("object_id") != object_id or len(obs.get("quat_wxyz") or ()) != 4:
             # No feedback is reported as STALE feedback, which halts a move
             # rather than letting it continue blind.
-            return Observation((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), 0.0, False, 1e9)
+            return Observation((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), 0.0, False, 1e9,
+                               stale_reason=L.NO_OBSERVATION)
         g = (obs.get("grippers") or {}).get("right") or {}
         return Observation(tuple(obs["position"]), tuple(obs["quat_wxyz"]),
                            float(g.get("grip_force_n", 0.0)), bool(g.get("grasping")),
-                           time.monotonic() - at + float(obs.get("age_s", 0.0)))
+                           r.age_s(now),
+                           stale_reason=L.stale_reason(r, now, OBSERVATION_STALE_S))
     return observe
 
 
@@ -661,23 +668,27 @@ def run_job(job: Dict[str, Any], conn: Connection, *,
 # -- the process ----------------------------------------------------------
 
 class Observations:
-    """The latest observation the parent forwarded, and when it arrived."""
+    """The latest observation the parent forwarded (latest-wins), stamped
+    with when SimLink ingested it and when it arrived here."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._obs: Optional[Dict[str, Any]] = None
-        self._at = 0.0
+        from reachy_ai.feedback.latest import LatestSlot
+        self._slot = LatestSlot()
 
     def put(self, obs: Dict[str, Any]) -> None:
-        with self._lock:
-            self._obs, self._at = obs, time.monotonic()
+        now = time.monotonic()
+        # An older parent sends only the age at send; then the pipe is not
+        # counted, as before.
+        ingest = obs.get("ingest_mono", now - float(obs.get("age_s", 0.0)))
+        self._slot.put(obs, float(ingest), now)
 
     def latest(self):
-        with self._lock:
-            return self._obs, self._at
+        return self._slot.latest()
 
 
-#: Filled by `_reader`; read by the jobs that need live feedback.
+#: Filled by `_reader`; read by the jobs that need live feedback.  Built at
+#: import, and it needs `reachy_ai.feedback`, hence the path first.
+_ensure_paths()
 OBSERVATIONS = Observations()
 
 
@@ -686,21 +697,36 @@ def _reader(stream, jobs: "queue.Queue", cancel: threading.Event) -> None:
 
     It has to: the main thread is inside a blocking move for the whole time a
     Stop is worth sending.
+
+    DRAIN TO LATEST.  Each wake-up takes everything already in the pipe;
+    cancels and jobs are kept in order, and only the newest observation is
+    published.  After a pause of this whole process (a gen-2 GC), the first
+    read after it is the newest the parent sent, not a walk through the
+    backlog.
     """
-    for line in stream:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            message = json.loads(line)
-        except ValueError:
-            continue
-        if message.get("cancel"):
-            cancel.set()
-        elif "observe" in message:
-            OBSERVATIONS.put(message["observe"])
-        elif "job" in message:
-            jobs.put(message["job"])
+    from reachy_ai.feedback.latest import LineDrain, newest_of
+    drain = LineDrain(stream)
+    while True:
+        lines, eof = drain.next_batch()
+        messages = []
+        for line in lines:
+            try:
+                messages.append(json.loads(line))
+            except ValueError:
+                continue
+        controls, newest, _skipped = newest_of(
+            messages, lambda m: isinstance(m, dict) and "observe" in m)
+        for message in controls:
+            if not isinstance(message, dict):
+                continue
+            if message.get("cancel"):
+                cancel.set()
+            elif "job" in message:
+                jobs.put(message["job"])
+        if newest is not None:
+            OBSERVATIONS.put(newest["observe"])
+        if eof:
+            break
     jobs.put(None)                                # EOF: the parent is gone
 
 
