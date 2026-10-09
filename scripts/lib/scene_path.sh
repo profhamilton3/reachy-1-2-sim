@@ -6,7 +6,10 @@
 # resolve_scene_path <repo> <scene_in>
 #   Sets SCENE (host path) and SCENE_FILE (container path, under
 #   /opt/scenes/) in the caller's shell. Exits 1 (after printing to
-#   stderr) if the resolved SCENE does not exist as a file.
+#   stderr) if the resolved SCENE does not exist as a file, or is not
+#   textually under <repo>/scenes/ (issue #115: an absolute path elsewhere,
+#   a doubled slash, a symlink from outside or a `..` segment would
+#   otherwise yield a SCENE_FILE the container cannot find).
 resolve_scene_path() {
     local repo="$1"
     local scene_in="$2"
@@ -20,12 +23,19 @@ resolve_scene_path() {
         echo "  Available: $(ls "$repo/scenes"/*.yaml 2>/dev/null | xargs -n1 basename | sed 's/\.yaml//' | tr '\n' ' ')" >&2
         return 1
     fi
-    # A1 (2026-09-15 matrix readiness): relative to $repo/scenes, not just
-    # the basename -- a board under a subdirectory (e.g. e1_boards/B4.yaml)
-    # must keep that subdirectory inside the container too, or the
-    # container-side scene-marker-publisher looks in the wrong place and
-    # crash-loops with no board visible in RViz, even though physics,
-    # bridge, /status, identity and recording are all otherwise correct
-    # (observed in the E1 pilot).
-    SCENE_FILE="/opt/scenes/${SCENE#"$repo/scenes/"}"
+    case "$SCENE" in
+        */../*|*/./*) ;;
+        "$repo/scenes/"*)
+            # A1 (2026-09-15 matrix readiness): relative to $repo/scenes, not
+            # just the basename -- a board under a subdirectory (e.g.
+            # e1_boards/B4.yaml) must keep that subdirectory inside the
+            # container too, or the container-side scene-marker-publisher
+            # looks in the wrong place and crash-loops with no board visible
+            # in RViz, even though physics, bridge, /status, identity and
+            # recording are all otherwise correct (observed in the E1 pilot).
+            SCENE_FILE="/opt/scenes/${SCENE#"$repo/scenes/"}"
+            return 0 ;;
+    esac
+    echo "✖ Scene must be a file under $repo/scenes/: $SCENE" >&2
+    return 1
 }

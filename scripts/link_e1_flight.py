@@ -653,7 +653,8 @@ def main() -> None:
     w = sidecar["contacts_window"]
     print(f"Wrote {path}: contacts={len(sidecar['contacts'])} "
           f"(evidence on {w['states_with_contacts_key']}/{w['states_in_window']} "
-          f"states, reset_in_window={w['reset_in_window']})")
+          f"states, reset_in_window={w['reset_in_window']}, "
+          f"torn_trailing_line={bool(w.get('torn_trailing_line', False))})")
 
 
 if __name__ == "__main__":

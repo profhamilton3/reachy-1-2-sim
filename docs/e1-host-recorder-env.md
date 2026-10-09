@@ -53,5 +53,19 @@ in the pilot.
 `verify_simulator_identity` refuses (N8/A2, 2026-09-15 matrix readiness) if
 `/.dockerenv` exists: the recorder shares the host monotonic clock with the
 native server (see `scripts/e1_identity.py`'s "Two clocks, deliberately not
-conflated" section), and a container shell does not share it. Always run
-the recorder -- venv or not -- from a host shell.
+conflated" section), and a container shell does not share it on the pilot
+host: macOS with Docker Desktop, where containers run in a Linux VM with
+its own clock. (On a Linux host a container shares the host kernel's
+monotonic clock; the refusal is kept anyway, as the procedure is
+host-shell only.) Always run the recorder -- venv or not -- from a host
+shell.
+
+## Do not re-link the committed pilot logs in place
+
+The PR #113 pilot logs under `docs/reviews/probes-2026-09-15-e1-tabletop-sim/`
+were linked before `contacts_tracked` existed. `link_e1_flight.py` writes
+its sidecar before deciding exit 4, so running it on those logs in place
+rewrites their `.link.json` to `contacts_recorded: false`. `git status` and
+that directory's `SHA256SUMS` would show the change; restore with
+`git checkout -- <file>`. Re-link a copy instead, if a re-link is ever
+needed.
