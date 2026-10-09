@@ -86,7 +86,7 @@ All processes managed by **supervisord**. Logs at `/var/log/supervisor/`.
 
 | Notebook | Purpose |
 |---|---|
-| `test_motion.ipynb` | Phase 0 smoke test — connects to fake server, reads joints, moves arm, tests gripper and head |
+| `test_motion.ipynb` | Phase 0 smoke test — connects to fake server, reads joints, moves arm, tests gripper and head. **The kinematic-mode SDK-compatibility notebook** (owner decision, #2): it drives raw `goal_position` writes on purpose, because existing motion examples must keep working in `kinematic` mode. It is not scene-aware — no table, collision or objects — so it is not a pattern for motion under `mujoco-remote`; use `tlh_motion-routine.ipynb` and `primitives` for that. Kept as-is; not to be migrated. |
 
 ## Viewing logs
 
