@@ -114,6 +114,16 @@ MOTION_DEADLINE_S = float(os.environ.get("REACHY_PANEL_MOTION_DEADLINE", "180"))
 #: child that is wedged inside grpc, which will not go at all.
 WORKER_EXIT_GRACE_S = 2.0
 
+#: Start the next job in a fresh motion worker after every lift: a backstop
+#: for per-process heap growth (the reachy_sdk poll leak, `sdk_compat`).  A
+#: fresh worker costs ~1.7 s at the next job's start (measured, emulated).
+#:
+#: OFF: with the poll fixed, one worker stayed flat over five lifts and
+#: >= 23.8k command pushes (Phase 1.5 Run A, 2026-10-09: full GC 7-12 ms,
+#: ~46.1k objects, 32 pending SDK waits throughout, no stale halt).  Turn it
+#: on if `sdk_compat` reports the fix was not applied (another SDK release).
+RESTART_WORKER_AFTER_LIFT = False
+
 #: How close to the destination cell the object must end up to count as placed.
 #: The cell's own half-extent decides that, so this only bounds the wait for a
 #: fresh snapshot after the arm has finished.
@@ -837,6 +847,15 @@ class SimulatorExecutor:
                           if o.position is not None},
                  "sdk": {"host": self._sdk_host, "port": self._sdk_port}},
                 on_phase=phase, should_cancel=should_cancel, **extra)
+            if proposal.task_type == "lift_object" and RESTART_WORKER_AFTER_LIFT:
+                # Backstop: a lift streams thousands of commands, and a
+                # process kept between lifts carries whatever any of them
+                # leaked into the next (the SDK poll leak, sdk_compat).  A
+                # fresh worker per lift bounds that to one lift; it costs
+                # ~1.7 s at the next job's start (measured, emulated).
+                close = getattr(self._worker, "close", None)
+                if close is not None:
+                    close()
             if out.get("status") != "moved":
                 # The motion process already knows the answer: a posture it
                 # has no route out of, a path it will not invent, a deadline.

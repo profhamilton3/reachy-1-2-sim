@@ -112,6 +112,7 @@ class Connection:
         self._port = port
         self._sdk_class = sdk_class
         self._robot = None
+        self.command_poll_fixed: Optional[bool] = None
 
     def robot(self):
         if self._robot is not None:
@@ -131,6 +132,10 @@ class Connection:
         cls = self._sdk_class
         if cls is None:
             from reachy_sdk import ReachySDK
+            from reachy_ai.sdk_compat import fix_command_poll
+            # This connection lives across jobs; the stock poll leaks per
+            # command (see sdk_compat).
+            self.command_poll_fixed = fix_command_poll()
             cls = ReachySDK
         self._robot = cls(host=self._host, sdk_port=self._port)
         time.sleep(CONNECT_SETTLE_S)
