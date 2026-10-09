@@ -117,7 +117,12 @@ WORKER_EXIT_GRACE_S = 2.0
 #: Start the next job in a fresh motion worker after every lift: a backstop
 #: for per-process heap growth (the reachy_sdk poll leak, `sdk_compat`).  A
 #: fresh worker costs ~1.7 s at the next job's start (measured, emulated).
-RESTART_WORKER_AFTER_LIFT = True
+#:
+#: OFF: with the poll fixed, one worker stayed flat over five lifts and
+#: >= 23.8k command pushes (Phase 1.5 Run A, 2026-10-09: full GC 7-12 ms,
+#: ~46.1k objects, 32 pending SDK waits throughout, no stale halt).  Turn it
+#: on if `sdk_compat` reports the fix was not applied (another SDK release).
+RESTART_WORKER_AFTER_LIFT = False
 
 #: How close to the destination cell the object must end up to count as placed.
 #: The cell's own half-extent decides that, so this only bounds the wait for a
