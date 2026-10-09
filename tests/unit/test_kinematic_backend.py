@@ -7,6 +7,13 @@ Exit gates covered:
   R12-101: Existing joint behavior works through KinematicBackend.
   R12-102: Motion result is invariant to zero, one, or multiple snapshot readers.
   R12-103: State file is never written partially (atomic rename path is exercised).
+
+The kinematic backend has no scene, no collision and no objects, by design: it
+moves joints and nothing else, so an arm driven through the table here goes
+straight through it.  That is not a gap in this backend.  Scene-aware motion is
+the awareness layer (`reachy_ai.scene.awareness`, `CartesianPlanner`) or the
+`mujoco-remote` physics backend; see
+`tests/integration/test_scene_aware_motion.py` (#2).
 """
 
 import math
