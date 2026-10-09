@@ -1,13 +1,14 @@
 # Plan: close out open PRs and issues (2026-10-08)
 
-Status: **Phase 0 complete; #130 closed (2026-10-09).** See *Progress log* below.
+Status: **Phases 0 and 1 complete (2026-10-09).** 11 issues closed and 0 PRs open; #74 and #2 remain, both in Phase 2. See *Progress log* below.
 Source: owner proposal "Proposals to Close Issues and PRs 2026-10-08" + `CLAUDE.md`.
 Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149, #150) and 7 open issues (#2, #28, #74, #107, #115, #127, #130). `main` was at `fb67972`.
 
 ## Progress log (verified on GitHub 2026-10-09)
 
-**Main:** `b645c45`. Full suite: 3,401 passed, 1 failed, 18 skipped. The one failure is (c) below.
-**Open:** 6 issues (#2, #28, #74, #107, #115, #127), 0 PRs.
+**Main:** `ca41933`. Full suite on the #166+#167 integration branch: 3,449 passed, 1 failed, 19 skipped (the SDK test file skips on hosts without reachy_sdk; it runs in the image). The one failure is (c) below.
+**Open:** 2 issues (#74, #2), both Phase 2. 0 PRs.
+**Live:** the sim checkout was pulled to `ca41933` and the panel restarted. The SDK fix is confirmed applied inside the container (reachy-sdk 0.7.0).
 
 | Item | Outcome | Commit |
 |---|---|---|
@@ -18,8 +19,16 @@ Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149,
 | #150 | Merged as a general E1 freshness fix (bridge-restart path) | `f7155cf` |
 | #130 | Closed by #161: explicit bool/NaN/Inf/overflow-safe `wall_time_ns` check at 3 sites | `db60c2b` |
 | Stale baselines | #162. (a) The goalfix tripwire citation `server.py:1059` → `1072`, at all 5 places. (b) The clearance test re-baselined 31.66 → 31.61 cm (`…_is_31_61cm`); the cause is the #151 soda-can height alone, with no change from #157 | `b645c45` |
+| Quick-close triage | #163 closes #127 (M1–M3 and the carried items fixed or won't-fix). #164 closes #115 (items 1–7; deferred tail won't-fix). #165 closes #107 (`nudge_joint` + `gate_check()`; live smoke test PASS). reachy-tabletop-ai#22 closes #28 (EPIC-8 8.8/8.9 "as shipped"; the browser UI recorded as future scope). Nothing was marked obsolete: E1 tooling is still live | `e8ae888`, `9abc00a`, `409e3e4` |
+| **Phase 1: observation delay** | **Root cause:** reachy-sdk 0.7.0 `_poll_waiting_commands` leaks 14 pending waits per command push. In the panel's reused worker this grew the heap and the full-GC pauses (7 → 124 ms in one lift; about 20k+ pushes by attempt 5), which caused the 0.67 s stale halt. **Fix:** #166 (`feedback/latest.py`, a portable latest-wins slot; non-blocking panel forwarder; worker drain-to-latest; end-to-end age; `stale_reason`; T1–T4). #167 (`sdk_compat.fix_command_poll`, gated to 0.7.0 with a source-hash pin; `RESTART_WORKER_AFTER_LIFT` backstop, default OFF). #168 marks the roadmap entry resolved. **Re-measure (1.5):** 10 lifts, 0 stale halts; one worker, 23.8k pushes, heap flat, full GC at most 12 ms. Evidence: `~/Reachy-Lab/outputs/sim/working/phase1.5-remeasure-2026-10-09.md` | `81b3571`, `b4f47fa`, `ca41933` |
 
 **Remaining known failure (c):** `test_panel_route_evaluators::test_the_registry_and_the_evaluators_agree…`. `lift_object` (#155, route `CRANE_LIFT`) has no entry in `ABILITY_ROUTES` or `EVALUATORS`. This is folded into the Phase 2 placement slice; no new issue was opened.
+
+**Ride-along for the next PR that touches `src/reachy_ai/sdk_compat.py`:** an INFO log when `fix_command_poll` applies successfully. Today it is silent on success and warns only when it skips.
+
+**Follow-ups (owner's call):**
+- Report the 0.7.0 leak upstream to Pollen Robotics (public; draft on request).
+- Port `feedback/latest.py` and `sdk_compat.py` to the reachy-tabletop-ai stereo-viewer app. It uses the same SDK against the robot, so it likely has the same leak.
 
 **Cleanup candidates (owner's call):**
 - About 35 old remote branches, most of them merged.
@@ -110,12 +119,12 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 
 | Step | Agent | Output |
 |---|---|---|
-| 1.1 Trace the panel → motion-worker path. Find every queue, poll interval, lock, and serialization step, and estimate the worst-case latency of each. Find where an observation can be read stale (unbounded queue, poll period, blocked worker, lock held during I/O). | Opus (read-only) | A short root-cause note with ranked hypotheses and the evidence for each |
-| 1.2 Write a deterministic reproducer: a fixture backend plus an injected delay that recreates an observation older than 0.5 s. | Sonnet | Failing test |
+| ✅ 1.1 Trace the panel → motion-worker path. Find every queue, poll interval, lock, and serialization step, and estimate the worst-case latency of each. Find where an observation can be read stale (unbounded queue, poll period, blocked worker, lock held during I/O). | Opus (read-only) | A short root-cause note with ranked hypotheses and the evidence for each |
+| ✅ 1.2 Write a deterministic reproducer: a fixture backend plus an injected delay that recreates an observation older than 0.5 s. | Sonnet | Failing test |
 | **H-1** Owner approves the fix design. | Owner | — |
-| 1.3 Implement the fix: bounded queue where the latest frame wins, a monotonic-clock age stamp on every observation, and an explicit stale status. The guard stays at 0.5 s. | Sonnet, reviewed by Opus | PR `core:` |
+| ✅ 1.3 Implement the fix: bounded queue where the latest frame wins, a monotonic-clock age stamp on every observation, and an explicit stale status. The guard stays at 0.5 s. | Sonnet, reviewed by Opus | PR `core:` |
 | 1.4 ✅ **#130** (closed by #161): `wall_time_ns` validation rejects `bool`, NaN, inf, and negative values (same class of bug as #119 H3). If #150 is going ahead, coordinate with it, because both change `e1_identity`. | Sonnet | PR with `Closes #130` and unit tests |
-| 1.5 Owner re-runs the five-attempt measurement on the real setup. | Owner | Evidence that 5/5 attempts finish with no stale-guard halts |
+| ✅ 1.5 Owner re-runs the five-attempt measurement on the real setup. | Owner | Evidence that 5/5 attempts finish with no stale-guard halts |
 
 **Phase exit:** the reproducer passes, #130 is closed, and the owner's re-measurement is recorded.
 
@@ -123,7 +132,7 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 
 | Item | Agent | Scope | Gate | Done when |
 |---|---|---|---|---|
-| **#107** | Sonnet | Add a helper to `primitives.py` (for example `nudge_joint`) that calls `gate_check()`. Route `scripts/smoke_test_host.py` through it. Add a test that a refused gate fails the smoke test. | H-2b | `Closes #107`, and the smoke test still exits 0 against a healthy sim |
+| ✅ **#107** | Sonnet | Add a helper to `primitives.py` (for example `nudge_joint`) that calls `gate_check()`. Route `scripts/smoke_test_host.py` through it. Add a test that a refused gate fails the smoke test. | H-2b | `Closes #107`, and the smoke test still exits 0 against a healthy sim |
 | **#74** | Opus designs, Sonnet implements | Reconcile the planner model with physics on clearance at `rig_rail_outer_right` (`SWING_1`). Add torso-clearance modelling. Add regression tests for the rejected rig routes in `FWDCenterLabSivaPool`. | H-2a | `Closes #74`, and the routes are either accepted with a stated margin or rejected for a documented reason |
 | **#2** | Sonnet | List every raw `goal_position` write in scripts and notebooks. Migrate scripts to `SceneModel`. Add table/relocation tests. Notebook edits only if the owner allows them. | H-2c | `Closes #2`, with the audit table in the PR |
 | Placement slice | Opus designs, Sonnet implements | Geometry-based placement to cell R2C1, using the gated primitives and the #74 clearance model. **Includes the success evaluators for `lift_object` and the new place ability.** This closes the last failing test (c), and decides how planned routes fit the baseline-recipe rule. | H-1-style design approval | A placement test passes in `fixture`/`kinematic` mode. The owner runs MuJoCo on the Mac. |
@@ -133,14 +142,14 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 | Item | Agent | Scope | Gate | Done when |
 |---|---|---|---|---|
 | Recovery planner | Opus designs, Sonnet implements | Plan a checked exit from the *measured* state, with no hard-coded waypoints and no sim reset | Design approval | Tests pass from at least 3 seeded start states |
-| **#127** | Sonnet | Stage 1 leg-chain residuals M1–M3: checked archive copies and the tail-check pointer. Do this during the recovery-script refactor. | H-3 | `Closes #127` |
-| **#115** | Sonnet | Items 1–7: gate test pinning, `scene_path` refusal, the shell-test runner, torn-flag visibility | H-3 | `Closes #115`. Each item is fixed or closed with a reason. |
+| ✅ **#127** | Sonnet | Stage 1 leg-chain residuals M1–M3: checked archive copies and the tail-check pointer. Do this during the recovery-script refactor. | H-3 | `Closes #127` |
+| ✅ **#115** | Sonnet | Items 1–7: gate test pinning, `scene_path` refusal, the shell-test runner, torn-flag visibility | H-3 | `Closes #115`. Each item is fixed or closed with a reason. |
 
 ### Phase 4: Experience-based planning and Epic 8
 
 | Item | Agent | Scope | Gate | Done when |
 |---|---|---|---|---|
-| **#28** | Sonnet (if the scope is amended) or Opus (if a UI is built) | Default: amend `EPIC-8.md` to the CLI/exporter scope that was actually delivered, and open a follow-up issue for the UI | H-4 | `Closes #28` |
+| ✅ **#28** | Sonnet (if the scope is amended) or Opus (if a UI is built) | Default: amend `EPIC-8.md` to the CLI/exporter scope that was actually delivered, and open a follow-up issue for the UI | H-4 | `Closes #28` |
 | Plan memory | Opus designs | Record successful plans with scene and model hashes and seeds, then reuse them as starting points. Write it up as a design doc first. | Design approval | ADR merged. Implementation is tracked in a new issue. |
 
 ---
