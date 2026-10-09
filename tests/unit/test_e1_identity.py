@@ -376,6 +376,27 @@ class TestContactsTrackedManifestGate:
         assert any("manifest.contacts_tracked is False" in r
                   for r in result.reasons)
 
+    @pytest.mark.parametrize("value", [1, "true", "True", [True], {"on": True}])
+    def test_truthy_non_true_contacts_tracked_refuses(self, tmp_path, value):
+        """#115 item 1: the gate is `is not True`, not truthiness -- a
+        regression to `if not contacts_tracked` must fail here."""
+        manifest = _manifest_for(_BOARD_SCENE, contacts_tracked=value)
+        wall_time_ns = 10_000_000_000
+        _write_run_dir(
+            tmp_path, manifest_meta=manifest,
+            wall_time_ns=wall_time_ns, sim_step=100)
+        result = ei.verify_simulator_identity(
+            host="localhost", port=50051, scene_path=_BOARD_SCENE,
+            record_root=str(tmp_path),
+            read_sdk_joints=lambda: _sdk_joints(_POSE_DEG),
+            http_get=_good_http_get,
+            now_ns=lambda: wall_time_ns, wall_clock_ns=lambda: 0,
+            sleep=lambda s: None, min_reads=1,
+        )
+        assert result.ok is False
+        assert any(f"manifest.contacts_tracked is {value!r}" in r
+                  for r in result.reasons), result.reasons
+
     def test_true_contacts_tracked_is_unchanged_pass(self, tmp_path):
         manifest = _manifest_for(_BOARD_SCENE, contacts_tracked=True)
         wall_time_ns = 10_000_000_000

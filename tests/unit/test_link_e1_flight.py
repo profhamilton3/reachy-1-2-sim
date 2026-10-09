@@ -775,6 +775,7 @@ class TestContactsThroughLinkFlight:
         assert "Wrote" in result.stdout
         assert "contacts=10" in result.stdout
         assert "reset_in_window=False" in result.stdout
+        assert "torn_trailing_line=False" in result.stdout
 
         sidecar_path = lef.sidecar_path_for(str(log_path))
         sidecar = json.loads(sidecar_path.read_text())
@@ -973,6 +974,16 @@ class TestContactsTrackedManifestGate:
         assert block["contacts"] is None
         assert block["contacts_window"]["manifest_contacts_tracked"] is False
 
+    @pytest.mark.parametrize("value", [1, "true", "True", [True], {"on": True}])
+    def test_manifest_truthy_non_true_flag_refuses(self, tmp_path, value):
+        """#115 item 1: the gate is `is not True`, not truthiness -- a
+        regression to `if not contacts_tracked` must fail here."""
+        run_dir = _write_states(tmp_path, self._states(), contacts_tracked=value)
+        block = lef.align_and_recompute(self._samples(), run_dir, _BOARD_SCENE)
+        assert block["contacts_recorded"] is False
+        assert block["contacts"] is None
+        assert block["contacts_window"]["manifest_contacts_tracked"] == value
+
     def test_manifest_true_flag_is_unchanged_pass(self, tmp_path):
         run_dir = _write_states(tmp_path, self._states(), contacts_tracked=True)
         block = lef.align_and_recompute(self._samples(), run_dir, _BOARD_SCENE)
@@ -1056,6 +1067,8 @@ class TestTornTrailingLine:
         sidecar = json.loads(lef.sidecar_path_for(str(log_path)).read_text())
         assert sidecar["contacts_recorded"] is True
         assert sidecar["contacts_window"]["torn_trailing_line"] is True
+        # #115 item 4: the success line says so, not only the sidecar.
+        assert "torn_trailing_line=True" in result.stdout
 
 
 class TestSettledPoseCheck:
