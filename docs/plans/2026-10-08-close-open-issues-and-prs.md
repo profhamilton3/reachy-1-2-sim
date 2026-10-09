@@ -1,8 +1,30 @@
 # Plan: close out open PRs and issues (2026-10-08)
 
-Status: **DRAFT for owner review. No code has been written under this plan.**
+Status: **Phase 0 complete; #130 closed (2026-10-09).** See *Progress log* below.
 Source: owner proposal "Proposals to Close Issues and PRs 2026-10-08" + `CLAUDE.md`.
 Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149, #150) and 7 open issues (#2, #28, #74, #107, #115, #127, #130). `main` was at `fb67972`.
+
+## Progress log (verified on GitHub 2026-10-09)
+
+**Main:** `b645c45`. Full suite: 3,401 passed, 1 failed, 18 skipped. The one failure is (c) below.
+**Open:** 6 issues (#2, #28, #74, #107, #115, #127), 0 PRs.
+
+| Item | Outcome | Commit |
+|---|---|---|
+| #132, #133, #149 | Merged (H-0a: Option A; H-0b: #133 kept as a partial record) | `5fd0793`, `351deef`, `dfa971f` |
+| #159 | B4 plan rev 7 added unchanged (`docs/plans/b4-goalfix-comparison-plan-rev7.md`) | `49d5da5` |
+| **H-0d** | **B4 goalfix comparison retired.** Work moves to the current physics. Record: `docs/plans/b4-goalfix-comparison-RETIRED-2026-10-08.md` (#160) | `45d0172` |
+| #146, #148 | Closed as not pursued (H-0c superseded); branches kept | — |
+| #150 | Merged as a general E1 freshness fix (bridge-restart path) | `f7155cf` |
+| #130 | Closed by #161: explicit bool/NaN/Inf/overflow-safe `wall_time_ns` check at 3 sites | `db60c2b` |
+| Stale baselines | #162. (a) The goalfix tripwire citation `server.py:1059` → `1072`, at all 5 places. (b) The clearance test re-baselined 31.66 → 31.61 cm (`…_is_31_61cm`); the cause is the #151 soda-can height alone, with no change from #157 | `b645c45` |
+
+**Remaining known failure (c):** `test_panel_route_evaluators::test_the_registry_and_the_evaluators_agree…`. `lift_object` (#155, route `CRANE_LIFT`) has no entry in `ABILITY_ROUTES` or `EVALUATORS`. This is folded into the Phase 2 placement slice; no new issue was opened.
+
+**Cleanup candidates (owner's call):**
+- About 35 old remote branches, most of them merged.
+- A Mac user path in `tests/fixtures/goalfix_cmp/c7_run04_r3_setup.json`, which CLAUDE.md forbids.
+- #150's description still has its old "Draft, do not merge" paragraph.
 
 ---
 
@@ -45,7 +67,7 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 | **H-0a** | The next B4 attempt needs a new host pin, wrapper bundle and reservation, and an amendment to B4 plan rev 7 §10. Merge #132, #133 and #149 before that new pin is set? | **Yes.** Merge all three, then set the new pin once (see the note below this table). |
 | **H-0b** | #133 stopped at reset 18 (17/18 cycles). Merge it as a partial-session record? | Merge, with "partial: 17/18" kept in the title and the stop reason in the evidence README. |
 | **H-0c** | #146 is marked *ready for review*, but the proposal says to keep it as a prep branch. Convert it to draft? | Convert to draft, add a `prep-only` label. |
-| **H-0d** | #150: change the host pin (a004 STOP repair)? | Owner decision. The agent writes a one-page summary of the trade-offs and does nothing else. |
+| **H-0d** | #150: change the host pin (a004 STOP repair)? | **Decided 2026-10-08: B4 retired.** #150 merged as a general fix. |
 | **H-1** | Phase 1 root cause found. Approve the proposed fix before it is implemented? | Required. |
 | **H-2a** | #74: which clearance model is authoritative at `rig_rail_outer_right` (planner model or MuJoCo physics), and is a torso-clearance term in scope? | Physics is ground truth. The model is made more conservative to match it. Torso term in scope. |
 | **H-2b** | #107: the smoke test must stay "non-destructive". Is it acceptable for it to fail when `gate_check()` refuses a move? | Yes. A refused gate makes the smoke test fail loudly. |
@@ -92,7 +114,7 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 | 1.2 Write a deterministic reproducer: a fixture backend plus an injected delay that recreates an observation older than 0.5 s. | Sonnet | Failing test |
 | **H-1** Owner approves the fix design. | Owner | — |
 | 1.3 Implement the fix: bounded queue where the latest frame wins, a monotonic-clock age stamp on every observation, and an explicit stale status. The guard stays at 0.5 s. | Sonnet, reviewed by Opus | PR `core:` |
-| 1.4 **#130**: `wall_time_ns` validation rejects `bool`, NaN, inf, and negative values (same class of bug as #119 H3). If #150 is going ahead, coordinate with it, because both change `e1_identity`. | Sonnet | PR with `Closes #130` and unit tests |
+| 1.4 ✅ **#130** (closed by #161): `wall_time_ns` validation rejects `bool`, NaN, inf, and negative values (same class of bug as #119 H3). If #150 is going ahead, coordinate with it, because both change `e1_identity`. | Sonnet | PR with `Closes #130` and unit tests |
 | 1.5 Owner re-runs the five-attempt measurement on the real setup. | Owner | Evidence that 5/5 attempts finish with no stale-guard halts |
 
 **Phase exit:** the reproducer passes, #130 is closed, and the owner's re-measurement is recorded.
@@ -104,7 +126,7 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 | **#107** | Sonnet | Add a helper to `primitives.py` (for example `nudge_joint`) that calls `gate_check()`. Route `scripts/smoke_test_host.py` through it. Add a test that a refused gate fails the smoke test. | H-2b | `Closes #107`, and the smoke test still exits 0 against a healthy sim |
 | **#74** | Opus designs, Sonnet implements | Reconcile the planner model with physics on clearance at `rig_rail_outer_right` (`SWING_1`). Add torso-clearance modelling. Add regression tests for the rejected rig routes in `FWDCenterLabSivaPool`. | H-2a | `Closes #74`, and the routes are either accepted with a stated margin or rejected for a documented reason |
 | **#2** | Sonnet | List every raw `goal_position` write in scripts and notebooks. Migrate scripts to `SceneModel`. Add table/relocation tests. Notebook edits only if the owner allows them. | H-2c | `Closes #2`, with the audit table in the PR |
-| Placement slice | Opus designs, Sonnet implements | Geometry-based placement to cell R2C1, using the gated primitives and the #74 clearance model | H-1-style design approval | A placement test passes in `fixture`/`kinematic` mode. The owner runs MuJoCo on the Mac. |
+| Placement slice | Opus designs, Sonnet implements | Geometry-based placement to cell R2C1, using the gated primitives and the #74 clearance model. **Includes the success evaluators for `lift_object` and the new place ability.** This closes the last failing test (c), and decides how planned routes fit the baseline-recipe rule. | H-1-style design approval | A placement test passes in `fixture`/`kinematic` mode. The owner runs MuJoCo on the Mac. |
 
 ### Phase 3: General withdrawal and recovery
 
