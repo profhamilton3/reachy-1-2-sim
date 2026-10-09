@@ -25,6 +25,11 @@ except ImportError:
     print("FAIL: reachy-sdk not installed.  Run: pip install reachy-sdk==0.7.0")
     sys.exit(1)
 
+# The bounded command goes through the motion primitives and the safety gate
+# like every other move (#107), never as a raw goal_position write here.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+from reachy_ai.motion import primitives as P  # noqa: E402
+
 PASS = "[PASS]"
 FAIL = "[FAIL]"
 SKIP = "[SKIP]"
@@ -55,6 +60,40 @@ def _check(label: str, condition: bool, detail: str = "") -> bool:
     tag = PASS if condition else FAIL
     print(f"  {tag}  {label}" + (f": {detail}" if detail else ""))
     return condition
+
+
+def _bounded_command(reachy) -> bool:
+    """[5]: nudge r_shoulder_pitch by _SAFE_COMMAND_DEG and back, through
+    `primitives.nudge_joint` (which checks `safety.gate_check()`).  A refused
+    gate is a FAIL, never a skip.  Returns True on pass."""
+    arm = reachy.r_arm
+    try:
+        reachy.turn_on("r_arm")
+        time.sleep(0.3)
+        j = arm.r_shoulder_pitch
+        start_pos = j.present_position
+        target = P.nudge_joint(arm, "r_shoulder_pitch", _SAFE_COMMAND_DEG)
+        time.sleep(_CONVERGE_WAIT_S)
+        final = j.present_position
+        error = abs(final - target)
+        ok = _check(
+            f"r_shoulder_pitch: target={target:.2f}° final={final:.2f}° err={error:.2f}°",
+            error <= _CONVERGE_TOL_DEG)
+        # Return to start
+        P.nudge_joint(arm, "r_shoulder_pitch", start_pos - j.present_position)
+        time.sleep(_CONVERGE_WAIT_S)
+        return ok
+    except P.MotionRefused as exc:
+        print(f"  {FAIL}  safety gate refused the bounded command: {exc}")
+        return False
+    except Exception as exc:
+        print(f"  {FAIL}  command/convergence error: {exc}")
+        return False
+    finally:
+        try:
+            reachy.turn_off("r_arm")
+        except Exception as exc:
+            print(f"  {FAIL}  turn_off after the bounded command: {exc}")
 
 
 def run_smoke_test(host: str, port: int) -> int:
@@ -125,28 +164,7 @@ def run_smoke_test(host: str, port: int) -> int:
 
     # ── 5. Bounded joint command + convergence ────────────────────────────────
     print(f"\n[5] Bounded command ({_SAFE_COMMAND_DEG}°) + convergence")
-    try:
-        reachy.turn_on("r_arm")
-        time.sleep(0.3)
-        j = reachy.r_arm.r_shoulder_pitch
-        start_pos = j.present_position
-        target = start_pos + _SAFE_COMMAND_DEG
-        j.goal_position = target
-        time.sleep(_CONVERGE_WAIT_S)
-        final = j.present_position
-        error = abs(final - target)
-        ok = error <= _CONVERGE_TOL_DEG
-        if not _check(
-            f"r_shoulder_pitch: target={target:.2f}° final={final:.2f}° err={error:.2f}°",
-            ok
-        ):
-            failures += 1
-        # Return to start
-        j.goal_position = start_pos
-        time.sleep(_CONVERGE_WAIT_S)
-        reachy.turn_off("r_arm")
-    except Exception as exc:
-        print(f"  {FAIL}  command/convergence error: {exc}")
+    if not _bounded_command(reachy):
         failures += 1
 
     # ── 6. Force sensors + fans ───────────────────────────────────────────────

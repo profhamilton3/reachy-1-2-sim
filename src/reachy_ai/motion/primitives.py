@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 # The measured pose set.  rig_routes imports nothing from here, so this is not
 # a cycle — and the pocket waypoints belong to the route, not to this module.
 from reachy_ai.motion import rig_routes as R_ROUTES  # noqa: E402
+from reachy_ai.motion import safety  # noqa: E402
 
 _INTERP_HZ = 25          # interpolation update rate
 # Gripper sign convention (measured from reachy_1_2.xml): the RIGHT gripper
@@ -297,6 +298,36 @@ def look_at(robot, xyz, duration: float = 1.0) -> None:
             pass
     time.sleep(0.1)
     smooth_move(head, {"neck_roll": 0.0, "neck_pitch": pitch, "neck_yaw": yaw}, duration)
+
+
+class MotionRefused(RuntimeError):
+    """`safety.gate_check()` refused motion; nothing was commanded."""
+
+
+#: The largest single-joint nudge `nudge_joint` will command (degrees).
+NUDGE_MAX_DEG = 10.0
+
+
+def nudge_joint(arm, joint_name: str, delta_deg: float, *,
+                max_delta_deg: float = NUDGE_MAX_DEG) -> float:
+    """Command one joint ``delta_deg`` from its present position.
+
+    A bounded, single-joint move for checks such as the host smoke test
+    (#107), not a planned motion.  Refuses before sending anything: a
+    non-finite or larger-than-``max_delta_deg`` step raises ``ValueError``,
+    and a refused ``safety.gate_check()`` raises ``MotionRefused``.
+
+    Returns the commanded target (degrees).
+    """
+    delta = float(delta_deg)
+    if not math.isfinite(delta) or abs(delta) > max_delta_deg:
+        raise ValueError(f"nudge of {delta_deg!r} deg is outside +/-{max_delta_deg} deg")
+    if not safety.gate_check():
+        raise MotionRefused("safety.gate_check() refused motion")
+    joint = getattr(arm, joint_name)
+    target = float(joint.present_position) + delta
+    joint.goal_position = target
+    return target
 
 
 def execute_trajectory(
