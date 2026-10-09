@@ -342,6 +342,10 @@ class MotionWorker:
             return False
 
 
+#: Start the next job in a fresh motion worker after every lift (backstop).
+RESTART_WORKER_AFTER_LIFT = True
+
+
 def _worker_failure(detail: str, **evidence) -> Dict[str, Any]:
     return {"status": "failed", "detail": detail, "evidence": evidence}
 
@@ -764,6 +768,15 @@ class SimulatorExecutor:
                           if o.position is not None},
                  "sdk": {"host": self._sdk_host, "port": self._sdk_port}},
                 on_phase=phase, should_cancel=should_cancel, **extra)
+            if proposal.task_type == "lift_object" and RESTART_WORKER_AFTER_LIFT:
+                # Backstop: a lift streams thousands of commands, and a
+                # process kept between lifts carries whatever any of them
+                # leaked into the next (the SDK poll leak, sdk_compat).  A
+                # fresh worker per lift bounds that to one lift; it costs
+                # ~1.7 s at the next job's start (measured, emulated).
+                close = getattr(self._worker, "close", None)
+                if close is not None:
+                    close()
             if out.get("status") != "moved":
                 # The motion process already knows the answer: a posture it
                 # has no route out of, a path it will not invent, a deadline.

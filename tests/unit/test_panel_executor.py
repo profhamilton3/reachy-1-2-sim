@@ -754,6 +754,63 @@ def _with(worker, provider=live_scene):
     return SimulatorExecutor(StubLink(), provider, "scene.yaml", worker=worker)
 
 
+class _LiftWorker(StubWorker):
+    """Takes the feed a lift is given, and counts closes."""
+
+    def __init__(self, *results):
+        super().__init__(*results)
+        self.closed = 0
+
+    def run(self, job, *, on_phase=None, should_cancel=None, feed=None):
+        return super().run(job, on_phase=on_phase, should_cancel=should_cancel)
+
+    def close(self):
+        self.closed += 1
+
+
+class _OrientedLink(StubLink):
+    """Reports the can's orientation, which a lift needs before it starts."""
+
+    def snapshot(self):
+        return SimSnapshot(received_at=time.monotonic(),
+                           quats={"soda_can": (1.0, 0.0, 0.0, 0.0)})
+
+
+def _lifting(worker):
+    return SimulatorExecutor(_OrientedLink(), live_scene, "scene.yaml", worker=worker)
+
+
+def _lift(**kw):
+    return _ability(task_type="lift_object", object_id="soda_can",
+                    route="CRANE_LIFT", expected_start_posture="home", **kw)
+
+
+def test_the_next_job_after_a_lift_gets_a_fresh_worker(monkeypatch, fake_sdk):
+    """Backstop for the SDK command-poll leak (sdk_compat): whatever a lift
+    left in the worker's heap goes with the process."""
+    import panel_executor as PE
+    _validated(monkeypatch)
+    monkeypatch.setattr(PE, "RESTART_WORKER_AFTER_LIFT", True)
+    for result in ({"status": "failed", "detail": "halted", "evidence": {}},
+                   {"status": "moved", "flown": [], "final_posture": "present"}):
+        worker = _LiftWorker(result)
+        out = _lifting(worker).execute(_lift())
+        assert len(worker.jobs) == 1 and worker.closed == 1, out
+
+
+def test_other_jobs_and_a_disabled_backstop_keep_the_worker(monkeypatch, fake_sdk):
+    import panel_executor as PE
+    _validated(monkeypatch)
+    monkeypatch.setattr(PE, "RESTART_WORKER_AFTER_LIFT", True)
+    worker = _LiftWorker()
+    _with(worker).execute(_ability(expected_start_posture="home"))
+    assert len(worker.jobs) == 1 and worker.closed == 0
+    monkeypatch.setattr(PE, "RESTART_WORKER_AFTER_LIFT", False)
+    worker = _LiftWorker({"status": "failed", "detail": "halted", "evidence": {}})
+    out = _lifting(worker).execute(_lift())
+    assert len(worker.jobs) == 1 and worker.closed == 0, out
+
+
 def test_the_job_names_the_ability_the_scene_and_where_it_must_start(
         monkeypatch, fake_sdk):
     """Everything the motion process needs and nothing it does not: it has no
