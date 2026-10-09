@@ -1,13 +1,13 @@
 # Plan: close out open PRs and issues (2026-10-08)
 
-Status: **Phases 0 and 1 complete (2026-10-09).** 11 issues closed and 0 PRs open; #74 and #2 remain, both in Phase 2. See *Progress log* below.
+Status: **All original issues and PRs closed (2026-10-09).** Phases 0 and 1 complete; Phase 2's issue work (#2, #74) is complete. 0 issues and 0 PRs open. Remaining work (evaluators → withdrawal → placement) has no open issue. See *Progress log* below.
 Source: owner proposal "Proposals to Close Issues and PRs 2026-10-08" + `CLAUDE.md`.
 Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149, #150) and 7 open issues (#2, #28, #74, #107, #115, #127, #130). `main` was at `fb67972`.
 
 ## Progress log (verified on GitHub 2026-10-09)
 
 **Main:** `ca41933`. Full suite on the #166+#167 integration branch: 3,449 passed, 1 failed, 19 skipped (the SDK test file skips on hosts without reachy_sdk; it runs in the image). The one failure is (c) below.
-**Open:** 2 issues (#74, #2), both Phase 2. 0 PRs.
+**Open:** 0 issues, 0 PRs. **Main:** `d8c02ba` (deployed; native server and panel restarted with the new joint inertia).
 **Live:** the sim checkout was pulled to `ca41933` and the panel restarted. The SDK fix is confirmed applied inside the container (reachy-sdk 0.7.0).
 
 | Item | Outcome | Commit |
@@ -21,6 +21,8 @@ Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149,
 | Stale baselines | #162. (a) The goalfix tripwire citation `server.py:1059` → `1072`, at all 5 places. (b) The clearance test re-baselined 31.66 → 31.61 cm (`…_is_31_61cm`); the cause is the #151 soda-can height alone, with no change from #157 | `b645c45` |
 | Quick-close triage | #163 closes #127 (M1–M3 and the carried items fixed or won't-fix). #164 closes #115 (items 1–7; deferred tail won't-fix). #165 closes #107 (`nudge_joint` + `gate_check()`; live smoke test PASS). reachy-tabletop-ai#22 closes #28 (EPIC-8 8.8/8.9 "as shipped"; the browser UI recorded as future scope). Nothing was marked obsolete: E1 tooling is still live | `e8ae888`, `9abc00a`, `409e3e4` |
 | **Phase 1: observation delay** | **Root cause:** reachy-sdk 0.7.0 `_poll_waiting_commands` leaks 14 pending waits per command push. In the panel's reused worker this grew the heap and the full-GC pauses (7 → 124 ms in one lift; about 20k+ pushes by attempt 5), which caused the 0.67 s stale halt. **Fix:** #166 (`feedback/latest.py`, a portable latest-wins slot; non-blocking panel forwarder; worker drain-to-latest; end-to-end age; `stale_reason`; T1–T4). #167 (`sdk_compat.fix_command_poll`, gated to 0.7.0 with a source-hash pin; `RESTART_WORKER_AFTER_LIFT` backstop, default OFF). #168 marks the roadmap entry resolved. **Re-measure (1.5):** 10 lifts, 0 stale halts; one worker, 23.8k pushes, heap flat, full GC at most 12 ms. Evidence: `~/Reachy-Lab/outputs/sim/working/phase1.5-remeasure-2026-10-09.md` | `81b3571`, `b4f47fa`, `ca41933` |
+| #2 | #169: the smoke test checks the scene; new integration tests for the below-table refusal and a physics carry tracked through `ObjectTracker`; `test_motion.ipynb` documented as the kinematic-mode compatibility notebook (D4) and left untouched | `54d1681` |
+| #74 | #170: SWING_1 moved (crossing +0.44 → +3.48 cm; every corridor route plans +2.57 cm); D1 margin rule in `check_route()` (ADR-0006); `route_version` 2. #171: the cause of the realised-clearance dips was a numerical oscillation in forearm yaw and wrist pitch (zero joint inertia at a 2 ms step, triggered by waves at the force limit). Fixed with joint armature (0.01 forearm yaw, 0.006 wrist pitch, both arms; wrist roll left at 0 to protect the #55 grasp), plus a forearm-yaw waypoint guard and corridor start check. SivaPool enforces D1: 160 flights, realised min ≥ +2.33 cm. FWDCenterLabMCC has no evidence, so it refuses corridor routes | `b014190`, `d8c02ba` |
 
 **Remaining known failure (c):** `test_panel_route_evaluators::test_the_registry_and_the_evaluators_agree…`. `lift_object` (#155, route `CRANE_LIFT`) has no entry in `ABILITY_ROUTES` or `EVALUATORS`. This is folded into the Phase 2 placement slice; no new issue was opened.
 
@@ -29,6 +31,21 @@ Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149,
 **Follow-ups (owner's call):**
 - Report the 0.7.0 leak upstream to Pollen Robotics (public; draft on request).
 - Port `feedback/latest.py` and `sdk_compat.py` to the reachy-tabletop-ai stereo-viewer app. It uses the same SDK against the robot, so it likely has the same leak.
+
+**Owner decisions recorded:**
+- D1 margin: planned ≥ 2.0 cm and realised worst case ≥ 1.0 cm over ≥ 20 flights, against the tube hand.
+- D4: `test_motion.ipynb` stays as the raw-SDK, kinematic-mode notebook.
+- D5/D6: lift and place success criteria, with withdrawal reported separately.
+- D7: a `planned` route type.
+- D8: order is evaluators → withdrawal → placement.
+- `scripts/smoke_test_host.py` is **frozen legacy reference**: not a merge gate, not to be extended.
+- Do not run another full suite without a strong reason.
+- #55 hold slip is now measured in the hand's frame: 0.074 mm with no-slip on (was 0.022 mm), bounds unchanged.
+
+**Next (Phase 2 remainder, no issue):**
+1. Evaluator PR: `lift_object` and place evaluators (D5/D6), the `planned` route type (D7), and run-record fields (`command_poll_fixed`, scene/model/code hashes, seed). It also lands the local branch `fix/load-world-extends` (`SimulationCore._load_world` skipped scene inheritance, so offline SivaPool had no table or rails), with a per-route, per-waypoint intended-contact allowlist. This clears the last failing test (c).
+2. Withdrawal: test the two options offline against the 10 recorded lifts, from `design-2026-10-09-phase2-evaluators-and-withdrawal.md`. Option 1: a retreat that strictly increases separation from its first step. Option 2: check the withdrawal before the hand opens.
+3. Placement: cube to R2C1.
 
 **Cleanup candidates (owner's call):**
 - About 35 old remote branches, most of them merged.
@@ -133,8 +150,8 @@ The Lead stops and asks the owner at each gate below. Each gate has a recommende
 | Item | Agent | Scope | Gate | Done when |
 |---|---|---|---|---|
 | ✅ **#107** | Sonnet | Add a helper to `primitives.py` (for example `nudge_joint`) that calls `gate_check()`. Route `scripts/smoke_test_host.py` through it. Add a test that a refused gate fails the smoke test. | H-2b | `Closes #107`, and the smoke test still exits 0 against a healthy sim |
-| **#74** | Opus designs, Sonnet implements | Reconcile the planner model with physics on clearance at `rig_rail_outer_right` (`SWING_1`). Add torso-clearance modelling. Add regression tests for the rejected rig routes in `FWDCenterLabSivaPool`. | H-2a | `Closes #74`, and the routes are either accepted with a stated margin or rejected for a documented reason |
-| **#2** | Sonnet | List every raw `goal_position` write in scripts and notebooks. Migrate scripts to `SceneModel`. Add table/relocation tests. Notebook edits only if the owner allows them. | H-2c | `Closes #2`, with the audit table in the PR |
+| ✅ **#74** | Opus designs, Sonnet implements | Reconcile the planner model with physics on clearance at `rig_rail_outer_right` (`SWING_1`). Add torso-clearance modelling. Add regression tests for the rejected rig routes in `FWDCenterLabSivaPool`. | H-2a | `Closes #74`, and the routes are either accepted with a stated margin or rejected for a documented reason |
+| ✅ **#2** | Sonnet | List every raw `goal_position` write in scripts and notebooks. Migrate scripts to `SceneModel`. Add table/relocation tests. Notebook edits only if the owner allows them. | H-2c | `Closes #2`, with the audit table in the PR |
 | Placement slice | Opus designs, Sonnet implements | Geometry-based placement to cell R2C1, using the gated primitives and the #74 clearance model. **Includes the success evaluators for `lift_object` and the new place ability.** This closes the last failing test (c), and decides how planned routes fit the baseline-recipe rule. | H-1-style design approval | A placement test passes in `fixture`/`kinematic` mode. The owner runs MuJoCo on the Mac. |
 
 ### Phase 3: General withdrawal and recovery
