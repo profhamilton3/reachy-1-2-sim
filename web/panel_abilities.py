@@ -140,6 +140,7 @@ _register(Ability(
     ),
     slots=(SLOT_ARM,),
     route="PLACE_ROUTE",
+    route_version=2,      # SWING_1 moved for margin (#74, docs/adr/0006)
     start_postures=(POSTURE_HOME,),
     end_posture=POSTURE_REST,
 ))
@@ -159,6 +160,7 @@ _register(Ability(
     ),
     slots=(SLOT_ARM,),
     route="STOW_ROUTE",
+    route_version=2,      # SWING_1 moved for margin (#74, docs/adr/0006)
     end_posture=POSTURE_HOME,
 ))
 

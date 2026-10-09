@@ -993,7 +993,11 @@ class TestB2S2FingerClearanceRootCause:
         measured 31.66 cm at the old can height; #151 alone accounts for
         the change."""
         scene = SceneModel.from_yaml(_B1_SCENE_PATH)
-        full = mrc.full_route_poses("PLACE_ROUTE")
+        # The B2 s2 recording flew the notebook's SWING_1; it moved on
+        # 2026-10-09 (docs/adr/0006), so the comparison uses the route as flown.
+        full = (mrc.R.HOME,) + tuple(
+            w.pose for w in mrc.R.with_notebook_swing_1(mrc.R.PLACE_ROUTE))
+        assert full[1:] != mrc.full_route_poses("PLACE_ROUTE")[1:]
         result = mrc.planned_clearance_by_link(
             "PLACE_ROUTE", 200, scene, "finger", hand="shells", waypoints=full)
         assert result["soda_can"] * 100 == pytest.approx(31.61, abs=0.01)
