@@ -136,7 +136,15 @@ Recorded by owner decision. Simulator only.
 
 - **Destination transfer:** pick from one cell and place in another (e.g. r2c2 → r2c1). This needs a carry between ladders, destination-ladder planning, and a held-object return or abort route. Not implemented.
 - **Robust withdrawal and recovery:** the release currently drags the cube (quasi-static, about 7.6–9.7 mm recorded), and a withdrawal can be refused at the model boundary, leaving the open hand held beside the object until a simulator reset. Prevention (release/withdrawal continuity) and general checked retreat (above) are both unfinished.
-- **Observation-delivery delay on the panel → motion-worker path:** in the 2026-10-08 five-attempt measurement (attempt 5), the crane lift's live-feedback guard (`FEEDBACK_STALE_S` = 0.5 s) halted during the gated descent because an observation reached the motion worker 0.67 s old.
+- **Observation-delivery delay on the panel → motion-worker path — RESOLVED (2026-10-09).** In the 2026-10-08 five-attempt measurement (attempt 5), the crane lift's live-feedback guard (`FEEDBACK_STALE_S` = 0.5 s) halted during the gated descent because an observation reached the motion worker 0.67 s old.
   - The simulator's own state stream showed no gap over 0.13 s in that window, so the delay arose on the panel's observation path (SimLink snapshot → feed → worker pipe).
   - The halt was safe: before any pad contact, the cube unmoved, a checked retreat to PRESENT, then the stow.
-  - It is an availability limitation. **Root cause not investigated.**
+  - **Cause:** `reachy-sdk` 0.7.0 `ReachySDK._poll_waiting_commands` leaks the waits it starts for every joint on each command push. It never cancels the ones that did not fire, which is 14 per push for the joints a lift never commands.
+    - They accumulate in the panel's motion worker, which is reused across lifts, so its generation-2 GC pauses keep growing: 7 → 124 ms within a single lift.
+    - The attempt-5 pause itself was not recorded. The re-measure below is the evidence.
+  - **Fix:**
+    - #166: latest-wins observation delivery, an end-to-end age, and an explicit stale reason.
+    - #167: the SDK poll fix, gated to reachy-sdk 0.7.0, plus a fresh-worker-per-lift backstop, off by default.
+  - **Re-measure** (`phase1.5-remeasure-2026-10-09.md`): 10 lifts with 0 stale halts.
+    - 5 lifts in one worker; 5 with the backstop on.
+    - Full GC ≤ 15 ms throughout; heap and pending SDK waits flat.
