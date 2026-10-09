@@ -68,7 +68,8 @@ def frozen():
     targets21 = np.array([r["arm8"] + other for r in rows], dtype=np.float64)
     t_hi = [r["t_hi"] for r in rows]
     start = dict(fx["start_pose8"])
-    route = route_rad(R.PLACE_ROUTE)
+    # Recorded at M (155fc15), through the notebook's SWING_1 (docs/adr/0006).
+    route = route_rad(R.with_notebook_swing_1(R.PLACE_ROUTE))
     targets8 = [{n: float(v) for n, v in zip(pc.R_JOINTS, row[:8])} for row in targets21]
     assignment = seg.assign_goals(route, start, targets8)
     return dict(fx=fx, targets21=targets21, t_hi=t_hi, start=start, route=route,

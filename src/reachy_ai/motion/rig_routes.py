@@ -827,6 +827,18 @@ CORRIDOR_ROUTES: Tuple[str, ...] = tuple(sorted(
     if any(w.name == "SWING_1" for w in route)))
 
 
+def with_notebook_swing_1(route: Tuple[Waypoint, ...]) -> Tuple[Waypoint, ...]:
+    """`route` as it was flown before SWING_1 moved (docs/adr/0006).
+
+    For replaying recordings made before 2026-10-09: they passed the
+    notebook's SWING_1, and judging them against the moved one reads a flight
+    nobody made.  Never for commanding motion.
+    """
+    from dataclasses import replace
+    return tuple(replace(w, pose=SWING_1_NOTEBOOK) if w.name == "SWING_1" else w
+                 for w in route)
+
+
 def route_named(name: str) -> Tuple[Waypoint, ...]:
     routes = {"PLACE_ROUTE": PLACE_ROUTE, "STOW_ROUTE": STOW_ROUTE,
               "LIFT_TO_PRESENT": LIFT_TO_PRESENT,
