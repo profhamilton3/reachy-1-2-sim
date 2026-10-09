@@ -201,31 +201,71 @@ def test_the_notebook_scene_rows_do_not_meet_the_corridor_margin(route):
 _CORRIDOR = ["PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE", "STOW_FROM_SIDE"]
 
 
+def test_the_margin_is_enforced_everywhere_again():
+    assert R.CORRIDOR_REPORT_ONLY_SCENES == ()
+
+
 @pytest.mark.parametrize("route", _CORRIDOR)
-def test_the_panel_scene_corridor_is_reported_not_refused_until_the_forearm_yaw_fix(route):
-    """FWDCenterLabSivaPool's corridor rows carry no figures: the 2026-10-09
-    campaign (docs/adr/0006) flew the moved SWING_1 twenty times per route
-    and did NOT meet the realised margin.  By owner decision ("Option B") the
-    panel scene REPORTS the shortfall and does not refuse until the
-    forearm-yaw fix; the answer says so, every time."""
-    assert R.CORRIDOR_REPORT_ONLY_SCENES == ("FWDCenterLabSivaPool",)
+def test_the_panel_scene_corridor_meets_the_margin_on_its_own_figures(route):
+    """Re-flown 2026-10-09 with the forearm-yaw fix (docs/adr/0006 §5-6)."""
     ok, why = R.check_route(route, "FWDCenterLabSivaPool")
-    assert ok
-    assert why.startswith("REPORTED, NOT ENFORCED in FWDCenterLabSivaPool")
-    assert "corridor margin (#74)" in why and "forearm-yaw fix" in why
+    assert (ok, why) == (True, "")
     row = R.validation_for(route, "FWDCenterLabSivaPool")
-    assert row is not None and row.realised_worst_m is None
+    assert row.flights >= R.CORRIDOR_MIN_FLIGHTS
+    assert row.planned_worst_m >= R.CORRIDOR_PLANNED_MARGIN
+    assert row.realised_worst_m >= R.CORRIDOR_REALISED_MARGIN
+    assert row.evidence.startswith("2026-10-09")
 
 
 @pytest.mark.parametrize("route", _CORRIDOR)
-def test_without_the_report_only_exemption_the_panel_scene_corridor_is_refused(
-        monkeypatch, route):
-    monkeypatch.setattr(R, "CORRIDOR_REPORT_ONLY_SCENES", ())
-    ok, why = R.check_route(route, "FWDCenterLabSivaPool")
-    assert not ok and "corridor margin (#74)" in why
+def test_each_rows_planned_figure_is_the_routes_geometry(route):
+    """The planned figure is not a number someone typed: it is the full
+    route's worst tube clearance against objects and rails, <= 2 deg legs."""
+    from reachy_ai.motion.kinematics import (hand_radius, joint_path,
+                                             link_capsules, sample_count)
+    from reachy_ai.scene.awareness import SceneModel
+    scene = SceneModel.from_yaml(os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml"))
+    ids = scene.obstacle_ids(include_static=True)
+    start = {"PLACE_ROUTE": R.HOME, "RAISE_TO_SIDE": R.HOME,
+             "STOW_ROUTE": R.REST, "STOW_FROM_SIDE": R.PRESENT}[route]
+    poses = (start,) + tuple(w.pose for w in R.route_named(route))
+    worst = None
+    for p0, p1 in zip(poses, poses[1:]):
+        a, b = [p0[j] for j in R.ARM7], [p1[j] for j in R.ARM7]
+        g = max(p0["r_gripper"], p1["r_gripper"], key=hand_radius)
+        for q in joint_path(a, b, sample_count(a, b)):
+            c = scene.clearance(link_capsules(q, "right", g), ids=ids)
+            worst = c.distance if worst is None else min(worst, c.distance)
+    assert R.validation_for(route, "FWDCenterLabSivaPool").planned_worst_m == \
+        pytest.approx(worst, abs=0.001)
 
 
-def test_off_corridor_routes_in_the_panel_scene_carry_no_report():
+def test_the_report_only_exemption_still_works_if_an_owner_sets_it(monkeypatch):
+    monkeypatch.setattr(R, "CORRIDOR_REPORT_ONLY_SCENES", ("FWDCenterLabMCC",))
+    ok, why = R.check_route("PLACE_ROUTE", "FWDCenterLabMCC")
+    assert ok and why.startswith("REPORTED, NOT ENFORCED in FWDCenterLabMCC")
+
+
+def test_every_corridor_waypoint_guards_the_forearm_yaw():
+    for route in (R.PLACE_ROUTE, R.STOW_ROUTE):
+        for wp in route:
+            assert wp.guard == R.CRITICAL_JOINTS + ("r_forearm_yaw",), wp.name
+            assert wp.pose["r_forearm_yaw"] == 0.0
+
+
+def test_a_corridor_route_refuses_to_start_with_the_forearm_yaw_off():
+    home = dict(R.HOME)
+    assert R.corridor_entry_refusal(home, R.PLACE_ROUTE) == ""
+    assert R.corridor_entry_refusal(dict(home, r_forearm_yaw=R.CORRIDOR_ENTRY_TOL), R.PLACE_ROUTE) == ""
+    why = R.corridor_entry_refusal(dict(home, r_forearm_yaw=-24.0), R.PLACE_ROUTE)
+    assert "forearm yaw is 24 deg off" in why and "will not start" in why
+    for route in (R.RAISE_TO_SIDE, R.STOW_ROUTE, R.STOW_FROM_SIDE):
+        assert R.corridor_entry_refusal(dict(home, r_forearm_yaw=-24.0), route)
+    # off the corridor nothing is refused on this account
+    assert R.corridor_entry_refusal(dict(R.PRESENT, r_forearm_yaw=-60.0), R.LOWER_TO_REST) == ""
+
+
+def test_off_corridor_routes_in_the_panel_scene_are_unaffected():
     for other in ("LIFT_TO_PRESENT", "LOWER_TO_REST", "WAVE"):
         assert R.check_route(other, "FWDCenterLabSivaPool") == (True, "")
 
