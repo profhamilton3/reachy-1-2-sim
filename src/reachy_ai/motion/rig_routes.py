@@ -122,7 +122,10 @@ CORRIDOR_MIN_FLIGHTS = 20
 #: that fix lands, `check_route` there still names the shortfall but lets the
 #: route fly.  The forearm-yaw fix is what removes the scene from this tuple,
 #: with the re-flown figures in the rows.  Anywhere else the margin refuses.
-CORRIDOR_REPORT_ONLY_SCENES: Tuple[str, ...] = ("FWDCenterLabSivaPool",)
+CORRIDOR_REPORT_ONLY_SCENES: Tuple[str, ...] = ()
+#: EMPTY since the forearm-yaw fix (docs/adr/0006 §5): FWDCenterLabSivaPool was
+#: listed from #170 until then, by owner decision ("Option B").  The tuple is
+#: kept so the exception, if ever needed again, is a visible owner decision.
 
 #: How far an object may move before the board counts as disturbed, in metres.
 #:
@@ -243,36 +246,52 @@ class Waypoint:
     guard: Optional[Tuple[str, ...]] = None
 
 
+#: The joints a corridor waypoint is judged on: the notebook's CRITICAL set
+#: (`CRITICAL_JOINTS`, below) plus the FOREARM YAW (#74, 2026-10-09).
+#:
+#: Forearm yaw was left out of CRITICAL as a weak joint that only spins the
+#: hand.  In the rig corridor that reasoning failed: it ran 24-52 deg off its
+#: commanded 0 in 8 of 80 corridor flights, and every reading under +2.31 cm
+#: of rig clearance came from those flights (docs/adr/0006 §3).  The cause was a
+#: simulator limit cycle, fixed in the model (joint armature, docs/adr/0006
+#: §5); this guard is what would catch the next thing that moves the hand off
+#: the shape the corridor was measured for.  Every corridor waypoint commands
+#: forearm yaw 0, so guarding it refuses nothing a healthy arm does.
+_CORRIDOR_GUARD: Tuple[str, ...] = (
+    "r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw", "r_elbow_pitch",
+    "r_wrist_pitch", "r_forearm_yaw",
+)
+
 #: Out of the pocket and onto the board.
 PLACE_ROUTE: Tuple[Waypoint, ...] = (
-    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.5, 25.0),
-    Waypoint("BACK", BACK, 3.0, TRACK_TOL),
-    Waypoint("CURL", CURL, 3.0, TRACK_TOL),
-    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL),
-    Waypoint("TUCK", TUCK, 2.0, TRACK_TOL),
-    Waypoint("SWING_1", SWING_1, 3.0, TRACK_TOL),
-    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL),
-    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL),
-    Waypoint("HOVER", HOVER, 2.5, TRACK_TOL),
-    Waypoint("REST_SHUT", REST_SHUT, 3.0, TRACK_TOL),
-    Waypoint("REST", REST, 3.0, TRACK_TOL),
+    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.5, 25.0, _CORRIDOR_GUARD),
+    Waypoint("BACK", BACK, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("CURL", CURL, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("TUCK", TUCK, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_1", SWING_1, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("HOVER", HOVER, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("REST_SHUT", REST_SHUT, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("REST", REST, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
 )
 
 #: The placement route run backwards.  Nothing may cut across it: a direct move
 #: from anywhere over the board to HOME drives the upper arm through the
 #: board's near edge.
 STOW_ROUTE: Tuple[Waypoint, ...] = (
-    Waypoint("REST_SHUT", REST_SHUT, 2.0, TRACK_TOL),
-    Waypoint("HOVER", HOVER, 2.0, TRACK_TOL),
-    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL),
-    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL),
-    Waypoint("SWING_1", SWING_1, 2.0, TRACK_TOL),
-    Waypoint("TUCK", TUCK, 3.0, TRACK_TOL),
-    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL),
-    Waypoint("CURL", CURL, 2.0, TRACK_TOL),
-    Waypoint("BACK", BACK, 3.0, TRACK_TOL),
-    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.0, 25.0),
-    Waypoint("HOME", HOME, 2.5, 25.0),
+    Waypoint("REST_SHUT", REST_SHUT, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("HOVER", HOVER, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_1", SWING_1, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("TUCK", TUCK, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("CURL", CURL, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("BACK", BACK, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.0, 25.0, _CORRIDOR_GUARD),
+    Waypoint("HOME", HOME, 2.5, 25.0, _CORRIDOR_GUARD),
 )
 
 # ── Getting to the presentation pose (notebook section 4) ───────────────────
@@ -868,6 +887,32 @@ def with_notebook_swing_1(route: Tuple[Waypoint, ...]) -> Tuple[Waypoint, ...]:
     from dataclasses import replace
     return tuple(replace(w, pose=SWING_1_NOTEBOOK) if w.name == "SWING_1" else w
                  for w in route)
+
+
+#: How far the forearm yaw may sit off the first waypoint's before a corridor
+#: route refuses to start, in degrees.
+CORRIDOR_ENTRY_TOL = TRACK_TOL
+
+
+def corridor_entry_refusal(present: Dict[str, float],
+                           route: Tuple[Waypoint, ...]) -> str:
+    """Why a corridor route must not start from `present`, or "".
+
+    Only routes through SWING_1.  The first waypoint commands the forearm yaw
+    too, but an arm that is ALREADY off before the corridor is an arm whose
+    hand is not the shape the corridor was measured for -- the case #74's
+    flights started from at HOME -- and refusing at the door costs nothing,
+    where stopping between rails strands the arm.
+    """
+    if not route or not any(w.name == "SWING_1" for w in route):
+        return ""
+    want = route[0].pose.get("r_forearm_yaw", 0.0)
+    off = abs(present.get("r_forearm_yaw", want) - want)
+    if off <= CORRIDOR_ENTRY_TOL:
+        return ""
+    return (f"the forearm yaw is {off:.0f} deg off before the rig corridor "
+            f"(tolerance {CORRIDOR_ENTRY_TOL:.0f}), so the hand is not the shape "
+            "the corridor was measured for; I will not start this route")
 
 
 def route_named(name: str) -> Tuple[Waypoint, ...]:

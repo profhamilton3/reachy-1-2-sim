@@ -401,6 +401,11 @@ def fly(arm, route, *, label: str = "route", move=None) -> List[str]:
     """
     from reachy_ai.motion import rig_routes as R
 
+    present = {n: getattr(arm, n).present_position for n in R.R_JOINTS
+               if hasattr(arm, n)}
+    refusal = R.corridor_entry_refusal(present, route)
+    if refusal:
+        raise RuntimeError(f"{label}: {refusal}")
     flown: List[str] = []
     for wp in route:
         guard = list(wp.guard) if wp.guard else list(R.CRITICAL_JOINTS)
