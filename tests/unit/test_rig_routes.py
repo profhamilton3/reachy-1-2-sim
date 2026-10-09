@@ -101,7 +101,19 @@ def notebook():
     "SWING_1", "SWING_2", "SWING_3", "HOVER", "REST_SHUT", "REST", "PRESENT",
 ])
 def test_every_pose_matches_the_notebook(notebook, name):
-    assert getattr(R, name) == notebook[name], name
+    # SWING_1 is the one pose moved off the notebook (#74, docs/adr/0006); the
+    # notebook's own pose is kept as SWING_1_NOTEBOOK and is what must match.
+    mine = R.SWING_1_NOTEBOOK if name == "SWING_1" else getattr(R, name)
+    assert mine == notebook[name], name
+
+
+def test_swing_1_departs_from_the_notebook_on_four_named_joints_only():
+    moved = {j for j in R.SWING_1 if R.SWING_1[j] != R.SWING_1_NOTEBOOK[j]}
+    assert moved == {"r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
+                     "r_elbow_pitch"}
+    assert R.SWING_1["r_gripper"] == R.SHUT            # still shut through the rig
+    assert R.SWING_1["r_elbow_pitch"] == R.CURL["r_elbow_pitch"]   # CURL's fold
+    assert max(abs(R.SWING_1[j] - R.SWING_1_NOTEBOOK[j]) for j in moved) == 5.0
 
 
 def test_the_gripper_constants_match(notebook):
@@ -123,7 +135,10 @@ def test_route_waypoints_match_the_notebook(notebook, route_name):
     assert len(mine) == len(theirs)
     for got, (name, target, secs, tol) in zip(mine, theirs):
         assert got.name == name
-        assert got.pose == target, name
+        if name == "SWING_1":                      # moved for margin, #74
+            assert target == R.SWING_1_NOTEBOOK and got.pose == R.SWING_1
+        else:
+            assert got.pose == target, name
         assert got.seconds == secs, name
         assert got.tol == tol, name
 
@@ -167,9 +182,19 @@ def test_the_wave_is_bounded_and_relative_to_present():
 # ---------------------------------------------------------------------------
 
 def test_the_routes_are_validated_where_they_were_measured():
-    for route in ("PLACE_ROUTE", "STOW_ROUTE", "WAVE"):
-        ok, why = R.check_route(route, "FWDCenterLabMCC")
-        assert ok, why
+    ok, why = R.check_route("WAVE", "FWDCenterLabMCC")
+    assert ok, why
+
+
+@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE",
+                                   "STOW_FROM_SIDE"])
+def test_the_notebook_scene_rows_do_not_meet_the_corridor_margin(route):
+    """FWDCenterLabMCC's evidence is the notebook, which flew the notebook's
+    SWING_1 and records no clearance figures.  Under the corridor margin
+    (#74, D1) that is a refusal that says why, not a silent pass."""
+    ok, why = R.check_route(route, "FWDCenterLabMCC")
+    assert not ok
+    assert "corridor margin (#74)" in why and "records no planned" in why
 
 
 @pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE"])
@@ -218,8 +243,8 @@ def test_the_hub_routes_were_reflown_before_they_were_relisted():
 
 
 def test_the_hub_routes_are_validated_where_the_notebook_flew_them():
-    for route in ("RAISE_TO_SIDE", "STOW_FROM_SIDE", "LIFT_TO_PRESENT",
-                  "LOWER_TO_REST"):
+    # RAISE_TO_SIDE and STOW_FROM_SIDE cross the corridor; see the test above.
+    for route in ("LIFT_TO_PRESENT", "LOWER_TO_REST"):
         ok, why = R.check_route(route, "FWDCenterLabMCC")
         assert ok, "{}: {}".format(route, why)
 
@@ -453,3 +478,52 @@ class TestFootprintLegs:
         for a, b in zip(lift, reversed_descent):
             for j in arm_joints:
                 assert a[j] == b[j], j
+
+
+# ---------------------------------------------------------------------------
+# The corridor margin (#74, owner decision D1, 2026-10-09)
+# ---------------------------------------------------------------------------
+
+def test_the_margin_is_the_owners_numbers():
+    assert R.CORRIDOR_PLANNED_MARGIN == 0.020
+    assert R.CORRIDOR_REALISED_MARGIN == 0.010
+    assert R.CORRIDOR_MIN_FLIGHTS == 20
+
+
+def test_the_corridor_routes_are_every_route_through_swing_1():
+    assert R.CORRIDOR_ROUTES == ("PLACE_ROUTE", "RAISE_TO_SIDE",
+                                 "STOW_FROM_SIDE", "STOW_ROUTE")
+    for name in ("LIFT_TO_PRESENT", "LOWER_TO_REST"):
+        assert name not in R.CORRIDOR_ROUTES
+
+
+def _with_row(monkeypatch, **figures):
+    row = R.RouteValidation("PLACE_ROUTE", "SomeRig", "2026-10-09: test row",
+                            **figures)
+    monkeypatch.setattr(R, "ROUTE_COMPATIBILITY", (row,))
+    return R.check_route("PLACE_ROUTE", "SomeRig")
+
+
+def test_a_corridor_row_meeting_the_margin_passes(monkeypatch):
+    assert _with_row(monkeypatch, planned_worst_m=0.020, realised_worst_m=0.010,
+                     flights=20) == (True, "")
+
+
+@pytest.mark.parametrize("figures,named", [
+    (dict(), "records no planned or realised"),
+    (dict(planned_worst_m=0.03, flights=20), "records no realised"),
+    (dict(planned_worst_m=0.0199, realised_worst_m=0.02, flights=20), "planned +1.99 cm"),
+    (dict(planned_worst_m=0.03, realised_worst_m=0.0099, flights=20), "realised +0.99 cm"),
+    (dict(planned_worst_m=0.03, realised_worst_m=0.02, flights=19), "19 flights against 20"),
+])
+def test_a_corridor_row_short_of_the_margin_is_refused_and_says_where(
+        monkeypatch, figures, named):
+    ok, why = _with_row(monkeypatch, **figures)
+    assert not ok
+    assert "crosses the rig corridor at SWING_1" in why and named in why
+
+
+def test_a_route_off_the_corridor_needs_no_figures(monkeypatch):
+    row = R.RouteValidation("WAVE", "SomeRig", "2026-10-09: test row")
+    monkeypatch.setattr(R, "ROUTE_COMPATIBILITY", (row,))
+    assert R.check_route("WAVE", "SomeRig") == (True, "")
