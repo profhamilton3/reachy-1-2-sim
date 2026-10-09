@@ -1,8 +1,8 @@
 # ADR-0006: The rig corridor flies at a stated margin, and SWING_1 moved to meet it
 
-- Status: Accepted (owner decisions D1, D2 and "Option B", 2026-10-09).
-  **D1's realised half is NOT met** (§3). In FWDCenterLabSivaPool the margin is
-  **reported, not enforced**, until the forearm-yaw fix lands (§4). Simulator only.
+- Status: Accepted (owner decisions D1, D2, "Option B", 2026-10-09). **D1 met**
+  after the forearm-yaw fix (§5, §6); the margin is enforced in every scene.
+  Simulator only.
 - Date: 2026-10-09
 - Decision owners: IITG Reachy 1.2 simulation project
 - Relates to: #74; ADR-0002 (whose SWING_1 graze this replaces), ADR-0003 (hand
@@ -145,11 +145,83 @@ is made in their baseline recipes. A stored version-1 trial describes the old
 corridor and is no longer reused. WAVE, POINT and CRANE_LIFT name routes
 whose own geometry did not change, so they stay at 1.
 
+### 5. The forearm-yaw excursion: cause and fix (2026-10-09)
+
+**Located by a recorded reproduction.** The native server ran with
+`--record` and the recording went outside the checkout; it was flown for 8
+cycles and the instrumented driver logged the SDK goal and the server's
+per-joint effort:
+- The server **received** forearm yaw = 0 throughout every excursion
+  (`commands.jsonl`). The command path was not at fault.
+- The recorded states show forearm yaw at |vel| 18–26 rad/s while its
+  position barely moves, with the force at ±15 N·m. That is a **period-2 limit
+  cycle**.
+- From a recorded excursion state, offline, the force flips sign every 2 ms
+  step and the mean drifts from −39° to −54° over 3 s.
+
+**Mechanism.**
+- Forearm yaw's inertia is about 6e-4 kg·m².
+- Once its force saturates, `implicitfast` integrates kv explicitly, and that
+  is stable only for dt < 2I/kv = 0.24 ms, against a 2 ms step.
+- The wave saturates the joint on every swing, which is why every event
+  followed one.
+- Wrist pitch shows the same in the corridor; wrist roll only in the wave.
+
+**Fix (model).**
+- Joint armature, the servos' reflected rotor inertia, previously 0:
+  forearm yaw 0.01 and wrist pitch 0.006, both sides. That meets
+  armature ≥ kv × timestep. From the same recorded state, forearm yaw returns
+  to 0 in < 0.8 s.
+- Wrist roll is left at 0. Its armature changes the #55 hold, and it does not
+  cycle in the corridor.
+- `test_contact_model_noslip` now measures slip in the hand's frame. The hand
+  settles about 0.12 mm on the recorded fixture, whose velocities predate the
+  armature. The measured slip is 0.074 mm with no-slip (main: 0.022 mm), and
+  2.66 mm without it. The bounds are unchanged.
+
+**Guard.**
+- Forearm yaw is guarded on every PLACE_ROUTE / STOW_ROUTE waypoint
+  (`_CORRIDOR_GUARD`).
+- A corridor route refuses to *start* with forearm yaw more than
+  `TRACK_TOL` off (`corridor_entry_refusal`, in `rig_motion.fly_route` and
+  `primitives.fly`).
+
+**Enforcement.** `CORRIDOR_REPORT_ONLY_SCENES` is empty, so FWDCenterLabSivaPool
+enforces D1 again.
+
+**Evidence.** The re-flown figures are in the rows (§6).
+
+### 6. Re-flown with the fix: D1 met
+
+**Setup.**
+- Flown 2026-10-09 against the live simulator, with the native server running
+  this change's model (`b9b66ab`) and the board as found (objects in the pools).
+- 40 cycles alternating the A and B plans of §3, through the panel's runners
+  with this change's guard and entry check.
+- Evidence: `~/Reachy-Lab/outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights/`.
+
+| route | flights | planned | realised min | p5 | median | D1 |
+|---|---|---|---|---|---|---|
+| PLACE_ROUTE | 20 | +2.57 | +2.35 | +2.35 | +2.36 | meets |
+| STOW_ROUTE | 20 | +2.57 | +2.33 | +2.33 | +2.36 | meets |
+| RAISE_TO_SIDE | 20 | +2.57 | +2.35 | +2.35 | +2.36 | meets |
+| STOW_FROM_SIDE | 20 | +2.57 | +2.34 | +2.35 | +2.36 | meets |
+
+Figures are in cm, tube hand.
+
+**Outcome.**
+- All 160 flights arrived, and no route refused at entry.
+- Forearm yaw stayed within 0.04° on all 120 non-wave flights.
+- No object moved.
+- The four SivaPool corridor rows now carry these figures, and `check_route`
+  enforces the margin there.
+- The FWDCenterLabMCC corridor rows still carry none, so they are refused.
+
 ## Consequences
 
-- The panel keeps flying the corridor in FWDCenterLabSivaPool, on the moved
-  SWING_1, with the D1 shortfall reported rather than enforced (§4). That is a
-  stated, temporary exception, not a passed margin.
+- The panel flies the corridor in FWDCenterLabSivaPool on the moved SWING_1,
+  with the margin enforced and met (§6). The report-only exception of §4 ended
+  with the forearm-yaw fix.
 - ADR-0002's §4 graze acceptance is superseded. Its revisit tripwires become
   this ADR's margin.
 - `route_version` is 2 for `rest_forearm` and `stow_arm` (§4).

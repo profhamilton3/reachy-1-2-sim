@@ -41,6 +41,34 @@ torques.  `torque_limit_percent` scales these at runtime.
 | gripper | 8 |
 | antenna | 0.5 |
 
+## Joint armature on the light distal joints (#74, 2026-10-09)
+
+| Joint(s) | armature (kg·m²) |
+|---|---|
+| forearm_yaw | 0.01 |
+| wrist_pitch | 0.006 |
+| every other joint | 0 |
+
+**Why.** These joints carry almost no inertia; forearm yaw is about
+6e-4 kg·m². While the actuator force is inside `forcerange`, `implicitfast`
+integrates the kv term implicitly and the servo is stable. Once the force
+saturates, the clamp has no velocity derivative, so kv acts explicitly.
+Explicit damping is stable only for dt < 2I/kv: 0.24 ms for forearm yaw,
+against a 2 ms step.
+
+Without armature, the saturated joint bang-bangs between ±forcerange on every
+step, and its mean drifts away from its target. This was observed in the live
+simulator: forearm yaw ran 24–52° off a commanded 0 after the wave (ADR-0006
+§5).
+
+**The rule.** armature ≥ kv × timestep on every joint that can saturate this
+way. The value is a servo's reflected rotor inertia, which the model had at 0.
+
+**Pinned by** `tests/unit/test_distal_joint_stability.py`.
+
+**Wrist roll is left at 0.** It only cycles during the wave, and its armature
+measurably changes the #55 hold.
+
 ## Measured behaviour (timestep 0.002 s, `implicitfast`)
 
 - **Stiff step response** — elbow commanded to −1.0 rad settles to −0.979 rad

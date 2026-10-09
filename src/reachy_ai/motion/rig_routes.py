@@ -535,11 +535,11 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     ),
     # ── FWDCenterLabSivaPool, accepted 2026-09-10 ───────────────────────────
     #
-    # SUPERSEDED FOR THE CORRIDOR BY docs/adr/0006 (2026-10-09).  These rows carry
-    # no corridor-margin figures, so `check_route` REPORTS the four corridor
-    # routes here as short of the margin (PLACE_ROUTE, STOW_ROUTE, RAISE_TO_SIDE,
-    # STOW_FROM_SIDE) and, by owner decision, does not refuse them until the
-    # forearm-yaw fix (`CORRIDOR_REPORT_ONLY_SCENES`).  The
+    # THE CORRIDOR ROWS CARRY THE CORRIDOR-MARGIN FIGURES (docs/adr/0006 §6):
+    # PLACE_ROUTE, STOW_ROUTE, RAISE_TO_SIDE and STOW_FROM_SIDE were re-flown 20
+    # times each on 2026-10-09 with the moved SWING_1 and the forearm-yaw fix,
+    # and `check_route` enforces the margin here again.  The 2026-09-10 text in
+    # each row is kept after the new evidence, as the superseded record.  The
     # 2026-10-09 campaign flew the moved SWING_1 twenty times per route and did
     # not meet the realised margin (PLACE_ROUTE +0.03 cm, STOW_FROM_SIDE -1.09
     # cm, both on flights where r_forearm_yaw swung 46-52 deg off its command),
@@ -564,6 +564,7 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     # about disturbance.
     RouteValidation(
         "RAISE_TO_SIDE", "FWDCenterLabSivaPool",
+        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.35, p5 +2.35, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
         "2026-09-10: HOME->PRESENT, flown SIX times, sampled at 20 Hz through "
         "the flight. Completed every time, 37-45 s; recognised at PRESENT on "
         "five of six (the sixth arrived 8-12 deg short, which is why "
@@ -572,13 +573,16 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
         "crossing of rig_rail_outer_right. Worst overall -2.55 to -4.41 cm, "
         "hand vs table_top, which is REST and is the route's INTENT. Board "
         "undisturbed all six runs, soda_can on r1c1 and foam_block on r2c3.",
+        planned_worst_m=0.02573, realised_worst_m=0.02352, flights=20,
     ),
     RouteValidation(
         "PLACE_ROUTE", "FWDCenterLabSivaPool",
+        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.35, p5 +2.35, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
         "2026-09-10: the first eleven waypoints of every RAISE_TO_SIDE flight "
         "above are this route, so its six flights are these six. Supersedes "
         "the rejection recorded in VALIDATION_ATTEMPTS, which measured the "
         "waypoints rather than the flight and had no objects on the board.",
+        planned_worst_m=0.02573, realised_worst_m=0.02351, flights=20,
     ),
     RouteValidation(
         "LIFT_TO_PRESENT", "FWDCenterLabSivaPool",
@@ -588,17 +592,21 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     ),
     RouteValidation(
         "STOW_FROM_SIDE", "FWDCenterLabSivaPool",
+        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.34, p5 +2.35, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
         "2026-09-10: PRESENT->HOME, flown three times, arrived at HOME every "
         "time, 32-34 s. Worst realised vs the rig -0.61, -0.62 and -0.69 cm at "
         "the same SWING_1 crossing; worst overall -2.77 to -3.36 cm vs "
         "table_top. Board undisturbed every run.",
+        planned_worst_m=0.02573, realised_worst_m=0.02337, flights=20,
     ),
     RouteValidation(
         "STOW_ROUTE", "FWDCenterLabSivaPool",
+        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.33, p5 +2.33, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
         "2026-09-10: REST->HOME, flown three times separately from the six "
         "STOW_FROM_SIDE legs that also fly it, arrived at HOME every time, "
         "33-39 s. Worst vs the rig -1.03, -1.15 and -1.58 cm. Board "
         "undisturbed. Supersedes the rejection in VALIDATION_ATTEMPTS.",
+        planned_worst_m=0.02573, realised_worst_m=0.02331, flights=20,
     ),
     RouteValidation(
         "LOWER_TO_REST", "FWDCenterLabSivaPool",
