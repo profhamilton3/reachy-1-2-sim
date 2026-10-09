@@ -76,6 +76,16 @@ If a future cycle's operator flow needs a settle-wait step, copy it from
    `plan_<cycle>.json` (written alongside the notebook) rather than a
    positional argument.
 
+   **Stop-progression is enforced when the next `leg.sh` starts, not in the
+   notebook.** The generated notebook writes `control/stop` but never reads
+   it; what holds leg N+1 back is the operator's `go_<leg>` marker and the
+   recorder's "fly the route now" line, which only `leg.sh` produces, and
+   `leg.sh` refuses to start while `control/stop` exists. So do not launch
+   the next `leg.sh`, or write the next `go_<leg>`, until the previous leg
+   has printed `LEG <name> ok`. Leg and parked-recording names are
+   single-use: `leg.sh` and `parked.sh` refuse a name whose
+   `recorder_<name>.log` already exists.
+
    `leg.sh` takes an optional 7th argument, `MODE` (`start` or `end`,
    default `end`), carried over from PR #117 for pre-flight parked
    recordings: in `start` mode a failed tail check is informational only
@@ -465,6 +475,12 @@ rejected recording's log and sidecar are preserved for review, not lost
 to the STOP -- evidence validity and experiment acceptance are
 deliberately kept distinct (see the module's docstring): `evaluate()`
 never writes to the sidecar or the log, only reads them.
+
+Because the gate runs before the tail check, a rejected recording gets no
+`tailcheck_<name>_<TARGET>.txt`. Its archived log can still be judged by
+hand: `PYTHONPATH=src python3 scripts/e1_tail_check.py <recorder_logs/...json>
+<TARGET>`. The archive copy itself is checked: a failed copy is a STOP
+(`archive <name> failed`), never a silent gap in the preserved evidence.
 
 ### `parked.sh` promoted into the package (decision note §6 item 3)
 
