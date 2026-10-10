@@ -1,6 +1,6 @@
 # Plan: close out open PRs and issues (2026-10-08)
 
-Status: **All original issues and PRs closed (2026-10-09).** Phases 0 and 1 complete; Phase 2's issue work (#2, #74) is complete. 0 issues and 0 PRs open. Remaining work (evaluators → withdrawal → placement) has no open issue. See *Progress log* below.
+Status: **All original issues and PRs closed (2026-10-09).** Phases 0 and 1 complete; Phase 2's issue work (#2, #74) is complete. 0 issues and 0 PRs open. Remaining Phase 2 work is tracked in #172 → #173 → #174. See *Progress log* below.
 Source: owner proposal "Proposals to Close Issues and PRs 2026-10-08" + `CLAUDE.md`.
 Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149, #150) and 7 open issues (#2, #28, #74, #107, #115, #127, #130). `main` was at `fb67972`.
 
@@ -42,10 +42,12 @@ Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149,
 - Do not run another full suite without a strong reason.
 - #55 hold slip is now measured in the hand's frame: 0.074 mm with no-slip on (was 0.022 mm), bounds unchanged.
 
-**Next (Phase 2 remainder, no issue):**
-1. Evaluator PR: `lift_object` and place evaluators (D5/D6), the `planned` route type (D7), and run-record fields (`command_poll_fixed`, scene/model/code hashes, seed). It also lands the local branch `fix/load-world-extends` (`SimulationCore._load_world` skipped scene inheritance, so offline SivaPool had no table or rails), with a per-route, per-waypoint intended-contact allowlist. This clears the last failing test (c).
-2. Withdrawal: test the two options offline against the 10 recorded lifts, from `design-2026-10-09-phase2-evaluators-and-withdrawal.md`. Option 1: a retreat that strictly increases separation from its first step. Option 2: check the withdrawal before the hand opens.
-3. Placement: cube to R2C1.
+**Next (Phase 2 remainder): tracked as issues, in this order:**
+1. **#172** Evaluators: `lift_object` and place evaluators (D5/D6), the `planned` route type (D7), and run-record fields (`command_poll_fixed`, scene/model/code hashes, seed). It also lands the local branch `fix/load-world-extends` (`SimulationCore._load_world` skipped scene inheritance, so offline SivaPool had no table or rails), with a per-route, per-waypoint intended-contact allowlist. This clears the last failing test (c).
+2. **#173** Withdrawal (depends on #172): test the two options offline against the 10 recorded lifts, from `design-2026-10-09-phase2-evaluators-and-withdrawal.md`. Option 1: a retreat that strictly increases separation from its first step. Option 2: check the withdrawal before the hand opens.
+3. **#174** Placement, cube r2c2 → r2c1, plus the panel routing decision for "pick and place" (depends on #172 and #173).
+
+Working rule for all three: offline replay and preflight sweeps first, focused tests only, one short live run of 10 at the end, no full suite.
 
 **Cleanup candidates (owner's call):**
 - About 35 old remote branches, most of them merged.
