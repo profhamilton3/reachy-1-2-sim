@@ -27,6 +27,28 @@ actually asked of the motion:
     it was checked.
   * **Point** reaches the hover region it selected, keeps its clearance, and
     leaves the board undisturbed.
+  * **Lift** (#172, D5) raises the object at least 4 cm, holds it with no more
+    than 2 mm of slip in the hand's frame, puts it back within 5 mm (xy) of
+    where it was picked up, touches nothing unintended from the crane's
+    ATTEMPT_START to the release, and ends at PRESENT.  The withdrawal is
+    REPORTED (`completed` / `refused`), not judged: a refused withdrawal is a
+    lift that passed and a full cycle that did not (ADR-0007).
+
+MEASURED AND PLANNED ROUTES (#172, D7)
+--------------------------------------
+Five abilities fly a MEASURED route: a fixed waypoint list from the notebook,
+which a recipe may vary only inside the wall below.  The lift flies a PLANNED
+one: `CRANE_LIFT` is solved per job by the crane planner against the object
+where it actually stands, so there is no canonical step list to compare
+anything to.  Its integrity is the plan's own record instead — the preflight
+passed, and the plan's hash was recorded — and no recipe may vary it at all.
+
+WHAT MAY BE TOUCHED
+-------------------
+One rule table for every ability, by role and phase (`contact_rules`), plus a
+short per-route exception list.  The verdicts judge every contact an episode
+recorded against it; an episode that recorded only the older per-body tally is
+judged the older way, against the spec's intended bodies.
 
 THE POINT EVALUATOR MEASURES WHAT THE ABILITY CLAIMS
 ----------------------------------------------------
@@ -58,12 +80,14 @@ bound, which is why nothing here prunes them.
 from __future__ import annotations
 
 import dataclasses
+import enum
 import math
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from reachy_ai.evaluation.base import (
     EpisodeVerdict, EvaluationPolicy, Violation, ViolationKind,
 )
+from reachy_ai.evaluation import contact_rules as CR
 from reachy_ai.evaluation.contacts import (
     check_invalid_episode, check_joint_limits, check_saturation,
     compute_contact_metrics, compute_effort_metrics,
@@ -81,7 +105,44 @@ ABILITY_ROUTES: Dict[str, str] = {
     "wave": "WAVE",
     "point_cell": "POINT",
     "point_object": "POINT",
+    "lift_object": "CRANE_LIFT",
 }
+
+
+class RouteType(str, enum.Enum):
+    """How a route's integrity is established (#172, D7)."""
+
+    #: A fixed waypoint list, measured once.  Integrity: a recipe's steps
+    #: compared against `canonical_steps`.
+    MEASURED = "measured"
+    #: Solved per job against the live scene.  Integrity: the preflight
+    #: passed and the plan's hash was recorded (`check_plan_integrity`).
+    PLANNED = "planned"
+
+
+#: Every route an ability flies has a type.  A route missing here is one
+#: nobody has said how to check, and `route_type` raises for it.
+ROUTE_TYPES: Dict[str, RouteType] = {
+    "PLACE_ROUTE": RouteType.MEASURED,
+    "STOW_ROUTE": RouteType.MEASURED,
+    "WAVE": RouteType.MEASURED,
+    "POINT": RouteType.MEASURED,
+    "CRANE_LIFT": RouteType.PLANNED,
+}
+
+
+def route_type(route: str) -> RouteType:
+    try:
+        return ROUTE_TYPES[route]
+    except KeyError:
+        raise KeyError(f"route {route!r} has no type; say whether it is "
+                       "measured or planned before anything evaluates it") from None
+
+
+def measured_abilities() -> List[str]:
+    """The abilities whose route is a measured waypoint list."""
+    return sorted(a for a, r in ABILITY_ROUTES.items()
+                  if route_type(r) is RouteType.MEASURED)
 
 #: A measured grid cell, in metres — `scenes/FWDCenterLabMCC.yaml` marker geoms.
 GRID_CELL_M = 0.127
@@ -114,6 +175,12 @@ class PanelRoutePolicy(EvaluationPolicy):
     #: ability claims, not the calibrated ray it does not.
     hover_miss_tolerance_m: float = GRID_CELL_M / 2.0
 
+    #: The lift (#172, D5).  The object's rise over the hold, its slip in the
+    #: hand's frame over the hold, and how far (horizontally) it was put back
+    #: from where it was picked up.
+    lift_rise_required_m: float = 0.040
+    lift_slip_max_m: float = 0.002
+    lift_put_back_xy_tol_m: float = 0.005
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +356,16 @@ def check_route_integrity(
         out.append(Violation(kind=kind, description=description, step=step,
                              severity="hard"))
 
+    if ROUTE_TYPES.get(route) is RouteType.PLANNED:
+        # NOTHING TO BE A VARIATION OF.  A planned route is solved per job, so
+        # a recipe naming one either carries a plan from some other job or
+        # invents one, and neither is this route.  Its integrity is the plan's
+        # record (`check_plan_integrity`), not a step list.
+        no(f"{route} is a planned route: it is solved per job against the "
+           "object where it stands, it has no canonical step list, and a "
+           "recipe may not vary it")
+        return out
+
     steps = _steps_of(recipe)
     cycles = _int(recipe.bounded_parameters.get("wave_cycles"), R.WAVE_CYCLES) \
         if route == "WAVE" else R.WAVE_CYCLES
@@ -342,6 +419,37 @@ def check_route_integrity(
                "not a duration", step=i)
 
     out.extend(_check_envelope(recipe, route))
+    return out
+
+
+#: What a planned route's record must carry for its integrity to hold.
+PLAN_PREFLIGHT_KEY = "preflight_passed"
+PLAN_HASH_KEY = "plan_sha256"
+
+
+def check_plan_integrity(route: str,
+                         plan: Optional[Mapping[str, Any]]) -> List[Violation]:
+    """Every way a planned route's record does not establish what was flown.
+
+    Two things, and only two (#172, D7): the preflight passed, and the plan's
+    hash was recorded.  Empty when both hold.  A missing record is not a
+    passed check: it is reported by the caller as "not checked".
+    """
+    out: List[Violation] = []
+    if plan is None:
+        return out
+
+    def no(description: str) -> None:
+        out.append(Violation(kind=ViolationKind.INVALID_EPISODE,
+                             description=description, severity="hard"))
+
+    if plan.get(PLAN_PREFLIGHT_KEY) is not True:
+        no(f"the {route} plan's preflight is not recorded as passed, so what "
+           "flew was never checked end to end")
+    digest = str(plan.get(PLAN_HASH_KEY) or "")
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        no(f"the {route} plan's hash is not recorded, so the plan that flew "
+           "cannot be identified")
     return out
 
 
@@ -435,11 +543,26 @@ CONTACT_BODIES_KEY = "fixture_bodies"
 #: An empty contact tally means two very different things depending on this.
 #: If the scene had rails and a board in it and the arm touched none of them,
 #: the route kept clear.  If the scene's only collidable bodies are the floor,
-#: the pedestal and some objects off in a corner — which is the case in
-#: `FWDCenterLabSivaPool`, where the rig fixtures the corridor's geometry was
-#: measured against are not collidable bodies at all — then the arm touching
-#: nothing is not evidence about the corridor.  A verdict says which it had.
+#: the pedestal and some objects off in a corner — which was the case in the
+#: offline `FWDCenterLabSivaPool` world until #172, when `_load_world` began
+#: resolving `extends:` and the table and rails arrived — then the arm
+#: touching nothing is not evidence about the corridor.  A verdict says which
+#: it had.
 COLLIDABLE_KEY = "collidable_bodies"
+
+#: Where the phase-tagged contacts live (#172): a list of
+#: `contact_rules.ContactSample.to_dict()`.  When present, the contact clause
+#: judges these against the rule table; when absent, it falls back to the
+#: per-body tally above.
+CONTACT_SAMPLES_KEY = "contact_samples"
+
+
+def contact_samples(result: EpisodeResult) -> Optional[List[CR.ContactSample]]:
+    """The phase-tagged contacts, or None when nobody recorded them."""
+    raw = (result.contact_summary or {}).get(CONTACT_SAMPLES_KEY)
+    if not isinstance(raw, list):
+        return None
+    return [CR.ContactSample.from_dict(d) for d in raw if isinstance(d, dict)]
 
 
 def contact_bodies(result: EpisodeResult) -> Optional[Dict[str, int]]:
@@ -460,8 +583,8 @@ def contact_bodies(result: EpisodeResult) -> Optional[Dict[str, int]]:
     return out
 
 
-def object_drift(result: EpisodeResult,
-                 spec: PanelRouteTaskSpec) -> Optional[Dict[str, float]]:
+def object_drift(result: EpisodeResult, spec: PanelRouteTaskSpec,
+                 exclude: Sequence[str] = ()) -> Optional[Dict[str, float]]:
     """How far each object moved, in metres, or None if that cannot be told.
 
     "Nothing moved" is a COMPARISON, and the result records only where things
@@ -480,6 +603,8 @@ def object_drift(result: EpisodeResult,
         return None
     drift: Dict[str, float] = {}
     for oid, was in spec.initial_object_positions.items():
+        if oid in exclude:
+            continue
         now = (result.final_object_states or {}).get(oid)
         pos = (now or {}).get("pos_xyz") if isinstance(now, dict) else None
         if pos is None or len(pos) < 3 or len(was) < 3:
@@ -538,9 +663,13 @@ def _common(result: EpisodeResult, policy: PanelRoutePolicy,
 
 def _undisturbed(result: EpisodeResult, spec: PanelRouteTaskSpec,
                  policy: PanelRoutePolicy, violations: List[Violation],
-                 lines: List[str]) -> bool:
-    """Did the board come through untouched?  False also for "cannot tell"."""
-    drift = object_drift(result, spec)
+                 lines: List[str], exclude: Sequence[str] = ()) -> bool:
+    """Did the board come through untouched?  False also for "cannot tell".
+
+    ``exclude`` names objects moved ON PURPOSE (the lift's target), which are
+    judged by their own criteria rather than by the drift tolerance.
+    """
+    drift = object_drift(result, spec, exclude)
     if drift is None:
         lines.append(
             "UNDISTURBED: cannot be told — the episode records where the "
@@ -567,8 +696,9 @@ def _undisturbed(result: EpisodeResult, spec: PanelRouteTaskSpec,
                 severity="hard"))
         return False
 
-    lines.append(f"UNDISTURBED: nothing moved more than "
-                 f"{policy.object_drift_tolerance_m * 100:.0f} mm.")
+    besides = f" besides {', '.join(exclude)}" if exclude else ""
+    lines.append(f"UNDISTURBED: nothing{besides} moved more than "
+                 f"{policy.object_drift_tolerance_m * 100:.0f} cm.")
     return True
 
 
@@ -610,7 +740,15 @@ def _only_intended_contact(result: EpisodeResult, spec: PanelRouteTaskSpec,
     Rest is the reason this is not simply "no contact": laying the forearm on
     the table is the task, and the runner's forbidden-contact counter goes up
     for it exactly as it would for the arm hitting a rail.
+
+    With phase-tagged contacts (#172) every one is judged against the shared
+    rule table and the route's exceptions; otherwise the per-body tally is
+    judged against the spec's intended bodies, as before.
     """
+    samples = contact_samples(result)
+    if samples is not None:
+        return _contacts_by_rule(result, spec, samples, violations, lines)
+
     touched = contact_bodies(result)
     if touched is None:
         total = int((result.contact_summary or {}).get("forbidden_total", 0) or 0)
@@ -655,6 +793,31 @@ def _only_intended_contact(result: EpisodeResult, spec: PanelRouteTaskSpec,
     return True
 
 
+def _contacts_by_rule(result: EpisodeResult, spec: PanelRouteTaskSpec,
+                      samples: Sequence[CR.ContactSample],
+                      violations: List[Violation], lines: List[str]) -> bool:
+    """Judge phase-tagged contacts against the rule table (#172, option C)."""
+    judged = CR.judge_all(samples, route=spec.route,
+                          target_id=spec.target_object_id)
+    unintended = [j for j in judged if not j.allowed]
+    if unintended:
+        lines.append("UNINTENDED CONTACT: " + "; ".join(
+            j.describe() for j in unintended))
+        for j in unintended:
+            violations.append(Violation(
+                kind=ViolationKind.FORBIDDEN_CONTACT,
+                description=f"{j.describe()}: {j.why}",
+                severity="hard"))
+        return False
+    if judged:
+        lines.append("CONTACT: " + "; ".join(
+            f"{j.describe()} — allowed: {j.why}" for j in judged))
+    else:
+        lines.append("CONTACT: none with the robot or the target.")
+        lines.append(_nothing_to_hit(result))
+    return True
+
+
 def _nothing_to_hit(result: EpisodeResult) -> str:
     """Whether an empty contact record is evidence, in one sentence."""
     collidable = (result.contact_summary or {}).get(COLLIDABLE_KEY)
@@ -671,7 +834,8 @@ def _nothing_to_hit(result: EpisodeResult) -> str:
 def _verdict(result: EpisodeResult, spec: PanelRouteTaskSpec,
              policy: PanelRoutePolicy, violations: List[Violation],
              lines: List[str], accuracy: float, successful: bool,
-             extra: Optional[Dict[str, float]] = None) -> EpisodeVerdict:
+             extra: Optional[Dict[str, float]] = None,
+             reported: Optional[Dict[str, Any]] = None) -> EpisodeVerdict:
     """Assemble the verdict.  One place, so the tiers cannot drift per ability."""
     contact = compute_contact_metrics(result)
     effort = compute_effort_metrics(result)
@@ -716,6 +880,7 @@ def _verdict(result: EpisodeResult, spec: PanelRouteTaskSpec,
         metrics=metrics,
         ranking_scores=ranking_scores,
         explanation="\n".join(lines),
+        reported=dict(reported or {}),
     )
 
 
@@ -930,6 +1095,218 @@ def evaluate_point(
                     extra=extra)
 
 
+#: Where a lift's measurements live in `EpisodeResult.metrics` (#172).  Each
+#: is a measurement from simulator truth, made by whoever produced the result
+#: (the replay of a recorded run, or a future live record); a missing one is
+#: "cannot be told", never zero.
+LIFT_RISE_KEY = "lift_rise_m"                  #: least rise over the hold
+LIFT_SLIP_KEY = "in_hand_slip_m"               #: slip in the hand's frame, over the hold
+LIFT_PUT_BACK_KEY = "put_back_offset_xy_m"     #: horizontal, pickup -> after release
+#: 1.0 completed, 0.0 refused; absent when the lift never reached it.
+WITHDRAWAL_KEY = "withdrawal_completed"
+
+WITHDRAWAL_COMPLETED = "completed"
+WITHDRAWAL_REFUSED = "refused"
+WITHDRAWAL_NOT_REACHED = "not reached"
+
+
+def withdrawal_of(result: EpisodeResult) -> str:
+    raw = (result.metrics or {}).get(WITHDRAWAL_KEY)
+    if raw is None:
+        return WITHDRAWAL_NOT_REACHED
+    return WITHDRAWAL_COMPLETED if float(raw) >= 0.5 else WITHDRAWAL_REFUSED
+
+
+def evaluate_lift_object(
+    result: EpisodeResult,
+    spec: PanelRouteTaskSpec,
+    recipe: Optional[TrajectoryRecipe] = None,
+    policy: Optional[PanelRoutePolicy] = None,
+    plan: Optional[Mapping[str, Any]] = None,
+) -> EpisodeVerdict:
+    """The lift passed when all of these held (#172, D5):
+
+      * the object rose at least `lift_rise_required_m` (4.0 cm) — the LEAST
+        rise over the hold, so a lift that sagged out of it fails;
+      * it slipped no more than `lift_slip_max_m` (2 mm) in the HAND's frame
+        over the hold — the hand moving with the object is not slip;
+      * it was put back within `lift_put_back_xy_tol_m` (5 mm, horizontal) of
+        where it was picked up;
+      * no contact was unintended under the shared rule table FROM THE CRANE'S
+        ATTEMPT_START TO THE RELEASE, and nothing else on the board moved more
+        than the drift tolerance;
+      * the arm ended at PRESENT — judged unless the withdrawal was refused.
+
+    WHAT THE CONTACT CLAUSE COVERS (owner ruling, 2026-10-10):
+      * the approach to the start posture (from HOME: RAISE_TO_SIDE) is a
+        measured route of its own.  Its contacts are judged under THAT route's
+        rules and exceptions and reported (`reported["approach"]`), not in
+        the lift verdict, and the lift route is given no exception for them;
+      * contacts after the release are the withdrawal's: judged in the
+        withdraw phase and reported with it (`reported["withdrawal_detail"]`,
+        e.g. "refused, residual pad contact 0.20 mm").  #173 must drive a
+        residual contact to zero.
+
+    THE WITHDRAWAL IS REPORTED, NOT JUDGED (`reported["withdrawal"]`,
+    `completed` or `refused`).  Ending at PRESENT is part of completing it: a
+    refused withdrawal is a guarded stop beside an object already put back,
+    the arm stays where it is rather than guess a way out, and the lift
+    verdict does not check PRESENT after one.  `reported["full_cycle"]` is
+    the lift passing, the withdrawal completing with no unintended contact,
+    and the arm at PRESENT.
+
+    The route is PLANNED: a recipe may not vary it (`check_route_integrity`
+    refuses one), and its integrity is ``plan`` — the preflight passed and the
+    plan's hash recorded (`check_plan_integrity`).  Without ``plan`` that is
+    said, not assumed.
+    """
+    policy = policy or PanelRoutePolicy()
+    route = ABILITY_ROUTES["lift_object"]
+    lines = [f"=== Lift Verdict: {spec.task_id or spec.ability} ==="]
+    violations = _common(result, policy, recipe, route, lines)
+
+    if plan is None:
+        lines.append("NOTE: no plan record was supplied, so the plan's "
+                     "integrity (preflight passed, plan hash recorded) was "
+                     "not checked.")
+    else:
+        integrity = check_plan_integrity(route, plan)
+        violations.extend(integrity)
+        for v in integrity:
+            lines.append(f"NOT THIS PLAN: {v.description}")
+        if not integrity:
+            lines.append(f"PLAN: preflight passed; plan "
+                         f"{str(plan.get(PLAN_HASH_KEY))[:12]} recorded.")
+
+    metrics = result.metrics or {}
+
+    def measured(key: str, what: str) -> Optional[float]:
+        raw = metrics.get(key)
+        if raw is None:
+            lines.append(f"{what.upper()}: not recorded, so it cannot be told.")
+            violations.append(Violation(
+                kind=ViolationKind.INVALID_EPISODE,
+                description=f"the episode recorded no {what}",
+                severity="hard"))
+            return None
+        return float(raw)
+
+    def failed(description: str) -> None:
+        violations.append(Violation(kind=ViolationKind.TASK_FAILURE,
+                                    description=description, severity="soft"))
+
+    rise = measured(LIFT_RISE_KEY, "rise")
+    rose = rise is not None and rise >= policy.lift_rise_required_m
+    if rise is not None:
+        lines.append(f"RISE: {rise * 100:.2f} cm at the least over the hold, "
+                     f"{policy.lift_rise_required_m * 100:.1f} cm required.")
+        if not rose:
+            failed(f"the object rose {rise * 100:.2f} cm and "
+                   f"{policy.lift_rise_required_m * 100:.1f} cm is required")
+
+    slip = measured(LIFT_SLIP_KEY, "slip in the hand")
+    held = slip is not None and slip <= policy.lift_slip_max_m
+    if slip is not None:
+        lines.append(f"SLIP: {slip * 1000:.3f} mm in the hand's frame over "
+                     f"the hold, {policy.lift_slip_max_m * 1000:.1f} mm "
+                     "allowed.")
+        if not held:
+            failed(f"the object slipped {slip * 1000:.2f} mm in the hand")
+
+    put_back = measured(LIFT_PUT_BACK_KEY, "put-back offset")
+    placed = put_back is not None and put_back <= policy.lift_put_back_xy_tol_m
+    if put_back is not None:
+        lines.append(f"PUT BACK: {put_back * 1000:.2f} mm (xy) from where it "
+                     f"was picked up, {policy.lift_put_back_xy_tol_m * 1000:.1f}"
+                     " mm allowed.")
+        if not placed:
+            failed(f"the object was put back {put_back * 1000:.2f} mm from "
+                   "where it was picked up")
+
+    samples = contact_samples(result)
+    approach: Dict[str, List[str]] = {}
+    residual: List[CR.JudgedContact] = []
+    if samples is None:
+        lines.append("CONTACT: no phase-tagged contacts were recorded, so an "
+                     "unintended contact cannot be ruled out.")
+        violations.append(Violation(
+            kind=ViolationKind.INVALID_EPISODE,
+            description="the episode recorded no phase-tagged contacts",
+            severity="hard"))
+        clean = False
+    else:
+        legs = [c for c in samples if c.route and c.route != route]
+        own = [c for c in samples if not c.route or c.route == route]
+        after = [c for c in own if c.phase is CR.Phase.WITHDRAW]
+        lifting = [c for c in own if c.phase is not CR.Phase.WITHDRAW]
+        clean = _contacts_by_rule(result, spec, lifting, violations, lines)
+        for j in CR.judge_all(legs, route=route,
+                              target_id=spec.target_object_id):
+            approach.setdefault(j.sample.route, [])
+            if not j.allowed:
+                approach[j.sample.route].append(f"{j.describe()}: {j.why}")
+        for leg in sorted({c.route for c in legs}):
+            approach.setdefault(leg, [])
+            found = approach[leg]
+            lines.append(f"APPROACH ({leg}, judged under its own route; not "
+                         "part of the lift verdict): "
+                         + ("; ".join(found) if found else "no unintended "
+                            "contact."))
+        residual = [j for j in CR.judge_all(after, route=route,
+                                            target_id=spec.target_object_id)
+                    if not j.allowed]
+    target = (spec.target_object_id,) if spec.target_object_id else ()
+    undisturbed = _undisturbed(result, spec, policy, violations, lines,
+                               exclude=target)
+
+    withdrawal = withdrawal_of(result)
+    if withdrawal == WITHDRAWAL_REFUSED:
+        lines.append("ENDS AT PRESENT: not judged — reaching PRESENT is part "
+                     "of completing the withdrawal, which was refused; the "
+                     "arm stopped beside the object rather than guess a way "
+                     "out.")
+        ended, at_present = True, False
+    else:
+        at_present = _arrived(result, R.POSTURE_PRESENT, policy, violations,
+                              lines)
+        ended = at_present
+
+    detail = withdrawal
+    if residual:
+        deepest = max(j.sample.deepest_m for j in residual)
+        kinds = sorted({"pad" if CR.Role.PAD in (j.role1, j.role2) else "arm"
+                        for j in residual})
+        detail = (f"{withdrawal}, residual {'/'.join(kinds)} contact "
+                  f"{deepest * 1000:.2f} mm")
+    lifted = rose and held and placed and clean and undisturbed and ended
+    full_cycle = bool(lifted and withdrawal == WITHDRAWAL_COMPLETED
+                      and at_present and not residual)
+    lines.append(f"WITHDRAWAL: {detail} (reported; not part of the lift "
+                 "verdict)." + ("" if not residual else "  " + "; ".join(
+                     f"{j.describe()}: {j.why}" for j in residual)))
+    lines.append(f"FULL CYCLE: {'yes' if full_cycle else 'no'}.")
+
+    clauses = (rose, held, placed, clean, undisturbed, ended)
+    extra: Dict[str, float] = {"full_cycle": float(full_cycle)}
+    for key, value in ((LIFT_RISE_KEY, rise), (LIFT_SLIP_KEY, slip),
+                       (LIFT_PUT_BACK_KEY, put_back)):
+        if value is not None:
+            extra[key] = float(value)
+    if withdrawal != WITHDRAWAL_NOT_REACHED:
+        extra[WITHDRAWAL_KEY] = float(withdrawal == WITHDRAWAL_COMPLETED)
+
+    return _verdict(result, spec, policy, violations, lines,
+                    accuracy=sum(map(bool, clauses)) / len(clauses),
+                    successful=lifted, extra=extra,
+                    reported={"withdrawal": withdrawal,
+                              "withdrawal_detail": detail,
+                              "withdrawal_contacts": [
+                                  f"{j.describe()}: {j.why}" for j in residual],
+                              "approach": approach,
+                              "full_cycle": full_cycle,
+                              "ends_at_present": bool(at_present)})
+
+
 #: One evaluator per ability, by the name `panel_abilities` registers it under.
 #: `point_cell` and `point_object` share an evaluator because they share a
 #: route; what differs between them is the target, which is in the task spec.
@@ -939,17 +1316,22 @@ EVALUATORS: Dict[str, Callable[..., EpisodeVerdict]] = {
     "wave": evaluate_wave,
     "point_cell": evaluate_point,
     "point_object": evaluate_point,
+    "lift_object": evaluate_lift_object,
 }
 
 
 def evaluate(ability: str, result: EpisodeResult, spec: PanelRouteTaskSpec,
              recipe: Optional[TrajectoryRecipe] = None,
-             policy: Optional[PanelRoutePolicy] = None) -> EpisodeVerdict:
+             policy: Optional[PanelRoutePolicy] = None,
+             plan: Optional[Mapping[str, Any]] = None) -> EpisodeVerdict:
     """Evaluate one ability's episode.  Raises for an ability with no evaluator.
 
     Raising is deliberate: a search pointed at an ability nobody has defined
     success for would otherwise optimise a default verdict, and a default
     verdict is a number with no meaning attached to it.
+
+    ``plan`` is a planned route's record (`check_plan_integrity`); it is
+    passed only to the evaluators of planned routes.
     """
     try:
         evaluator = EVALUATORS[ability]
@@ -957,4 +1339,6 @@ def evaluate(ability: str, result: EpisodeResult, spec: PanelRouteTaskSpec,
         raise KeyError(
             f"no evaluator for ability {ability!r}; success has not been "
             f"defined for it.  Known: {', '.join(sorted(EVALUATORS))}") from None
+    if route_type(ABILITY_ROUTES[ability]) is RouteType.PLANNED:
+        return evaluator(result, spec, recipe, policy, plan=plan)
     return evaluator(result, spec, recipe, policy)

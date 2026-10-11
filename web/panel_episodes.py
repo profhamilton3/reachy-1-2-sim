@@ -147,7 +147,15 @@ class EpisodeRecorder:
         status = getattr(result, "status", "failed")
         detail = getattr(result, "detail", "")
         drift = {k: float(v) for k, v in (evidence.get("object_drift") or {}).items()}
+        # HOW FAR EVERYTHING MOVED, measured (#172).  `object_drift` is only
+        # what moved past the tolerance, with the lift's own target excused,
+        # so a record built from it said 0.0 for a cube put back 4 mm away.
+        # Older evidence has no displacement; it falls back to the drift.
+        moved = evidence.get("object_displacement_m")
+        displacement = ({k: float(v) for k, v in moved.items()}
+                        if isinstance(moved, dict) else dict(drift))
         flown = [str(w) for w in (evidence.get("waypoints_flown") or [])]
+        identity = self._identity_for(scene_revision)
 
         spec = TaskSpec(
             task_id=f"panel:{proposal.task_type}",
@@ -169,7 +177,7 @@ class EpisodeRecorder:
         )
 
         config = EpisodeConfig(
-            simulator_identity=self._identity_for(scene_revision),
+            simulator_identity=identity,
             # Zero because there was no seed, not because the seed was zero.
             # `live_interactive` is what tells a reader to disregard it.
             seed=0,
@@ -190,7 +198,8 @@ class EpisodeRecorder:
                 STUDY_ID, spec, self._route_json(proposal), config,
                 live_interactive=True,
                 optimizer_metadata=self._metadata(proposal, phases, evidence,
-                                                  scene_name, obstacles),
+                                                  scene_name, obstacles,
+                                                  identity),
             )
             store.start_trial(trial_id)
 
@@ -200,14 +209,22 @@ class EpisodeRecorder:
                 status=_STATUS.get(status, EpisodeStatus.FAILED),
                 termination_reason=detail,
                 success=(status == "completed"),
+                # The simulator's steps either side of the job (#172); 0 when
+                # the board view had none, as it was for every record before.
+                start_sim_step=_step(evidence.get("sim_step_start")),
+                end_sim_step=_step(evidence.get("sim_step_end")),
                 wall_duration_s=round(max(0.0, ended_at - started_at), 3),
                 metrics={
                     "waypoints_flown": float(len(flown)),
                     "objects_disturbed": float(len(drift)),
-                    "max_object_drift_m": max(drift.values()) if drift else 0.0,
+                    "max_object_drift_m": (max(displacement.values())
+                                           if displacement else 0.0),
                 },
                 hard_violations=violations,
-                final_object_states={"drift_m": drift},
+                # `drift_m` is every object's measured displacement; the ones
+                # past the tolerance are `over_tolerance_m` (and the violation).
+                final_object_states={"drift_m": displacement,
+                                     "over_tolerance_m": drift},
                 # What the operator was shown, kept verbatim.  A record that
                 # cannot reproduce the sentence the human read is a record of
                 # a different event.
@@ -241,8 +258,9 @@ class EpisodeRecorder:
         })
 
     def _metadata(self, proposal, phases, evidence, scene_name,
-                  obstacles) -> Dict[str, Any]:
+                  obstacles, identity=None) -> Dict[str, Any]:
         return {
+            **_run_fields(proposal, evidence, identity),
             "live_interactive": True,
             "source": "panel",
             "scene_name": scene_name or getattr(proposal, "scene_name", ""),
@@ -288,6 +306,57 @@ class EpisodeRecorder:
         `assert_research_context` exists to refuse.
         """
         return self._identity.for_scene(scene_revision)
+
+
+def _step(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+#: How each route's motion was chosen, for the record's `seed` (#172).  None
+#: of them draws a random number, and the record says that rather than
+#: leaving the field blank.
+PLANNER_SEED = {
+    "CRANE_LIFT": "deterministic: the crane planner's fixed IK start set "
+                  "(crane_pick_live.GRASP_STARTS); no random seed",
+}
+MEASURED_SEED = "none: a measured route; nothing is sampled"
+
+
+def _run_fields(proposal, evidence, identity) -> Dict[str, Any]:
+    """The run-record fields #172 asks every panel episode to carry.
+
+    `seed.reset` is None: a live-interactive episode starts from whatever
+    the board was, with no seeded reset.  The hashes repeat the identity's
+    so a reader of the metadata alone has them; `code` adds the source hash
+    because `repository_git_sha` is "" inside the container.
+    """
+    route = getattr(proposal, "route", "") or ""
+    out: Dict[str, Any] = {
+        "route_version": getattr(proposal, "route_version", 0),
+        "command_poll_fixed": evidence.get("command_poll_fixed"),
+        "seed": {"reset": None,
+                 "planner": PLANNER_SEED.get(route, MEASURED_SEED)},
+        "scene_sha256": getattr(identity, "scene_sha256", "") if identity else "",
+        "model_sha256": getattr(identity, "model_sha256", "") if identity else "",
+        "code": {"git_sha": (getattr(identity, "repository_git_sha", "")
+                             if identity else "") or None,
+                 "working_tree_dirty": (bool(getattr(identity,
+                                                     "working_tree_dirty", False))
+                                        if identity else None),
+                 "source_sha256": _P.code_sha256() or None},
+        "sim_step_start": evidence.get("sim_step_start"),
+        "sim_step_end": evidence.get("sim_step_end"),
+    }
+    if "contact_model" in evidence:
+        out["contact_model"] = evidence.get("contact_model")
+    plan = (evidence.get("crane") or {}).get("plan")
+    if plan:
+        # A planned route's integrity (#172, D7): preflight passed, hash.
+        out["plan"] = plan
+    return out
 
 
 def build_recorder(scene_file: str = "") -> Optional[EpisodeRecorder]:

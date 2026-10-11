@@ -33,6 +33,8 @@ which is the whole point.
 from __future__ import annotations
 
 import dataclasses
+import functools
+import hashlib
 import os
 import pathlib
 import sys
@@ -73,6 +75,40 @@ def robot_model() -> str:
         if candidate.is_file():
             return str(candidate)
     return ""
+
+
+#: The source a code hash covers: what the panel and the motion process import.
+CODE_TREES = ("web", "src/reachy_ai")
+
+
+@functools.lru_cache(maxsize=1)
+def code_sha256() -> str:
+    """sha256 over the Python source this process runs, or "" if none is here.
+
+    THE CONTAINER HAS NO .git — it mounts the checkout's directories, not the
+    repository — so `repository_git_sha` is "" in every live record, and a
+    record with no code identity cannot say which evaluator, planner or guard
+    produced it (#172).  This hashes each `.py` under `CODE_TREES` by its
+    repo-relative path and its bytes, in sorted order, so the same tree gives
+    the same hash on any machine.  Computed once per process: code edited
+    under a running process is not the code it runs.
+    """
+    root = repo_root()
+    digest = hashlib.sha256()
+    found = False
+    for tree in CODE_TREES:
+        base = root / tree
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            found = True
+            digest.update(str(path.relative_to(root)).encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest() if found else ""
 
 
 def relative(path: str) -> str:
