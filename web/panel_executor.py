@@ -823,6 +823,7 @@ class SimulatorExecutor:
             # was the one way for that to go unnoticed.
             before = {oid: o.position for oid, o in scene.objects.items()
                       if o.position is not None}
+            start_step = getattr(scene, "sim_step", None)
 
             # Only the lift needs live feedback; every other job is sent
             # exactly as before.
@@ -862,13 +863,17 @@ class SimulatorExecutor:
                 return ExecutionResult(
                     status=out.get("status", "failed"),
                     detail=out.get("detail", "the motion failed"),
-                    evidence=self._with_contact_model(
-                        proposal, out.get("evidence") or {}))
+                    evidence=self._run_record(
+                        out, start_step, before, self._with_contact_model(
+                            proposal, out.get("evidence") or {})))
 
-            return self._verify_posture(proposal, out.get("flown") or [],
-                                        out.get("final_posture"), before,
-                                        out.get("start_posture") or "",
-                                        crane=out.get("crane"))
+            result = self._verify_posture(proposal, out.get("flown") or [],
+                                          out.get("final_posture"), before,
+                                          out.get("start_posture") or "",
+                                          crane=out.get("crane"))
+            result.evidence = self._run_record(out, start_step, before,
+                                               result.evidence)
+            return result
 
         except Exception as exc:
             log.exception("ability execution failed")
@@ -877,6 +882,41 @@ class SimulatorExecutor:
                 detail=f"the motion failed: {exc.__class__.__name__}: {exc}")
         finally:
             self._link.release_control()
+
+    def _run_record(self, out: Dict[str, Any], start_step, before,
+                    evidence: Dict[str, Any]) -> Dict[str, Any]:
+        """The fields an episode record needs and the evidence lacked (#172).
+
+        * ``sim_step_start``/``sim_step_end``: the simulator step either side
+          of the job, from the board views taken under the lease.  Records
+          before this read 0 for both.
+        * ``object_displacement_m``: how far EVERY object moved, measured, not
+          thresholded and not excluding the lift's target.  ``object_drift``
+          keeps its meaning (moved past the tolerance, the lift's target
+          excused); a record built from it alone said 0.0 for a cube put back
+          4 mm away.
+        * ``command_poll_fixed``: whether the motion process's SDK connection
+          runs with `sdk_compat.fix_command_poll` (None: never patched).
+
+        Never raises: a field it cannot read is None, because a record must
+        not be able to fail a movement that already happened.
+        """
+        record: Dict[str, Any] = {"sim_step_start": start_step,
+                                  "sim_step_end": None,
+                                  "object_displacement_m": None,
+                                  "command_poll_fixed": out.get("command_poll_fixed")}
+        try:
+            scene = self._scene_provider()
+            record["sim_step_end"] = getattr(scene, "sim_step", None)
+            moved = {}
+            for oid, was in before.items():
+                now = scene.objects.get(oid)
+                if now is not None and now.position is not None:
+                    moved[oid] = round(_euclid(now.position, was), 5)
+            record["object_displacement_m"] = moved
+        except Exception:                         # noqa: BLE001 - see above
+            log.exception("could not read the board for the run record")
+        return dict(evidence, **record)
 
     def _with_contact_model(self, proposal, evidence: Dict[str, Any]) -> Dict[str, Any]:
         """A lift's evidence names the simulator's contact model (ADR-0005).

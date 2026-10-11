@@ -58,6 +58,7 @@ the answer.  It is never `completed` — nothing in here has seen the board.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -340,9 +341,10 @@ def _observer(object_id: str):
 
 #: The crane events kept in the panel's evidence (every MEASURE is not: the
 #: hover and grasp-depth ones are, with the corrections, the straddle, the
-#: hold, the placement and the withdrawal).  Phases are live lines; this is
-#: what remains on the task afterwards.
-KEPT_CRANE_EVENTS = ("CORRECTION", "CORRECTION_COMMANDED", "ALIGNED", "ALIGN_REFUSED",
+#: hold, the placement and the withdrawal).  Phases are live lines AND kept
+#: (#172): the contact rules judge by phase, and the crane's own segment names
+#: are its phases (`evaluation.contact_rules.CRANE_PHASES`).
+KEPT_CRANE_EVENTS = ("phase", "CORRECTION", "CORRECTION_COMMANDED", "ALIGNED", "ALIGN_REFUSED",
                      "DESCENT_CHECK_FAILED", "STRADDLE", "CLOSED", "HELD", "SUPPORTED",
                      "RELEASED", "WITHDRAWAL_JUDGED", "WITHDRAWAL_CORRECTION",
                      "WITHDRAWN", "HALT", "REFUSED", "RETREAT_REFUSED")
@@ -423,8 +425,26 @@ def _crane_preflight(job, arm, phase, crane: Dict[str, Any]) -> Optional[Dict[st
     except CP.CraneRefused as exc:
         return _fail(f"I will not lift {oid}: {exc.stage}: {exc.reason}",
                      refused_before_motion=True, stage=exc.stage)
-    crane.update(plan=plan, planner=planner, model=model, observe=observe)
+    crane.update(plan=plan, planner=planner, model=model, observe=observe,
+                 plan_record=plan_record(plan))
     return None
+
+
+def _jsonable(v):
+    return v.tolist() if hasattr(v, "tolist") else str(v)
+
+
+def plan_record(plan) -> Dict[str, Any]:
+    """What identifies the plan that flew (#172, D7: a planned route's
+    integrity is "preflight passed, plan hash recorded").  Made only after
+    `plan_crane_pick` returned, i.e. after every preflight check passed; a
+    refused plan never gets this far and never moves the arm."""
+    summary = json.loads(json.dumps(plan.summary(), default=_jsonable))
+    digest = hashlib.sha256(json.dumps(summary, sort_keys=True,
+                                       separators=(",", ":")).encode()).hexdigest()
+    return {"preflight_passed": True, "plan_sha256": digest,
+            "rungs": len(summary.get("rungs") or ()),
+            "object_id": summary.get("object_id")}
 
 
 def _arm_state(arm) -> Dict[str, Any]:
@@ -450,8 +470,9 @@ def _crane_lift(robot, arm, phase, crane, *, should_abort=None, on_phase=None):
     out = CP.execute_crane_pick(robot, crane["planner"], crane["model"], crane["plan"],
                                 crane["observe"], on_event=_crane_phases(phase, kept),
                                 should_abort=should_abort, stow=False)
-    crane["outcome"] = json.loads(json.dumps(dict(out, events=kept, arm_state=_arm_state(arm)),
-                                         default=lambda v: (v.tolist() if hasattr(v, "tolist") else str(v))))
+    crane["outcome"] = json.loads(json.dumps(dict(out, events=kept, arm_state=_arm_state(arm),
+                                                  plan=crane.get("plan_record")),
+                                         default=_jsonable))
     held = out.get("lifted_and_held") or {}
     return [f"lift: {out.get('halt') or out.get('refusal') or 'completed the sequence'}",
             f"lift: held {held.get('rise_end_mm', 0) / 10:.1f} cm up" if held.get("rise_end_mm")
@@ -651,6 +672,16 @@ JOBS = {"ability": run_ability, "pick_place": run_pick_place}
 
 def run_job(job: Dict[str, Any], conn: Connection, *,
             emit: Phase = None, should_abort: Abort = None) -> Dict[str, Any]:
+    out = _run_job(job, conn, emit=emit, should_abort=should_abort)
+    # WHICH COMPATIBILITY FIXES THIS CONNECTION RAN WITH (#172), on every
+    # answer.  None means the connection never patched (a stub SDK, or no
+    # connection made); the run record says so rather than guessing.
+    out["command_poll_fixed"] = getattr(conn, "command_poll_fixed", None)
+    return out
+
+
+def _run_job(job: Dict[str, Any], conn: Connection, *,
+             emit: Phase = None, should_abort: Abort = None) -> Dict[str, Any]:
     _ensure_paths()
     try:
         from reachy_ai.motion.safety import gate_check

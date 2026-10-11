@@ -24,9 +24,9 @@ for _p in ("../../src", "../../native_mujoco", "../../web"):
 
 from reachy_ai.evaluation.base import ViolationKind  # noqa: E402
 from reachy_ai.evaluation.panel_routes import (  # noqa: E402
-    ABILITY_ROUTES, CONTACT_BODIES_KEY, GRID_CELL_M, EVALUATORS,
-    PanelRoutePolicy, align_to_parameters, canonical_steps,
-    check_route_integrity, evaluate,
+    ABILITY_ROUTES, CONTACT_BODIES_KEY, GRID_CELL_M, EVALUATORS, ROUTE_TYPES,
+    PanelRoutePolicy, RouteType, align_to_parameters, canonical_steps,
+    check_route_integrity, evaluate, measured_abilities,
 )
 from reachy_ai.experience.models import (  # noqa: E402
     EpisodeResult, EpisodeStatus, PanelRouteTaskSpec,
@@ -78,12 +78,17 @@ def a_spec(ability, *, initial=None, intended=(), cycles=0):
         expected_wave_cycles=cycles)
 
 
+#: The abilities with a measured route, and so a baseline recipe file (#172:
+#: the lift's route is planned per job and has neither).
+MEASURED = measured_abilities()
+
+
 # ---------------------------------------------------------------------------
-# Every ability has a recipe and an evaluator
+# Every ability has an evaluator; every measured one has a recipe
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("ability", sorted(ABILITY_ROUTES))
-def test_every_ability_has_a_recipe(ability):
+@pytest.mark.parametrize("ability", MEASURED)
+def test_every_measured_ability_has_a_recipe(ability):
     r = load(ability)
     assert r.task_type == ability
     assert r.route == ABILITY_ROUTES[ability]
@@ -106,6 +111,14 @@ def test_the_registry_and_the_evaluators_agree_on_which_abilities_exist():
     assert flown == set(ABILITY_ROUTES) == set(EVALUATORS)
 
 
+def test_every_route_has_a_type():
+    """D7: an ability's route is measured or planned, and nothing else."""
+    assert set(ABILITY_ROUTES.values()) <= set(ROUTE_TYPES)
+    assert ROUTE_TYPES["CRANE_LIFT"] is RouteType.PLANNED
+    assert "lift_object" not in MEASURED
+    assert set(MEASURED) == set(ABILITY_ROUTES) - {"lift_object"}
+
+
 def test_an_unknown_ability_raises_rather_than_scoring():
     with pytest.raises(KeyError) as e:
         evaluate("somersault", a_result(), a_spec("wave"))
@@ -116,12 +129,13 @@ def test_an_unknown_ability_raises_rather_than_scoring():
 # Baselines are variations of the measured route, and are pinned to it
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("ability", sorted(ABILITY_ROUTES))
+@pytest.mark.parametrize("ability", MEASURED)
 def test_the_baseline_recipe_is_the_measured_route(ability):
     assert check_route_integrity(load(ability), ABILITY_ROUTES[ability]) == []
 
 
-@pytest.mark.parametrize("ability,route", sorted(ABILITY_ROUTES.items()))
+@pytest.mark.parametrize("ability,route",
+                         [(a, ABILITY_ROUTES[a]) for a in MEASURED])
 def test_the_recipe_file_still_matches_rig_routes(ability, route):
     """The files are GENERATED from `rig_routes` and this is what keeps them
     that way: edit a waypoint in the module the arm actually flies and the

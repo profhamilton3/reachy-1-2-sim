@@ -111,6 +111,10 @@ class EpisodeVerdict:
     metrics: Dict[str, float]
     ranking_scores: Dict[str, float]
     explanation: str
+    #: Measures REPORTED alongside the verdict and not part of it (#172: a
+    #: lift's withdrawal, `completed` or `refused`).  Empty for evaluators
+    #: that report nothing extra.
+    reported: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
     # Convenience tier tuple for sorting (higher = better).
     # Active tiers (6):
@@ -144,6 +148,7 @@ class EpisodeVerdict:
             "metrics": self.metrics,
             "ranking_scores": self.ranking_scores,
             "explanation": self.explanation,
+            "reported": dict(self.reported),
         }
 
     def to_json(self, *, indent: int = 2) -> str:
@@ -172,6 +177,7 @@ class EpisodeVerdict:
             metrics=d.get("metrics", {}),
             ranking_scores=d.get("ranking_scores", {}),
             explanation=d.get("explanation", ""),
+            reported=dict(d.get("reported") or {}),
         )
 
     @classmethod

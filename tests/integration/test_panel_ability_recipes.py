@@ -140,36 +140,50 @@ def test_the_stow_corridor_starts_at_rest_not_at_the_pocket():
     assert "neck_pitch" not in pose
 
 
-def test_an_empty_contact_record_says_what_could_have_been_hit():
-    """THE RIG FIXTURES ARE NOT COLLIDABLE BODIES IN THIS SCENE.
+def test_the_offline_world_has_the_board_and_the_rails():
+    """#172: `_load_world` resolves `extends:`, as the server does.
 
-    `FWDCenterLabSivaPool` has three collision groups — world and pedestal,
-    the robot, and the manipulable objects — and no contype-8 geom anywhere,
-    which is the group the runner's own forbidden-contact counter pairs with.
-    So no route flown here can register a forbidden contact, and the rails and
-    board whose geometry IS the corridor's safety argument are not in the
-    question at all.
-
-    That makes an empty contact record worth almost nothing on its own, and
-    this test exists to keep that fact attached to it: the verdict names what
-    was collidable, and the rig fixtures are conspicuously not on the list."""
+    Until it did, the offline `FWDCenterLabSivaPool` world had no table and
+    no rails — only the floor, the pedestal and the pool objects — so no route
+    flown here could touch the board or the rig the corridor's geometry was
+    measured against, and an empty contact record said nothing about the
+    corridor.  Now they are collidable, and the verdict names them."""
     _skip_without_mujoco()
-    from reachy_ai.evaluation.panel_routes import (COLLIDABLE_KEY,
-                                                   CONTACT_BODIES_KEY)
+    from reachy_ai.evaluation.panel_routes import COLLIDABLE_KEY
 
-    result, spec = runner_for("rest_forearm").run(load("rest_forearm"), seed=0)
-    assert result.contact_summary.get(CONTACT_BODIES_KEY) == {}
-
+    result, spec = runner_for("wave").run(load("wave"), seed=0)
     collidable = result.contact_summary.get(COLLIDABLE_KEY)
-    assert collidable, "nothing recorded what could have been hit"
+    assert "table_top" in collidable
+    assert sum(b.startswith("rig_rail") for b in collidable) == 5
     assert "world" in collidable
-    assert not any("rail" in b or "board" in b or "table" in b
-                   for b in collidable), \
-        f"a rig fixture became collidable; this test's premise changed: {collidable}"
 
-    verdict = evaluate("rest_forearm", result, spec, load("rest_forearm"),
-                       runner_for("rest_forearm").policy)
-    assert "collidable in this scene" in verdict.explanation
+
+@pytest.mark.parametrize("ability", FLYABLE)
+def test_the_panel_routes_make_no_unintended_contact(ability):
+    """Every contact a measured route makes in the world WITH the board and
+    rails is allowed by the shared rule table: rest and stow lay the forearm
+    on the board at REST, which is their declared route exception, and
+    nothing else touches anything."""
+    _skip_without_mujoco()
+    from reachy_ai.evaluation import contact_rules as CR
+    from reachy_ai.evaluation.base import ViolationKind
+    from reachy_ai.evaluation.panel_routes import contact_samples
+
+    runner = runner_for(ability)
+    recipe = load(ability)
+    result, spec = runner.run(recipe, seed=0)
+    judged = CR.judge_all(contact_samples(result), route=spec.route)
+    assert all(j.allowed for j in judged), [j.describe() for j in judged
+                                            if not j.allowed]
+    made = {(j.sample.body1, j.sample.body2, j.sample.pose) for j in judged}
+    if ability in ("rest_forearm", "stow_arm"):
+        assert made == {("r_forearm", "table_top", "rest")}
+    else:
+        assert made == set()
+
+    verdict = evaluate(ability, result, spec, recipe, runner.policy)
+    assert not any(v.kind is ViolationKind.FORBIDDEN_CONTACT
+                   for v in verdict.violations), verdict.explanation
 
 
 # ---------------------------------------------------------------------------

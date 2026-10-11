@@ -653,3 +653,119 @@ def test_a_v1_database_keeps_the_rows_it_already_had(tmp_path):
 
     assert row["trial_id"] == "old-1"
     assert row["live_interactive"] == 0
+
+
+# ---------------------------------------------------------------------------
+# #172: the run-record fields
+# ---------------------------------------------------------------------------
+
+def _stepping_scene(nudge_m=0.004):
+    """A board whose simulator step advances across the job, and whose can
+    the job nudges by ``nudge_m`` (under the drift tolerance)."""
+    scene = live_scene()
+    c = scene.cells["r1c1"]
+    apply_snapshot(scene, SimSnapshot(
+        sim_step=1200, scene_revision="rev-1",
+        objects={"soda_can": (c.x, c.y, c.top_z + 0.03)},
+        received_at=time.monotonic()))
+
+    class Nudges(StubWorker):
+        def run(self, job, **kw):
+            apply_snapshot(scene, SimSnapshot(
+                sim_step=9800, scene_revision="rev-1",
+                objects={"soda_can": (c.x + nudge_m, c.y, c.top_z + 0.03)},
+                received_at=time.monotonic()))
+            return dict(self.result, command_poll_fixed=True)
+
+    return scene, Nudges()
+
+
+def test_the_record_carries_the_run_fields(db, fake_sdk, validated):
+    scene, worker = _stepping_scene()
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
+                           worker=worker,
+                           recorder=EpisodeRecorder("scene.yaml", db_path=db))
+    assert ex.execute(_ability()).status == "completed"
+
+    row, = rows(db)
+    result = json.loads(row["result_json"])
+    meta = json.loads(row["optimizer_metadata_json"])
+    # sim_step was 0 in every record before #172.
+    assert (result["start_sim_step"], result["end_sim_step"]) == (1200, 9800)
+    assert (meta["sim_step_start"], meta["sim_step_end"]) == (1200, 9800)
+    # Drift is MEASURED: 4 mm is recorded, and is not a violation.
+    assert result["metrics"]["max_object_drift_m"] == pytest.approx(0.004, abs=1e-4)
+    assert result["metrics"]["objects_disturbed"] == 0.0
+    assert result["final_object_states"]["drift_m"]["soda_can"] == \
+        pytest.approx(0.004, abs=1e-4)
+    assert result["final_object_states"]["over_tolerance_m"] == {}
+    assert "forbidden_contact" not in result["hard_violations"]
+
+    assert meta["command_poll_fixed"] is True
+    assert meta["route_version"] == 1
+    assert meta["seed"]["reset"] is None
+    assert meta["seed"]["planner"].startswith("none")
+    assert "model_sha256" in meta and "scene_sha256" in meta
+    assert len(meta["code"]["source_sha256"]) == 64
+
+
+def test_a_lift_record_carries_its_plan_and_its_planners_seed(db):
+    """The lift's planned-route integrity (preflight passed, plan hash) and
+    the fact that its planner draws no random number, in the record."""
+    plan = {"preflight_passed": True, "plan_sha256": "cd" * 32, "rungs": 13}
+    proposal = _ability(task_type="lift_object", route="CRANE_LIFT",
+                        expected_start_posture="present", end_posture="present",
+                        object_id="red_cube")
+    result = types.SimpleNamespace(
+        status="failed", detail="withdrawal refused",
+        evidence={"route": "CRANE_LIFT", "object_drift": {},
+                  "object_displacement_m": {"red_cube": 0.0041, "soda_can": 0.0},
+                  "sim_step_start": 8720, "sim_step_end": 47120,
+                  "command_poll_fixed": True,
+                  "contact_model": {"noslip_iterations": 10},
+                  "crane": {"plan": plan}})
+    EpisodeRecorder("scene.yaml", db_path=db).record(proposal, result)
+
+    row, = rows(db)
+    out = json.loads(row["result_json"])
+    meta = json.loads(row["optimizer_metadata_json"])
+    assert out["metrics"]["max_object_drift_m"] == pytest.approx(0.0041)
+    assert out["metrics"]["objects_disturbed"] == 0.0
+    assert (out["start_sim_step"], out["end_sim_step"]) == (8720, 47120)
+    assert meta["plan"] == plan
+    assert meta["seed"]["planner"].startswith("deterministic")
+    assert meta["contact_model"] == {"noslip_iterations": 10}
+
+
+def test_an_old_evidence_shape_still_records(db):
+    """Evidence from before #172 has no displacement and no steps: the record
+    falls back to the drift and to 0, as before."""
+    result = types.SimpleNamespace(
+        status="completed", detail="",
+        evidence={"route": "STOW_ROUTE", "object_drift": {"soda_can": 0.03}})
+    EpisodeRecorder("scene.yaml", db_path=db).record(_ability(), result)
+    out = json.loads(rows(db)[0]["result_json"])
+    assert out["metrics"]["max_object_drift_m"] == pytest.approx(0.03)
+    assert (out["start_sim_step"], out["end_sim_step"]) == (0, 0)
+
+
+def test_a_board_that_cannot_be_read_costs_the_fields_not_the_motion(
+        db, fake_sdk, validated):
+    scene = live_scene()
+    calls = {"n": 0}
+
+    def provider():
+        calls["n"] += 1
+        if calls["n"] > 3:          # the run record's read, after the motion
+            raise RuntimeError("scene went away")
+        return scene
+
+    ex = SimulatorExecutor(StubLink(), provider, "scene.yaml",
+                           worker=StubWorker(), recorder=None)
+    calls["n"] = 3
+    evidence = ex._run_record({"command_poll_fixed": None}, 5, {}, {"x": 1})
+    assert evidence["x"] == 1
+    assert evidence["sim_step_start"] == 5
+    assert evidence["sim_step_end"] is None
+    assert evidence["object_displacement_m"] is None
+    assert evidence["command_poll_fixed"] is None

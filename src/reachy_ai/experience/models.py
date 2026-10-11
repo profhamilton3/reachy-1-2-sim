@@ -209,6 +209,10 @@ class PanelRouteTaskSpec(TaskSpec):
     #: How many wave cycles were asked for.  Zero for the routes that do not
     #: wave.
     expected_wave_cycles: int                   = 0
+    #: The object the ability acts on (#172): the lift's target.  It is what
+    #: gives one body the TARGET role in the contact rules
+    #: (`evaluation.contact_rules`).  Empty for the routes that act on nothing.
+    target_object_id: str                       = ""
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "PanelRouteTaskSpec":
