@@ -143,6 +143,11 @@ class CraneSpec:
     tilt_deg: float = 30.0
     lean_bearing_deg: float = 59.52
     opening_deg: float = -65.0
+    #: The wider release (#173): the gripper's travel ends at -68.75 deg, and
+    #: this stays 0.75 deg inside it.  Used only when the measured state says
+    #: the usual opening leaves a pad under the allowance; offline, the extra
+    #: 3 deg took the finger 0.3-0.9 mm further from the cube it had followed.
+    wide_opening_deg: float = -68.0
     close_deg: float = -5.0          # primitives._GRIPPER_CLOSED_DEG
     transit_opening_deg: float = -45.0   # rig_routes.OPEN
     rung_m: float = 0.01
@@ -194,6 +199,10 @@ class CraneLimits:
     #: Lift: the object may trail the hand by at most one rung before it is
     #: called a slip; success is a held rise >= lift - one rung.
     lift_lag_m: float = 0.01
+    #: A separating retreat (#173, O1) may START with a pad under the
+    #: allowance -- the release left it there -- but not deeper into the
+    #: object than this.
+    separation_start_floor_m: float = 0.0005
     ik_position_tol_m: float = 0.0005
     max_attempt_s: float = 300.0
 
@@ -673,6 +682,217 @@ def replan(planner, scene: SceneModel, plan: CranePlan, shift: np.ndarray,
     return out
 
 
+# ── The way out after the release (#173) ──────────────────────────────────────
+#
+# Four of the ten Phase 1.5 lifts refused their withdrawal: the release drags
+# the cube 5-12 mm (the clamped pads unload into it as the finger opens) and
+# it can come to rest against a pad, so the first sample of the way out -- the
+# pose the hand is ALREADY in -- is under the allowance, and a correction of
+# the climb cannot move it.  Two changes, chosen offline on the ten recorded
+# release states (Reachy-Lab issue173-replay):
+#
+#   * O2, CHECK BEFORE OPENING: open only until the grip lets go, judge the
+#     way out for the fully opened hand from the measured state, and open no
+#     further if there is none.  The usual opening is tried first, then the
+#     wider one; after opening, the measured state is judged again, and the
+#     hand opens to the wider angle if a pad still sits under the allowance.
+#   * O1, A SEPARATING RETREAT: if the way straight up (or the existing
+#     sideways correction) is not clear, the first leg may move along the
+#     jaw's closing axis from a start under the allowance, provided the pad
+#     under it moves strictly away from the object until it clears it, the
+#     other pad stays clear, and no pad starts deeper than
+#     `CraneLimits.separation_start_floor_m`.  That leg flies with the monitor
+#     off, as the existing correction does; the climb after it is monitored.
+
+@dataclass
+class WayOut:
+    """A judged way out of the hand after the release.
+
+    ``path`` starts at the last commanded pose.  ``path[1:1 + unmonitored]``
+    flies with the monitor off (a correction or separating leg, whose start
+    may be in contact with nothing more than the object just released); the
+    rest is the climb, monitored.  ``kind`` is ``direct``, ``sideways`` (the
+    pre-#173 correction) or ``separating`` (#173, O1).
+    """
+    kind: str
+    path: List[List[float]]
+    plan: CranePlan
+    unmonitored: int
+    report: Dict[str, object]
+    shift_mm: Optional[List[float]] = None
+
+
+def rungs_above(plan: CranePlan, cmd: Sequence[float], above: int) -> List[int]:
+    """The ladder rungs above the commanded pose ``cmd``, up to the hover
+    (``above`` is the highest rung the hand is at or below)."""
+    s = plan.spec
+    k = min(max(above, 0), s.hover_rungs)
+    z_now = G.hand_frames(cmd, s.opening_deg).gap_mid[2]
+    while k < s.hover_rungs and \
+            G.hand_frames(plan.rungs[k], s.opening_deg).gap_mid[2] <= z_now + 1e-4:
+        k += 1
+    return list(range(k, s.hover_rungs + 1))
+
+
+def _onward(plan: CranePlan) -> List[List[float]]:
+    s = plan.spec
+    return [plan.rungs[j] for j in range(s.hover_rungs + 1, s.via_rungs + 1)] + \
+        [plan.present]
+
+
+def _pad_series(path, gm: float, live: G.Box, off) -> Tuple[List[float], List[float]]:
+    """Thumb and finger clearance to ``live`` at every 0.25 deg sample of the
+    commanded ``path``, predicted with the measured offset (the samples of
+    `grasp_alignment.route_clearance`)."""
+    th, fi = [], []
+    for q in G.densify(path, 0.25):
+        h = G.hand_frames(np.asarray(q) + off, gm)
+        th.append(G.obb_separation(h.thumb, live))
+        fi.append(G.obb_separation(h.finger, live))
+    return th, fi
+
+
+def judge_way_out(planner, scene: SceneModel, plan: CranePlan, path, gm: float,
+                  live: G.Box, off, *, separating: int = 0,
+                  label: str = "") -> Tuple[bool, Dict[str, object]]:
+    """Both pads against the measured object and the table, along ``path`` as
+    it will be flown (predicted from the measured offset), plus the unchanged
+    whole-arm check onward to PRESENT.
+
+    Every sample must clear the allowance, except -- with ``separating`` > 0
+    -- the first ``separating`` samples, where a pad may start under it if it
+    starts no deeper than the floor and its clearance strictly increases
+    until it is clear (O1).
+    """
+    s, lim = plan.spec, plan.limits
+    th, fi = _pad_series(path, gm, live, off)
+    climb = (G.hand_frames(path[-1], gm).gap_mid[2]
+             - G.hand_frames(path[0], gm).gap_mid[2])
+    tol = prediction_tolerance(max(climb, s.rung_m))
+    pred = [list(np.asarray(q) + off) for q in G.densify(path, 0.5)]
+    tab = G.table_clearance(scene, pred, gm)
+    route = G.route_clearance(path, gm, live, offset=off)
+    rep: Dict[str, object] = {
+        "label": label, "route": route.as_dict(), "tolerance_mm": round(1000 * tol, 3),
+        "table_mm": {k: round(1000 * v, 2) for k, v in tab.by_link.items()},
+        "start_mm": [round(1000 * th[0], 2), round(1000 * fi[0], 2)],
+        "path_rungs": len(path) - 1}
+    if separating:
+        ok = True
+        for series in (th, fi):
+            if series[0] < -lim.separation_start_floor_m:
+                ok = False
+            seg = series[:separating + 1]
+            if any(a < tol and b <= a for a, b in zip(seg, seg[1:])):
+                ok = False
+        ok = ok and min(th[separating:]) >= tol and min(fi[separating:]) >= tol
+        rep["separating_samples"] = separating
+    else:
+        ok = min(th) >= tol and min(fi) >= tol
+    ok = ok and tab.worst_m >= 0.0
+    if ok:
+        try:
+            planner.check_arm_path(
+                list(path) + _onward(plan), segment=f"withdrawal ({label})",
+                gripper_deg=gm,
+                target=TargetContact(plan.object_id, hand_contact=True,
+                                     center=tuple(live.center)))
+        except ArmClearanceError as exc:
+            ok = False
+            rep["check_arm_path"] = str(exc)
+    rep["ok"] = ok
+    return ok, rep
+
+
+def _shifted(planner, plan: CranePlan, cmd, d: np.ndarray):
+    """``cmd`` moved by ``d`` (jaw-gap, world) and the ladder moved with it."""
+    s, lim = plan.spec, plan.limits
+    got = solve_gap(planner._arm, G.hand_rotation(cmd),
+                    G.hand_frames(cmd, s.opening_deg).gap_mid + d, s.opening_deg, cmd,
+                    lim.ik_position_tol_m, iters=20, relax=True)
+    if got is None:
+        return None, None
+    moved = replace(plan, gap_targets=[t + d for t in plan.gap_targets],
+                    rungs=_shift_ladder(planner, plan, d), shift=plan.shift + d,
+                    checks={})
+    return got[0], moved
+
+
+#: Every kind of way out, in the order `plan_way_out` tries them.
+WAY_OUT_KINDS = ("direct", "sideways", "separating")
+#: What the check before opening looks for first, at either opening.
+PRE_OPEN_PREFERRED = ("direct", "sideways")
+
+
+def release_openings(spec: CraneSpec) -> Tuple[float, float]:
+    """The openings the check before opening tries, in order: the wider one
+    first.  Offline (issue173-replay), every release that opened only to the
+    usual angle and later needed the wider one had left the finger resting on
+    the cube in between; opening wide at once left it clear."""
+    return (spec.wide_opening_deg, spec.opening_deg)
+
+
+def plan_way_out(planner, scene: SceneModel, plan: CranePlan, cmd, above: int,
+                 gm: float, live: G.Box, off, label: str = "",
+                 kinds: Sequence[str] = WAY_OUT_KINDS
+                 ) -> Tuple[Optional[WayOut], List[Dict[str, object]]]:
+    """The first clear way out, in order: straight up the ladder; the bounded
+    sideways correction that equalises the route's worst clearances (as
+    before #173); the separating retreat (#173, O1).  Returns it (or None)
+    and the report of every candidate judged.  ``kinds`` restricts the two
+    corrections (the offline comparison of options uses it); the way straight
+    up is always tried first."""
+    lim = plan.limits
+    reports: List[Dict[str, object]] = []
+    cmd = list(cmd)
+
+    path = [cmd] + [plan.rungs[j] for j in rungs_above(plan, cmd, above)]
+    ok, rep = judge_way_out(planner, scene, plan, path, gm, live, off,
+                            label=f"{label} direct")
+    reports.append(rep)
+    if ok:
+        return WayOut("direct", path, plan, 0, rep), reports
+
+    def via(d: np.ndarray, kind: str, separating: bool):
+        got, moved = _shifted(planner, plan, cmd, d)
+        if got is None:
+            reports.append({"label": f"{label} {kind}", "ok": False,
+                            "reason": "IK found no shifted pose"})
+            return None
+        p = [cmd, got] + [moved.rungs[j] for j in rungs_above(moved, cmd, above)]
+        n = len(G.densify([cmd, got], 0.25)) - 1 if separating else 0
+        ok_, rep_ = judge_way_out(planner, scene, moved, p, gm, live, off,
+                                  separating=n, label=f"{label} {kind}")
+        rep_["shift_mm"] = (1000 * d).round(2).tolist()
+        reports.append(rep_)
+        if ok_:
+            return WayOut(kind, p, moved, 1, rep_, rep_["shift_mm"])
+        return None
+
+    # Sideways, as before #173: equalise the route's worst clearances, and
+    # refuse rather than cap a shift that would exceed the bound.
+    route = G.route_clearance(path, gm, live, offset=off)
+    d = 0.5 * (route.thumb_m - route.finger_m) * np.asarray(route.end.face_normal)
+    if "sideways" in kinds and float(np.linalg.norm(d)) <= lim.max_lateral_correction_m \
+            and "check_arm_path" not in rep:
+        found = via(d, "sideways", separating=False)
+        if found is not None:
+            return found, reports
+
+    if "separating" not in kinds:
+        return None, reports
+    # Separating (O1): equalise the START clearances along the jaw's closing
+    # axis, bounded, so the pad the release left under the allowance moves
+    # away first; the climb follows the ladder shifted the same way.
+    start = G.pad_clearance(G.hand_frames(np.asarray(cmd) + off, gm), live)
+    d = 0.5 * (start.thumb_m - start.finger_m) * np.asarray(start.face_normal)
+    norm = float(np.linalg.norm(d))
+    if norm > lim.max_lateral_correction_m:
+        d = d * (lim.max_lateral_correction_m / norm)
+    found = via(d, "separating", separating=True)
+    return found, reports
+
+
 # ── Execution ─────────────────────────────────────────────────────────────────
 
 def _read(arm) -> Tuple[List[float], float]:
@@ -887,115 +1107,92 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
             qm, gm, off, live, hm, pc = measure(at_rung, f"{label} after correction {i + 1}")
         raise AssertionError("unreachable")
 
-    def withdrawal_rungs() -> List[int]:
-        """The ladder rungs above the last commanded pose, up to the hover."""
-        plan_ = P_()
-        k = min(max(st["above"], 0), s.hover_rungs)
-        z_now = G.hand_frames(st["cmd"], s.opening_deg).gap_mid[2]
-        # skip a rung the hand is already level with or above
-        while k < s.hover_rungs and \
-                G.hand_frames(plan_.rungs[k], s.opening_deg).gap_mid[2] <= z_now + 1e-4:
-            k += 1
-        return list(range(k, s.hover_rungs + 1))
-
-    def withdrawal_path() -> List[List[float]]:
-        """Last commanded pose, then the ladder up to the hover."""
-        return [list(st["cmd"])] + [P_().rungs[j] for j in withdrawal_rungs()]
-
-    def onward(plan_: CranePlan) -> List[List[float]]:
-        """Hover -> via (rung by rung, as flown) -> PRESENT."""
-        return [plan_.rungs[j] for j in range(s.hover_rungs + 1, s.via_rungs + 1)] + \
-            [plan_.present]
-
-    def judge_withdrawal(label: str) -> Tuple[bool, Dict[str, object]]:
-        """Both pads against the MEASURED object and the table, along the
-        withdrawal as it will actually be flown, predicted from the measured
-        offset; plus the unchanged whole-arm check with the object where it
-        now is."""
+    def measured_state():
+        """The hand and the object as they are now, with the joint offset
+        from the last commanded pose."""
         plan_ = P_()
         qm, gm = _read(arm)
         off = G.joint_offset(qm, st["cmd"])
         o = observe()
         live = G.object_box(scene.get(plan_.object_id), o.position, o.quat_wxyz)
-        path = withdrawal_path()
-        route = G.route_clearance(path, gm, live, offset=off)
-        climb = (G.hand_frames(path[-1], gm).gap_mid[2]
-                 - G.hand_frames(path[0], gm).gap_mid[2])
-        tol = prediction_tolerance(max(climb, s.rung_m))
-        pred = [list(np.asarray(q) + off) for q in G.densify(path, 0.5)]
-        tab = G.table_clearance(scene, pred, gm)
-        rep = {"label": label, "route": route.as_dict(), "tolerance_mm": round(1000 * tol, 3),
-               "table_mm": {k: round(1000 * v, 2) for k, v in tab.by_link.items()},
-               "object": [round(v, 5) for v in o.position], "grip_force_n": o.grip_force_n,
-               "path_rungs": len(path) - 1}
-        ok = route.min_m >= tol and tab.worst_m >= 0.0
-        if ok:
-            try:
-                planner.check_arm_path(
-                    path + onward(plan_), segment=f"withdrawal ({label})",
-                    gripper_deg=gm,
-                    target=TargetContact(plan_.object_id, hand_contact=True,
-                                         center=tuple(o.position)))
-            except ArmClearanceError as exc:
-                ok = False
-                rep["check_arm_path"] = str(exc)
-        rep["ok"] = ok
-        rep["_live"], rep["_off"], rep["_gm"], rep["_route"] = live, off, gm, route
-        return ok, rep
+        return qm, gm, off, o, live
+
+    def way_out(label: str, gripper_deg: Optional[float] = None,
+                kinds: Sequence[str] = WAY_OUT_KINDS):
+        """`plan_way_out` from the measured state; ``gripper_deg`` judges the
+        hand as it WILL be opened (the check before opening) rather than as
+        it is."""
+        qm, gm, off, o, live = measured_state()
+        g = gm if gripper_deg is None else gripper_deg
+        found, reports = plan_way_out(planner, scene, P_(), st["cmd"], st["above"],
+                                      g, live, off, label=label, kinds=kinds)
+        return found, reports, o
+
+    def check_before_opening() -> Optional[float]:
+        """O2: with the grip let go, the opening to open to; None when no
+        opening has a way out.  An opening the pads clear without a
+        separating retreat is preferred, and the wider opening before the
+        usual one (`release_openings`)."""
+        for kinds in (PRE_OPEN_PREFERRED, WAY_OUT_KINDS):
+            for opening in release_openings(s):
+                found, reports, _o = way_out(f"before opening to {opening:.0f} deg",
+                                             gripper_deg=opening, kinds=kinds)
+                ev("WITHDRAWAL_PRECHECK", opening_deg=opening, ok=found is not None,
+                   way_out=found.kind if found else None, allowed=list(kinds),
+                   candidates=[{k: v for k, v in r.items() if k != "route"}
+                               for r in reports])
+                if found is not None:
+                    return opening
+        return None
 
     def withdraw() -> Dict[str, object]:
-        """Re-judge, correct at most once, then climb with the monitor on.
+        """Judge the way out from where the object now is; open wider if a pad
+        is still under the allowance; fly an unmonitored correcting or
+        separating leg if one is needed, then climb with the monitor on.
         Returns the withdrawal record; raises _Halt when it refuses or trips."""
-        ok, rep = judge_withdrawal("after release")
-        ev("WITHDRAWAL_JUDGED", **{k: v for k, v in rep.items() if not k.startswith("_")})
+        found, reports, o = way_out("after release")
+        opened_wider = False
+        if found is None or found.kind != "direct":
+            qm, gm = _read(arm)
+            if gm > s.wide_opening_deg + 0.5:
+                # A pad under the allowance with the usual opening: open wider
+                # (inside the travel) and judge again before anything moves.
+                P.smooth_move(arm, {"r_gripper": s.wide_opening_deg}, 0.3)
+                hold(0.5, check=False)
+                opened_wider = True
+                # The hand is no longer the one judged: judge it again.
+                found, reports_w, o = way_out("after opening wider")
+                reports += reports_w
+        last = reports[-1] if reports else {}
+        ev("WITHDRAWAL_JUDGED", label="after release", ok=found is not None,
+           way_out=found.kind if found else None, opened_wider=opened_wider,
+           route=(found.report if found else reports[0]).get("route"),
+           tolerance_mm=(found.report if found else reports[0]).get("tolerance_mm"),
+           object=[round(v, 5) for v in o.position], grip_force_n=o.grip_force_n,
+           candidates=[{k: v for k, v in r.items() if k != "route"} for r in reports])
+        if found is None:
+            raise _Halt("withdrawal refused: no clear way out of the replaced object "
+                        "(straight up, a bounded sideways shift or a separating retreat)",
+                        judged=reports, last=last)
         corrected = None
-        if not ok:
-            live, off, gm, route = rep["_live"], rep["_off"], rep["_gm"], rep["_route"]
-            end = route.end
-            n = np.asarray(end.face_normal)
-            d = 0.5 * (route.thumb_m - route.finger_m) * n      # equalise, laterally only
-            if float(np.linalg.norm(d)) > lim.max_lateral_correction_m or "check_arm_path" in rep:
-                raise _Halt("withdrawal refused: the pads' way out past the replaced "
-                            "object is not clear and no bounded sideways shift fixes it",
-                            withdrawal=_public(rep), shift_mm=(1000 * d).round(2).tolist())
-            plan_ = P_()
-            got = solve_gap(planner._arm, G.hand_rotation(st["cmd"]),
-                            G.hand_frames(st["cmd"], s.opening_deg).gap_mid + d,
-                            s.opening_deg, st["cmd"], lim.ik_position_tol_m,
-                            iters=20, relax=True)
-            if got is None:
-                raise _Halt("withdrawal refused: IK found no shifted pose")
-            shifted = replace(plan_, gap_targets=[t + d for t in plan_.gap_targets],
-                              rungs=_shift_ladder(planner, plan_, d), shift=plan_.shift + d,
-                              checks={})
-            path = [st["cmd"], got[0]] + [shifted.rungs[j] for j in withdrawal_rungs()]
-            r2 = G.route_clearance(path, gm, live, offset=off)
-            pred = [list(np.asarray(q) + off) for q in G.densify(path, 0.5)]
-            t2 = G.table_clearance(scene, pred, gm)
-            tol = prediction_tolerance(s.hover_rungs * s.rung_m)
-            corrected = {"shift_mm": (1000 * d).round(2).tolist(), "route": r2.as_dict(),
-                         "table_mm": round(1000 * t2.worst_m, 2), "tolerance_mm": round(1000 * tol, 3)}
+        if found.unmonitored:
+            corrected = {"way_out": found.kind, "shift_mm": found.shift_mm,
+                         "route": found.report.get("route"),
+                         "start_mm": found.report.get("start_mm")}
             ev("WITHDRAWAL_CORRECTION", **corrected)
-            if r2.min_m < tol or t2.worst_m < 0.0:
-                raise _Halt("withdrawal refused: a bounded sideways shift does not clear "
-                            "the replaced object", withdrawal=_public(rep), correction=corrected)
-            try:
-                planner.check_arm_path(path + onward(shifted),
-                                       segment="withdrawal (corrected)", gripper_deg=gm,
-                                       target=TargetContact(plan_.object_id, hand_contact=True,
-                                                            center=tuple(observe().position)))
-            except ArmClearanceError as exc:
-                raise _Halt(f"withdrawal refused: {exc}")
-            cur["plan"] = shifted
-            stream(got[0], STEP_HZ, 0.05)
+            cur["plan"] = found.plan
+            for q in found.path[1:1 + found.unmonitored]:
+                stream(q, STEP_HZ, 0.05)        # the monitor is off here
             hold(0.5)
         # Climb, the monitor on: a pad force or the object moving stops it.
         st["ref"] = np.asarray(observe().position, dtype=float)
         st["monitor"] = True
-        for q in withdrawal_path()[1:]:
+        for q in found.path[1 + found.unmonitored:]:
             stream(q, STEP_HZ, 0.05)
         st["above"] = s.hover_rungs
-        return {"judged": _public(rep), "corrected": corrected}
+        return {"way_out": found.kind, "opened_wider": opened_wider,
+                "judged": [{k: v for k, v in r.items() if k != "route"} for r in reports],
+                "corrected": corrected}
 
     def back_to_present(opening: float) -> None:
         """Hover -> via -> PRESENT by the checked ladder; pad force still watched."""
@@ -1223,8 +1420,19 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     st["above"] = max([j for j in range(0, s.hover_rungs + 1)
                        if G.hand_frames(plan.rungs[j], s.close_deg).gap_mid[2] <= z_cmd + 1e-4]
                       or [0])
-    P.smooth_move(arm, {"r_gripper": s.opening_deg}, 0.8)
-    hold(0.8, check=False)
+    held_at = np.asarray(o.position, dtype=float)
+    # ── release (#173, O2): let go, CHECK, and only then open ───────────────
+    # Open only until the grip force reads zero: the object is free and the
+    # hand has opened no further than it took to free it.  Then judge the way
+    # out for the fully opened hand from where the object came to rest, and
+    # open no further if neither opening has one -- never open into a refusal.
+    let_go = P.release_grip(arm, s.opening_deg,
+                            lambda: observe().grip_force_n <= lim.contact_force_n, 0.8)
+    hold(0.5, check=False)
+    opening = check_before_opening()
+    if opening is not None:
+        P.smooth_move(arm, {"r_gripper": opening}, 0.4)
+        hold(0.8, check=False)
     o = observe()
     qm, gm = _read(arm)
     hm = G.hand_frames(qm, gm)
@@ -1233,6 +1441,11 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     tilt = math.degrees(math.acos(max(-1.0, min(1.0, 1 - 2 * (x * x + y * y)))))
     outcome["replaced"] = {
         "supported_before_open": reached_support, "object": list(o.position),
+        # How far the release moved the object (horizontal, held -> released):
+        # reported, target <= 5 mm, not a criterion (#173 decision).
+        "release_drag_mm": round(1000 * float(np.linalg.norm((np.asarray(o.position)
+                                                                - held_at)[:2])), 2),
+        "let_go_deg": round(float(let_go), 2), "opening_deg": opening,
         "quat": list(o.quat_wxyz), "tilt_deg": round(tilt, 3),
         "lowest_above_table_mm": round(1000 * (placed.lowest_z - scene.table_surface_z), 3),
         "offset_from_start_mm": round(1000 * float(np.linalg.norm(np.asarray(o.position) - c0)), 2),
@@ -1244,6 +1457,10 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     # ── withdraw: re-judged against where the object now is ────────────────
     ev("phase", name="withdrawal")
     try:
+        if opening is None:
+            raise _Halt("withdrawal refused before opening: with the grip let go, "
+                        "neither opening has a clear way out, so the hand was not "
+                        "opened further")
         outcome["withdrawal"] = withdraw()
         outcome["withdrawal"]["clean"] = True
         ev("WITHDRAWN", **outcome["withdrawal"])

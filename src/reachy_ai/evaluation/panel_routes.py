@@ -181,6 +181,10 @@ class PanelRoutePolicy(EvaluationPolicy):
     lift_rise_required_m: float = 0.040
     lift_slip_max_m: float = 0.002
     lift_put_back_xy_tol_m: float = 0.005
+    #: Release drag (#173): how far the object moves, horizontally, while the
+    #: hand opens.  A TARGET, reported against and never judged (owner
+    #: decision on #173: report it, target <= 5 mm, non-blocking).
+    release_drag_target_m: float = 0.005
 
 
 # ---------------------------------------------------------------------------
@@ -1104,6 +1108,8 @@ LIFT_SLIP_KEY = "in_hand_slip_m"               #: slip in the hand's frame, over
 LIFT_PUT_BACK_KEY = "put_back_offset_xy_m"     #: horizontal, pickup -> after release
 #: 1.0 completed, 0.0 refused; absent when the lift never reached it.
 WITHDRAWAL_KEY = "withdrawal_completed"
+#: Horizontal object displacement while the hand opened (#173); reported only.
+RELEASE_DRAG_KEY = "release_drag_xy_m"
 
 WITHDRAWAL_COMPLETED = "completed"
 WITHDRAWAL_REFUSED = "refused"
@@ -1294,6 +1300,12 @@ def evaluate_lift_object(
             extra[key] = float(value)
     if withdrawal != WITHDRAWAL_NOT_REACHED:
         extra[WITHDRAWAL_KEY] = float(withdrawal == WITHDRAWAL_COMPLETED)
+    drag = metrics.get(RELEASE_DRAG_KEY)
+    if drag is not None:
+        extra[RELEASE_DRAG_KEY] = float(drag)
+        lines.append(f"RELEASE DRAG: {float(drag) * 1000:.2f} mm (target "
+                     f"{policy.release_drag_target_m * 1000:.0f} mm; reported, "
+                     "not part of the verdict).")
 
     return _verdict(result, spec, policy, violations, lines,
                     accuracy=sum(map(bool, clauses)) / len(clauses),
@@ -1304,7 +1316,12 @@ def evaluate_lift_object(
                                   f"{j.describe()}: {j.why}" for j in residual],
                               "approach": approach,
                               "full_cycle": full_cycle,
-                              "ends_at_present": bool(at_present)})
+                              "ends_at_present": bool(at_present),
+                              "release_drag_mm": (None if drag is None
+                                                  else round(float(drag) * 1000, 2)),
+                              "release_drag_within_target": (
+                                  None if drag is None
+                                  else float(drag) <= policy.release_drag_target_m)})
 
 
 #: One evaluator per ability, by the name `panel_abilities` registers it under.

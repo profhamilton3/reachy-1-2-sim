@@ -723,7 +723,10 @@ def test_a_lift_record_carries_its_plan_and_its_planners_seed(db):
                   "sim_step_start": 8720, "sim_step_end": 47120,
                   "command_poll_fixed": True,
                   "contact_model": {"noslip_iterations": 10},
-                  "crane": {"plan": plan}})
+                  "crane": {"plan": plan,
+                            "replaced": {"release_drag_mm": 9.84, "opening_deg": -68.0},
+                            "withdrawal": {"clean": True, "way_out": "separating",
+                                           "opened_wider": False}}})
     EpisodeRecorder("scene.yaml", db_path=db).record(proposal, result)
 
     row, = rows(db)
@@ -735,6 +738,10 @@ def test_a_lift_record_carries_its_plan_and_its_planners_seed(db):
     assert meta["plan"] == plan
     assert meta["seed"]["planner"].startswith("deterministic")
     assert meta["contact_model"] == {"noslip_iterations": 10}
+    # #173: release drag reported, and how the hand got out
+    assert meta["release_drag_mm"] == 9.84 and meta["release_opening_deg"] == -68.0
+    assert meta["withdrawal"] == {"completed": True, "way_out": "separating",
+                                  "opened_wider": False}
 
 
 def test_an_old_evidence_shape_still_records(db):

@@ -273,3 +273,26 @@ def test_the_verdict_round_trips_with_what_it_reported():
     old = v.to_dict()
     old.pop("reported")
     assert EpisodeVerdict.from_dict(old).reported == {}
+
+
+# ---------------------------------------------------------------------------
+# #173: release drag is reported against a 5 mm target, never judged
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("drag_m,within", [(0.0031, True), (0.0118, False)])
+def test_release_drag_is_reported_and_not_judged(drag_m, within):
+    from reachy_ai.evaluation.panel_routes import RELEASE_DRAG_KEY
+    result = a_lift()
+    result.metrics[RELEASE_DRAG_KEY] = drag_m
+    v = lift(result)
+    assert v.is_successful and v.reported["full_cycle"]
+    assert v.reported["release_drag_mm"] == round(drag_m * 1000, 2)
+    assert v.reported["release_drag_within_target"] is within
+    assert "RELEASE DRAG" in v.explanation
+    assert PanelRoutePolicy().release_drag_target_m == 0.005
+
+
+def test_no_drag_recorded_reports_none():
+    v = lift(a_lift())
+    assert v.reported["release_drag_mm"] is None
+    assert v.reported["release_drag_within_target"] is None

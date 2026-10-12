@@ -346,7 +346,8 @@ def _observer(object_id: str):
 #: are its phases (`evaluation.contact_rules.CRANE_PHASES`).
 KEPT_CRANE_EVENTS = ("phase", "CORRECTION", "CORRECTION_COMMANDED", "ALIGNED", "ALIGN_REFUSED",
                      "DESCENT_CHECK_FAILED", "STRADDLE", "CLOSED", "HELD", "SUPPORTED",
-                     "RELEASED", "WITHDRAWAL_JUDGED", "WITHDRAWAL_CORRECTION",
+                     "RELEASED", "WITHDRAWAL_PRECHECK", "WITHDRAWAL_JUDGED",
+                     "WITHDRAWAL_CORRECTION",
                      "WITHDRAWN", "HALT", "REFUSED", "RETREAT_REFUSED")
 
 
@@ -385,12 +386,19 @@ def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
             phase("lift: object resting on the table -- opening" if kw.get("reached")
                   else "lift: lowered as far as the pads allow -- opening")
         elif kind == "WITHDRAWAL_JUDGED":
-            r = kw["route"]
+            r = kw.get("route") or {}
             phase(f"lift: way out judged against the object where it now is -- pads "
-                  f"{r['route_thumb_mm']:.1f} / {r['route_finger_mm']:.1f} mm "
-                  f"({'clear' if kw['ok'] else 'NOT clear'})")
+                  f"{r.get('route_thumb_mm', float('nan')):.1f} / "
+                  f"{r.get('route_finger_mm', float('nan')):.1f} mm "
+                  + (f"(clear, {kw.get('way_out')})" if kw["ok"] else "(NOT clear)"))
+        elif kind == "WITHDRAWAL_PRECHECK":
+            phase(f"lift: grip let go; way out with the hand opened to "
+                  f"{kw['opening_deg']:.0f} deg -- "
+                  + (f"clear ({kw['way_out']})" if kw.get("ok") else "not clear"))
         elif kind == "WITHDRAWAL_CORRECTION":
-            phase(f"lift: shifting the way out by {mm(kw['shift_mm'])}")
+            what = "separating from the object by" if kw.get("way_out") == "separating" \
+                else "shifting the way out by"
+            phase(f"lift: {what} {mm(kw['shift_mm'] or [0, 0, 0])}")
         elif kind == "HALT":
             phase(f"lift: stopped -- {kw.get('reason')}")
         elif kind in ("REFUSED", "RETREAT_REFUSED"):

@@ -333,6 +333,31 @@ def open_gripper(arm, duration: float = 0.8, side: str = "right") -> None:
     smooth_move(arm, {jn: val}, duration)
 
 
+def release_grip(arm, open_deg: float, released, duration: float = 0.8,
+                 joint: str = "r_gripper") -> float:
+    """Open toward ``open_deg`` only until ``released()`` says the grip let go.
+
+    The same linear ramp `smooth_move` flies over ``duration`` (from the
+    measured angle, at ``_INTERP_HZ``), stopped at the first step after which
+    ``released()`` is true -- the caller's grip-force reading at zero.  The
+    hand is left there: the object is free, and nothing has opened further
+    than it took to free it (#173: the way out is checked before the hand
+    opens fully).  Returns the last commanded angle.
+    """
+    steps = max(1, int(duration * _INTERP_HZ))
+    start = getattr(arm, joint).present_position
+    dt = duration / steps
+    goal = start
+    for i in range(1, steps + 1):
+        goal = start + i / steps * (open_deg - start)
+        getattr(arm, joint).goal_position = goal
+        time.sleep(dt)
+        if released():
+            break
+    log.debug("release_grip: let go at %.1f°", goal)
+    return goal
+
+
 def close_gripper(arm, duration: float = 0.8, side: str = "right") -> None:
     """Close the gripper to a firm grip (side-aware sign)."""
     jn = f"{side[0]}_gripper"
