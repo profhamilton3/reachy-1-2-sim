@@ -390,13 +390,13 @@ def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
             phase(f"lift: way out judged against the object where it now is -- pads "
                   f"{r.get('route_thumb_mm', float('nan')):.1f} / "
                   f"{r.get('route_finger_mm', float('nan')):.1f} mm "
-                  + (f"(clear, {kw.get('kind')})" if kw["ok"] else "(NOT clear)"))
+                  + (f"(clear, {kw.get('way_out')})" if kw["ok"] else "(NOT clear)"))
         elif kind == "WITHDRAWAL_PRECHECK":
             phase(f"lift: grip let go; way out with the hand opened to "
                   f"{kw['opening_deg']:.0f} deg -- "
-                  + (f"clear ({kw['kind']})" if kw.get("ok") else "not clear"))
+                  + (f"clear ({kw['way_out']})" if kw.get("ok") else "not clear"))
         elif kind == "WITHDRAWAL_CORRECTION":
-            what = "separating from the object by" if kw.get("kind") == "separating" \
+            what = "separating from the object by" if kw.get("way_out") == "separating" \
                 else "shifting the way out by"
             phase(f"lift: {what} {mm(kw['shift_mm'] or [0, 0, 0])}")
         elif kind == "HALT":

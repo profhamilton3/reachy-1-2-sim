@@ -1138,7 +1138,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                 found, reports, _o = way_out(f"before opening to {opening:.0f} deg",
                                              gripper_deg=opening, kinds=kinds)
                 ev("WITHDRAWAL_PRECHECK", opening_deg=opening, ok=found is not None,
-                   kind=found.kind if found else None, allowed=list(kinds),
+                   way_out=found.kind if found else None, allowed=list(kinds),
                    candidates=[{k: v for k, v in r.items() if k != "route"}
                                for r in reports])
                 if found is not None:
@@ -1165,7 +1165,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                 reports += reports_w
         last = reports[-1] if reports else {}
         ev("WITHDRAWAL_JUDGED", label="after release", ok=found is not None,
-           kind=found.kind if found else None, opened_wider=opened_wider,
+           way_out=found.kind if found else None, opened_wider=opened_wider,
            route=(found.report if found else reports[0]).get("route"),
            tolerance_mm=(found.report if found else reports[0]).get("tolerance_mm"),
            object=[round(v, 5) for v in o.position], grip_force_n=o.grip_force_n,
@@ -1176,7 +1176,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                         judged=reports, last=last)
         corrected = None
         if found.unmonitored:
-            corrected = {"kind": found.kind, "shift_mm": found.shift_mm,
+            corrected = {"way_out": found.kind, "shift_mm": found.shift_mm,
                          "route": found.report.get("route"),
                          "start_mm": found.report.get("start_mm")}
             ev("WITHDRAWAL_CORRECTION", **corrected)
@@ -1190,7 +1190,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         for q in found.path[1 + found.unmonitored:]:
             stream(q, STEP_HZ, 0.05)
         st["above"] = s.hover_rungs
-        return {"kind": found.kind, "opened_wider": opened_wider,
+        return {"way_out": found.kind, "opened_wider": opened_wider,
                 "judged": [{k: v for k, v in r.items() if k != "route"} for r in reports],
                 "corrected": corrected}
 

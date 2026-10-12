@@ -237,7 +237,9 @@ def _run(rig, observe):
     scene, arm, planner, plan = rig
     events = []
     out = C.execute_crane_pick(_Robot(arm), planner, scene, plan, observe,
-                               on_event=lambda k, **kw: events.append((k, kw)))
+                               # the parameter is named as the panel's is (`kind`), so an
+                               # event field of that name fails here as it did live
+                               on_event=lambda kind, **kw: events.append((kind, kw)))
     return out, events, arm
 
 

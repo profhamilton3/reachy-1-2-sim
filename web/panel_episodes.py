@@ -365,7 +365,7 @@ def _run_fields(proposal, evidence, identity) -> Dict[str, Any]:
     withdrawal = crane.get("withdrawal") or {}
     if withdrawal:
         out["withdrawal"] = {"completed": bool(withdrawal.get("clean")),
-                             "kind": withdrawal.get("kind"),
+                             "way_out": withdrawal.get("way_out"),
                              "opened_wider": withdrawal.get("opened_wider")}
     return out
 
