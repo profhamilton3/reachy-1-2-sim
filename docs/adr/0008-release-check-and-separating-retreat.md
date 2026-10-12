@@ -77,6 +77,13 @@ pins the 10 lifts.
   separating leg lifts the pad off.
 - The new withdrawal also clears all 10 recorded live release states.
 
+Live check (2026-10-12): 10 lifts in one panel worker, with a simulator reset
+between lifts. All 10 were lift pass, withdrawal completed and full cycle.
+- Ways out: 8 straight up, 1 sideways, 1 separating.
+- Release drag: 5.3–10.4 mm, mean 8.1 mm. Phase 1.5 had 4.2–12.2 mm, mean
+  7.9 mm.
+- Every run record reads `withdrawal: completed`.
+
 ## Consequences
 
 - Release drag is unchanged at about 7–12 mm offline and 4–12 mm live. It is
