@@ -406,9 +406,12 @@ def test_moves_start_from_the_commanded_pose_not_the_measured_one(rig, monkeypat
 
 def test_obstructed_withdrawal_is_refused_before_it_moves(rig, monkeypatch):
     """After release the cube sits 8 mm toward the thumb: the pads' way out is
-    blocked and the sideways shift that would clear it exceeds the 6 mm cap.
-    The withdrawal is refused -- the hand stays where it opened -- and the
-    attempt reports it rather than climbing through the cube."""
+    blocked, the sideways shift that would clear it exceeds the 6 mm cap, and
+    the thumb starts too deep in the cube for a separating retreat.
+
+    #173: that is now found BEFORE the hand opens.  With the grip let go, the
+    way out is judged for both openings and neither is clear, so the hand is
+    not opened further, the withdrawal is refused, and nothing climbs."""
     _scene_, arm, _planner, plan = rig
     goals = _goal_log(monkeypatch)
     pc = G.pad_clearance(G.hand_frames(plan.rungs[0], -65.0), plan.obj)
@@ -416,11 +419,19 @@ def test_obstructed_withdrawal_is_refused_before_it_moves(rig, monkeypatch):
     cube = _Cube(arm, plan, shift_after=toward_thumb)
     out, events, arm = _run(rig, cube)
     kinds = [k for k, _ in events]
-    assert "WITHDRAWAL_JUDGED" in kinds
-    judged = dict(events[kinds.index("WITHDRAWAL_JUDGED")][1])
-    assert judged["ok"] is False
+    checks = [dict(kw) for k, kw in events if k == "WITHDRAWAL_PRECHECK"]
+    # both openings (wider first), without and then with a separating retreat
+    wide, usual = plan.spec.wide_opening_deg, plan.spec.opening_deg
+    assert [c["opening_deg"] for c in checks] == [wide, usual, wide, usual]
+    assert [len(c["allowed"]) for c in checks] == [2, 2, 3, 3]
+    assert not any(c["ok"] for c in checks)
+    # never opened into the refusal: after the close, no command to either
+    # full opening (the -65 before it is the approach's)
+    after_close = arm.gripper_goals[arm.gripper_goals.index(plan.spec.close_deg) + 1:]
+    assert plan.spec.opening_deg not in after_close
+    assert plan.spec.wide_opening_deg not in after_close
     assert out["withdrawal"]["clean"] is False
-    assert "withdrawal refused" in out["halt"]
+    assert "withdrawal refused before opening" in out["halt"]
     assert "WITHDRAWN" not in kinds
     # nothing climbed: the last commanded pose is still down beside the cube
     assert out["criteria"]["clean_withdrawal"] is False
@@ -442,3 +453,106 @@ def test_pad_force_during_withdrawal_stops_the_climb(rig, monkeypatch):
     assert "WITHDRAWAL_JUDGED" in kinds and "WITHDRAWN" not in kinds
     assert out["withdrawal"]["clean"] is False
     assert "grip force" in out["halt"]
+
+
+# ── #173: let go, check before opening, and a way out from a resting pad ──────
+
+def test_the_release_lets_go_checks_and_then_opens(rig, monkeypatch):
+    """The gripper opens only until the grip force reads zero; the way out is
+    judged for the opened hand (wider first) BEFORE it opens further; then it
+    opens to the angle that was judged clear, and RELEASED says all three."""
+    _scene_, arm, _planner, plan = rig
+    cube = _Cube(arm, plan)
+    out, events, arm = _run(rig, cube)
+    kinds = [k for k, _ in events]
+    checks = [dict(kw) for k, kw in events if k == "WITHDRAWAL_PRECHECK"]
+    assert checks and checks[0]["opening_deg"] == plan.spec.wide_opening_deg
+    assert checks[-1]["ok"] is True
+    assert kinds.index("WITHDRAWAL_PRECHECK") < kinds.index("RELEASED")
+    rel = out["replaced"]
+    assert rel["opening_deg"] == checks[-1]["opening_deg"]
+    assert rel["let_go_deg"] > rel["opening_deg"]           # let go before fully open
+    assert "release_drag_mm" in rel
+    after_close = arm.gripper_goals[arm.gripper_goals.index(plan.spec.close_deg) + 1:]
+    assert after_close[0] == rel["opening_deg"]             # one opening, after the check
+    assert out["withdrawal"]["clean"] is True
+
+
+def test_a_pad_left_resting_on_the_cube_now_withdraws(rig, monkeypatch):
+    """A1/B4 live: the release left the cube ~3 mm toward the finger, on it.
+    Before #173 that refused (the first sample is the pose the hand is in);
+    now the hand opens wider and, if needed, separates before it climbs."""
+    _scene_, arm, _planner, plan = rig
+    pc = G.pad_clearance(G.hand_frames(plan.rungs[0], -65.0), plan.obj)
+    toward_finger = (pc.finger_side_m + 0.0001) * np.asarray(pc.face_normal)
+    cube = _Cube(arm, plan, shift_after=toward_finger)
+    out, events, arm = _run(rig, cube)
+    assert out["withdrawal"]["clean"] is True, out.get("halt")
+    assert out["criteria"]["returned_to_present"]
+    judged = [dict(kw) for k, kw in events if k == "WITHDRAWAL_JUDGED"][0]
+    assert judged["ok"] is True
+
+
+def _ik_planner(scene):
+    """A planner whose arm has the simulator's IK (host mirror): the
+    sideways and separating ways out are solved, not looked up."""
+    pytest.importorskip("scipy")
+    sys.path.insert(0, _HERE)
+    from host_ik_arm import HostIKArm
+    return CartesianPlanner(HostIKArm(), scene=scene)
+
+
+def _box_at(plan, shift):
+    return plan.obj.moved(np.eye(3), np.asarray(shift, dtype=float))
+
+
+def test_a_separating_retreat_may_not_start_deep_in_the_object(rig):
+    """O1 accepts a start under the allowance only down to the floor: a pad
+    1 mm into the object is a collision, not a resting contact."""
+    _scene_, arm, _planner, plan = rig
+    planner = _ik_planner(_scene_)
+    pc = G.pad_clearance(G.hand_frames(plan.rungs[0], -65.0), plan.obj)
+    n = np.asarray(pc.face_normal)
+    cmd, off = list(plan.rungs[0]), np.zeros(7)
+    for depth, ok in ((-0.0002, True), (-0.0010, False)):
+        live = _box_at(plan, (pc.finger_side_m - depth) * n)
+        found, reports = C.plan_way_out(planner, _scene_, plan, cmd, 0, -65.0, live, off)
+        assert (found is not None and found.kind == "separating") is ok, reports
+        if ok:
+            assert found.unmonitored == 1 and reports[-1]["start_mm"][1] < 0
+
+
+def test_the_way_out_kinds_are_tried_in_order(rig):
+    """Straight up first; the pre-#173 sideways correction second; the
+    separating retreat only when neither is clear."""
+    _scene_, arm, _planner, plan = rig
+    planner = _ik_planner(_scene_)
+    cmd, off = list(plan.rungs[0]), np.zeros(7)
+    found, reports = C.plan_way_out(planner, _scene_, plan, cmd, 0, -65.0, plan.obj, off)
+    assert found.kind == "direct" and len(reports) == 1
+    pc = G.pad_clearance(G.hand_frames(plan.rungs[0], -65.0), plan.obj)
+    on_finger = _box_at(plan, (pc.finger_side_m + 0.0001) * np.asarray(pc.face_normal))
+    found, reports = C.plan_way_out(planner, _scene_, plan, cmd, 0, -65.0, on_finger, off,
+                                    kinds=("direct", "sideways"))
+    assert found is None or found.kind == "sideways"
+    found, _ = C.plan_way_out(planner, _scene_, plan, cmd, 0, -65.0, on_finger, off)
+    assert found is not None and found.kind in ("sideways", "separating")
+
+
+def test_the_wider_opening_is_inside_the_gripper_travel():
+    from joint_map import by_name
+    lo, _hi = by_name("r_gripper").limits_deg
+    spec = C.CraneSpec()
+    assert lo < spec.wide_opening_deg < spec.opening_deg
+    assert spec.wide_opening_deg - lo >= 0.5
+    assert C.release_openings(spec) == (spec.wide_opening_deg, spec.opening_deg)
+
+
+def test_release_grip_stops_where_the_grip_lets_go(monkeypatch):
+    monkeypatch.setattr(P.time, "sleep", lambda *_a: None)
+    arm = _Arm(C.present_joints(), -25.0)
+    goal = P.release_grip(arm, -65.0, lambda: arm.r_gripper.goal_position <= -40.0, 0.8)
+    assert -42.0 <= goal <= -40.0
+    assert arm.r_gripper.goal_position == goal
+    full = P.release_grip(_Arm(C.present_joints(), -25.0), -65.0, lambda: False, 0.8)
+    assert full == pytest.approx(-65.0)

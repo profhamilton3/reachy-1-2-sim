@@ -352,10 +352,21 @@ def _run_fields(proposal, evidence, identity) -> Dict[str, Any]:
     }
     if "contact_model" in evidence:
         out["contact_model"] = evidence.get("contact_model")
-    plan = (evidence.get("crane") or {}).get("plan")
+    crane = evidence.get("crane") or {}
+    plan = crane.get("plan")
     if plan:
         # A planned route's integrity (#172, D7): preflight passed, hash.
         out["plan"] = plan
+    replaced = crane.get("replaced") or {}
+    if "release_drag_mm" in replaced:
+        # Reported against a 5 mm target, never judged (#173).
+        out["release_drag_mm"] = replaced.get("release_drag_mm")
+        out["release_opening_deg"] = replaced.get("opening_deg")
+    withdrawal = crane.get("withdrawal") or {}
+    if withdrawal:
+        out["withdrawal"] = {"completed": bool(withdrawal.get("clean")),
+                             "kind": withdrawal.get("kind"),
+                             "opened_wider": withdrawal.get("opened_wider")}
     return out
 
 

@@ -1228,7 +1228,7 @@ def _judge_lift(proposal, crane: Dict[str, Any], end: str,
                f"{held.get('rise_end_mm', 0) / 10:.1f} cm up after the hold "
                f"(slip in the hand {held.get('in_hand_slip_mm', 0):.2f} mm); it "
                f"is back on the table {rep.get('offset_from_start_mm', 0):.1f} mm "
-               "from where I picked it up.")
+               "from where I picked it up" + _drag_clause(rep) + ".")
     failed = [text for key, text in LIFT_CRITERIA if not criteria.get(key)]
     if failed:
         return ExecutionResult(
@@ -1267,13 +1267,17 @@ def _lift_stopped_detail(object_id: str, crane: Dict[str, Any],
         said.append(f"I did not lift {object_id}.")
     if rep.get("supported_before_open"):
         said.append(f"I put it back on the table, {rep.get('offset_from_start_mm', 0):.1f} mm "
-                    "from where I picked it up.")
+                    "from where I picked it up" + _drag_clause(rep) + ".")
     why = wd.get("reason") if wd and not wd.get("clean") else None
     why = why or crane.get("halt") or crane.get("refusal")
     if wd and not wd.get("clean"):
         reason = str(why or "the way out was not clear")
-        reason = reason.split("withdrawal refused: ", 1)[-1]
-        said.append(f"Then I refused to withdraw my hand, before moving it: {reason}.")
+        if reason.startswith("withdrawal refused before opening: "):
+            reason = reason.split(": ", 1)[1]
+            said.append(f"Then, with my grip let go, I did not open my hand further: {reason}.")
+        else:
+            reason = reason.split("withdrawal refused: ", 1)[-1]
+            said.append(f"Then I refused to withdraw my hand, before moving it: {reason}.")
     elif why:
         said.append(f"Then I stopped: {why}.")
     if "joints_deg" in arm:
@@ -1287,6 +1291,14 @@ def _lift_stopped_detail(object_id: str, crane: Dict[str, Any],
         said.append("I will not guess a way out from here: the simulator needs a reset "
                     "before the next request.")
     return " ".join(said)
+
+
+def _drag_clause(rep: Dict[str, Any]) -> str:
+    """How far the release moved the object (#173), when the lift measured it."""
+    drag = rep.get("release_drag_mm")
+    if drag is None:
+        return ""
+    return f"; letting go moved it {float(drag):.1f} mm"
 
 
 def _euclid(a, b) -> float:

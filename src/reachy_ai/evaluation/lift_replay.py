@@ -45,6 +45,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Mapping, Optional,
 from reachy_ai.evaluation import contact_rules as CR
 from reachy_ai.evaluation.panel_routes import (
     COLLIDABLE_KEY, CONTACT_SAMPLES_KEY, LIFT_PUT_BACK_KEY, LIFT_RISE_KEY,
+    RELEASE_DRAG_KEY,
     LIFT_SLIP_KEY, WITHDRAWAL_KEY,
 )
 from reachy_ai.experience.models import (EpisodeResult, EpisodeStatus,
@@ -332,6 +333,13 @@ def replay_lift(task: Mapping[str, Any], states: Sequence[Mapping[str, Any]],
     if pickup is not None and after and crane.get("replaced"):
         put = object_pos(after[0], oid)
         metrics[LIFT_PUT_BACK_KEY] = math.dist(put[:2], pickup[:2])
+
+    # RELEASE DRAG (#173): the object before the hand opened (the release
+    # window's first state) against after it opened (the withdrawal's first).
+    opening = during(_window(windows, CR.Phase.RELEASE))
+    if opening and after:
+        metrics[RELEASE_DRAG_KEY] = math.dist(object_pos(after[0], oid)[:2],
+                                              object_pos(opening[0], oid)[:2])
 
     wd = crane.get("withdrawal")
     if isinstance(wd, dict) and "clean" in wd:
