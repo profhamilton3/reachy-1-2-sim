@@ -1,6 +1,6 @@
 # Plan: close out open PRs and issues (2026-10-08)
 
-Status: **All original issues and PRs closed (2026-10-09).** Phases 0 and 1 complete; Phase 2's issue work (#2, #74) is complete. 0 issues and 0 PRs open. Remaining Phase 2 work is tracked in #172 → #173 → #174. See *Progress log* below.
+Status: **Phase 2 complete (2026-10-13): place_on_cell is live (#174).** All original issues and PRs closed (2026-10-09). Phases 0 and 1 complete; Phase 2's issue work (#2, #74) is complete. 0 issues and 0 PRs open. Remaining Phase 2 work is tracked in #172 → #173 → #174. See *Progress log* below.
 Source: owner proposal "Proposals to Close Issues and PRs 2026-10-08" + `CLAUDE.md`.
 Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149, #150) and 7 open issues (#2, #28, #74, #107, #115, #127, #130). `main` was at `fb67972`.
 
@@ -45,7 +45,17 @@ Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149,
 **Next (Phase 2 remainder): tracked as issues, in this order:**
 1. ✅ **#172** Evaluators (PR #175, `943e5a0`). Rulings: a lift's contact verdict starts at ATTEMPT_START, and approach legs are judged under their own routes' rules; pad contact after release belongs to withdrawal; "ends at present" is part of completing the withdrawal. Original scope: `lift_object` and place evaluators (D5/D6), the `planned` route type (D7), and run-record fields (`command_poll_fixed`, scene/model/code hashes, seed). It also lands the local branch `fix/load-world-extends` (`SimulationCore._load_world` skipped scene inheritance, so offline SivaPool had no table or rails), with a per-route, per-waypoint intended-contact allowlist. This clears the last failing test (c).
 2. ✅ **#173** Withdrawal (PR #176, `ce93064`). Live: 10/10 full cycles. Release drag averaged 8.1 mm (5.3–10.4), missing the ≤ 5 mm target (non-blocking). Residual pad contact offline: A1 0.06 mm, A4 0.001 mm. The −68° opening is a simulator figure; check the physical gripper's travel before porting. Original scope: test the two options offline against the 10 recorded lifts, from `design-2026-10-09-phase2-evaluators-and-withdrawal.md`. Option 1: a retreat that strictly increases separation from its first step. Option 2: check the withdrawal before the hand opens.
-3. **#174** Placement, cube r2c2 → r2c1, plus the panel routing decision for "pick and place" (depends on #172 and #173).
+3. ✅ **#174** Placement (PR #177, `e417817`). place_on_cell is live on the panel. r2c2 → r2c1, 10/10 live runs:
+   - 3.2–4.1 mm from the cell centre (D6 allows 10 mm);
+   - tilt 0°, nothing else moved, no pad contact after release;
+   - release drag 2.5–3.6 mm.
+
+   Added along the way:
+   - a placement-only grasp angle (the lift's validated posture is unchanged);
+   - an exit check, so a placement is refused if no validated exit (REST or stow) would remain;
+   - set-down corrections stop where the cube meets the table.
+
+   **Watch:** the shoulder-roll margin at set-down was 1.0–2.3°, under 2° in 7 of 10 runs. Only r2c2 → r2c1 with the red cube is validated live. Original scope: Placement, cube r2c2 → r2c1, plus the panel routing decision for "pick and place" (depends on #172 and #173).
 
 Working rule for all three: offline replay and preflight sweeps first, focused tests only, one short live run of 10 at the end, no full suite.
 
