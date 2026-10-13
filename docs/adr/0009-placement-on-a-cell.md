@@ -92,9 +92,42 @@ Both drop over the near board. With the cube on r2c3 or r3c3, the executor's foo
    - A destination that is not a cell is refused.
    - The executor refuses `pick_place` proposals by name. Its arc, the job runner and the demo stay, as reference.
 
+## The first live check, and what changed (2026-10-12)
+
+**The first live check was stopped after 4 runs.**
+- Runs 1, 2 and 4 placed the cube 2.8–3.2 mm from the centre.
+- Run 3 aborted safely: the cube went back to r2c2, the hand withdrew, and the arm returned to PRESENT.
+  - The live hold varies about ±4 mm in the hand, which the offline hold does not.
+  - The 1.4 mm correction 2 cm up re-solved every rung of the destination ladder.
+  - Rung 0 stands at the shoulder-roll stop, so the IK failed there.
+- Run 2 met D6 and was still answered "failed", on the lift's 0.1 mm slip criterion.
+
+**Owner decision: option 1, the D6 verdict, and option 3 if the margin is under 2°.**
+- **The correction stops at the support point.** It re-solves the destination ladder only down to one rung past where the held object is predicted to meet the table (`replan_setdown`, `CranePlan.floor_rung`). The lowering never goes below that rung. Run 3's recorded case was replayed offline: the old correction is refused at rung 0, the new one solves and re-checks clean.
+- **The carry and an abort use the pickup ladder as flown,** after the hover correction.
+- **The panel's placement verdict is D6.** Slip and hold height are reported only.
+- **The shoulder-roll margin at set-down is under 2°:** 0.84–1.88° offline, and 0.25° with run 3's hold. The release drag also pushes toward the robot, so aiming that way costs about 0.8 mm of D6 error per mm. The set-down is aimed 1 mm toward the robot's base (`PlaceSpec.aim_m`); offline D6 error over 10 starts was ≤ 5.7 mm. D6 is still measured from the cell centre.
+
+**The re-fly, 10 runs:**
+
+| run | from cell centre (mm) | tilt | others moved | shoulder-roll margin at set-down (°) | release drag (mm) | pad contact after release | withdrawal | full cycle |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 3.81 | 0° | 0 | 2.14 | 3.23 | none | straight up | yes |
+| 2 | 3.24 | 0° | 0 | 1.15 | 2.54 | none | straight up | yes |
+| 3 | 3.92 | 0° | 0 | 1.61 | 3.18 | none | straight up | yes |
+| 4 | 3.43 | 0° | 0 | 1.29 | 2.70 | none | straight up | yes |
+| 5 | 3.78 | 0° | 0 | 2.29 | 3.22 | none | straight up | yes |
+| 6 | 3.88 | 0° | 0 | 1.66 | 3.20 | none | straight up | yes |
+| 7 | 3.86 | 0° | 0 | 1.05 | 3.26 | none | straight up | yes |
+| 8 | 3.34 | 0° | 0 | 2.19 | 2.47 | none | straight up | yes |
+| 9 | 3.26 | 0° | 0 | 1.20 | 2.50 | none | straight up | yes |
+| 10 | 4.07 | 0° | 0 | 1.00 | 3.61 | none | straight up | yes |
+
+10 of 10 placed and full cycle, with no aborts. The held cube was within 0.03 mm of its aim before the release in every run. This agrees with the offline prediction for the 1 mm aim: 4.5–5.7 mm and 1.05–2.09°.
+
 ## Consequences
 
 - **Validated scope.** Only r2c2 → r2c1 with the 60 mm red cube is validated (the #174 live check). Other pairs are planned and checked, and refused when a check fails.
-- **The attitude is a different grasp.** At the set-down it sits 0.9° from the shoulder-roll stop. The descent's prediction tolerances, the correction caps and the drag study were all measured at tilt 30°.
+- **The attitude is a different grasp.** At the set-down it sits 1.0–2.3° from the shoulder-roll stop, live (rung 0 of the plan: 0.9°). The descent's prediction tolerances, the correction caps and the drag study were all measured at tilt 30°.
 - **The release drag is still the largest error term.** At the place attitude it is 3.8–5.0 mm offline, and it is reported in every run record.
 - **The −68° opening and every force figure are simulator values.**
