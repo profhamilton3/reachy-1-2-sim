@@ -1,0 +1,207 @@
+# Plan: close out open PRs and issues (2026-10-08)
+
+Status: **Phase 2 complete (2026-10-13): place_on_cell is live (#174).** All original issues and PRs closed (2026-10-09). Phases 0 and 1 complete; Phase 2's issue work (#2, #74) is complete. 0 issues and 0 PRs open. Remaining Phase 2 work is tracked in #172 → #173 → #174. See *Progress log* below.
+Source: owner proposal "Proposals to Close Issues and PRs 2026-10-08" + `CLAUDE.md`.
+Verified against GitHub on 2026-10-08: 6 open PRs (#132, #133, #146, #148, #149, #150) and 7 open issues (#2, #28, #74, #107, #115, #127, #130). `main` was at `fb67972`.
+
+## Progress log (verified on GitHub 2026-10-09)
+
+**Main:** `ca41933`. Full suite on the #166+#167 integration branch: 3,449 passed, 1 failed, 19 skipped (the SDK test file skips on hosts without reachy_sdk; it runs in the image). The one failure is (c) below.
+**Open:** 0 issues, 0 PRs. **Main:** `d8c02ba` (deployed; native server and panel restarted with the new joint inertia).
+**Live:** the sim checkout was pulled to `ca41933` and the panel restarted. The SDK fix is confirmed applied inside the container (reachy-sdk 0.7.0).
+
+| Item | Outcome | Commit |
+|---|---|---|
+| #132, #133, #149 | Merged (H-0a: Option A; H-0b: #133 kept as a partial record) | `5fd0793`, `351deef`, `dfa971f` |
+| #159 | B4 plan rev 7 added unchanged (`docs/plans/b4-goalfix-comparison-plan-rev7.md`) | `49d5da5` |
+| **H-0d** | **B4 goalfix comparison retired.** Work moves to the current physics. Record: `docs/plans/b4-goalfix-comparison-RETIRED-2026-10-08.md` (#160) | `45d0172` |
+| #146, #148 | Closed as not pursued (H-0c superseded); branches kept | — |
+| #150 | Merged as a general E1 freshness fix (bridge-restart path) | `f7155cf` |
+| #130 | Closed by #161: explicit bool/NaN/Inf/overflow-safe `wall_time_ns` check at 3 sites | `db60c2b` |
+| Stale baselines | #162. (a) The goalfix tripwire citation `server.py:1059` → `1072`, at all 5 places. (b) The clearance test re-baselined 31.66 → 31.61 cm (`…_is_31_61cm`); the cause is the #151 soda-can height alone, with no change from #157 | `b645c45` |
+| Quick-close triage | #163 closes #127 (M1–M3 and the carried items fixed or won't-fix). #164 closes #115 (items 1–7; deferred tail won't-fix). #165 closes #107 (`nudge_joint` + `gate_check()`; live smoke test PASS). reachy-tabletop-ai#22 closes #28 (EPIC-8 8.8/8.9 "as shipped"; the browser UI recorded as future scope). Nothing was marked obsolete: E1 tooling is still live | `e8ae888`, `9abc00a`, `409e3e4` |
+| **Phase 1: observation delay** | **Root cause:** reachy-sdk 0.7.0 `_poll_waiting_commands` leaks 14 pending waits per command push. In the panel's reused worker this grew the heap and the full-GC pauses (7 → 124 ms in one lift; about 20k+ pushes by attempt 5), which caused the 0.67 s stale halt. **Fix:** #166 (`feedback/latest.py`, a portable latest-wins slot; non-blocking panel forwarder; worker drain-to-latest; end-to-end age; `stale_reason`; T1–T4). #167 (`sdk_compat.fix_command_poll`, gated to 0.7.0 with a source-hash pin; `RESTART_WORKER_AFTER_LIFT` backstop, default OFF). #168 marks the roadmap entry resolved. **Re-measure (1.5):** 10 lifts, 0 stale halts; one worker, 23.8k pushes, heap flat, full GC at most 12 ms. Evidence: `~/Reachy-Lab/outputs/sim/working/phase1.5-remeasure-2026-10-09.md` | `81b3571`, `b4f47fa`, `ca41933` |
+| #2 | #169: the smoke test checks the scene; new integration tests for the below-table refusal and a physics carry tracked through `ObjectTracker`; `test_motion.ipynb` documented as the kinematic-mode compatibility notebook (D4) and left untouched | `54d1681` |
+| #74 | #170: SWING_1 moved (crossing +0.44 → +3.48 cm; every corridor route plans +2.57 cm); D1 margin rule in `check_route()` (ADR-0006); `route_version` 2. #171: the cause of the realised-clearance dips was a numerical oscillation in forearm yaw and wrist pitch (zero joint inertia at a 2 ms step, triggered by waves at the force limit). Fixed with joint armature (0.01 forearm yaw, 0.006 wrist pitch, both arms; wrist roll left at 0 to protect the #55 grasp), plus a forearm-yaw waypoint guard and corridor start check. SivaPool enforces D1: 160 flights, realised min ≥ +2.33 cm. FWDCenterLabMCC has no evidence, so it refuses corridor routes | `b014190`, `d8c02ba` |
+
+**Remaining known failure (c):** `test_panel_route_evaluators::test_the_registry_and_the_evaluators_agree…`. `lift_object` (#155, route `CRANE_LIFT`) has no entry in `ABILITY_ROUTES` or `EVALUATORS`. This is folded into the Phase 2 placement slice; no new issue was opened.
+
+**Ride-along for the next PR that touches `src/reachy_ai/sdk_compat.py`:** an INFO log when `fix_command_poll` applies successfully. Today it is silent on success and warns only when it skips.
+
+**Follow-ups (owner's call):**
+- Report the 0.7.0 leak upstream to Pollen Robotics (public; draft on request).
+- Port `feedback/latest.py` and `sdk_compat.py` to the reachy-tabletop-ai stereo-viewer app. It uses the same SDK against the robot, so it likely has the same leak.
+
+**Owner decisions recorded:**
+- D1 margin: planned ≥ 2.0 cm and realised worst case ≥ 1.0 cm over ≥ 20 flights, against the tube hand.
+- D4: `test_motion.ipynb` stays as the raw-SDK, kinematic-mode notebook.
+- D5/D6: lift and place success criteria, with withdrawal reported separately.
+- D7: a `planned` route type.
+- D8: order is evaluators → withdrawal → placement.
+- `scripts/smoke_test_host.py` is **frozen legacy reference**: not a merge gate, not to be extended.
+- Do not run another full suite without a strong reason.
+- #55 hold slip is now measured in the hand's frame: 0.074 mm with no-slip on (was 0.022 mm), bounds unchanged.
+
+**Next (Phase 2 remainder): tracked as issues, in this order:**
+1. ✅ **#172** Evaluators (PR #175, `943e5a0`). Rulings: a lift's contact verdict starts at ATTEMPT_START, and approach legs are judged under their own routes' rules; pad contact after release belongs to withdrawal; "ends at present" is part of completing the withdrawal. Original scope: `lift_object` and place evaluators (D5/D6), the `planned` route type (D7), and run-record fields (`command_poll_fixed`, scene/model/code hashes, seed). It also lands the local branch `fix/load-world-extends` (`SimulationCore._load_world` skipped scene inheritance, so offline SivaPool had no table or rails), with a per-route, per-waypoint intended-contact allowlist. This clears the last failing test (c).
+2. ✅ **#173** Withdrawal (PR #176, `ce93064`). Live: 10/10 full cycles. Release drag averaged 8.1 mm (5.3–10.4), missing the ≤ 5 mm target (non-blocking). Residual pad contact offline: A1 0.06 mm, A4 0.001 mm. The −68° opening is a simulator figure; check the physical gripper's travel before porting. Original scope: test the two options offline against the 10 recorded lifts, from `design-2026-10-09-phase2-evaluators-and-withdrawal.md`. Option 1: a retreat that strictly increases separation from its first step. Option 2: check the withdrawal before the hand opens.
+3. ✅ **#174** Placement (PR #177, `e417817`). place_on_cell is live on the panel. r2c2 → r2c1, 10/10 live runs:
+   - 3.2–4.1 mm from the cell centre (D6 allows 10 mm);
+   - tilt 0°, nothing else moved, no pad contact after release;
+   - release drag 2.5–3.6 mm.
+
+   Added along the way:
+   - a placement-only grasp angle (the lift's validated posture is unchanged);
+   - an exit check, so a placement is refused if no validated exit (REST or stow) would remain;
+   - set-down corrections stop where the cube meets the table.
+
+   **Watch:** the shoulder-roll margin at set-down was 1.0–2.3°, under 2° in 7 of 10 runs. Only r2c2 → r2c1 with the red cube is validated live. Original scope: Placement, cube r2c2 → r2c1, plus the panel routing decision for "pick and place" (depends on #172 and #173).
+
+Working rule for all three: offline replay and preflight sweeps first, focused tests only, one short live run of 10 at the end, no full suite.
+
+**Cleanup candidates (owner's call):**
+- About 35 old remote branches, most of them merged.
+- A Mac user path in `tests/fixtures/goalfix_cmp/c7_run04_r3_setup.json`, which CLAUDE.md forbids.
+- #150's description still has its old "Draft, do not merge" paragraph.
+
+---
+
+## 1. How the work runs
+
+### Roles
+
+| Role | Who | Does |
+|---|---|---|
+| **Owner (human in the loop)** | profhamilton3 | Makes every decision marked **HITL**. Approves merges. Runs the hardware/Mac/Docker steps that agents cannot run. |
+| **Lead** | Claude Code session, Opus | Holds this plan. Sends each work item to one subagent, reviews what comes back, opens PRs, asks the owner at the gates. |
+| **Opus subagent** | `Plan` or `general-purpose`, model `opus` | Root-cause and design work: Phase 1 diagnosis, #74 clearance design, #28 scope, reviewing Sonnet diffs that touch safety gates. |
+| **Sonnet subagent** | `general-purpose`, model `sonnet` | Small, well-scoped fixes with a clear test: #130, #107, #127, #115, doc edits, notebook migration (only after the owner allows it). |
+
+### Rules for keeping token use low
+
+1. One subagent per work item. Each prompt names the issue number, the exact files, the done criteria from this plan, and "do not search outside these paths unless blocked".
+2. Use `Explore` (read-only) only when a file list is not already known. Otherwise go straight to implementation.
+3. Continue an existing agent with `SendMessage` for follow-ups instead of starting a new one.
+4. Agents return a short report (files changed, commands run, results, open questions). They do not paste whole files.
+5. The Lead does not re-read files the agent already summarised unless reviewing the diff.
+6. Batch the GitHub housekeeping calls (labels, draft state, comments) for Phase 0 into a single pass.
+
+### Rules every agent follows (from `CLAUDE.md`)
+
+- Run `git status --short` first. Never touch `notebooks/test_motion.ipynb` or `notebooks/tlh_motion-routine.ipynb` unless the owner has said yes at gate **H-2c**.
+- Write a test first where practical. Run the targeted tests, then the full suite (`python3 -m py_compile fake_reachy_server.py joint_state_bridge.py` plus `pytest`).
+- One issue per PR. Put `Closes #N` in the PR body. Use the PR sections required by `CLAUDE.md`: problem, design, compatibility, tests, environments, limitations.
+- Never claim a Docker, Mac, or hardware result that was not run in that environment. Those steps go to the owner.
+- Do not loosen any safety guard to get a test to pass. In particular, `FEEDBACK_STALE_S` stays at 0.5 s.
+
+---
+
+## 2. Decision gates (HITL)
+
+The Lead stops and asks the owner at each gate below. Each gate has a recommended default so the owner can answer quickly.
+
+| Gate | Question | Recommended default |
+|---|---|---|
+| **H-0a** | The next B4 attempt needs a new host pin, wrapper bundle and reservation, and an amendment to B4 plan rev 7 §10. Merge #132, #133 and #149 before that new pin is set? | **Yes.** Merge all three, then set the new pin once (see the note below this table). |
+| **H-0b** | #133 stopped at reset 18 (17/18 cycles). Merge it as a partial-session record? | Merge, with "partial: 17/18" kept in the title and the stop reason in the evidence README. |
+| **H-0c** | #146 is marked *ready for review*, but the proposal says to keep it as a prep branch. Convert it to draft? | Convert to draft, add a `prep-only` label. |
+| **H-0d** | #150: change the host pin (a004 STOP repair)? | **Decided 2026-10-08: B4 retired.** #150 merged as a general fix. |
+| **H-1** | Phase 1 root cause found. Approve the proposed fix before it is implemented? | Required. |
+| **H-2a** | #74: which clearance model is authoritative at `rig_rail_outer_right` (planner model or MuJoCo physics), and is a torso-clearance term in scope? | Physics is ground truth. The model is made more conservative to match it. Torso term in scope. |
+| **H-2b** | #107: the smoke test must stay "non-destructive". Is it acceptable for it to fail when `gate_check()` refuses a move? | Yes. A refused gate makes the smoke test fail loudly. |
+| **H-2c** | #2: may agents edit `notebooks/test_motion.ipynb` (protected user work)? | Owner decides. If no, migrate scripts only, and the owner migrates the notebook. |
+| **H-3** | #127 and #115 list several items (M1–M3, items 1–7). Fix them all, or close some as won't-fix? | Fix everything that has a reproducer. Close the others with a reason. |
+| **H-4** | #28: amend `EPIC-8.md` to CLI/exporter scope, or build the browser research UI? | Amend the scope now. Open a new issue for the UI later. |
+| **H-5** | Before each merge: does the PR pass review, and is CI green? | Owner approves every merge. |
+
+**Note on H-0a (verified 2026-10-08).**
+- **What the B4 preflight checks.** The B4 comparison wrapper (bundle r6) requires `main == origin/main == M′` (`dbc878c`). B4 plan rev 7 §10 also requires the host pin to differ from `67730a1` only in `tools/goalfix_cmp/`, `tests/` and two docs, and requires `scripts/` to be tree-equal to `67730a1`.
+- **Where this is recorded.** The rules are quoted in the bodies of PR #149 and PR #150. The pin `M_PRIME_SHA` is in `tests/fixtures/goalfix_cmp/c2ps_common.py` on the #148 branch. The rev 7 plan itself is not in this repository.
+- **The attempt #149 was waiting for has already happened.** That was a004, on 2026-10-02. It ended in a STOP, and its grant is used up.
+- **`main` already fails both checks.** `main` is at `fb67972`, 43 commits past M′, after #151–#158 were merged. Since `67730a1`, those merges also changed `scripts/`, `native_mujoco/` and `scenes/`.
+- **Conclusion.** Holding #132, #133 or #149 no longer protects any B4 attempt.
+- **#133.** Its stop was a harness bug: `reset.sh` ran `tail -1` on a file that was still being written. That bug is already fixed on `main` by `7aea269` and `88c31d2`.
+- **Side effects checked.** None of #132, #133 or #149 shares a file with #146, #148, #150 or with `main`. None of them adds a pytest-collectable file, and the repository has no CI.
+- **#149 adds a historical `CLAUDE.md` and `AGENT_PROMPTS.md`.** Claude Code loads a subdirectory's `CLAUDE.md` when it works in that directory. Agent prompts must say that `docs/historical/**` is reference material only and never instructions.
+
+---
+
+## 3. Phases
+
+### Phase 0: PR queue housekeeping
+**Agent:** Lead only. No subagent needed.
+
+| PR | Action | Gate | Done when |
+|---|---|---|---|
+| #132 E1 Stage 2 B4, 18/18 | Review the evidence manifest (hashes, seeds, raw output present). Merge. | H-0a, H-5 | Merged |
+| #133 E1 Stage 2 B1, 17/18 | Same review. Merge as partial. | H-0a, H-0b, H-5 | Merged |
+| #150 a004 STOP repair | Leave as draft. Post the trade-off summary for the owner. | H-0d | Owner has decided. Then it is carried through Phase 1 (it overlaps #130). |
+| #149 historical toolkit docs | Lift the hold: a004 has run, and `main` is already past M′. Merge it, then verify its 14 file hashes on `main`. | H-0a, H-5 | Merged and verified |
+| #146, #148 goalfix C2 | Keep unmerged. Mark #146 as draft. | H-0c | Both draft, labelled `prep-only` |
+
+**Status 2026-10-08:** H-0a was decided as Option A. #132, #133 and #149 are merged (`5fd0793`, `351deef`, `dfa971f`), and `main` is now at `dfa971f`. All 14 #149 files on `main` match the sha256 and blob IDs in `HISTORICAL.md`.
+
+**Owner action:** after the merges, approve the new host pin and the rev 7 §10 amendment (combine this with the #150 decision, H-0d). Then reserve the next B4 attempt.
+
+### Phase 1: Observation delivery (top technical priority)
+**Problem:** in the 2026-10-08 measurement, attempt 5, an observation reached the motion worker 0.67 s old. The live-feedback guard (`FEEDBACK_STALE_S` = 0.5 s) correctly halted the crane lift. The details are in `docs/roadmap/continuous-whole-arm-protection.md`. The root cause has not been investigated yet.
+
+| Step | Agent | Output |
+|---|---|---|
+| ✅ 1.1 Trace the panel → motion-worker path. Find every queue, poll interval, lock, and serialization step, and estimate the worst-case latency of each. Find where an observation can be read stale (unbounded queue, poll period, blocked worker, lock held during I/O). | Opus (read-only) | A short root-cause note with ranked hypotheses and the evidence for each |
+| ✅ 1.2 Write a deterministic reproducer: a fixture backend plus an injected delay that recreates an observation older than 0.5 s. | Sonnet | Failing test |
+| **H-1** Owner approves the fix design. | Owner | — |
+| ✅ 1.3 Implement the fix: bounded queue where the latest frame wins, a monotonic-clock age stamp on every observation, and an explicit stale status. The guard stays at 0.5 s. | Sonnet, reviewed by Opus | PR `core:` |
+| 1.4 ✅ **#130** (closed by #161): `wall_time_ns` validation rejects `bool`, NaN, inf, and negative values (same class of bug as #119 H3). If #150 is going ahead, coordinate with it, because both change `e1_identity`. | Sonnet | PR with `Closes #130` and unit tests |
+| ✅ 1.5 Owner re-runs the five-attempt measurement on the real setup. | Owner | Evidence that 5/5 attempts finish with no stale-guard halts |
+
+**Phase exit:** the reproducer passes, #130 is closed, and the owner's re-measurement is recorded.
+
+### Phase 2: Destination transfer ("put cube at R2C1")
+
+| Item | Agent | Scope | Gate | Done when |
+|---|---|---|---|---|
+| ✅ **#107** | Sonnet | Add a helper to `primitives.py` (for example `nudge_joint`) that calls `gate_check()`. Route `scripts/smoke_test_host.py` through it. Add a test that a refused gate fails the smoke test. | H-2b | `Closes #107`, and the smoke test still exits 0 against a healthy sim |
+| ✅ **#74** | Opus designs, Sonnet implements | Reconcile the planner model with physics on clearance at `rig_rail_outer_right` (`SWING_1`). Add torso-clearance modelling. Add regression tests for the rejected rig routes in `FWDCenterLabSivaPool`. | H-2a | `Closes #74`, and the routes are either accepted with a stated margin or rejected for a documented reason |
+| ✅ **#2** | Sonnet | List every raw `goal_position` write in scripts and notebooks. Migrate scripts to `SceneModel`. Add table/relocation tests. Notebook edits only if the owner allows them. | H-2c | `Closes #2`, with the audit table in the PR |
+| Placement slice | Opus designs, Sonnet implements | Geometry-based placement to cell R2C1, using the gated primitives and the #74 clearance model. **Includes the success evaluators for `lift_object` and the new place ability.** This closes the last failing test (c), and decides how planned routes fit the baseline-recipe rule. | H-1-style design approval | A placement test passes in `fixture`/`kinematic` mode. The owner runs MuJoCo on the Mac. |
+
+### Phase 3: General withdrawal and recovery
+
+| Item | Agent | Scope | Gate | Done when |
+|---|---|---|---|---|
+| Recovery planner | Opus designs, Sonnet implements | Plan a checked exit from the *measured* state, with no hard-coded waypoints and no sim reset | Design approval | Tests pass from at least 3 seeded start states |
+| ✅ **#127** | Sonnet | Stage 1 leg-chain residuals M1–M3: checked archive copies and the tail-check pointer. Do this during the recovery-script refactor. | H-3 | `Closes #127` |
+| ✅ **#115** | Sonnet | Items 1–7: gate test pinning, `scene_path` refusal, the shell-test runner, torn-flag visibility | H-3 | `Closes #115`. Each item is fixed or closed with a reason. |
+
+### Phase 4: Experience-based planning and Epic 8
+
+| Item | Agent | Scope | Gate | Done when |
+|---|---|---|---|---|
+| ✅ **#28** | Sonnet (if the scope is amended) or Opus (if a UI is built) | Default: amend `EPIC-8.md` to the CLI/exporter scope that was actually delivered, and open a follow-up issue for the UI | H-4 | `Closes #28` |
+| Plan memory | Opus designs | Record successful plans with scene and model hashes and seeds, then reuse them as starting points. Write it up as a design doc first. | Design approval | ADR merged. Implementation is tracked in a new issue. |
+
+---
+
+## 4. Order and dependencies
+
+```
+Phase 0 (merge #132/#133/#149) ─┬─> new pin + §10 amendment (with #150) ─> next B4 attempt
+         └─> Phase 1 (1.1 → 1.2 → H-1 → 1.3; #130 in parallel) ─> owner re-measure
+                 └─> Phase 2 (#107 first → #74 → #2 → placement)
+                         └─> Phase 3 (recovery → #127, #115)
+                                 └─> Phase 4 (#28, plan memory)
+```
+
+Items that can run in parallel: #130 alongside 1.1–1.3; #107 and #2 (the scripts part) alongside #74's design; #28 at any time after H-4.
+
+## 5. Tracking
+
+The Lead keeps a checklist comment on a single tracking issue (to be created when the owner approves this plan), with one line per PR or issue. Each line is updated when that item's state changes. Nothing is closed without a merged PR or a written won't-fix reason.
+
+## 6. Out of scope and risks
+
+- Docker, Apple-Silicon, and hardware results come only from the owner.
+- #150 and #130 both change `e1_identity`, so there is a merge-conflict risk. Sequence them at H-0d.
+- The Phase 1 root cause may be in the panel/hardware path, which the sim cannot reproduce. If that happens, the agent reports it and the owner collects traces.
+- Every merge after the new pin is set breaks the B4 preflight again. Freeze `main` from the moment the pin is set until the B4 attempt has finished.

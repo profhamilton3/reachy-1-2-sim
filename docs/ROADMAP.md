@@ -2,6 +2,10 @@
 
 This backlog is organized as mergeable vertical slices. Do not open one giant “add MuJoCo” change. Each epic has explicit entry conditions, tasks, and exit gates.
 
+## Current plan and status (start here)
+
+The live plan, its progress log and the owner's decisions are in [plans/2026-10-08-close-open-issues-and-prs.md](plans/2026-10-08-close-open-issues-and-prs.md). Open work is tracked as GitHub issues linked from that file. The epics below are the original backlog and are kept as history.
+
 ## Proposed extension — continuous whole-arm clearance monitoring
 
 See [Continuous whole-arm clearance monitoring](roadmap/continuous-whole-arm-protection.md) for the proposed operating contract, simulator-state monitoring and stop enforcement, followed by camera-fed obstacle integration. It builds on issues #56 and #74 and cross-links the IITG perception roadmap. **Status: proposal; implementation and experiments are not authorized by this document.**
