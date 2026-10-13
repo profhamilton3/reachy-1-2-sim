@@ -839,7 +839,8 @@ class _LiftWorker(StubWorker):
         super().__init__(*results)
         self.closed = 0
 
-    def run(self, job, *, on_phase=None, should_cancel=None, feed=None):
+    def run(self, job, *, on_phase=None, should_cancel=None, feed=None, deadline_s=None):
+        self.deadlines = getattr(self, "deadlines", []) + [deadline_s]
         return super().run(job, on_phase=on_phase, should_cancel=should_cancel)
 
     def close(self):
@@ -1035,8 +1036,8 @@ def test_the_place_job_carries_the_object_the_cell_and_the_live_poses(
     seen = {}
 
     class Feeding(_LiftWorker):
-        def run(self, job, *, on_phase=None, should_cancel=None, feed=None):
-            seen["feed"] = feed
+        def run(self, job, *, on_phase=None, should_cancel=None, feed=None, deadline_s=None):
+            seen["feed"], seen["deadline_s"] = feed, deadline_s
             return super().run(job, on_phase=on_phase, should_cancel=should_cancel)
 
     worker = Feeding({"status": "moved", "flown": [], "final_posture": "present"})
@@ -1050,6 +1051,19 @@ def test_the_place_job_carries_the_object_the_cell_and_the_live_poses(
     assert job["scene_file"] == "scene.yaml"
     assert job["live"]["soda_can"] == list(scene.objects["soda_can"].position)
     assert callable(seen["feed"])
+    # A placement is longer than a lift: its own motion deadline, and a lease
+    # that outlives it by the same margin as the default lease does.
+    import panel_executor as PE
+    assert seen["deadline_s"] == PE.PLACE_MOTION_DEADLINE_S > PE.MOTION_DEADLINE_S
+    assert ex._link.acquired[-1][2] == pytest.approx(
+        PE.PLACE_MOTION_DEADLINE_S + PE.LEASE_TTL_S - PE.MOTION_DEADLINE_S)
+
+
+def test_a_lift_keeps_the_default_deadline(fake_sdk, monkeypatch):
+    _validated(monkeypatch)
+    worker = _LiftWorker({"status": "failed", "detail": "halted", "evidence": {}})
+    _lifting(worker).execute(_lift())
+    assert worker.deadlines == [None]
 
 
 def test_a_refusal_from_the_placement_preflight_reaches_the_operator(

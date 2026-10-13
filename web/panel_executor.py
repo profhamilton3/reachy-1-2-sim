@@ -111,6 +111,14 @@ FRESH_SNAPSHOT_TIMEOUT_S = 2.0
 #: the lease outliving the motion is what lets the kill be tidied up under it.
 MOTION_DEADLINE_S = float(os.environ.get("REACHY_PANEL_MOTION_DEADLINE", "180"))
 
+#: A placement's own bound (#174).  It is the lift plus a carry, the set-down
+#: corrections and a re-plan from the measured hold: offline it runs ~25 %
+#: longer than the lift, whose live jobs took 138-143 s against the 180 s
+#: above.  A deadline that fired mid-carry would leave the arm holding the
+#: object where it stopped, so the placement gets room, and its lease outlives
+#: it by the same minute the default lease outlives the default deadline.
+PLACE_MOTION_DEADLINE_S = float(os.environ.get("REACHY_PANEL_PLACE_DEADLINE", "300"))
+
 #: How long a motion process is given to exit on its own before it is killed.
 #: A child that has answered goes on stdin EOF; the one this bounds is the
 #: child that is wedged inside grpc, which will not go at all.
@@ -273,8 +281,8 @@ class MotionWorker:
     def run(self, job: Dict[str, Any], *,
             on_phase: Optional[Callable[[str], None]] = None,
             should_cancel: Optional[Callable[[], bool]] = None,
-            feed: Optional[Callable[[], Optional[Dict[str, Any]]]] = None
-            ) -> Dict[str, Any]:
+            feed: Optional[Callable[[], Optional[Dict[str, Any]]]] = None,
+            deadline_s: Optional[float] = None) -> Dict[str, Any]:
         """Send one job, forward its phases, and always return a result.
 
         ``feed``, when given, is called by a forwarding thread while the job
@@ -284,7 +292,8 @@ class MotionWorker:
         not fit in a full pipe is dropped, since a newer one follows.  It is
         how a job that needs live feedback -- the crane lift watches pad
         force and the object -- gets it without a WebSocket in the motion
-        process (#79).
+        process (#79).  ``deadline_s`` replaces the worker's deadline for this
+        job (a placement's is longer).
         """
         if self._proc is None or self._proc.poll() is not None:
             self.close()
@@ -305,7 +314,8 @@ class MotionWorker:
         forwarding = _Forwarder(self, feed) if feed is not None else None
         dropped_before = self.observations_dropped
         try:
-            return self._wait_for_result(on_phase, should_cancel, forwarding)
+            return self._wait_for_result(on_phase, should_cancel, forwarding,
+                                         self._deadline if deadline_s is None else deadline_s)
         finally:
             if forwarding is not None:
                 forwarding.stop()
@@ -314,15 +324,16 @@ class MotionWorker:
                     log.warning("motion worker: %d observation(s) dropped on a full pipe",
                                 dropped)
 
-    def _wait_for_result(self, on_phase, should_cancel, forwarding) -> Dict[str, Any]:
-        deadline = time.monotonic() + self._deadline
+    def _wait_for_result(self, on_phase, should_cancel, forwarding,
+                         limit_s: float) -> Dict[str, Any]:
+        deadline = time.monotonic() + limit_s
         cancelled = False
         while True:
             left = deadline - time.monotonic()
             if left <= 0:
                 self.close()
                 return _worker_failure(
-                    f"the move did not finish within {self._deadline:.0f} "
+                    f"the move did not finish within {limit_s:.0f} "
                     "seconds, so I stopped it. My arm is wherever it stopped, "
                     "and I will not guess a path from there.",
                     timed_out=True, recovery_needed=True)
@@ -796,9 +807,11 @@ class SimulatorExecutor:
         the board, and the before-and-after that decides whether the route
         arrived without disturbing anything.
         """
+        placing = proposal.task_type == "place_on_cell"
         granted, why = self._link.acquire_control(
             MOTION_CLIENT_ID, reason=f"plan {proposal.plan_id}",
-            ttl_s=LEASE_TTL_S)
+            ttl_s=(PLACE_MOTION_DEADLINE_S + (LEASE_TTL_S - MOTION_DEADLINE_S)
+                   if placing else LEASE_TTL_S))
         if not granted:
             return ExecutionResult(
                 status="failed",
@@ -835,6 +848,8 @@ class SimulatorExecutor:
             # exactly as before.
             extra = ({"feed": self._observation_feed(proposal.object_id)}
                      if proposal.task_type in CRANE_ABILITIES else {})
+            if placing:
+                extra["deadline_s"] = PLACE_MOTION_DEADLINE_S
             out = self._worker.run(
                 {"kind": "ability",
                  "task_type": proposal.task_type,
