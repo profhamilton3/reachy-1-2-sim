@@ -257,7 +257,10 @@ def test_proposal_carries_the_full_contract():
     assert p.destination_kind == "cell"
     assert p.destination_label == "grid cell r2c2"
     assert p.legacy_destination is None
-    assert p.task_type == "pick_place"
+    # The grammar's placement is the place ability (#174; the open-loop
+    # pick_place arc is retired from the panel).
+    assert p.task_type == "place_on_cell"
+    assert (p.object_id, p.cell, p.route) == ("soda_can", "r2c2", "CRANE_PLACE")
     assert p.semantic_source == "scene_data"
     assert p.scene_name == "TestScene"
     assert p.requires_confirmation is True
@@ -267,9 +270,11 @@ def test_proposal_carries_the_full_contract():
     assert "It is on r1c1 now." in p.brief_reason
 
 
-def test_a_non_live_plan_records_no_evidence():
+def test_a_non_live_plan_records_no_evidence_of_position():
     p = plan(make_scene(), "put soda_can on r2c2").proposal
-    assert p.state_evidence == {}
+    ev = p.state_evidence
+    assert ev["live"] is False
+    assert not {"object_position", "target_cell", "destination_occupant"} & set(ev)
     assert "has not been verified" in p.brief_reason
 
 
@@ -368,7 +373,7 @@ def test_advancing_simulation_time_alone_does_not_invalidate():
 def test_tiny_physics_jitter_does_not_invalidate():
     planned = _live_scene_with()
     proposal = plan(planned, "put soda_can on r2c2").proposal
-    pos = list(proposal.state_evidence["target_pos"])
+    pos = list(proposal.state_evidence["object_position"])
     pos[0] += POSE_TOLERANCE_M / 2
 
     later = make_scene()
@@ -443,7 +448,7 @@ def test_a_scene_error_invalidates():
 def test_a_plan_with_no_evidence_is_not_invalidated_by_a_live_scene():
     """A planning-only plan claimed no position, so nothing contradicts it."""
     proposal = plan(make_scene(), "put soda_can on r2c2").proposal
-    assert proposal.state_evidence == {}
+    assert "object_position" not in proposal.state_evidence
     assert LiveProposalValidator(lambda: _live_scene_with())(proposal)[0]
 
 
@@ -534,3 +539,47 @@ def test_real_pool_scene_still_has_no_bin_to_offer():
     assert out.kind == "clarification"
     assert "no bin or tray configured" in out.message
     assert "r2c2" not in out.choices        # the can is standing on it
+
+
+# ---------------------------------------------------------------------------
+# #174: the placement is the place ability, from either phrasing
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", ["move soda_can to r2c2",
+                                  "pick and place soda_can at r2c2",
+                                  "put soda_can on r2c2"])
+def test_every_placement_phrasing_proposes_the_place_ability(text):
+    p = plan(_live_scene_with(), text).proposal
+    assert p.task_type == "place_on_cell" and p.route == "CRANE_PLACE"
+    assert (p.object_id, p.cell, p.target_id, p.destination) == (
+        "soda_can", "r2c2", "soda_can", "cell:r2c2")
+    assert p.expected_start_posture == "present" and p.end_posture == "present"
+    ev = p.state_evidence
+    assert ev["action"] == "place_on_cell"
+    assert ev["target_cell"] == "r1c1" and ev["destination_occupant"] is None
+    assert p.summary == "move soda_can to r2c2"
+
+
+def test_a_placement_onto_an_occupied_cell_asks_for_another():
+    scene = make_scene()
+    apply_snapshot(scene, snap(soda_can=on_cell(scene, "r1c1"),
+                               red_cube=on_cell(scene, "r2c2")))
+    out = plan(scene, "move soda_can to r2c2")
+    assert out.kind == "clarification"
+    assert "already occupied by red_cube" in out.message
+    assert "r2c2" not in out.choices
+
+
+def test_a_placement_is_invalidated_when_its_destination_is_taken():
+    proposal = plan(_live_scene_with(), "move soda_can to r2c2").proposal
+    later = make_scene()
+    apply_snapshot(later, snap(soda_can=on_cell(later, "r1c1"),
+                               red_cube=on_cell(later, "r2c2")))
+    ok, why = LiveProposalValidator(lambda: later)(proposal)
+    assert not ok and "now holds red_cube" in why
+
+
+def test_a_placement_is_invalidated_when_the_object_moved():
+    proposal = plan(_live_scene_with(), "move soda_can to r2c2").proposal
+    ok, why = LiveProposalValidator(lambda: _live_scene_with("r2c3"))(proposal)
+    assert not ok and "has moved" in why

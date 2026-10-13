@@ -140,6 +140,10 @@ class Action:
             return f"point to {cell}" if cell else "point to a cell"
         if self.ability == "lift_object":
             return f"pick up {obj} and put it back" if obj else ""
+        if self.ability == "place_on_cell":
+            # Both slots or nothing: a placement with no destination is not a
+            # request this phrase can carry.
+            return f"move {obj} to {cell}" if obj and cell else ""
         if self.ability == "point_object":
             # No slot-less phrasing exists for this one, so an action with no
             # object is refused rather than guessed at.

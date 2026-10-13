@@ -134,7 +134,12 @@ Recorded by owner decision. Simulator only.
 
 ### Unfinished capabilities tracked here (from #55)
 
-- **Destination transfer:** pick from one cell and place in another (e.g. r2c2 → r2c1). This needs a carry between ladders, destination-ladder planning, and a held-object return or abort route. Not implemented.
+- **Destination transfer — implemented by #174 (ADR-0009), simulator only.** The `place_on_cell` ability does three things:
+  - carries between ladders, with the held object checked;
+  - re-plans the destination ladder from the measured hold and corrects the set-down toward the cell centre;
+  - aborts back to the pickup.
+
+  The live check covered only r2c2 → r2c1, with the 60 mm red cube, at the place's own grasp attitude (tilt 63°, lean 65°). That set-down stands 0.9° from the shoulder-roll stop, and every other pair is planned and refused when a check fails.
 - **Robust withdrawal and recovery:** the release currently drags the cube (quasi-static, about 7.6–9.7 mm recorded), and a withdrawal can be refused at the model boundary, leaving the open hand held beside the object until a simulator reset. Prevention (release/withdrawal continuity) and general checked retreat (above) are both unfinished.
 - **Observation-delivery delay on the panel → motion-worker path — RESOLVED (2026-10-09).** In the 2026-10-08 five-attempt measurement (attempt 5), the crane lift's live-feedback guard (`FEEDBACK_STALE_S` = 0.5 s) halted during the gated descent because an observation reached the motion worker 0.67 s old.
   - The simulator's own state stream showed no gap over 0.13 s in that window, so the delay arose on the panel's observation path (SimLink snapshot → feed → worker pipe).

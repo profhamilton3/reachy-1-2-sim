@@ -321,6 +321,10 @@ def _step(value) -> int:
 PLANNER_SEED = {
     "CRANE_LIFT": "deterministic: the crane planner's fixed IK start set "
                   "(crane_pick_live.GRASP_STARTS); no random seed",
+    "CRANE_PLACE": "deterministic: the crane planner's fixed IK start set "
+                   "(crane_pick_live.GRASP_STARTS) at the place attitude "
+                   "(crane_place_live.PLACE_GRASP), headings tried in a fixed "
+                   "order; no random seed",
 }
 MEASURED_SEED = "none: a measured route; nothing is sampled"
 
@@ -362,6 +366,16 @@ def _run_fields(proposal, evidence, identity) -> Dict[str, Any]:
         # Reported against a 5 mm target, never judged (#173).
         out["release_drag_mm"] = replaced.get("release_drag_mm")
         out["release_opening_deg"] = replaced.get("opening_deg")
+    place = crane.get("place") or {}
+    if place:
+        # The placement (#174): where it was meant to go, how far from the
+        # cell's centre it ended, its tilt, and whether it was aborted.
+        out["placement"] = {"target_cell": place.get("target_cell"),
+                            "at_destination": place.get("at_destination"),
+                            "error_from_target_mm": place.get("error_from_target_mm"),
+                            "tilt_deg": place.get("tilt_deg"),
+                            "aborted": place.get("aborted"),
+                            "release_retreat_mm": replaced.get("release_retreat_mm")}
     withdrawal = crane.get("withdrawal") or {}
     if withdrawal:
         out["withdrawal"] = {"completed": bool(withdrawal.get("clean")),

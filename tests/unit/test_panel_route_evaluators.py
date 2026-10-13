@@ -115,8 +115,9 @@ def test_every_route_has_a_type():
     """D7: an ability's route is measured or planned, and nothing else."""
     assert set(ABILITY_ROUTES.values()) <= set(ROUTE_TYPES)
     assert ROUTE_TYPES["CRANE_LIFT"] is RouteType.PLANNED
-    assert "lift_object" not in MEASURED
-    assert set(MEASURED) == set(ABILITY_ROUTES) - {"lift_object"}
+    assert ROUTE_TYPES["CRANE_PLACE"] is RouteType.PLANNED      # #174
+    assert "lift_object" not in MEASURED and "place_on_cell" not in MEASURED
+    assert set(MEASURED) == set(ABILITY_ROUTES) - {"lift_object", "place_on_cell"}
 
 
 def test_an_unknown_ability_raises_rather_than_scoring():

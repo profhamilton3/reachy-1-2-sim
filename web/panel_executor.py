@@ -5,12 +5,14 @@ and reports what actually happened rather than that a message was sent.
 
 HOW COMMANDS REACH THAT WORLD
 -----------------------------
-Not by a new channel.  `scripts/demo_pick_place.py` already drives this exact
-world: the Reachy v1 SDK on gRPC 50051 → the compatibility core's
-mujoco-remote backend → the native server's WebSocket on 8765 → the physics
-the panel's cameras are rendering.  This adapter uses that path, and the arc
-itself is `reachy_ai.tasks.pick_place_live`, the same tuned motion the demo
-runs.  Nothing here is a second implementation of pick-and-place.
+Not by a new channel: the Reachy v1 SDK on gRPC 50051 → the compatibility
+core's mujoco-remote backend → the native server's WebSocket on 8765 → the
+physics the panel's cameras are rendering.  Every ability is flown from the
+motion process over that path; the lift and the placement by the crane
+(`reachy_ai.tasks.crane_pick_live`, `crane_place_live`), planned and checked
+before the arm moves.  The older open-loop pick-and-place arc
+(`tasks.pick_place_live`, `scripts/demo_pick_place.py`) is retired from the
+panel (#174) and stays as reference.
 
 WHAT IT REFUSES TO DO
 ---------------------
@@ -34,9 +36,9 @@ Everything the motion is planned against is read AFTER the grant and from a
 snapshot captured after it, then revalidated.  Reading first and locking second
 leaves one window — the only one in the whole execution — where the plan is
 being fixed while other clients can still move the board.  A `place_object`
-landing there sends the arm to where the object was; `_verify` catches it, so
-the panel does not lie about the outcome, but the failure reads as a slipped
-grasp rather than as a race, and that is the expensive kind of wrong.
+landing there sends the arm to where the object was; the crane refuses to start
+when the object is not where its plan was made, but the refusal reads as a
+moved object rather than as a race, and that is the expensive kind of wrong.
 
 What the lease does NOT give is exclusivity against other SDK callers.  It
 names `docker-core` as the mover, and `docker-core` is one bridge that can
@@ -124,10 +126,15 @@ WORKER_EXIT_GRACE_S = 2.0
 #: on if `sdk_compat` reports the fix was not applied (another SDK release).
 RESTART_WORKER_AFTER_LIFT = False
 
-#: How close to the destination cell the object must end up to count as placed.
-#: The cell's own half-extent decides that, so this only bounds the wait for a
-#: fresh snapshot after the arm has finished.
-SETTLE_TIMEOUT_S = 4.0
+#: The abilities flown by the crane (`tasks.crane_pick_live`): they get live
+#: feedback on their object, and are judged by the crane's measured criteria.
+CRANE_ABILITIES = ("lift_object", "place_on_cell")
+
+#: What the panel says to a pick_place proposal (#174: retired from the panel).
+PICK_PLACE_RETIRED = (
+    "the old pick-and-place arc is retired from the panel: it did not check "
+    "that it had grasped anything. Ask me to \"move <object> to <cell>\" and I "
+    "will plan, check and fly the placement ability instead")
 
 
 @dataclass
@@ -512,27 +519,15 @@ class SimulatorExecutor:
         if proposal is None:
             return True, ""
 
-        if proposal.task_type != "pick_place":
-            return self._ability_available(proposal)
-        if proposal.destination_kind != "cell":
-            return False, ("I can only place onto a grid cell; this plan names "
-                           f"{proposal.destination_label!r}")
-
-        scene = self._scene_provider()
-        if scene.error:
-            return False, f"I cannot read the scene: {scene.error}"
-        obj = scene.objects.get(proposal.target_id)
-        if obj is None or obj.position is None:
-            return False, f"I cannot see where {proposal.target_id} is"
-        if obj.on_board is not True:
-            return False, (f"{proposal.target_id} is not on the board, and I "
-                           "only pick from the board")
-        cell = scene.cells.get(_ref_id(proposal.destination))
-        if cell is None:
-            return False, "that destination is not in this scene"
-        if not cell.reachable:
-            return False, f"{cell.name} is out of the arm's reach"
-        return True, ""
+        if proposal.task_type == "pick_place":
+            # RETIRED FROM THE PANEL (#174, owner decision).  The open-loop arc
+            # did not check that it had grasped anything, was not recorded,
+            # and was seen on 2026-10-09 missing a cube and a cylinder and
+            # releasing anyway.  Placement is the `place_on_cell` ability; the
+            # arc's offline runner (`tasks.pick_place_live`,
+            # `scripts/demo_pick_place.py`) stays, as reference.
+            return False, PICK_PLACE_RETIRED
+        return self._ability_available(proposal)
 
     def _ability_available(self, proposal) -> Tuple[bool, str]:
         """Can this ability be flown, in this scene, on this arm?
@@ -581,7 +576,7 @@ class SimulatorExecutor:
         # The limit is the number of objects rather than which ones, because
         # what has not been measured is objects INTERACTING — a reach that
         # clears the thing it is aimed at by threading past a second one.
-        if proposal.task_type == "lift_object":
+        if proposal.task_type in ("lift_object", "place_on_cell"):
             # THE OBJECT HAS TO BE ON THE BOARD, under the lease, for the same
             # reason as pointing below.  Whether it is a shape the crane grasp
             # can close on, and whether the whole arc clears everything else
@@ -598,6 +593,19 @@ class SimulatorExecutor:
                 return False, (f"the simulator is not reporting which way "
                                f"{proposal.object_id} is turned, and the grasp "
                                "closes on two of its faces")
+        if proposal.task_type == "place_on_cell":
+            # WHERE IT GOES: a grid cell that exists, is within reach, and is
+            # free -- or holds the object itself.  Whether the arm can set it
+            # down there, and leave by a validated exit afterwards, is the
+            # placement plan's to answer, before the arm moves.
+            cell = scene.cells.get(_ref_id(proposal.cell or ""))
+            if cell is None:
+                return False, (f"{proposal.cell or 'that destination'} is not a "
+                               "grid cell in this scene; I place onto grid cells only")
+            if not cell.reachable:
+                return False, f"{cell.name} is out of the arm's reach"
+            if cell.occupant and cell.occupant != proposal.object_id:
+                return False, f"{cell.name} is not free: {cell.occupant} is on it"
 
         if proposal.task_type in ("point_cell", "point_object"):
             # THE OBJECT HAS TO BE ON THE BOARD, checked here and not only in
@@ -766,9 +774,7 @@ class SimulatorExecutor:
                           proposal.plan_id)
 
     def _execute_locked(self, proposal, should_cancel, on_phase) -> ExecutionResult:
-        if proposal.task_type != "pick_place":
-            return self._execute_ability_locked(proposal, should_cancel, on_phase)
-        return self._execute_pick_place_locked(proposal, should_cancel, on_phase)
+        return self._execute_ability_locked(proposal, should_cancel, on_phase)
 
     # -- abilities ---------------------------------------------------------
 
@@ -828,7 +834,7 @@ class SimulatorExecutor:
             # Only the lift needs live feedback; every other job is sent
             # exactly as before.
             extra = ({"feed": self._observation_feed(proposal.object_id)}
-                     if proposal.task_type == "lift_object" else {})
+                     if proposal.task_type in CRANE_ABILITIES else {})
             out = self._worker.run(
                 {"kind": "ability",
                  "task_type": proposal.task_type,
@@ -848,7 +854,7 @@ class SimulatorExecutor:
                           if o.position is not None},
                  "sdk": {"host": self._sdk_host, "port": self._sdk_port}},
                 on_phase=phase, should_cancel=should_cancel, **extra)
-            if proposal.task_type == "lift_object" and RESTART_WORKER_AFTER_LIFT:
+            if proposal.task_type in CRANE_ABILITIES and RESTART_WORKER_AFTER_LIFT:
                 # Backstop: a lift streams thousands of commands, and a
                 # process kept between lifts carries whatever any of them
                 # leaked into the next (the SDK poll leak, sdk_compat).  A
@@ -925,7 +931,7 @@ class SimulatorExecutor:
         completed or failed, says which one it was measured under.  ``None``
         when the server did not advertise one -- never a guessed value.
         """
-        if proposal.task_type != "lift_object":
+        if proposal.task_type not in CRANE_ABILITIES:
             return evidence
         try:
             contact_model = self._link.status.get("contact_model")
@@ -981,9 +987,10 @@ class SimulatorExecutor:
         drift = {}
         scene = self._scene_provider()
         for oid, was in before.items():
-            if proposal.task_type == "lift_object" and oid == proposal.object_id:
-                # Picked up and put back on purpose: judged by the lift's own
-                # measured criteria below, not by the board-drift tolerance.
+            if proposal.task_type in CRANE_ABILITIES and oid == proposal.object_id:
+                # Picked up and put back -- or put somewhere else -- on purpose:
+                # judged by the crane's own measured criteria below, not by
+                # the board-drift tolerance.
                 continue
             now = scene.objects.get(oid)
             if now is not None and now.position is not None:
@@ -1000,7 +1007,7 @@ class SimulatorExecutor:
             evidence["crane"] = crane
         evidence = self._with_contact_model(proposal, evidence)
         if posture != end:
-            if proposal.task_type == "lift_object" and crane:
+            if proposal.task_type in CRANE_ABILITIES and crane:
                 detail = _lift_stopped_detail(proposal.object_id, crane, posture, end)
             else:
                 detail = (f"the route stopped before {end}: my arm is at "
@@ -1015,6 +1022,8 @@ class SimulatorExecutor:
                 evidence=evidence)
         if proposal.task_type == "lift_object":
             return _judge_lift(proposal, crane or {}, end, evidence)
+        if proposal.task_type == "place_on_cell":
+            return _judge_place(proposal, crane or {}, end, evidence)
         if proposal.task_type.startswith("point"):
             # "The trajectory finished" is not "it pointed accurately", and the
             # brief is explicit that this is a HOVER POINTER rather than a
@@ -1032,90 +1041,6 @@ class SimulatorExecutor:
             status="completed",
             detail=f"My arm is at {end}, and the board is as it was.",
             evidence=evidence)
-
-    def _execute_pick_place_locked(self, proposal, should_cancel, on_phase):
-        target_id = proposal.target_id
-
-        granted, why = self._link.acquire_control(
-            MOTION_CLIENT_ID,
-            reason=f"plan {proposal.plan_id}",
-            ttl_s=LEASE_TTL_S,
-        )
-        if not granted:
-            return ExecutionResult(
-                status="failed",
-                detail=f"I could not take control of the scene: {why}",
-            )
-
-        def phase(name: str) -> None:
-            log.info("executor phase: %s", name)
-            if on_phase is not None:
-                on_phase(name)
-
-        try:
-            # Nothing about the board is read until here.  Taking the lease is
-            # what makes the next few lines mean anything: they describe a
-            # scene no other client can now change.
-            phase("checking the board")
-            scene = self._fresh_scene()
-            if scene is None:
-                return ExecutionResult(
-                    status="failed",
-                    detail=("I took control of the scene but no fresh view of "
-                            "it arrived, so I will not move against a stale "
-                            "picture of the board."),
-                )
-
-            ok, why = self.available(proposal)
-            if not ok:
-                # Distinct from a motion failure on purpose.  "The board
-                # changed while I was taking control" is an answer the operator
-                # can act on; "the motion finished but soda_can is not on r2c2"
-                # sends them looking for a grasp problem that is not there.
-                return ExecutionResult(
-                    status="failed",
-                    detail=f"the board changed while I was taking control: {why}",
-                    evidence={"scene_changed": True, "sim_step": scene.sim_step},
-                )
-
-            cell = scene.cells[_ref_id(proposal.destination)]
-            started_step = scene.sim_step
-
-            # The scene document supplies geometry; the live snapshot supplies
-            # where things actually are.  Planning against the YAML's initial
-            # poses would aim the gripper at where an object started.
-            live = {oid: list(o.position) for oid, o in scene.objects.items()
-                    if o.position is not None}
-
-            out = self._worker.run(
-                {"kind": "pick_place",
-                 "target_id": target_id,
-                 "cell_xy": [cell.x, cell.y],
-                 "scene_file": self._scene_file,
-                 "live": live,
-                 "sdk": {"host": self._sdk_host, "port": self._sdk_port}},
-                on_phase=phase, should_cancel=should_cancel)
-            if out.get("status") == "cancelled":
-                return ExecutionResult(
-                    status="cancelled",
-                    detail=out.get("detail", "Stopped."),
-                    evidence=out.get("evidence") or {})
-            if out.get("status") != "moved":
-                return ExecutionResult(
-                    status=out.get("status", "failed"),
-                    detail=out.get("detail", "the motion failed"),
-                    evidence=out.get("evidence") or {})
-
-            return self._verify(target_id, cell, started_step)
-
-        except Exception as exc:
-            log.exception("execution failed")
-            return ExecutionResult(
-                status="failed",
-                detail=f"the motion failed: {exc.__class__.__name__}: {exc}",
-            )
-        finally:
-            self._link.release_control()
 
     # -- reading the board under the lease ---------------------------------
 
@@ -1147,52 +1072,6 @@ class SimulatorExecutor:
             time.sleep(0.05)
         return None
 
-    # -- result verification ----------------------------------------------
-
-    def _verify(self, target_id, cell, started_step) -> ExecutionResult:
-        """Did the object actually end up on the cell?
-
-        Read back from the simulator, not inferred from the trajectory having
-        finished.  Every segment can run to completion while the grasp slipped
-        somewhere in the middle, and that is a failure the panel must report as
-        one.
-        """
-        deadline = time.time() + SETTLE_TIMEOUT_S
-        position = None
-        while time.time() < deadline:
-            scene = self._scene_provider()
-            obj = scene.objects.get(target_id)
-            if (scene.live and scene.sim_step > started_step
-                    and obj is not None and obj.position is not None):
-                position = obj.position
-                if cell.contains(position):
-                    return ExecutionResult(
-                        status="completed",
-                        detail=f"{target_id} is on {cell.name}.",
-                        evidence={
-                            "target_id": target_id,
-                            "cell": cell.name,
-                            "position": list(position),
-                            "sim_step": scene.sim_step,
-                            "verified": "live_pose",
-                        },
-                    )
-            time.sleep(0.2)
-
-        where = (f"at ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f})"
-                 if position else "somewhere I cannot see")
-        return ExecutionResult(
-            status="failed",
-            detail=(f"The motion finished but {target_id} is not on "
-                    f"{cell.name} — it is {where}."),
-            evidence={
-                "target_id": target_id,
-                "cell": cell.name,
-                "position": list(position) if position else None,
-                "verified": "live_pose",
-            },
-        )
-
 
 #: Which objects were on the board, or None if that was not observed.  One
 #: implementation, in `panel_provenance`, shared with the planner — the gate
@@ -1209,6 +1088,12 @@ LIFT_CRITERIA = (
     ("clean_withdrawal", "withdraw without a pad touching anything"),
     ("returned_to_present", "come back to the raised pose"),
 )
+
+#: The placement's criteria (#174): the lift's, with "set it down on the
+#: cell" first -- within 1 cm of its centre and upright (D6).
+PLACE_CRITERIA = (
+    ("placed_on_target", "set it down within 1 cm of the cell's centre, upright"),
+) + LIFT_CRITERIA
 
 
 def _judge_lift(proposal, crane: Dict[str, Any], end: str,
@@ -1243,6 +1128,45 @@ def _judge_lift(proposal, crane: Dict[str, Any], end: str,
         evidence=evidence)
 
 
+def _judge_place(proposal, crane: Dict[str, Any], end: str,
+                 evidence: Dict[str, Any]) -> ExecutionResult:
+    """A placement is completed only if every criterion held -- the object
+    set down on the cell (D6: within 1 cm of its centre, upright) among them;
+    otherwise say which did not, with the numbers."""
+    evidence = dict(evidence, crane=crane)
+    criteria = crane.get("criteria") or {}
+    place = crane.get("place") or {}
+    cell = str(proposal.cell or place.get("target_cell", "")).replace("cell_", "")
+    if not criteria:
+        why = crane.get("halt") or crane.get("refusal") or "it stopped before the pick"
+        return ExecutionResult(status="failed",
+                               detail=f"I did not place {proposal.object_id}: {why}. "
+                                      f"My arm is at {end}.", evidence=evidence)
+    rep = crane.get("replaced") or {}
+    if place.get("aborted"):
+        return ExecutionResult(
+            status="failed",
+            detail=(f"I did not place {proposal.object_id} on {cell}: {place['aborted']}. "
+                    "I carried it back and set it down where I picked it up"
+                    + _drag_clause(rep) + f". My arm is at {end}."),
+            evidence=evidence)
+    numbers = (f"It is {place.get('error_from_target_mm', float('nan')):.1f} mm from "
+               f"the centre of {cell}, tilted {place.get('tilt_deg', 0.0):.1f} degrees"
+               + _drag_clause(rep) + ".")
+    failed = [text for key, text in PLACE_CRITERIA if not criteria.get(key)]
+    if failed:
+        return ExecutionResult(
+            status="failed",
+            detail=(f"I moved {proposal.object_id} toward {cell}, but I did not "
+                    + "; and did not ".join(failed) + ". " + numbers),
+            evidence=evidence)
+    return ExecutionResult(
+        status="completed",
+        detail=(f"I moved {proposal.object_id} to {cell}. " + numbers
+                + f" My arm is at {end}."),
+        evidence=evidence)
+
+
 def _lift_stopped_detail(object_id: str, crane: Dict[str, Any],
                          posture: Optional[str], end: str) -> str:
     """A lift that did not get back to ``end``: what DID happen, phase by
@@ -1265,7 +1189,12 @@ def _lift_stopped_detail(object_id: str, crane: Dict[str, Any],
                     f"(slip in the hand {held.get('in_hand_slip_mm', 0):.2f} mm).")
     else:
         said.append(f"I did not lift {object_id}.")
-    if rep.get("supported_before_open"):
+    place = crane.get("place") or {}
+    if rep.get("supported_before_open") and place.get("at_destination"):
+        cell = str(place.get("target_cell", "")).replace("cell_", "")
+        said.append(f"I set it down on {cell}, {place.get('error_from_target_mm', 0):.1f} mm "
+                    "from its centre" + _drag_clause(rep) + ".")
+    elif rep.get("supported_before_open"):
         said.append(f"I put it back on the table, {rep.get('offset_from_start_mm', 0):.1f} mm "
                     "from where I picked it up" + _drag_clause(rep) + ".")
     why = wd.get("reason") if wd and not wd.get("clean") else None

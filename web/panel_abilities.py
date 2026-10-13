@@ -235,6 +235,30 @@ _register(Ability(
     end_posture="present",
 ))
 
+_register(Ability(
+    name="place_on_cell",
+    summary=("pick an object up and set it down on another grid cell "
+             "(evaluated in simulation for the 60 mm red cube, r2c2 to r2c1; "
+             "anything else is planned and checked first, and refused if a "
+             "check fails)"),
+    patterns=(
+        # "pick and place X at Y" and "move X to Y" (#174, owner decision):
+        # the placement, with the cell it goes to.
+        rf"{_POLITE}pick\s+and\s+place\s+(?:the\s+)?(?P<object>.+?)\s+"
+        rf"(?:at|on|onto|in|into|to)\s+(?:the\s+)?(?:cell\s+)?(?P<cell>r[1-9]c[1-9])"
+        rf"(?:\s+cell)?{_TRAIL}",
+        rf"{_POLITE}move\s+(?:the\s+)?(?P<object>.+?)\s+(?:to|onto|on|into)\s+"
+        rf"(?:the\s+)?(?:cell\s+)?(?P<cell>r[1-9]c[1-9])(?:\s+cell)?{_TRAIL}",
+    ),
+    slots=(SLOT_OBJECT, SLOT_CELL, SLOT_ARM),
+    # The crane pick of #55 at the placement's own attitude, a checked carry
+    # with the object in the hand, a measured set-down on the cell and #173's
+    # withdrawal (tasks/crane_place_live).  Starts and ends at the raised pose.
+    route="CRANE_PLACE",
+    start_postures=("present",),
+    end_posture="present",
+))
+
 #: Order matters: `point_cell` must be tried before `point_object`, whose
 #: pattern deliberately accepts anything after "point to".  Registry order is
 #: insertion order, which is the order above.
