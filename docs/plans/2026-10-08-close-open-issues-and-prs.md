@@ -64,6 +64,23 @@ Working rule for all three: offline replay and preflight sweeps first, focused t
 - A Mac user path in `tests/fixtures/goalfix_cmp/c7_run04_r3_setup.json`, which CLAUDE.md forbids.
 - #150's description still has its old "Draft, do not merge" paragraph.
 
+## Direction after Phase 2 (decided 2026-10-13)
+
+**Autonomy layers.** Each layer builds on the one below and never removes it:
+- **(a) Scripted skills with checks** is the current system. It is kept working as the **safety layer and fallback**.
+- **(b) Skills that adapt from outcomes** (#181) choose better parameters *within* (a)'s checked envelope.
+- **(c) Perception-driven generalisation** (#182, an epic) supplies object descriptions and real-robot success checks. It is the ultimate goal, and keeps (a) and (b).
+
+**Open work:**
+
+| Issue | What | Notes |
+|---|---|---|
+| #180 | Placement breadth: more cell pairs live, and cylinders | Offline sweep first; 5 live runs per pair |
+| #179 | Measure the physical gripper's travel and load (scripts for the robot team) | Validates −68° and feeds the real grasp checks in #182 stage 3 |
+| reachy-tabletop-ai#23 | Port the SDK 0.7.0 leak fix and latest-wins delivery to the workstation app | Client-side only; no robot or NUC change |
+| #181 | Autonomy (b): adapt from outcomes | First slice: release strategy |
+| #182 | Autonomy (c): perception-driven generalisation | 5 stages; perception lives in tabletop-ai |
+
 ---
 
 ## 1. How the work runs
