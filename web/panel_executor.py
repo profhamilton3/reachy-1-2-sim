@@ -1016,6 +1016,15 @@ class SimulatorExecutor:
         evidence = {"route": wanted, "waypoints_flown": list(flown),
                     "start_posture": start_posture,
                     "final_posture": posture, "object_drift": drift}
+        if proposal.task_type == "place_on_cell":
+            # D6: every OTHER object, measured, not thresholded at the drift
+            # tolerance (that is 2 cm; D6's bound is 1 mm).
+            moved = {}
+            for oid, was in before.items():
+                now = scene.objects.get(oid)
+                if oid != proposal.object_id and now is not None and now.position is not None:
+                    moved[oid] = round(_euclid(now.position, was), 5)
+            evidence["others_moved_m"] = moved
         if crane is not None:
             # The lift's measurements travel with every answer, including a
             # failed one: where it stopped and why is the useful part.
@@ -1104,11 +1113,20 @@ LIFT_CRITERIA = (
     ("returned_to_present", "come back to the raised pose"),
 )
 
-#: The placement's criteria (#174): the lift's, with "set it down on the
-#: cell" first -- within 1 cm of its centre and upright (D6).
+#: The placement's criteria are D6 (#174), and only D6: on the cell (within
+#: 1 cm of its centre, upright), nothing else on the board moved more than
+#: 1 mm, and the hand let go cleanly (no pad on it or on the table once open).
+#: The hold's slip and height are the lift's criteria, not the placement's:
+#: they are reported in the sentence, never judged here.  The withdrawal is
+#: reported separately -- a stopped one leaves the arm off PRESENT, which is
+#: said as such (`_lift_stopped_detail`).
 PLACE_CRITERIA = (
     ("placed_on_target", "set it down within 1 cm of the cell's centre, upright"),
-) + LIFT_CRITERIA
+    ("others_still", "leave everything else on the board where it was (within 1 mm)"),
+    ("clean_placement", "let go without a pad touching it or the table"),
+)
+#: D6's bound on the other objects (`evaluation.panel_routes.PanelRoutePolicy`).
+PLACE_OTHERS_MOVED_MAX_M = 0.001
 
 
 def _judge_lift(proposal, crane: Dict[str, Any], end: str,
@@ -1165,9 +1183,15 @@ def _judge_place(proposal, crane: Dict[str, Any], end: str,
                     "I carried it back and set it down where I picked it up"
                     + _drag_clause(rep) + f". My arm is at {end}."),
             evidence=evidence)
+    held = crane.get("lifted_and_held") or {}
+    others = evidence.get("others_moved_m") or {}
+    worst = max(others.values(), default=0.0)
+    criteria = dict(criteria, others_still=worst <= PLACE_OTHERS_MOVED_MAX_M)
     numbers = (f"It is {place.get('error_from_target_mm', float('nan')):.1f} mm from "
                f"the centre of {cell}, tilted {place.get('tilt_deg', 0.0):.1f} degrees"
-               + _drag_clause(rep) + ".")
+               + _drag_clause(rep) + "; nothing else moved more than "
+               f"{1000 * worst:.1f} mm, and it slipped {held.get('in_hand_slip_mm', 0):.2f} mm "
+               "in my hand during the hold (reported, not judged).")
     failed = [text for key, text in PLACE_CRITERIA if not criteria.get(key)]
     if failed:
         return ExecutionResult(

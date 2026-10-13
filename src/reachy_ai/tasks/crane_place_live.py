@@ -114,13 +114,22 @@ class PlaceSpec:
     min_transfer_m: float = 0.02
     #: The whole attempt, pick to PRESENT (the lift's is 300 s).
     max_attempt_s: float = 480.0
+    #: Where the set-down is AIMED, against the cell centre D6 measures from:
+    #: ``aim_m`` toward the point ``aim_toward_xy`` (world, m).  0 aims at
+    #: the centre.  See `PLACE_AIM` for the placement's own.
+    #: #174 option 3: the set-down margin from the shoulder-roll stop is under
+    #: 2 deg, and the release drag also pushes toward the robot, so aiming
+    #: there costs ~0.8 mm of D6 error per mm.  1 mm toward the robot's base
+    #: kept the offline D6 error <= 5.7 mm (10 starts) for ~0.2 deg of margin.
+    aim_m: float = 0.001
+    aim_toward_xy: Tuple[float, float] = (0.0, 0.0)
 
 
 @dataclass
 class PlacePlan:
     object_id: str
     target_cell: str
-    target: np.ndarray                 # where the object's centre will stand
+    target: np.ndarray                 # where the object's centre is aimed to stand
     spec: PlaceSpec
     pick: CP.CranePlan
     dest: CP.CranePlan
@@ -129,6 +138,13 @@ class PlacePlan:
     rel: Tuple[np.ndarray, np.ndarray]  # the hold the destination was solved for
     hold_source: str = "predicted"
     checks: Dict[str, object] = field(default_factory=dict)
+    #: The cell's centre: what D6 measures the placement from (the aim may
+    #: differ from it by `PlaceSpec.aim_m`).
+    cell_centre: Optional[np.ndarray] = None
+
+    @property
+    def centre(self) -> np.ndarray:
+        return self.target if self.cell_centre is None else self.cell_centre
 
     @property
     def cell(self) -> str:
@@ -143,12 +159,14 @@ class PlacePlan:
         return [self.pick.rungs[self.carry_rung], self.dest.rungs[self.carry_rung]]
 
     def setdown(self, frm: Optional[int] = None) -> List[List[float]]:
+        """Down the destination ladder to its floor (`CranePlan.floor_rung`)."""
         top = self.carry_rung if frm is None else frm
-        return [self.dest.rungs[k] for k in range(top, -1, -1)]
+        return [self.dest.rungs[k] for k in range(top, self.dest.floor_rung - 1, -1)]
 
     def summary(self) -> Dict[str, object]:
         return {"object_id": self.object_id, "target_cell": self.target_cell,
                 "target": [round(float(v), 5) for v in self.target],
+                "cell_centre": [round(float(v), 5) for v in self.centre[:2]],
                 "carry_rung": self.carry_rung, "psi_deg": round(self.psi_deg, 3),
                 "hold_source": self.hold_source,
                 "hold_in_thumb_mm": (1000 * self.rel[1]).round(2).tolist(),
@@ -450,7 +468,8 @@ def plan_crane_place(planner, scene: SceneModel, object_id: str, target_cell: st
         raise CP.CraneRefused("destination", f"{target_cell} is not a grid cell")
     if "no-right-arm" in cell.tags:
         raise CP.CraneRefused("destination", f"{target_cell} is out of the right arm's reach")
-    tx, ty, _tz = scene.cell_center(cell_id)
+    cx, cy, _tz = scene.cell_center(cell_id)
+    tx, ty = aimed((cx, cy), place)
     # The cell must be free whatever the heading: nothing within the object's
     # footprint circle (plus the margin) of the cell centre.
     held = G.object_box(scene.get(object_id), *(() if pose is None else
@@ -488,7 +507,8 @@ def plan_crane_place(planner, scene: SceneModel, object_id: str, target_cell: st
             continue
         for c in place.carry_rungs:
             try:
-                pp = PlacePlan(object_id, cell_id, target, place, pick, dest, c, psi, rel)
+                pp = PlacePlan(object_id, cell_id, target, place, pick, dest, c, psi, rel,
+                           cell_centre=np.array([cx, cy]))
                 check_place(planner, scene, pp)
             except CP.CraneRefused as exc:
                 ev("place_carry_refused", carry_rung=c, psi_deg=round(psi, 1),
@@ -500,6 +520,52 @@ def plan_crane_place(planner, scene: SceneModel, object_id: str, target_cell: st
             return pp
     assert last is not None
     raise last
+
+
+def support_rung(dest: CP.CranePlan, rel: Tuple[np.ndarray, np.ndarray], obj: G.Box,
+                 offset: Sequence[float], table_z: float) -> int:
+    """The highest destination rung at which the held object, on the arm as
+    it is predicted to sit (commanded + the measured loaded offset), already
+    meets the table: where the set-down's lowering will stop.  0 if none."""
+    off = np.asarray(offset, dtype=float)
+    g = dest.spec.close_deg
+    for j in range(len(dest.rungs) - 1, -1, -1):
+        b = G.carried_box(G.hand_frames(np.asarray(dest.rungs[j]) + off, g), obj, rel)
+        if b.lowest_z <= table_z:
+            return j
+    return 0
+
+
+def replan_setdown(planner, scene: SceneModel, place: PlacePlan, dest: CP.CranePlan,
+                   shift: np.ndarray, at_rung: int, offset: Sequence[float]) -> CP.CranePlan:
+    """A set-down correction: ``dest`` (the destination ladder as flown)
+    moved by ``shift``, re-solved from ``at_rung`` up, and down only to one
+    rung past where the held object is predicted to meet the table -- the
+    rungs below are never commanded, since the lowering stops at support, and
+    the lowest of them stand against the shoulder-roll stop at r2c1 (live run
+    3, 2026-10-12: the correction failed there).  If that rung has no pose,
+    the contact rung itself.  Raises CraneRefused."""
+    contact = support_rung(dest, place.rel, place.pick.obj, offset, scene.table_surface_z)
+    tries = sorted({min(at_rung, max(0, contact - 1)), min(at_rung, contact)})
+    last: Optional[CP.CraneRefused] = None
+    for low in tries:
+        try:
+            return CP.replan(planner, scene, dest, shift, at_rung, lowest=low)
+        except CP.CraneRefused as exc:
+            last = exc
+    assert last is not None
+    raise last
+
+
+def aimed(centre_xy: Sequence[float], place: PlaceSpec) -> Tuple[float, float]:
+    """Where the set-down is aimed: the cell centre moved ``place.aim_m``
+    toward ``place.aim_toward_xy``."""
+    cx, cy = float(centre_xy[0]), float(centre_xy[1])
+    if place.aim_m <= 0.0:
+        return cx, cy
+    u = np.array([place.aim_toward_xy[0] - cx, place.aim_toward_xy[1] - cy])
+    u = u / (np.linalg.norm(u) or 1.0)
+    return cx + place.aim_m * float(u[0]), cy + place.aim_m * float(u[1])
 
 
 def headings_from(psi0: float, step: float = 15.0) -> List[float]:

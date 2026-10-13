@@ -248,7 +248,7 @@ def fly(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, dest: Optional[str] = "
     return {
         "outcome": out, "events": events,
         "final_object": [float(v) for v in p],
-        "error_mm": (1000 * PL.placement_error(p, plan.target) if plan is not None
+        "error_mm": (1000 * PL.placement_error(p, plan.centre) if plan is not None
                      else 1000 * PL.placement_error(p, p0)),
         "tilt_deg": tilt,
         "others_moved_max_mm": 1000 * max(others.values(), default=0.0),
@@ -257,6 +257,7 @@ def fly(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, dest: Optional[str] = "
         "withdrawal": (out.get("withdrawal") or {}).get("clean"),
         "way_out": (out.get("withdrawal") or {}).get("way_out"),
         "aborted": (out.get("place") or {}).get("aborted"),
+        "setdown_margin": (out.get("place") or {}).get("setdown_margin_deg"),
         "criteria": out.get("criteria"), "final": out.get("final"),
         "sim_s": clock.t,
         "states": states, "kept_events": kept,

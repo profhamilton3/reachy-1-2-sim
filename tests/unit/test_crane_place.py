@@ -51,7 +51,9 @@ def test_r2c2_to_r2c1_is_planned_end_to_end_at_the_place_attitude():
     pp = PL.plan_crane_place(planner, scene, "red_cube", "r2c1", seen)
     assert pp.pick.spec.tilt_deg == PL.PLACE_GRASP.tilt_deg == 63.0
     assert pp.dest.spec.release_retreat_m == pytest.approx(0.009)
-    assert np.hypot(*(pp.target[:2] - np.asarray(scene.cell_center("cell_r2c1")[:2]))) < 1e-9
+    centre = np.asarray(scene.cell_center("cell_r2c1")[:2])
+    assert np.hypot(*(pp.centre[:2] - centre)) < 1e-9          # D6 measures from here
+    assert np.hypot(*(pp.target[:2] - centre)) == pytest.approx(0.001)   # aimed 1 mm off
     held = pp.checks["held"]
     assert set(held) == {f"carry: climb to +{pp.carry_rung} (pickup ladder)",
                          f"carry: to r2c1 +{pp.carry_rung}",

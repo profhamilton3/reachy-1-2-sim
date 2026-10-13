@@ -378,6 +378,11 @@ class CranePlan:
     present: List[float]
     shift: np.ndarray = field(default_factory=lambda: np.zeros(3))
     insertion_rung: int = 0            # lowest rung with every pad above the top
+    #: The lowest rung a set-down may command (#174).  A placement's
+    #: correction re-solves the ladder only down to one rung past where the
+    #: held object is predicted to meet the table; the rungs below it are
+    #: never commanded (the lowering stops at support) and are not re-solved.
+    floor_rung: int = 0
     jaw_face_limit_deg: float = 0.0    # from the PLANNED pad slack (see jaw_face_limit_deg)
     checks: Dict[str, object] = field(default_factory=dict)
 
@@ -652,12 +657,15 @@ def plan_crane_pick(planner, scene: SceneModel, object_id: str,
 
 
 def replan(planner, scene: SceneModel, plan: CranePlan, shift: np.ndarray,
-           seed_rung: int) -> CranePlan:
+           seed_rung: int, lowest: int = 0) -> CranePlan:
     """The same ladder with its gap targets moved by ``shift`` (world, m).
 
     Re-solved by IK from the existing rungs (each rung keeps its own
     orientation as the target), and NOT checked here -- the caller runs
     ``check_crane_plan`` with the measured offset before commanding it.
+    ``lowest`` > 0 (a placement's set-down, #174) re-solves only the rungs
+    from there up: the ones below are never commanded, keep the lowest
+    solved pose, and the plan's ``floor_rung`` says so.
     """
     lim = plan.limits
     total = plan.shift + shift
@@ -681,17 +689,25 @@ def replan(planner, scene: SceneModel, plan: CranePlan, shift: np.ndarray,
     if got is None:
         raise CraneRefused("correction", f"IK found no corrected pose at rung +{seed_rung}")
     new[seed_rung] = got[0]
-    for k in list(range(seed_rung - 1, -1, -1)) + list(range(seed_rung + 1, len(targets))):
+    lowest = max(0, min(int(lowest), seed_rung))
+    for k in list(range(seed_rung - 1, lowest - 1, -1)) + list(range(seed_rung + 1, len(targets))):
         nb = new[k + 1] if k < seed_rung else new[k - 1]
         got = solve_gap(arm, rots[k], targets[k], plan.spec.opening_deg, nb,
                         lim.ik_position_tol_m, iters=20, relax=True)
         if got is None:
             raise CraneRefused("correction", f"IK found no corrected pose at rung +{k}")
         new[k] = got[0]
+    for k in range(lowest):
+        new[k] = list(new[lowest])           # never commanded (`floor_rung`)
     out = replace(plan, gap_targets=targets,
                   rungs=[new[k] for k in range(len(targets))], shift=total,
-                  checks={})
-    out.insertion_rung = _insertion_rung(out)
+                  checks={}, floor_rung=lowest)
+    try:
+        out.insertion_rung = _insertion_rung(out)
+    except CraneRefused:
+        if lowest == 0:
+            raise
+        out.insertion_rung = plan.insertion_rung
     return out
 
 
@@ -1274,8 +1290,9 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         sp = plan_.spec
         qm, gm = _read(arm)
         off = G.joint_offset(qm, st["cmd"])
-        lower = [st["cmd"]] + [plan_.rungs[j] for j in range(k_ - 1, -1, -1)] if k_ > 0 \
-            else [st["cmd"]]
+        floor_ = plan_.floor_rung
+        lower = [st["cmd"]] + [plan_.rungs[j] for j in range(k_ - 1, floor_ - 1, -1)] \
+            if k_ > floor_ else [st["cmd"]]
         dense = G.densify(lower, 0.05)
         # Both pads stay out of the table on the way down, predicted from the
         # loaded hand's measured offset: lower no further than that allows.
@@ -1305,10 +1322,13 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         o = observe()
         qm, gm = _read(arm)
         hm = G.hand_frames(qm, gm)
+        margin = joint_margins(st["cmd"])
+        st["setdown_margin"] = margin
         ev("SUPPORTED", reached=reached, object=list(o.position), quat=list(o.quat_wxyz),
            thumb_above_table_mm=round(1000 * (hm.thumb.lowest_z - scene.table_surface_z), 2),
            finger_above_table_mm=round(1000 * (hm.finger.lowest_z - scene.table_surface_z), 2),
-           grip_force_n=o.grip_force_n)
+           grip_force_n=o.grip_force_n, q_commanded=[round(v, 3) for v in st["cmd"]],
+           joint_margin_deg=margin)
         # Height of the hand above the grasp rung: where `above` sits now.
         z_cmd = G.hand_frames(st["cmd"], sp.close_deg).gap_mid[2]
         st["above"] = max([j for j in range(0, sp.hover_rungs + 1)
@@ -1366,6 +1386,10 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         Raises _Halt / CraneRefused (the caller aborts)."""
         from reachy_ai.tasks import crane_place_live as PL
 
+        # The pickup ladder AS FLOWN: the hover correction moved it, and the
+        # climb and an abort's way back are on it, not on the preflight's.
+        pl = replace(pl, pick=P_())
+        st["pickup_plan"] = P_()
         sp_ = pl.spec
         c = pl.carry_rung
         qm, gm = _read(arm)
@@ -1404,9 +1428,11 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                 ev("SETDOWN_MEASURE", **rec)
                 if err <= sp_.setdown_tolerance_m or i == sp_.setdown_corrections:
                     return
-                new = replan(planner, scene, P_(), e, rung)       # bounded: CraneRefused
                 qm_, gm_ = _read(arm)
                 off_ = G.joint_offset(qm_, st["cmd"])
+                # Re-solved only down to just past where the held object meets
+                # the table (bounded: CraneRefused).
+                new = PL.replan_setdown(planner, scene, cur_pl, P_(), e, rung, off_)
                 cand = replace(cur_pl, dest=new)
                 PL.check_place(planner, scene, cand, offset=off_, from_rung=rung)
                 move = [st["cmd"], new.rungs[rung]]
@@ -1471,7 +1497,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         for q in reversed(trail):
             stream(q, STEP_HZ, 0.1)
         st["carrying"], st["monitor"], st["aborting"] = False, False, False
-        cur["plan"] = place.pick
+        cur["plan"] = st.get("pickup_plan") or place.pick
         st["above"] = s.lift_rungs
         # The stop that caused this has been honoured: what is left -- set it
         # down, withdraw, go home -- is finished whatever is asked, as the
@@ -1642,7 +1668,10 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     at_destination = False
     if place is not None:
         outcome["place"] = {"target_cell": place.target_cell,
-                            "target": [round(float(v), 5) for v in place.target],
+                            # D6 measures from the cell's centre; the set-down
+                            # is aimed at `aim` (`PlaceSpec.aim_m` off it).
+                            "target": [round(float(v), 5) for v in place.centre[:2]],
+                            "aim": [round(float(v), 5) for v in place.target[:2]],
                             "carry_rung": place.carry_rung, "psi_deg": round(place.psi_deg, 2),
                             "corrections": [], "aborted": None}
         if lifted and hold_rec and hold_rec.get("ok"):
@@ -1728,11 +1757,12 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         "thumb_above_table_mm": round(1000 * (hm.thumb.lowest_z - scene.table_surface_z), 2),
         "finger_above_table_mm": round(1000 * (hm.finger.lowest_z - scene.table_surface_z), 2)}
     if place is not None:
-        err = math.hypot(float(o.position[0]) - float(place.target[0]),
-                         float(o.position[1]) - float(place.target[1]))
+        err = math.hypot(float(o.position[0]) - float(place.centre[0]),
+                         float(o.position[1]) - float(place.centre[1]))
         outcome["place"].update(at_destination=at_destination,
                                 error_from_target_mm=round(1000 * err, 2),
-                                tilt_deg=round(tilt, 3))
+                                tilt_deg=round(tilt, 3),
+                                setdown_margin_deg=st.get("setdown_margin"))
     ev("RELEASED", **outcome["replaced"])
 
     # ── withdraw: re-judged against where the object now is ────────────────
@@ -1759,6 +1789,19 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         return _end(outcome, ev, observe)
     outcome["criteria"] = _criteria(outcome, arm)
     return _finish(arm, robot, observe, outcome, ev, stow)
+
+
+def joint_margins(q: Sequence[float]) -> Dict[str, object]:
+    """How far a commanded pose stands from the joint stops (deg): the least
+    margin, its joint, and the shoulder roll's (the stop the r2c1 set-down
+    works against, #174)."""
+    from reachy_ai.motion.kinematics import joint_limits
+
+    m = {n: min(float(v) - a, b - float(v))
+         for n, v, (a, b) in zip(R_ARM_JOINTS, q, joint_limits("right"))}
+    worst = min(m, key=m.get)
+    return {"min_deg": round(m[worst], 3), "joint": worst,
+            "shoulder_roll_deg": round(m["r_shoulder_roll"], 3)}
 
 
 def _public(d):
