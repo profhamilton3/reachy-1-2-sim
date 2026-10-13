@@ -211,12 +211,15 @@ def test_the_roll_never_goes_past_the_measured_maximum():
 # ---------------------------------------------------------------------------
 
 #: The tightest point on each route, interpolated between consecutive
-#: waypoints, in both scenes.  SWING_1 past `rig_rail_outer_right` is the
-#: binding one, and it is narrow for everything that goes through it: the
-#: waypoint plans at +0.6 cm and flew at +0.2 and -0.2 (#74).  This is not a
-#: test for a comfortable margin — it is a test that the corridor is the one
-#: that was measured.
-_ROUTE_PATH_CM = 0.45
+#: waypoints, in both scenes (they share the rig).  This is not a test for a
+#: comfortable margin — it is a test that the corridor is the one that was
+#: measured, so a change to it is visible.
+#:
+#: It was 0.45, at the notebook's SWING_1 past `rig_rail_outer_right` (the
+#: waypoint planned +0.6 cm and flew at +0.2 and -0.2, #74).  SWING_1 was moved
+#: for margin (docs/adr/0006) and the tightest point is now the upper arm on
+#: SWING_3 -> HOVER, against the same rail.
+_ROUTE_PATH_CM = 2.57
 
 
 def test_the_route_it_flies_is_the_measured_corridor(pool_scene):

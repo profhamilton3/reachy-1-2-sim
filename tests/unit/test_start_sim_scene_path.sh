@@ -49,4 +49,29 @@ check "bare file" "other.yaml" "/opt/scenes/other.yaml"
 check "absolute path with subdirectory" "$TMP/scenes/e1_boards/B4.yaml" \
     "/opt/scenes/e1_boards/B4.yaml"
 
+# Issue #115: anything not textually under $REPO/scenes/ is refused, even
+# when the file exists -- it would otherwise give a SCENE_FILE the container
+# cannot find (the A1 pilot symptom, by another route).
+mkdir -p "$TMP/elsewhere"
+touch "$TMP/elsewhere/outside.yaml"
+ln -s "$TMP/scenes/other.yaml" "$TMP/elsewhere/link.yaml"
+refuse() {
+    local label="$1" scene_in="$2"
+    SCENE="" SCENE_FILE=""
+    if resolve_scene_path "$TMP" "$scene_in" 2>/dev/null; then
+        echo "FAIL ($label): accepted, SCENE_FILE=$SCENE_FILE"
+        fail=1
+    elif [ -n "$SCENE_FILE" ]; then
+        echo "FAIL ($label): refused but left SCENE_FILE=$SCENE_FILE"
+        fail=1
+    else
+        echo "ok ($label): refused"
+    fi
+}
+refuse "absolute path outside scenes/" "$TMP/elsewhere/outside.yaml"
+refuse "symlink from outside scenes/" "$TMP/elsewhere/link.yaml"
+refuse "doubled slash before scenes/" "$TMP//scenes/other.yaml"
+refuse "dot-dot segment" "$TMP/scenes/e1_boards/../other.yaml"
+refuse "missing file" "$TMP/scenes/nope.yaml"
+
 exit "$fail"

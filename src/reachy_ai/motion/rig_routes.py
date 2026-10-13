@@ -1,7 +1,8 @@
 """The measured pose set and routes for the FWD Center Lab rig (issue #64).
 
 Extracted from `notebooks/tlh_motion-routine.ipynb`, whose cell sources are the
-source of truth for every number here.  The notebook is preserved and is not
+source of truth for every number here but one: SWING_1 was moved for margin
+(#74, docs/adr/0006), and the notebook's pose is kept as `SWING_1_NOTEBOOK`.  The notebook is preserved and is not
 imported: importing it would execute its cells, which connect to a robot.
 
 WHY THESE NUMBERS CANNOT BE TIDIED
@@ -28,8 +29,11 @@ scene's own name rather than by claiming the arm is unavailable.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 #: Named postures.  `REST` is the forearm supported on the tabletop; `HOME` is
 #: stored in the rail pocket.  They are eleven waypoints apart, and the
@@ -82,6 +86,47 @@ SAFE_MARGIN = 0.05
 #: data neither this constant nor this commit has.
 FOOTPRINT_MARGIN = 0.0
 
+# ── The corridor margin (#74; owner decision D1, 2026-10-09) ────────────────
+#
+# The margin this project flies the rig corridor at, stated where a route can
+# be checked against it rather than left implicit in whether a run happened to
+# clear.  `check_route` enforces it for every route in `CORRIDOR_ROUTES`.
+#
+# Both figures use the model the planner enforces (`CartesianPlanner.
+# check_arm_path`): the TUBE hand (`kinematics.WHOLE_ARM_HAND_MODEL`), against
+# the manipulable objects and the rig rails -- `SceneModel.obstacle_ids(
+# include_static=True)`, which leaves out the tabletop, because REST lands on
+# it by design.  ADR-0003 measures the tube as up to 9 cm more conservative
+# than the MJCF hand; the margin is stated on it anyway, because it is the
+# model the guard flies.
+
+#: Worst clearance the COMMANDED route may plan, in metres: every leg of the
+#: full route, joint-space lines sampled at <= 2 degrees, each leg's hand sized
+#: to the wider of its two endpoint apertures.
+CORRIDOR_PLANNED_MARGIN = 0.020
+
+#: Worst clearance any FLIGHT may realise, in metres: the same model on the
+#: arm's own joint readings and realised aperture, sampled at 20 Hz through
+#: the whole flight, against the object poses the simulator reported.
+CORRIDOR_REALISED_MARGIN = 0.010
+
+#: The realised figure is the worst over at least this many flights.  Four was
+#: what #74 had, and four is not a distribution.
+CORRIDOR_MIN_FLIGHTS = 20
+
+#: Scenes where the corridor margin is REPORTED and NOT ENFORCED (owner
+#: decision, 2026-10-09, "Option B").  FWDCenterLabSivaPool's corridor was
+#: flown twenty times per route with the moved SWING_1 and did not meet the
+#: realised margin -- every reading under +2.31 cm came from a flight where
+#: `r_forearm_yaw` swung 24-52 deg off its command (docs/adr/0006 §3).  Until
+#: that fix lands, `check_route` there still names the shortfall but lets the
+#: route fly.  The forearm-yaw fix is what removes the scene from this tuple,
+#: with the re-flown figures in the rows.  Anywhere else the margin refuses.
+CORRIDOR_REPORT_ONLY_SCENES: Tuple[str, ...] = ()
+#: EMPTY since the forearm-yaw fix (docs/adr/0006 §5): FWDCenterLabSivaPool was
+#: listed from #170 until then, by owner decision ("Option B").  The tuple is
+#: kept so the exception, if ever needed again, is a visible owner decision.
+
 #: How far an object may move before the board counts as disturbed, in metres.
 #:
 #: ONE NUMBER, NOT THREE.  The live executor's post-move check, the episode
@@ -124,8 +169,27 @@ TUCK = pose(r_gripper=SHUT, r_shoulder_pitch=70.0,
             r_elbow_pitch=-120.0, r_wrist_pitch=-45.0)
 
 # 3. swing the folded unit forward and out over the rail
-SWING_1 = pose(r_gripper=SHUT, r_shoulder_pitch=37.5, r_shoulder_roll=-32.5,
-               r_elbow_pitch=-120.0, r_wrist_pitch=-45.0)
+#
+# SWING_1 IS THE ONE POSE THAT IS NOT THE NOTEBOOK'S (#74, owner decisions D1
+# and D2, 2026-10-09).  The notebook's crossing of `rig_rail_outer_right`
+# planned +0.6 cm at the pose and +0.4 cm along TUCK -> SWING_1 (tube hand),
+# and the physics arm's tracking error is the same size, so every flight read
+# a few millimetres negative (ADR-0002).  Searched, not eyeballed: about 170k
+# nearby poses, each leg in and out sampled at <= 2 deg against the objects,
+# the rails, the tabletop and the URDF torso.  The fold doing the work is the
+# ELBOW, -120 -> -125 (CURL's own fold): alone it takes the crossing from
+# +0.44 to +2.08 cm.  Five degrees of pitch, roll and arm yaw take it to +3.48,
+# where SWING_2 itself (+3.53, upper arm) becomes the ceiling.  The wrist is
+# untouched: opening it fouls the board's edge instead.  The tabletop goes
+# from -0.25 to +0.53 cm on the same legs.  See docs/adr/0006.
+#
+# The notebook's pose is kept, by name, because the notebook is still the
+# source of truth for every OTHER number here and is not edited.
+SWING_1_NOTEBOOK = pose(r_gripper=SHUT, r_shoulder_pitch=37.5,
+                        r_shoulder_roll=-32.5, r_elbow_pitch=-120.0,
+                        r_wrist_pitch=-45.0)
+SWING_1 = pose(r_gripper=SHUT, r_shoulder_pitch=32.5, r_shoulder_roll=-27.5,
+               r_arm_yaw=5.0, r_elbow_pitch=-125.0, r_wrist_pitch=-45.0)
 SWING_2 = pose(r_gripper=SHUT, r_shoulder_pitch=20.0, r_shoulder_roll=-35.0,
                r_elbow_pitch=-120.0, r_wrist_pitch=-45.0)
 SWING_3 = pose(r_gripper=SHUT, r_shoulder_pitch=-17.5, r_shoulder_roll=-37.5,
@@ -182,36 +246,52 @@ class Waypoint:
     guard: Optional[Tuple[str, ...]] = None
 
 
+#: The joints a corridor waypoint is judged on: the notebook's CRITICAL set
+#: (`CRITICAL_JOINTS`, below) plus the FOREARM YAW (#74, 2026-10-09).
+#:
+#: Forearm yaw was left out of CRITICAL as a weak joint that only spins the
+#: hand.  In the rig corridor that reasoning failed: it ran 24-52 deg off its
+#: commanded 0 in 8 of 80 corridor flights, and every reading under +2.31 cm
+#: of rig clearance came from those flights (docs/adr/0006 §3).  The cause was a
+#: simulator limit cycle, fixed in the model (joint armature, docs/adr/0006
+#: §5); this guard is what would catch the next thing that moves the hand off
+#: the shape the corridor was measured for.  Every corridor waypoint commands
+#: forearm yaw 0, so guarding it refuses nothing a healthy arm does.
+_CORRIDOR_GUARD: Tuple[str, ...] = (
+    "r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw", "r_elbow_pitch",
+    "r_wrist_pitch", "r_forearm_yaw",
+)
+
 #: Out of the pocket and onto the board.
 PLACE_ROUTE: Tuple[Waypoint, ...] = (
-    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.5, 25.0),
-    Waypoint("BACK", BACK, 3.0, TRACK_TOL),
-    Waypoint("CURL", CURL, 3.0, TRACK_TOL),
-    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL),
-    Waypoint("TUCK", TUCK, 2.0, TRACK_TOL),
-    Waypoint("SWING_1", SWING_1, 3.0, TRACK_TOL),
-    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL),
-    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL),
-    Waypoint("HOVER", HOVER, 2.5, TRACK_TOL),
-    Waypoint("REST_SHUT", REST_SHUT, 3.0, TRACK_TOL),
-    Waypoint("REST", REST, 3.0, TRACK_TOL),
+    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.5, 25.0, _CORRIDOR_GUARD),
+    Waypoint("BACK", BACK, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("CURL", CURL, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("TUCK", TUCK, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_1", SWING_1, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("HOVER", HOVER, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("REST_SHUT", REST_SHUT, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("REST", REST, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
 )
 
 #: The placement route run backwards.  Nothing may cut across it: a direct move
 #: from anywhere over the board to HOME drives the upper arm through the
 #: board's near edge.
 STOW_ROUTE: Tuple[Waypoint, ...] = (
-    Waypoint("REST_SHUT", REST_SHUT, 2.0, TRACK_TOL),
-    Waypoint("HOVER", HOVER, 2.0, TRACK_TOL),
-    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL),
-    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL),
-    Waypoint("SWING_1", SWING_1, 2.0, TRACK_TOL),
-    Waypoint("TUCK", TUCK, 3.0, TRACK_TOL),
-    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL),
-    Waypoint("CURL", CURL, 2.0, TRACK_TOL),
-    Waypoint("BACK", BACK, 3.0, TRACK_TOL),
-    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.0, 25.0),
-    Waypoint("HOME", HOME, 2.5, 25.0),
+    Waypoint("REST_SHUT", REST_SHUT, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("HOVER", HOVER, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("SWING_1", SWING_1, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("TUCK", TUCK, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("CURL", CURL, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("BACK", BACK, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
+    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.0, 25.0, _CORRIDOR_GUARD),
+    Waypoint("HOME", HOME, 2.5, 25.0, _CORRIDOR_GUARD),
 )
 
 # ── Getting to the presentation pose (notebook section 4) ───────────────────
@@ -399,6 +479,12 @@ class RouteValidation:
     route: str
     scene: str
     evidence: str
+    #: The corridor-margin figures (#74, D1).  Required to be present -- and
+    #: to meet the margin -- for a route in `CORRIDOR_ROUTES`; see
+    #: `corridor_shortfall`.  Metres, and a flight count.
+    planned_worst_m: Optional[float] = None
+    realised_worst_m: Optional[float] = None
+    flights: int = 0
 
 
 #: Routes proven in a scene by flying them there.
@@ -449,6 +535,16 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     ),
     # ── FWDCenterLabSivaPool, accepted 2026-09-10 ───────────────────────────
     #
+    # THE CORRIDOR ROWS CARRY THE CORRIDOR-MARGIN FIGURES (docs/adr/0006 §6):
+    # PLACE_ROUTE, STOW_ROUTE, RAISE_TO_SIDE and STOW_FROM_SIDE were re-flown 20
+    # times each on 2026-10-09 with the moved SWING_1 and the forearm-yaw fix,
+    # and `check_route` enforces the margin here again.  The 2026-09-10 text in
+    # each row is kept after the new evidence, as the superseded record.  The
+    # 2026-10-09 campaign flew the moved SWING_1 twenty times per route and did
+    # not meet the realised margin (PLACE_ROUTE +0.03 cm, STOW_FROM_SIDE -1.09
+    # cm, both on flights where r_forearm_yaw swung 46-52 deg off its command),
+    # so no figures were added.  The text below is the 2026-09-10 record.
+    #
     # THE DECISION THESE ROWS REST ON IS RECORDED IN docs/adr/0002.  In short:
     # the SWING_1 crossing has about 6 mm of modelled budget and the physics
     # arm's tracking error is the same size, so every flight of every route
@@ -468,6 +564,7 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     # about disturbance.
     RouteValidation(
         "RAISE_TO_SIDE", "FWDCenterLabSivaPool",
+        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.35, p5 +2.35, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
         "2026-09-10: HOME->PRESENT, flown SIX times, sampled at 20 Hz through "
         "the flight. Completed every time, 37-45 s; recognised at PRESENT on "
         "five of six (the sixth arrived 8-12 deg short, which is why "
@@ -476,13 +573,16 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
         "crossing of rig_rail_outer_right. Worst overall -2.55 to -4.41 cm, "
         "hand vs table_top, which is REST and is the route's INTENT. Board "
         "undisturbed all six runs, soda_can on r1c1 and foam_block on r2c3.",
+        planned_worst_m=0.02573, realised_worst_m=0.02352, flights=20,
     ),
     RouteValidation(
         "PLACE_ROUTE", "FWDCenterLabSivaPool",
+        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.35, p5 +2.35, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
         "2026-09-10: the first eleven waypoints of every RAISE_TO_SIDE flight "
         "above are this route, so its six flights are these six. Supersedes "
         "the rejection recorded in VALIDATION_ATTEMPTS, which measured the "
         "waypoints rather than the flight and had no objects on the board.",
+        planned_worst_m=0.02573, realised_worst_m=0.02351, flights=20,
     ),
     RouteValidation(
         "LIFT_TO_PRESENT", "FWDCenterLabSivaPool",
@@ -492,17 +592,21 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     ),
     RouteValidation(
         "STOW_FROM_SIDE", "FWDCenterLabSivaPool",
+        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.34, p5 +2.35, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
         "2026-09-10: PRESENT->HOME, flown three times, arrived at HOME every "
         "time, 32-34 s. Worst realised vs the rig -0.61, -0.62 and -0.69 cm at "
         "the same SWING_1 crossing; worst overall -2.77 to -3.36 cm vs "
         "table_top. Board undisturbed every run.",
+        planned_worst_m=0.02573, realised_worst_m=0.02337, flights=20,
     ),
     RouteValidation(
         "STOW_ROUTE", "FWDCenterLabSivaPool",
+        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.33, p5 +2.33, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
         "2026-09-10: REST->HOME, flown three times separately from the six "
         "STOW_FROM_SIDE legs that also fly it, arrived at HOME every time, "
         "33-39 s. Worst vs the rig -1.03, -1.15 and -1.58 cm. Board "
         "undisturbed. Supersedes the rejection in VALIDATION_ATTEMPTS.",
+        planned_worst_m=0.02573, realised_worst_m=0.02331, flights=20,
     ),
     RouteValidation(
         "LOWER_TO_REST", "FWDCenterLabSivaPool",
@@ -674,17 +778,67 @@ def validation_for(route: str, scene: str) -> Optional[RouteValidation]:
     return None
 
 
+#: (route, scene) pairs whose report-only shortfall has been logged in this
+#: process -- once each, because `check_route` runs on every panel request.
+_REPORTED: set = set()
+
+
+def corridor_shortfall(row: RouteValidation) -> str:
+    """Why this record does not meet the corridor margin, or "" if it does.
+
+    Every figure has to be there.  A row without them is the implicit margin
+    #74 was filed about: whatever a run happened to clear.
+    """
+    missing = [name for name, v in (("planned", row.planned_worst_m),
+                                    ("realised", row.realised_worst_m))
+               if v is None]
+    if missing:
+        return (f"it records no {' or '.join(missing)} worst clearance, so "
+                "there is nothing to hold to the margin")
+    short = []
+    if row.planned_worst_m < CORRIDOR_PLANNED_MARGIN:
+        short.append(f"planned {100 * row.planned_worst_m:+.2f} cm against "
+                     f"{100 * CORRIDOR_PLANNED_MARGIN:.1f} cm")
+    if row.realised_worst_m < CORRIDOR_REALISED_MARGIN:
+        short.append(f"realised {100 * row.realised_worst_m:+.2f} cm against "
+                     f"{100 * CORRIDOR_REALISED_MARGIN:.1f} cm")
+    if row.flights < CORRIDOR_MIN_FLIGHTS:
+        short.append(f"{row.flights} flights against {CORRIDOR_MIN_FLIGHTS}")
+    return "; ".join(short)
+
+
 def check_route(route: str, scene: str) -> Tuple[bool, str]:
     """May this route be flown in this scene?  (ok, why_not)
 
     The refusal names the scene rather than the arm.  "I cannot do that in this
     scene" sends someone to the compatibility record; "the arm is unavailable"
     sends them to the robot, which is fine.
+
+    A route that crosses the rig corridor needs more than a row: the row must
+    carry figures that meet the corridor margin (`corridor_shortfall`).  In a
+    scene listed in `CORRIDOR_REPORT_ONLY_SCENES` a shortfall is REPORTED, not
+    enforced: the answer is (True, note), the note naming the shortfall, and
+    it is logged once per route and scene.
     """
     if not route:
         return False, "that action names no route"
     row = validation_for(route, scene)
     if row is not None:
+        if route in CORRIDOR_ROUTES:
+            short = corridor_shortfall(row)
+            if short and scene in CORRIDOR_REPORT_ONLY_SCENES:
+                note = (f"REPORTED, NOT ENFORCED in {scene} (owner decision "
+                        f"2026-10-09, until the forearm-yaw fix): the {route} "
+                        f"route does not meet the corridor margin (#74): {short}")
+                if (route, scene) not in _REPORTED:
+                    _REPORTED.add((route, scene))
+                    log.warning("%s", note)
+                return True, note
+            if short:
+                return False, (
+                    f"the {route} route crosses the rig corridor at SWING_1, "
+                    f"and its record in {scene} does not meet the corridor "
+                    f"margin (#74): {short}")
         return True, ""
     tried = attempts_for(route, scene)
     if tried:
@@ -716,6 +870,57 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
                    "The endpoints matching does not mean the path between them "
                    "is clear, and this corridor is a few millimetres wide in "
                    "places.")
+
+
+#: The routes the corridor margin applies to: every one that flies SWING_1,
+#: the tightest crossing of the rig (`rig_rail_outer_right`, #74).  Computed,
+#: not listed, so a new route through the corridor cannot be left off.
+CORRIDOR_ROUTES: Tuple[str, ...] = tuple(sorted(
+    name for name, route in (("PLACE_ROUTE", PLACE_ROUTE),
+                             ("STOW_ROUTE", STOW_ROUTE),
+                             ("LIFT_TO_PRESENT", LIFT_TO_PRESENT),
+                             ("LOWER_TO_REST", LOWER_TO_REST),
+                             ("RAISE_TO_SIDE", RAISE_TO_SIDE),
+                             ("STOW_FROM_SIDE", STOW_FROM_SIDE))
+    if any(w.name == "SWING_1" for w in route)))
+
+
+def with_notebook_swing_1(route: Tuple[Waypoint, ...]) -> Tuple[Waypoint, ...]:
+    """`route` as it was flown before SWING_1 moved (docs/adr/0006).
+
+    For replaying recordings made before 2026-10-09: they passed the
+    notebook's SWING_1, and judging them against the moved one reads a flight
+    nobody made.  Never for commanding motion.
+    """
+    from dataclasses import replace
+    return tuple(replace(w, pose=SWING_1_NOTEBOOK) if w.name == "SWING_1" else w
+                 for w in route)
+
+
+#: How far the forearm yaw may sit off the first waypoint's before a corridor
+#: route refuses to start, in degrees.
+CORRIDOR_ENTRY_TOL = TRACK_TOL
+
+
+def corridor_entry_refusal(present: Dict[str, float],
+                           route: Tuple[Waypoint, ...]) -> str:
+    """Why a corridor route must not start from `present`, or "".
+
+    Only routes through SWING_1.  The first waypoint commands the forearm yaw
+    too, but an arm that is ALREADY off before the corridor is an arm whose
+    hand is not the shape the corridor was measured for -- the case #74's
+    flights started from at HOME -- and refusing at the door costs nothing,
+    where stopping between rails strands the arm.
+    """
+    if not route or not any(w.name == "SWING_1" for w in route):
+        return ""
+    want = route[0].pose.get("r_forearm_yaw", 0.0)
+    off = abs(present.get("r_forearm_yaw", want) - want)
+    if off <= CORRIDOR_ENTRY_TOL:
+        return ""
+    return (f"the forearm yaw is {off:.0f} deg off before the rig corridor "
+            f"(tolerance {CORRIDOR_ENTRY_TOL:.0f}), so the hand is not the shape "
+            "the corridor was measured for; I will not start this route")
 
 
 def route_named(name: str) -> Tuple[Waypoint, ...]:

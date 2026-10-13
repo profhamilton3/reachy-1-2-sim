@@ -1,0 +1,21 @@
+{
+  "cycle": "stage0-B4-s1",
+  "board": "B4",
+  "session": "s1",
+  "scene_rel": "scenes/e1_boards/B4_pool_box_1_r2c3.yaml",
+  "repo": "/Users/terrancehamilton/reachy-1-2-sim-stage2",
+  "repo_sha": "e6c30b74e09c38e616dee0819a7e205d12c5853e",
+  "required_sha": "3d7fc744f81eae14c39b70f22fab3c95fd02626d",
+  "merge_time_iso": "2026-09-16T02:20:18Z",
+  "generated_at": "2026-09-19T04:40:40.821575+00:00",
+  "lead_in_s": 3.0,
+  "compliance_timeout_s": 3.0,
+  "margin_s": 5.0,
+  "armon_leg": "stage0-B4-s1-armon",
+  "legs": {
+    "stage0-B4-s1-armon": {
+      "route": "RAISE_TO_SIDE",
+      "dur_s": 14.0
+    }
+  }
+}

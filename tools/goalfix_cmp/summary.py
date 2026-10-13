@@ -286,7 +286,7 @@ def aggregate(
 #: Every pattern here is anchored to a real, cited source line -- never a
 #: bare word search. The old "lease acquisition" pattern matched nothing
 #: the native server ever logs (it logs "Execution lease granted to …",
-#: server.py:1059); "pause" was a bare substring that happened to match
+#: server.py:1072); "pause" was a bare substring that happened to match
 #: unrelated log noise. Both are fixed below.
 #:
 #: MB7 (merge verdict, 2026-09-25 stage-repairs assignment §3; owner
@@ -317,7 +317,7 @@ TRIPWIRE_SOURCES: Dict[str, str] = {
     # wording ("ack mismatch or other STOP"); the old pattern matched only
     # the first.
     "reset_sh_mismatch": "reset_sh",
-    # "Execution lease granted to %r (mover %r, %.0fs)" (server.py:1059).
+    # "Execution lease granted to %r (mover %r, %.0fs)" (server.py:1072).
     "lease_acquisition": "native",
     # "Server error: [%s] %s" % ("control_held", …) -- the BRIDGE's own
     # log of a native refusal sent to ITS connection
@@ -341,7 +341,7 @@ _TRIPWIRE_PATTERN_TEXT: Dict[str, str] = {
 #: checkpoint/final. Blind spots are ALWAYS listed, never folded into a
 #: 0 count.
 MB7_OBSERVABLE_SCOPE: Dict[str, str] = {
-    "lease_acquisition": "native log: 'Execution lease granted to %r' (server.py:1059)",
+    "lease_acquisition": "native log: 'Execution lease granted to %r' (server.py:1072)",
     "control_held_refusal": ("bridge log: 'Server error: [control_held]' "
                               "(mujoco_remote_backend.py:486-488)"),
     "pause": ("states.jsonl: rows with paused==true (server.py:863), plus "
@@ -372,7 +372,7 @@ TRIPWIRE_SOURCE_LINES: Dict[str, tuple] = {
     "reset_sh_mismatch": (
         ("scripts/e1_stage1/reset.sh", 50, "STOP: reset $GEN not verified"),),
     "lease_acquisition": (
-        ("native_mujoco/server.py", 1059, "Execution lease granted to %r"),),
+        ("native_mujoco/server.py", 1072, "Execution lease granted to %r"),),
     "control_held_refusal": (
         ("mujoco_remote_backend.py", 486, "Server error: [%s] %s"),),
 }

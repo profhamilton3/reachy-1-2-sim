@@ -249,3 +249,74 @@ def test_the_worker_reads_the_arm_state_without_commanding_it():
     assert st["motors_on"] is True and st["gripper_deg"] == -65.0
     assert len(st["joints_deg"]) == 7
     assert not any(hasattr(getattr(a, n), "goal_position") for n in R_ARM_JOINTS)
+
+
+# ---------------------------------------------------------------------------
+# #174: the placement, through the panel
+# ---------------------------------------------------------------------------
+
+def _place():
+    return Proposal(plan_id="p", plan_version=0, task_type="place_on_cell",
+                    target_id="red_cube", destination="cell:r2c1",
+                    destination_kind="cell", brief_reason="", arm="right",
+                    route="CRANE_PLACE", route_version=1, object_id="red_cube",
+                    cell="r2c1", summary="move red_cube to r2c1")
+
+
+def test_the_place_request_reads_back_and_needs_both_slots():
+    act = Action(ability="place_on_cell", arguments={abilities.SLOT_OBJECT: "red cube",
+                                                     abilities.SLOT_CELL: "r2c1"})
+    ok, why = act.reads_back()
+    assert ok, why
+    assert Action(ability="place_on_cell",
+                  arguments={abilities.SLOT_OBJECT: "red cube"}).as_command() == ""
+
+
+def test_a_placement_is_judged_by_its_criteria_including_d6():
+    from panel_executor import PLACE_CRITERIA, _judge_place
+    crane = {"criteria": {k: True for k, _ in PLACE_CRITERIA},
+             "place": {"target_cell": "cell_r2c1", "error_from_target_mm": 3.9,
+                       "tilt_deg": 0.1, "aborted": None, "at_destination": True},
+             "replaced": {"release_drag_mm": 3.8}}
+    done = _judge_place(_place(), crane, "present", {})
+    assert done.status == "completed"
+    assert "moved red_cube to r2c1" in done.detail and "3.9 mm from the centre" in done.detail
+    crane["criteria"]["placed_on_target"] = False
+    off = _judge_place(_place(), crane, "present", {})
+    assert off.status == "failed" and "within 1 cm of the cell's centre" in off.detail
+
+
+def test_a_placement_follows_d6_and_only_reports_the_slip():
+    """Live run 2 (2026-10-12) met D6 and was answered "failed" on the lift's
+    0.1 mm slip criterion.  D6 does not judge slip: it is reported."""
+    from panel_executor import _judge_place
+    crane = {"criteria": {"placed_on_target": True, "clean_placement": True,
+                          "slip_within_resolution": False, "retained_height": False},
+             "lifted_and_held": {"in_hand_slip_mm": 0.113},
+             "place": {"target_cell": "cell_r2c1", "error_from_target_mm": 3.2,
+                       "tilt_deg": 0.0, "aborted": None, "at_destination": True},
+             "replaced": {"release_drag_mm": 3.1}}
+    out = _judge_place(_place(), crane, "present", {"others_moved_m": {"soda_can": 0.0004}})
+    assert out.status == "completed"
+    assert "slipped 0.11 mm in my hand during the hold (reported, not judged)" in out.detail
+    moved = _judge_place(_place(), crane, "present", {"others_moved_m": {"soda_can": 0.0012}})
+    assert moved.status == "failed" and "within 1 mm" in moved.detail
+
+
+def test_an_aborted_placement_says_where_the_object_is():
+    from panel_executor import PLACE_CRITERIA, _judge_place
+    crane = {"criteria": {k: k != "placed_on_target" for k, _ in PLACE_CRITERIA},
+             "place": {"target_cell": "cell_r2c1", "aborted": "aborted by the caller"},
+             "replaced": {"release_drag_mm": 8.0}}
+    out = _judge_place(_place(), crane, "present", {})
+    assert out.status == "failed"
+    assert "carried it back and set it down where I picked it up" in out.detail
+
+
+def test_the_worker_flies_the_placement_with_the_crane():
+    import inspect
+    src = inspect.getsource(motion_worker.run_ability)
+    assert '"place_on_cell": lambda a, **kw: _crane_lift(' in src
+    assert 'place=crane.get("place")' in inspect.getsource(motion_worker._crane_lift)
+    assert "SETDOWN_MEASURE" in motion_worker.KEPT_CRANE_EVENTS
+    assert "ABORT" in motion_worker.KEPT_CRANE_EVENTS

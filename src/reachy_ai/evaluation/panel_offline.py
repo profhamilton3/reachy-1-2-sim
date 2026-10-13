@@ -43,9 +43,10 @@ import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+from reachy_ai.evaluation import contact_rules as CR
 from reachy_ai.evaluation.panel_routes import (
-    ABILITY_ROUTES, COLLIDABLE_KEY, CONTACT_BODIES_KEY, PanelRoutePolicy,
-    align_to_parameters, evaluate,
+    ABILITY_ROUTES, COLLIDABLE_KEY, CONTACT_BODIES_KEY, CONTACT_SAMPLES_KEY,
+    PanelRoutePolicy, align_to_parameters, evaluate,
 )
 from reachy_ai.experience.models import (
     EpisodeConfig, EpisodeResult, PanelRouteTaskSpec, SimulatorIdentity,
@@ -57,25 +58,21 @@ from reachy_ai.motion.recipe_executor import (
 )
 
 #: Robot geoms are contype 2.  The runner's own forbidden-contact counter pairs
-#: that with contype 8 (fixtures) — and THAT PAIR MATCHES NOTHING IN THE SCENES
-#: THIS DRIVER RUNS.  `FWDCenterLabSivaPool` has three collision groups: the
-#: world and pedestal (1), the robot (2), and the manipulable objects (4).
-#: There is no contype 8 geom anywhere in it, so "no forbidden contact" out of
-#: an episode there means "there was nothing tagged as a fixture to hit", not
-#: "the arm kept clear".  This module therefore tallies robot-to-ANYTHING
-#: contact by body name and reports what was collidable, so a clean record can
-#: be told from an empty question.
+#: that with contype 8 (fixtures) only, and the group tagging is not what
+#: decides what an ability may touch: the table is contype 4, like the objects.
+#: Until #172 the offline `FWDCenterLabSivaPool` world had no table and no
+#: rails at all (`_load_world` skipped `extends:`), so "no contact" there meant
+#: "nothing to hit".  This module therefore tallies robot-to-ANYTHING contact
+#: by body name, tags it with phase and posture for the rule table, and reports
+#: what was collidable, so a clean record can be told from an empty question.
 _ROBOT_CONTYPE = 2
 
-#: Bodies the rest route is MEANT to touch.
+#: Bodies the rest route is MEANT to touch, for the older per-body judgement.
 #:
-#: EMPTY, AND NOT BECAUSE RESTING TOUCHES NOTHING.  REST is the forearm
-#: supported on the tabletop, and in the real rig it does touch.  In the
-#: simulated scenes the tabletop is part of the world body rather than a
-#: separate collidable fixture, and measured across the whole route the arm
-#: registers no contact at all.  Naming `table_top` here would be declaring an
-#: intention about a body that does not exist, which reads in a verdict as
-#: though the contact happened and was allowed.
+#: EMPTY, and no longer consulted for runs from this driver: since #172 every
+#: run carries phase-tagged contacts, judged by the shared rule table, where
+#: the forearm on the board at REST is a declared route exception
+#: (`contact_rules.ROUTE_EXCEPTIONS`).  Kept for results recorded before that.
 REST_INTENDED_CONTACT: Tuple[str, ...] = ()
 
 
@@ -149,12 +146,11 @@ class OfflineRouteRunner:
     def _collidable_bodies(self) -> List[str]:
         """Non-robot bodies in this scene the arm could actually collide with.
 
-        An episode's contact record is only as meaningful as this list: in
-        `FWDCenterLabSivaPool` it is the world, the pedestal and the
-        manipulable objects — the rails and the board the corridor's geometry
-        was measured AGAINST are not collidable bodies at all.  A route that
-        reports no contact there has not been shown to keep clear of them; it
-        has been shown that they were not in the question.
+        An episode's contact record is only as meaningful as this list.  In
+        `FWDCenterLabSivaPool` it once held only the world, the pedestal and
+        the pool objects, because the offline world dropped the inherited
+        scene; since #172 it holds the table and the five rails too, so a
+        route that reports no contact has been shown to keep clear of them.
         """
         import mujoco
 
@@ -239,6 +235,27 @@ class OfflineRouteRunner:
             if other:
                 tally[other] = tally.get(other, 0) + 1
 
+    def _tagged_contacts(self, snap, raw: List[Tuple]) -> None:
+        """Add this step's robot contacts, tagged with the route's phase and
+        the posture the arm stands at, for the rule table (#172).
+
+        The posture is what the arm-on-board exception turns on (forearm on
+        the board only AT REST), so it is read per step, and only on steps
+        that have a robot contact to judge.
+        """
+        from reachy_ai.motion import rig_routes as R
+
+        robot = [c for c in snap.contacts
+                 if bool(c.contype1 & _ROBOT_CONTYPE) != bool(c.contype2 & _ROBOT_CONTYPE)]
+        if not robot:
+            return
+        deg = {j.get("name"): math.degrees(float(j.get("position_rad", 0.0)))
+               for j in snap.joints}
+        pose = R.posture_of(deg)
+        phase = CR.MEASURED_ROUTE_PHASES.get(self.route, CR.Phase.APPROACH)
+        for c in robot:
+            raw.append((c.body1, c.body2, phase, pose, c.dist))
+
     # -- one episode ------------------------------------------------------
 
     def run(self, recipe: TrajectoryRecipe, seed: int,
@@ -275,6 +292,7 @@ class OfflineRouteRunner:
         # measure drift against the wrong board.
         initial: Dict[str, List[float]] = {}
         tally: Dict[str, int] = {}
+        tagged: List[Tuple] = []
         counter = _SwingCounter(_amplitude_in(recipe))
 
         def watch(snap) -> None:
@@ -286,12 +304,18 @@ class OfflineRouteRunner:
                     if (o.get("object_id") or o.get("id"))
                 })
             self._fixture_bodies(snap, tally)
+            self._tagged_contacts(snap, tagged)
             if self.route == "WAVE":
                 counter.observe(snap)
 
         result = runner.run(commands, on_snapshot=watch, start_pose_rad=start)
         result.contact_summary = dict(result.contact_summary or {})
         result.contact_summary[CONTACT_BODIES_KEY] = tally
+        # THE SAME CONTACTS, tagged with phase and posture, for the shared
+        # rule table (#172).  The tally above stays: it is what older readers
+        # of the contact summary know.
+        result.contact_summary[CONTACT_SAMPLES_KEY] = [
+            s.to_dict() for s in CR.aggregate(tagged)]
         # WHAT COULD HAVE BEEN HIT, so that an empty tally can be read as "the
         # arm kept clear" rather than "there was nothing to keep clear of".
         result.contact_summary[COLLIDABLE_KEY] = self._collidable

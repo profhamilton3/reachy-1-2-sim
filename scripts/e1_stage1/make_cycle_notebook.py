@@ -4,7 +4,8 @@ protocol (`go_<leg>`, `recorder_<leg>.log`, `<leg>_done`, `binding_ok_<cycle>`
 / `binding_FAIL_<cycle>`) carried over from PR #117's reference generator
 (read-only, `~/reachy-1-2-sim-stage1/docs/reviews/probes-2026-09-15-e1-stage1-b4/
 control/tools/make_cycle_notebook.py`); the motion cell adds the W2
-fail-closed `cmd_seq` baseline, and cells 1-2 add the W3 timing constants and
+fail-closed `cmd_seq` baseline (a `CmdBaseline` from
+`e1_identity.capture_cmd_baseline`, bridge-restart-safe), and cells 1-2 add the W3 timing constants and
 W4 tree-provenance checks. This module only writes files: it never imports
 or executes a notebook, connects to an SDK, or starts a server.
 
@@ -333,15 +334,17 @@ if rec == "ready":
 if rec == "ready" and LEG["start_check"]["ok"]:
     LEG["t_start_mono_ns"] = time.monotonic_ns(); LEG["t_start_wall_ns"] = time.time_ns()
     phases = []
-    baseline = e1_identity._read_last_state(pathlib.Path(ident.run_dir) / "states.jsonl")
-    baseline_cmd_seq = (baseline or {{}}).get("cmd_seq")
-    if isinstance(baseline_cmd_seq, bool) or not isinstance(baseline_cmd_seq, int):
-        LEG["outcome"] = "STOP no_valid_baseline_cmd_seq"; LEG["baseline"] = repr(baseline_cmd_seq)
+    # Bridge-restart-safe baseline (a004): byte offsets + baseline cmd_seq/seq,
+    # captured immediately before turn_on; invalid -> STOP, no turn_on.
+    cmd_baseline, baseline_why = e1_identity.capture_cmd_baseline(ident.run_dir)
+    if cmd_baseline is None:
+        LEG["outcome"] = "STOP no_valid_baseline_cmd_seq"; LEG["baseline"] = baseline_why
         (CTRL / "stop").write_text(json.dumps(LEG, default=str))
     else:
+        LEG["cmd_baseline"] = cmd_baseline.as_dict()
         reachy.turn_on("r_arm")
         chk = e1_identity.require_compliance(ident.run_dir, R.R_JOINTS, compliant=False,
-                                             timeout_s=COMPLIANCE_TIMEOUT_S, min_cmd_seq=baseline_cmd_seq)
+                                             timeout_s=COMPLIANCE_TIMEOUT_S, cmd_baseline=cmd_baseline)
         LEG["compliance_check"] = chk.as_dict(); print("compliance:", chk.as_dict())
         if chk.ok:
             try:
@@ -394,15 +397,17 @@ LEG["recorder_status"] = rec; print("recorder status:", rec)
 if rec == "ready":
     time.sleep(LEAD_IN_S)
     LEG["t_start_mono_ns"] = time.monotonic_ns(); LEG["t_start_wall_ns"] = time.time_ns()
-    baseline = e1_identity._read_last_state(pathlib.Path(ident.run_dir) / "states.jsonl")
-    baseline_cmd_seq = (baseline or {{}}).get("cmd_seq")
-    if isinstance(baseline_cmd_seq, bool) or not isinstance(baseline_cmd_seq, int):
-        LEG["outcome"] = "STOP no_valid_baseline_cmd_seq"; LEG["baseline"] = repr(baseline_cmd_seq)
+    # Bridge-restart-safe baseline (a004): byte offsets + baseline cmd_seq/seq,
+    # captured immediately before turn_on; invalid -> STOP, no turn_on.
+    cmd_baseline, baseline_why = e1_identity.capture_cmd_baseline(ident.run_dir)
+    if cmd_baseline is None:
+        LEG["outcome"] = "STOP no_valid_baseline_cmd_seq"; LEG["baseline"] = baseline_why
         (CTRL / "stop").write_text(json.dumps(LEG, default=str))
     else:
+        LEG["cmd_baseline"] = cmd_baseline.as_dict()
         reachy.turn_on("r_arm")
         chk = e1_identity.require_compliance(ident.run_dir, R.R_JOINTS, compliant=False,
-                                             timeout_s=COMPLIANCE_TIMEOUT_S, min_cmd_seq=baseline_cmd_seq)
+                                             timeout_s=COMPLIANCE_TIMEOUT_S, cmd_baseline=cmd_baseline)
         LEG["compliance_check"] = chk.as_dict(); print("compliance:", chk.as_dict())
         LEG["outcome"] = "returned" if chk.ok else "STOP compliance_check"
         if not chk.ok:

@@ -58,6 +58,7 @@ the answer.  It is never `completed` — nothing in here has seen the board.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -112,6 +113,7 @@ class Connection:
         self._port = port
         self._sdk_class = sdk_class
         self._robot = None
+        self.command_poll_fixed: Optional[bool] = None
 
     def robot(self):
         if self._robot is not None:
@@ -131,6 +133,10 @@ class Connection:
         cls = self._sdk_class
         if cls is None:
             from reachy_sdk import ReachySDK
+            from reachy_ai.sdk_compat import fix_command_poll
+            # This connection lives across jobs; the stock poll leaks per
+            # command (see sdk_compat).
+            self.command_poll_fixed = fix_command_poll()
             cls = ReachySDK
         self._robot = cls(host=self._host, sdk_port=self._port)
         time.sleep(CONNECT_SETTLE_S)
@@ -225,7 +231,7 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
     # (whole arm, table, both pads, the carried object) from the raised pose
     # with the IK service alone; a refusal here leaves the arm untouched.
     crane: Dict[str, Any] = {}
-    if job.get("task_type") == "lift_object":
+    if job.get("task_type") in ("lift_object", "place_on_cell"):
         refused = _crane_preflight(job, arm, phase, crane)
         if refused is not None:
             return refused
@@ -281,6 +287,7 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
               "point_cell": point,
               "point_object": point,
               "lift_object": lambda a, **kw: _crane_lift(robot, a, phase, crane, **kw),
+              "place_on_cell": lambda a, **kw: _crane_lift(robot, a, phase, crane, **kw),
               }.get(job.get("task_type"))
     if runner is None:
         return _fail(f"I have no runner wired up for {job.get('task_type')}")
@@ -310,30 +317,42 @@ OBSERVATION_STALE_S = 0.5
 
 
 def _observer(object_id: str):
-    """`tasks.crane_pick_live.Observe` over what the parent forwards."""
+    """`tasks.crane_pick_live.Observe` over what the parent forwards.  The
+    age is end to end (since SimLink ingested it, in the panel process; same
+    container kernel, same CLOCK_MONOTONIC), and a stale one says why."""
+    from reachy_ai.feedback import latest as L
     from reachy_ai.tasks.crane_pick_live import Observation
 
     def observe():
-        obs, at = OBSERVATIONS.latest()
+        r = OBSERVATIONS.latest()
+        now = time.monotonic()
+        obs = r.value if r is not None else None
         if obs is None or obs.get("object_id") != object_id or len(obs.get("quat_wxyz") or ()) != 4:
             # No feedback is reported as STALE feedback, which halts a move
             # rather than letting it continue blind.
-            return Observation((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), 0.0, False, 1e9)
+            return Observation((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), 0.0, False, 1e9,
+                               stale_reason=L.NO_OBSERVATION)
         g = (obs.get("grippers") or {}).get("right") or {}
         return Observation(tuple(obs["position"]), tuple(obs["quat_wxyz"]),
                            float(g.get("grip_force_n", 0.0)), bool(g.get("grasping")),
-                           time.monotonic() - at + float(obs.get("age_s", 0.0)))
+                           r.age_s(now),
+                           stale_reason=L.stale_reason(r, now, OBSERVATION_STALE_S))
     return observe
 
 
 #: The crane events kept in the panel's evidence (every MEASURE is not: the
 #: hover and grasp-depth ones are, with the corrections, the straddle, the
-#: hold, the placement and the withdrawal).  Phases are live lines; this is
-#: what remains on the task afterwards.
-KEPT_CRANE_EVENTS = ("CORRECTION", "CORRECTION_COMMANDED", "ALIGNED", "ALIGN_REFUSED",
+#: hold, the placement and the withdrawal).  Phases are live lines AND kept
+#: (#172): the contact rules judge by phase, and the crane's own segment names
+#: are its phases (`evaluation.contact_rules.CRANE_PHASES`).
+KEPT_CRANE_EVENTS = ("phase", "CORRECTION", "CORRECTION_COMMANDED", "ALIGNED", "ALIGN_REFUSED",
                      "DESCENT_CHECK_FAILED", "STRADDLE", "CLOSED", "HELD", "SUPPORTED",
-                     "RELEASED", "WITHDRAWAL_JUDGED", "WITHDRAWAL_CORRECTION",
-                     "WITHDRAWN", "HALT", "REFUSED", "RETREAT_REFUSED")
+                     "RELEASED", "WITHDRAWAL_PRECHECK", "WITHDRAWAL_JUDGED",
+                     "WITHDRAWAL_CORRECTION",
+                     "WITHDRAWN", "HALT", "REFUSED", "RETREAT_REFUSED",
+                     # the placement (#174)
+                     "CARRY_PLANNED", "IN_HAND", "SETDOWN_MEASURE", "SETDOWN_CORRECTION",
+                     "ABORT", "RELEASE_RETREAT")
 
 
 def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
@@ -371,12 +390,33 @@ def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
             phase("lift: object resting on the table -- opening" if kw.get("reached")
                   else "lift: lowered as far as the pads allow -- opening")
         elif kind == "WITHDRAWAL_JUDGED":
-            r = kw["route"]
+            r = kw.get("route") or {}
             phase(f"lift: way out judged against the object where it now is -- pads "
-                  f"{r['route_thumb_mm']:.1f} / {r['route_finger_mm']:.1f} mm "
-                  f"({'clear' if kw['ok'] else 'NOT clear'})")
+                  f"{r.get('route_thumb_mm', float('nan')):.1f} / "
+                  f"{r.get('route_finger_mm', float('nan')):.1f} mm "
+                  + (f"(clear, {kw.get('way_out')})" if kw["ok"] else "(NOT clear)"))
+        elif kind == "WITHDRAWAL_PRECHECK":
+            phase(f"lift: grip let go; way out with the hand opened to "
+                  f"{kw['opening_deg']:.0f} deg -- "
+                  + (f"clear ({kw['way_out']})" if kw.get("ok") else "not clear"))
         elif kind == "WITHDRAWAL_CORRECTION":
-            phase(f"lift: shifting the way out by {mm(kw['shift_mm'])}")
+            what = "separating from the object by" if kw.get("way_out") == "separating" \
+                else "shifting the way out by"
+            phase(f"lift: {what} {mm(kw['shift_mm'] or [0, 0, 0])}")
+        elif kind == "CARRY_PLANNED":
+            phase(f"lift: the destination re-planned from where the object sits in my hand; "
+                  f"carrying it at +{kw.get('carry_rung')} cm")
+        elif kind == "SETDOWN_MEASURE":
+            phase(f"lift: the held object is {kw.get('error_mm', 0):.1f} mm from the cell's "
+                  f"centre ({kw.get('label')})")
+        elif kind == "SETDOWN_CORRECTION":
+            phase(f"lift: correcting the set-down by {mm(kw['shift_mm'])}")
+        elif kind == "ABORT":
+            phase(f"lift: not placing it -- {kw.get('reason')}; carrying it back to where "
+                  "I picked it up")
+        elif kind == "RELEASE_RETREAT":
+            phase("lift: backing my hand off the object as I let go" if kw.get("ok")
+                  else f"lift: letting go without backing off ({kw.get('reason')})")
         elif kind == "HALT":
             phase(f"lift: stopped -- {kw.get('reason')}")
         elif kind in ("REFUSED", "RETREAT_REFUSED"):
@@ -405,14 +445,53 @@ def _crane_preflight(job, arm, phase, crane: Dict[str, Any]) -> Optional[Dict[st
     o = observe()
     model.update_poses({oid: o.position})
     planner = CartesianPlanner(arm, scene=model)
+    if job.get("task_type") == "place_on_cell":
+        from reachy_ai.tasks import crane_place_live as PL
+        cell = job.get("cell") or ""
+        phase(f"lift: planning and checking the whole placement of {oid} on "
+              f"{cell.replace('cell_', '')} before moving")
+        try:
+            place = PL.plan_crane_place(planner, model, oid, cell, o,
+                                        on_event=_crane_phases(phase))
+        except CP.CraneRefused as exc:
+            return _fail(f"I will not move {oid} to {cell.replace('cell_', '')}: "
+                         f"{exc.stage}: {exc.reason}",
+                         refused_before_motion=True, stage=exc.stage)
+        crane.update(plan=place.pick, place=place, planner=planner, model=model,
+                     observe=observe, plan_record=plan_record(place))
+        return None
     phase(f"lift: planning and checking the whole lift of {oid} before moving")
     try:
         plan = CP.plan_crane_pick(planner, model, oid, o, on_event=_crane_phases(phase))
     except CP.CraneRefused as exc:
         return _fail(f"I will not lift {oid}: {exc.stage}: {exc.reason}",
                      refused_before_motion=True, stage=exc.stage)
-    crane.update(plan=plan, planner=planner, model=model, observe=observe)
+    crane.update(plan=plan, planner=planner, model=model, observe=observe,
+                 plan_record=plan_record(plan))
     return None
+
+
+def _jsonable(v):
+    return v.tolist() if hasattr(v, "tolist") else str(v)
+
+
+def plan_record(plan) -> Dict[str, Any]:
+    """What identifies the plan that flew (#172, D7: a planned route's
+    integrity is "preflight passed, plan hash recorded").  Made only after
+    `plan_crane_pick` (or, for a placement, `plan_crane_place`) returned, i.e.
+    after every preflight check passed; a refused plan never gets this far and
+    never moves the arm."""
+    summary = json.loads(json.dumps(plan.summary(), default=_jsonable))
+    digest = hashlib.sha256(json.dumps(summary, sort_keys=True,
+                                       separators=(",", ":")).encode()).hexdigest()
+    # A placement's plan is two ladders (the pickup's and the destination's).
+    rungs = summary.get("rungs") or (list((summary.get("pick") or {}).get("rungs") or ())
+                                     + list((summary.get("dest") or {}).get("rungs") or ()))
+    record = {"preflight_passed": True, "plan_sha256": digest, "rungs": len(rungs),
+              "object_id": summary.get("object_id")}
+    if summary.get("target_cell"):
+        record["target_cell"] = summary["target_cell"]
+    return record
 
 
 def _arm_state(arm) -> Dict[str, Any]:
@@ -437,9 +516,11 @@ def _crane_lift(robot, arm, phase, crane, *, should_abort=None, on_phase=None):
     kept: List[Dict[str, Any]] = []
     out = CP.execute_crane_pick(robot, crane["planner"], crane["model"], crane["plan"],
                                 crane["observe"], on_event=_crane_phases(phase, kept),
-                                should_abort=should_abort, stow=False)
-    crane["outcome"] = json.loads(json.dumps(dict(out, events=kept, arm_state=_arm_state(arm)),
-                                         default=lambda v: (v.tolist() if hasattr(v, "tolist") else str(v))))
+                                should_abort=should_abort, stow=False,
+                                place=crane.get("place"))
+    crane["outcome"] = json.loads(json.dumps(dict(out, events=kept, arm_state=_arm_state(arm),
+                                                  plan=crane.get("plan_record")),
+                                         default=_jsonable))
     held = out.get("lifted_and_held") or {}
     return [f"lift: {out.get('halt') or out.get('refusal') or 'completed the sequence'}",
             f"lift: held {held.get('rise_end_mm', 0) / 10:.1f} cm up" if held.get("rise_end_mm")
@@ -639,6 +720,16 @@ JOBS = {"ability": run_ability, "pick_place": run_pick_place}
 
 def run_job(job: Dict[str, Any], conn: Connection, *,
             emit: Phase = None, should_abort: Abort = None) -> Dict[str, Any]:
+    out = _run_job(job, conn, emit=emit, should_abort=should_abort)
+    # WHICH COMPATIBILITY FIXES THIS CONNECTION RAN WITH (#172), on every
+    # answer.  None means the connection never patched (a stub SDK, or no
+    # connection made); the run record says so rather than guessing.
+    out["command_poll_fixed"] = getattr(conn, "command_poll_fixed", None)
+    return out
+
+
+def _run_job(job: Dict[str, Any], conn: Connection, *,
+             emit: Phase = None, should_abort: Abort = None) -> Dict[str, Any]:
     _ensure_paths()
     try:
         from reachy_ai.motion.safety import gate_check
@@ -661,23 +752,27 @@ def run_job(job: Dict[str, Any], conn: Connection, *,
 # -- the process ----------------------------------------------------------
 
 class Observations:
-    """The latest observation the parent forwarded, and when it arrived."""
+    """The latest observation the parent forwarded (latest-wins), stamped
+    with when SimLink ingested it and when it arrived here."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._obs: Optional[Dict[str, Any]] = None
-        self._at = 0.0
+        from reachy_ai.feedback.latest import LatestSlot
+        self._slot = LatestSlot()
 
     def put(self, obs: Dict[str, Any]) -> None:
-        with self._lock:
-            self._obs, self._at = obs, time.monotonic()
+        now = time.monotonic()
+        # An older parent sends only the age at send; then the pipe is not
+        # counted, as before.
+        ingest = obs.get("ingest_mono", now - float(obs.get("age_s", 0.0)))
+        self._slot.put(obs, float(ingest), now)
 
     def latest(self):
-        with self._lock:
-            return self._obs, self._at
+        return self._slot.latest()
 
 
-#: Filled by `_reader`; read by the jobs that need live feedback.
+#: Filled by `_reader`; read by the jobs that need live feedback.  Built at
+#: import, and it needs `reachy_ai.feedback`, hence the path first.
+_ensure_paths()
 OBSERVATIONS = Observations()
 
 
@@ -686,21 +781,36 @@ def _reader(stream, jobs: "queue.Queue", cancel: threading.Event) -> None:
 
     It has to: the main thread is inside a blocking move for the whole time a
     Stop is worth sending.
+
+    DRAIN TO LATEST.  Each wake-up takes everything already in the pipe;
+    cancels and jobs are kept in order, and only the newest observation is
+    published.  After a pause of this whole process (a gen-2 GC), the first
+    read after it is the newest the parent sent, not a walk through the
+    backlog.
     """
-    for line in stream:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            message = json.loads(line)
-        except ValueError:
-            continue
-        if message.get("cancel"):
-            cancel.set()
-        elif "observe" in message:
-            OBSERVATIONS.put(message["observe"])
-        elif "job" in message:
-            jobs.put(message["job"])
+    from reachy_ai.feedback.latest import LineDrain, newest_of
+    drain = LineDrain(stream)
+    while True:
+        lines, eof = drain.next_batch()
+        messages = []
+        for line in lines:
+            try:
+                messages.append(json.loads(line))
+            except ValueError:
+                continue
+        controls, newest, _skipped = newest_of(
+            messages, lambda m: isinstance(m, dict) and "observe" in m)
+        for message in controls:
+            if not isinstance(message, dict):
+                continue
+            if message.get("cancel"):
+                cancel.set()
+            elif "job" in message:
+                jobs.put(message["job"])
+        if newest is not None:
+            OBSERVATIONS.put(newest["observe"])
+        if eof:
+            break
     jobs.put(None)                                # EOF: the parent is gone
 
 

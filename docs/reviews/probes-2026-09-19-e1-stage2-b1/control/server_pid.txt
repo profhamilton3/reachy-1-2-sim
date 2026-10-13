@@ -1,0 +1,1 @@
+mjpython pid 48843 (/Library/Frameworks/Python.framework/Versions/3.14/bin/python3.14 server.py --sc)

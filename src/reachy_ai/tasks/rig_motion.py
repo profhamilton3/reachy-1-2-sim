@@ -117,6 +117,9 @@ def fly_route(arm, route, *, should_abort: Abort = None, on_phase: Phase = None,
     clearance was measured FROM this one.
     """
     move = move or sdk_move
+    refusal = R.corridor_entry_refusal(present_pose(arm), route)
+    if refusal:
+        raise RouteError(refusal)
     flown: List[str] = []
     for wp in route:
         if should_abort is not None and should_abort():

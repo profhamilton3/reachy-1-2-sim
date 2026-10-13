@@ -553,3 +553,44 @@ def test_the_object_hover_is_reported_against_the_table(monkeypatch,
     # the object, which is where the pad sits relative to a different thing.
     assert "blue_cylinder at a 16 cm hover" in said[0], said
     assert "missed by 1.4 cm" in said[1]
+
+
+# -- #172: what the run record needs from this process ---------------------
+
+def test_every_job_says_whether_the_command_poll_was_fixed(monkeypatch):
+    from reachy_ai.motion import safety
+    monkeypatch.setattr(safety, "gate_check", lambda *a, **kw: True)
+    conn = _conn()
+    conn.command_poll_fixed = True
+    assert W.run_job({"kind": "juggle"}, conn)["command_poll_fixed"] is True
+    # A stub SDK never patches: None, not a guessed False.
+    assert W.run_job({"kind": "juggle"}, _conn())["command_poll_fixed"] is None
+
+
+def test_the_plan_record_is_preflight_passed_and_a_stable_hash():
+    import numpy as np
+
+    class Plan:
+        def __init__(self, shift):
+            self.shift = shift
+
+        def summary(self):
+            return {"object_id": "red_cube", "shift_mm": [self.shift, 0.0, 0.0],
+                    "rungs": [[0.1, 0.2], [0.3, 0.4]],
+                    "checks": {"margin": np.float64(0.012)}}
+
+    a, b, c = W.plan_record(Plan(1.0)), W.plan_record(Plan(1.0)), W.plan_record(Plan(2.0))
+    assert a["preflight_passed"] is True
+    assert len(a["plan_sha256"]) == 64 and a["plan_sha256"] == b["plan_sha256"]
+    assert c["plan_sha256"] != a["plan_sha256"]
+    assert a["rungs"] == 2 and a["object_id"] == "red_cube"
+
+
+def test_the_crane_phases_are_kept_for_the_contact_rules():
+    kept = []
+    on_event = W._crane_phases(lambda _n: None, kept)
+    on_event("phase", name="hold (2 s)")
+    on_event("MEASURE", label="descent rung", gap_error_mm=[0, 0, 0],
+             pads={"thumb_side_mm": 1.0, "finger_side_mm": 1.0})
+    assert [e["kind"] for e in kept] == ["phase"]
+    assert kept[0]["name"] == "hold (2 s)" and "t" in kept[0]

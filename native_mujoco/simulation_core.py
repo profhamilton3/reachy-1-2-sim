@@ -75,7 +75,6 @@ def _load_world(
     ``noslip_iterations`` optionally overrides the model file's no-slip
     setting (ADR-0005).
     """
-    import yaml
     from scene_compiler import (
         interactive_specs as _interactive_specs,
         tracked_object_ids,
@@ -83,13 +82,18 @@ def _load_world(
 
     if scene_path:
         log.info("Loading scene %s into model %s", scene_path, model_path)
+        # Resolve `extends:` first, exactly as native_mujoco/server.py does, then
+        # validate the RESULT.  Reading the raw file dropped every inherited
+        # object: FWDCenterLabSivaPool compiled with its six pool objects and
+        # without red_cube, blue_cylinder, soda_can or foam_block, so an offline
+        # world differed from the live one.
+        from scene_io import load_scene as _resolve_scene
+        scene_doc = _resolve_scene(scene_path)
         try:
             from scene_loader import load_scene
-            load_scene(scene_path)
+            load_scene(scene_path, document=scene_doc)
         except ImportError:
             log.debug("scene_loader unavailable; skipping validation")
-        with open(scene_path) as f:
-            scene_doc = yaml.safe_load(f)
         compiled_xml = build_scene_model_xml(scene_doc, model_path)
         model = mujoco.MjModel.from_xml_string(compiled_xml)
         cm = apply_contact_model(model, noslip_iterations)

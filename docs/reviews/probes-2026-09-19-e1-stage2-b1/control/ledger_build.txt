@@ -1,0 +1,50 @@
+stage0-B1-s1   armon   RAISE_TO_SIDE (label only)   contacts=0 disp_max=1.08e-07 gate=yes tail=STAGE0_INIT_OK=yes     sv=-          nb=returned el=0.06 pass
+S2-B1-a-r1     parked  RAISE_TO_SIDE                contacts=0 disp_max=1.79e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-a-r1     setup   RAISE_TO_SIDE                contacts=0 disp_max=6.3e-08 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=33.25 pass
+S2-B1-a-r1     flight  LOWER_TO_REST                contacts=0 disp_max=1.17e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=6.7 pass
+S2-B1-b-r1     parked  PLACE_ROUTE                  contacts=0 disp_max=2.42e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-b-r1     flight  PLACE_ROUTE                  contacts=0 disp_max=5.4e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.57 pass
+S2-B1-c-r1     parked  PLACE_ROUTE                  contacts=0 disp_max=2.42e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-c-r1     setup   PLACE_ROUTE                  contacts=0 disp_max=1.11e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.62 pass
+S2-B1-c-r1     flight  LIFT_TO_PRESENT              contacts=0 disp_max=3.37e-08 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=3.38 pass
+S2-B1-a-r2     parked  RAISE_TO_SIDE                contacts=0 disp_max=1.34e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-a-r2     setup   RAISE_TO_SIDE                contacts=0 disp_max=1.75e-07 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=33.27 pass
+S2-B1-a-r2     flight  LOWER_TO_REST                contacts=0 disp_max=1.97e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=6.7 pass
+S2-B1-b-r2     parked  PLACE_ROUTE                  contacts=0 disp_max=1.86e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-b-r2     flight  PLACE_ROUTE                  contacts=0 disp_max=4.05e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.61 pass
+S2-B1-c-r2     parked  PLACE_ROUTE                  contacts=0 disp_max=1.52e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-c-r2     setup   PLACE_ROUTE                  contacts=0 disp_max=2.91e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.59 pass
+S2-B1-c-r2     flight  LIFT_TO_PRESENT              contacts=0 disp_max=3.1e-07 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=3.38 pass
+S2-B1-a-r3     parked  RAISE_TO_SIDE                contacts=0 disp_max=3.5e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-a-r3     setup   RAISE_TO_SIDE                contacts=0 disp_max=3.04e-07 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=33.24 pass
+S2-B1-a-r3     flight  LOWER_TO_REST                contacts=0 disp_max=1.7e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=6.7 pass
+S2-B1-b-r3     parked  PLACE_ROUTE                  contacts=0 disp_max=1.92e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-b-r3     flight  PLACE_ROUTE                  contacts=0 disp_max=3.02e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.6 pass
+S2-B1-c-r3     parked  PLACE_ROUTE                  contacts=0 disp_max=2.29e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-c-r3     setup   PLACE_ROUTE                  contacts=0 disp_max=3.51e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=34.46 pass
+S2-B1-c-r3     flight  LIFT_TO_PRESENT              contacts=0 disp_max=2.89e-07 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=3.38 pass
+S2-B1-a-r4     parked  RAISE_TO_SIDE                contacts=0 disp_max=7.6e-08 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-a-r4     setup   RAISE_TO_SIDE                contacts=0 disp_max=4.65e-07 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=33.24 pass
+S2-B1-a-r4     flight  LOWER_TO_REST                contacts=0 disp_max=1.51e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=6.72 pass
+S2-B1-b-r4     parked  PLACE_ROUTE                  contacts=0 disp_max=1.46e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-b-r4     flight  PLACE_ROUTE                  contacts=0 disp_max=5.6e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=34.42 pass
+S2-B1-c-r4     parked  PLACE_ROUTE                  contacts=0 disp_max=2.68e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-c-r4     setup   PLACE_ROUTE                  contacts=0 disp_max=7.13e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.6 pass
+S2-B1-c-r4     flight  LIFT_TO_PRESENT              contacts=0 disp_max=7.18e-08 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=3.37 pass
+S2-B1-a-r5     parked  RAISE_TO_SIDE                contacts=0 disp_max=3.11e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-a-r5     setup   RAISE_TO_SIDE                contacts=0 disp_max=2e-07 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=33.23 pass
+S2-B1-a-r5     flight  LOWER_TO_REST                contacts=0 disp_max=3.51e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=6.7 pass
+S2-B1-b-r5     parked  PLACE_ROUTE                  contacts=0 disp_max=1.78e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-b-r5     flight  PLACE_ROUTE                  contacts=0 disp_max=5.21e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.65 pass
+S2-B1-c-r5     parked  PLACE_ROUTE                  contacts=0 disp_max=2.51e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-c-r5     setup   PLACE_ROUTE                  contacts=0 disp_max=2.44e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.64 pass
+S2-B1-c-r5     flight  LIFT_TO_PRESENT              contacts=0 disp_max=4.85e-07 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=3.38 pass
+S2-B1-a-r6     parked  RAISE_TO_SIDE                contacts=0 disp_max=3.34e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-a-r6     setup   RAISE_TO_SIDE                contacts=0 disp_max=1.01e-06 gate=yes tail=PARKED_AT_PRESENT=yes  sv=-          nb=returned el=33.85 pass
+S2-B1-a-r6     flight  LOWER_TO_REST                contacts=0 disp_max=2.11e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=6.71 pass
+S2-B1-b-r6     parked  PLACE_ROUTE                  contacts=0 disp_max=1.83e-07 gate=yes tail=PARKED_AT_HOME=NO      sv=stiff-zero nb=n/a      el= pass
+S2-B1-b-r6     flight  PLACE_ROUTE                  contacts=0 disp_max=4.87e-07 gate=yes tail=PARKED_AT_REST=yes     sv=-          nb=returned el=33.58 pass
+S2-B1-c-r6     parked  PLACE_ROUTE                  contacts= disp_max= gate= tail=                       sv=-          nb=n/a      el= NOT FLOWN (session stopped)
+S2-B1-c-r6     setup   PLACE_ROUTE                  contacts= disp_max= gate= tail=                       sv=-          nb=n/a      el= NOT FLOWN (session stopped)
+S2-B1-c-r6     flight  LIFT_TO_PRESENT              contacts= disp_max= gate= tail=                       sv=-          nb=n/a      el= NOT FLOWN (session stopped)
+rows=49 pass=46

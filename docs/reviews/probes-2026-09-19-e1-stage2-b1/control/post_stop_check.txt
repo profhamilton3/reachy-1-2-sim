@@ -1,0 +1,16 @@
+# post-stop read-only check 2026-09-19T11:20:24Z
+states.jsonl: 2397581429 bytes; commands.jsonl resets: 18
+last 2 reset entries:
+{"type":"reset","seed":null,"sim_step":397371,"wall_time_s":7595.043302297592}
+{"type":"reset","seed":null,"sim_step":282875,"wall_time_s":8160.797637224197}
+current last state:
+lines returned by tail -1: 1
+sim_step 20850 seq 410111 contacts []
+joints keys sample: <class 'list'>
+r_ joints (deg if rad): {}
+container:
+reachy-1-2-sim Up 2 hours
+18
+bridge connections on 8765: 4
+caffeinate: 3 assertions
+recorder running: 

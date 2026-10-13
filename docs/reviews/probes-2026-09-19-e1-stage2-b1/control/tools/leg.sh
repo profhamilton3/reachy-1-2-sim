@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# One recorded leg: recorder -> linker -> archive -> experiment gate -> tail
+# check. Every non-zero exit is a STOP (writes control/stop and exits
+# non-zero). DUR and the board's scene path are both read from
+# plan_<CYCLE>.json (single source of truth, plan.py's BOARDS registry),
+# never positional arguments -- adapted from PR #117's leg.sh
+# (control/tools/leg.sh), which took DUR on the command line and hard-coded
+# the B4 scene path (decision note
+# outputs/e1-stage2-decision-2026-09-15.md §6 item 1).
+#
+# The experiment gate (scripts/experiment_gate.py, PR #124 re-review R3) is
+# unconditional -- unlike the tail check, it STOPs in every MODE, not only
+# "end": a recorded contact or a disturbed board is a safety fact about the
+# leg that just flew, independent of that leg's position in the cycle. It
+# runs after the recording is archived to recorder_logs/, so a rejected
+# experiment's log and sidecar are preserved for review, not lost to the
+# STOP.
+#
+# All three python invocations below use $E1_PYTHON (default: python3),
+# not whatever "python3" resolves to on PATH. measure_route_clearance.py
+# imports reachy_sdk (M4, PR #120 review): the system python3 does not have
+# it, only the documented host SDK venv does (README calls it "e1venv",
+# reachy_sdk 0.7.0). Set E1_PYTHON to that venv's interpreter before running
+# this script, e.g.:
+#   export E1_PYTHON=/path/to/e1venv/bin/python3
+# Usage:
+#   leg.sh <repo> <evidence-dir> <cycle> <name> <ROUTE> <TAIL_TARGET> [start]
+set -u
+REPO=$1; P=$2; CYCLE=$3; NAME=$4; ROUTE=$5; TGT=$6; MODE=${7:-end}
+PY=${E1_PYTHON:-python3}
+stop() { echo "STOP: $1" | tee -a "$P/control/stop"; exit 9; }
+[ -f "$P/control/stop" ] && stop "stop marker already present"
+DUR=$("$PY" -c "import json,sys; print(json.load(open(sys.argv[1]))['legs'][sys.argv[2]]['dur_s'])" "$P/plan_${CYCLE}.json" "$NAME") \
+  || stop "could not read DUR for $NAME from $P/plan_${CYCLE}.json"
+SCENE_REL=$("$PY" -c "import json,sys; print(json.load(open(sys.argv[1]))['scene_rel'])" "$P/plan_${CYCLE}.json") \
+  || stop "could not read scene_rel for $CYCLE from $P/plan_${CYCLE}.json"
+cd "$REPO"
+REACHY_SIM_RECORD_CLEARANCE=1 "$PY" -u scripts/measure_route_clearance.py \
+  --route "$ROUTE" --duration "$DUR" --host localhost --scene "$REPO/$SCENE_REL" \
+  --record-root "$P/e1_server_runs" > "$P/control/recorder_$NAME.log" 2>&1
+rc=$?; echo "recorder exit=$rc" >> "$P/control/recorder_$NAME.log"
+[ $rc -eq 0 ] || stop "recorder $NAME exit $rc"
+LOG=$(grep -o 'Saved [0-9]* samples to .*' "$P/control/recorder_$NAME.log" | sed 's/.* to //')
+[ -f "$LOG" ] || stop "recorder $NAME: log not found ($LOG)"
+PYTHONPATH=src "$PY" scripts/link_e1_flight.py "$LOG" > "$P/control/linker_$NAME.txt" 2>&1
+rc=$?; echo "linker exit=$rc" >> "$P/control/linker_$NAME.txt"
+[ $rc -eq 0 ] || stop "linker $NAME exit $rc"
+mkdir -p "$P/recorder_logs"
+cp "$LOG" "${LOG%.json}.link.json" "$P/recorder_logs/"
+"$PY" scripts/experiment_gate.py "$LOG" > "$P/control/gate_$NAME.txt" 2>&1
+rc=$?; echo "gate exit=$rc" >> "$P/control/gate_$NAME.txt"
+[ $rc -eq 0 ] || stop "experiment gate $NAME rejected (see $P/control/gate_$NAME.txt): exit $rc"
+PYTHONPATH=src "$PY" scripts/e1_tail_check.py "$LOG" "$TGT" > "$P/control/tailcheck_${NAME}_$TGT.txt" 2>&1
+rc=$?; echo "tailcheck exit=$rc (mode=$MODE)" >> "$P/control/tailcheck_${NAME}_$TGT.txt"
+if [ "$MODE" = "end" ]; then [ $rc -eq 0 ] || stop "tailcheck $NAME $TGT exit $rc"; fi
+echo "LEG $NAME ok: $LOG"

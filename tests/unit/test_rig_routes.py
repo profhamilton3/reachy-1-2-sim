@@ -19,6 +19,7 @@ import pytest
 
 _HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(_HERE, "../../src"))
+sys.path.insert(0, os.path.join(_HERE, "../../web"))
 
 from reachy_ai.motion import rig_routes as R  # noqa: E402
 
@@ -101,7 +102,19 @@ def notebook():
     "SWING_1", "SWING_2", "SWING_3", "HOVER", "REST_SHUT", "REST", "PRESENT",
 ])
 def test_every_pose_matches_the_notebook(notebook, name):
-    assert getattr(R, name) == notebook[name], name
+    # SWING_1 is the one pose moved off the notebook (#74, docs/adr/0006); the
+    # notebook's own pose is kept as SWING_1_NOTEBOOK and is what must match.
+    mine = R.SWING_1_NOTEBOOK if name == "SWING_1" else getattr(R, name)
+    assert mine == notebook[name], name
+
+
+def test_swing_1_departs_from_the_notebook_on_four_named_joints_only():
+    moved = {j for j in R.SWING_1 if R.SWING_1[j] != R.SWING_1_NOTEBOOK[j]}
+    assert moved == {"r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
+                     "r_elbow_pitch"}
+    assert R.SWING_1["r_gripper"] == R.SHUT            # still shut through the rig
+    assert R.SWING_1["r_elbow_pitch"] == R.CURL["r_elbow_pitch"]   # CURL's fold
+    assert max(abs(R.SWING_1[j] - R.SWING_1_NOTEBOOK[j]) for j in moved) == 5.0
 
 
 def test_the_gripper_constants_match(notebook):
@@ -123,7 +136,10 @@ def test_route_waypoints_match_the_notebook(notebook, route_name):
     assert len(mine) == len(theirs)
     for got, (name, target, secs, tol) in zip(mine, theirs):
         assert got.name == name
-        assert got.pose == target, name
+        if name == "SWING_1":                      # moved for margin, #74
+            assert target == R.SWING_1_NOTEBOOK and got.pose == R.SWING_1
+        else:
+            assert got.pose == target, name
         assert got.seconds == secs, name
         assert got.tol == tol, name
 
@@ -167,27 +183,98 @@ def test_the_wave_is_bounded_and_relative_to_present():
 # ---------------------------------------------------------------------------
 
 def test_the_routes_are_validated_where_they_were_measured():
-    for route in ("PLACE_ROUTE", "STOW_ROUTE", "WAVE"):
-        ok, why = R.check_route(route, "FWDCenterLabMCC")
-        assert ok, why
-
-
-@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE"])
-def test_the_panel_scene_is_validated_on_flights_through_the_flight(route):
-    """FWDCenterLabSivaPool is where the panel runs, and it is listed now.
-
-    It was not, and the verdict changed on evidence rather than on wishing.
-    The first round sampled the WAYPOINTS of an empty board and found SWING_1
-    2 mm inside `rig_rail_outer_right`.  The second sampled at 20 Hz THROUGH
-    eighteen legs with objects on the board and found the same few millimetres
-    of graze and nothing moved, at the one rail #73 already documents as
-    disagreeing with the model in both directions.  See docs/adr/0002.
-    """
-    ok, why = R.check_route(route, "FWDCenterLabSivaPool")
+    ok, why = R.check_route("WAVE", "FWDCenterLabMCC")
     assert ok, why
+
+
+@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE",
+                                   "STOW_FROM_SIDE"])
+def test_the_notebook_scene_rows_do_not_meet_the_corridor_margin(route):
+    """FWDCenterLabMCC's evidence is the notebook, which flew the notebook's
+    SWING_1 and records no clearance figures.  Under the corridor margin
+    (#74, D1) that is a refusal that says why, not a silent pass."""
+    ok, why = R.check_route(route, "FWDCenterLabMCC")
+    assert not ok
+    assert "corridor margin (#74)" in why and "records no planned" in why
+
+
+_CORRIDOR = ["PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE", "STOW_FROM_SIDE"]
+
+
+def test_the_margin_is_enforced_everywhere_again():
+    assert R.CORRIDOR_REPORT_ONLY_SCENES == ()
+
+
+@pytest.mark.parametrize("route", _CORRIDOR)
+def test_the_panel_scene_corridor_meets_the_margin_on_its_own_figures(route):
+    """Re-flown 2026-10-09 with the forearm-yaw fix (docs/adr/0006 §5-6)."""
+    ok, why = R.check_route(route, "FWDCenterLabSivaPool")
+    assert (ok, why) == (True, "")
     row = R.validation_for(route, "FWDCenterLabSivaPool")
-    assert "2026-09-10" in row.evidence
-    assert "undisturbed" in row.evidence or "RAISE_TO_SIDE" in row.evidence
+    assert row.flights >= R.CORRIDOR_MIN_FLIGHTS
+    assert row.planned_worst_m >= R.CORRIDOR_PLANNED_MARGIN
+    assert row.realised_worst_m >= R.CORRIDOR_REALISED_MARGIN
+    assert row.evidence.startswith("2026-10-09")
+
+
+@pytest.mark.parametrize("route", _CORRIDOR)
+def test_each_rows_planned_figure_is_the_routes_geometry(route):
+    """The planned figure is not a number someone typed: it is the full
+    route's worst tube clearance against objects and rails, <= 2 deg legs."""
+    from reachy_ai.motion.kinematics import (hand_radius, joint_path,
+                                             link_capsules, sample_count)
+    from reachy_ai.scene.awareness import SceneModel
+    scene = SceneModel.from_yaml(os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml"))
+    ids = scene.obstacle_ids(include_static=True)
+    start = {"PLACE_ROUTE": R.HOME, "RAISE_TO_SIDE": R.HOME,
+             "STOW_ROUTE": R.REST, "STOW_FROM_SIDE": R.PRESENT}[route]
+    poses = (start,) + tuple(w.pose for w in R.route_named(route))
+    worst = None
+    for p0, p1 in zip(poses, poses[1:]):
+        a, b = [p0[j] for j in R.ARM7], [p1[j] for j in R.ARM7]
+        g = max(p0["r_gripper"], p1["r_gripper"], key=hand_radius)
+        for q in joint_path(a, b, sample_count(a, b)):
+            c = scene.clearance(link_capsules(q, "right", g), ids=ids)
+            worst = c.distance if worst is None else min(worst, c.distance)
+    assert R.validation_for(route, "FWDCenterLabSivaPool").planned_worst_m == \
+        pytest.approx(worst, abs=0.001)
+
+
+def test_the_report_only_exemption_still_works_if_an_owner_sets_it(monkeypatch):
+    monkeypatch.setattr(R, "CORRIDOR_REPORT_ONLY_SCENES", ("FWDCenterLabMCC",))
+    ok, why = R.check_route("PLACE_ROUTE", "FWDCenterLabMCC")
+    assert ok and why.startswith("REPORTED, NOT ENFORCED in FWDCenterLabMCC")
+
+
+def test_every_corridor_waypoint_guards_the_forearm_yaw():
+    for route in (R.PLACE_ROUTE, R.STOW_ROUTE):
+        for wp in route:
+            assert wp.guard == R.CRITICAL_JOINTS + ("r_forearm_yaw",), wp.name
+            assert wp.pose["r_forearm_yaw"] == 0.0
+
+
+def test_a_corridor_route_refuses_to_start_with_the_forearm_yaw_off():
+    home = dict(R.HOME)
+    assert R.corridor_entry_refusal(home, R.PLACE_ROUTE) == ""
+    assert R.corridor_entry_refusal(dict(home, r_forearm_yaw=R.CORRIDOR_ENTRY_TOL), R.PLACE_ROUTE) == ""
+    why = R.corridor_entry_refusal(dict(home, r_forearm_yaw=-24.0), R.PLACE_ROUTE)
+    assert "forearm yaw is 24 deg off" in why and "will not start" in why
+    for route in (R.RAISE_TO_SIDE, R.STOW_ROUTE, R.STOW_FROM_SIDE):
+        assert R.corridor_entry_refusal(dict(home, r_forearm_yaw=-24.0), route)
+    # off the corridor nothing is refused on this account
+    assert R.corridor_entry_refusal(dict(R.PRESENT, r_forearm_yaw=-60.0), R.LOWER_TO_REST) == ""
+
+
+def test_off_corridor_routes_in_the_panel_scene_are_unaffected():
+    for other in ("LIFT_TO_PRESENT", "LOWER_TO_REST", "WAVE"):
+        assert R.check_route(other, "FWDCenterLabSivaPool") == (True, "")
+
+
+def test_the_corridor_routes_ability_versions_moved_with_swing_1():
+    import panel_abilities as A
+    for name, a in A.REGISTRY.items():
+        if a.route in R.CORRIDOR_ROUTES:
+            assert a.route_version == 2, name
 
 
 def test_a_rejected_route_says_it_was_flown_and_why_it_failed():
@@ -218,8 +305,8 @@ def test_the_hub_routes_were_reflown_before_they_were_relisted():
 
 
 def test_the_hub_routes_are_validated_where_the_notebook_flew_them():
-    for route in ("RAISE_TO_SIDE", "STOW_FROM_SIDE", "LIFT_TO_PRESENT",
-                  "LOWER_TO_REST"):
+    # RAISE_TO_SIDE and STOW_FROM_SIDE cross the corridor; see the test above.
+    for route in ("LIFT_TO_PRESENT", "LOWER_TO_REST"):
         ok, why = R.check_route(route, "FWDCenterLabMCC")
         assert ok, "{}: {}".format(route, why)
 
@@ -453,3 +540,52 @@ class TestFootprintLegs:
         for a, b in zip(lift, reversed_descent):
             for j in arm_joints:
                 assert a[j] == b[j], j
+
+
+# ---------------------------------------------------------------------------
+# The corridor margin (#74, owner decision D1, 2026-10-09)
+# ---------------------------------------------------------------------------
+
+def test_the_margin_is_the_owners_numbers():
+    assert R.CORRIDOR_PLANNED_MARGIN == 0.020
+    assert R.CORRIDOR_REALISED_MARGIN == 0.010
+    assert R.CORRIDOR_MIN_FLIGHTS == 20
+
+
+def test_the_corridor_routes_are_every_route_through_swing_1():
+    assert R.CORRIDOR_ROUTES == ("PLACE_ROUTE", "RAISE_TO_SIDE",
+                                 "STOW_FROM_SIDE", "STOW_ROUTE")
+    for name in ("LIFT_TO_PRESENT", "LOWER_TO_REST"):
+        assert name not in R.CORRIDOR_ROUTES
+
+
+def _with_row(monkeypatch, **figures):
+    row = R.RouteValidation("PLACE_ROUTE", "SomeRig", "2026-10-09: test row",
+                            **figures)
+    monkeypatch.setattr(R, "ROUTE_COMPATIBILITY", (row,))
+    return R.check_route("PLACE_ROUTE", "SomeRig")
+
+
+def test_a_corridor_row_meeting_the_margin_passes(monkeypatch):
+    assert _with_row(monkeypatch, planned_worst_m=0.020, realised_worst_m=0.010,
+                     flights=20) == (True, "")
+
+
+@pytest.mark.parametrize("figures,named", [
+    (dict(), "records no planned or realised"),
+    (dict(planned_worst_m=0.03, flights=20), "records no realised"),
+    (dict(planned_worst_m=0.0199, realised_worst_m=0.02, flights=20), "planned +1.99 cm"),
+    (dict(planned_worst_m=0.03, realised_worst_m=0.0099, flights=20), "realised +0.99 cm"),
+    (dict(planned_worst_m=0.03, realised_worst_m=0.02, flights=19), "19 flights against 20"),
+])
+def test_a_corridor_row_short_of_the_margin_is_refused_and_says_where(
+        monkeypatch, figures, named):
+    ok, why = _with_row(monkeypatch, **figures)
+    assert not ok
+    assert "crosses the rig corridor at SWING_1" in why and named in why
+
+
+def test_a_route_off_the_corridor_needs_no_figures(monkeypatch):
+    row = R.RouteValidation("WAVE", "SomeRig", "2026-10-09: test row")
+    monkeypatch.setattr(R, "ROUTE_COMPATIBILITY", (row,))
+    assert R.check_route("WAVE", "SomeRig") == (True, "")

@@ -1,0 +1,3 @@
+REACHY_SIM_SCENE_FILE=/opt/scenes/e1_boards/B1_evidence.yaml
+REACHY_SIM_BACKEND=mujoco-remote
+REACHY_PANEL_EXECUTOR=0

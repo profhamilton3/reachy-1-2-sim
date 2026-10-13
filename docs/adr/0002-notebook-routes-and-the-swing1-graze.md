@@ -1,6 +1,7 @@
 # ADR-0002: Rig motion flies the measured notebook routes, and the SWING_1 graze is accepted
 
-- Status: Accepted
+- Status: Accepted; §4 (the SWING_1 graze) superseded by ADR-0006 (2026-10-09):
+  SWING_1 moved off the rail and the corridor flies at a stated margin
 - Date: 2026-09-10
 - Decision owners: IITG Reachy 1.2 simulation project
 - Supersedes: the route-compatibility position taken in #73 and #74 for FWDCenterLabSivaPool

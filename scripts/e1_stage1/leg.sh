@@ -30,6 +30,9 @@ REPO=$1; P=$2; CYCLE=$3; NAME=$4; ROUTE=$5; TGT=$6; MODE=${7:-end}
 PY=${E1_PYTHON:-python3}
 stop() { echo "STOP: $1" | tee -a "$P/control/stop"; exit 9; }
 [ -f "$P/control/stop" ] && stop "stop marker already present"
+# A leg name is used once: an existing recorder log is a prior attempt's
+# evidence (and would satisfy the notebook's "fly the route now" wait).
+[ -e "$P/control/recorder_$NAME.log" ] && stop "recorder_$NAME.log already exists -- leg names are single-use"
 DUR=$("$PY" -c "import json,sys; print(json.load(open(sys.argv[1]))['legs'][sys.argv[2]]['dur_s'])" "$P/plan_${CYCLE}.json" "$NAME") \
   || stop "could not read DUR for $NAME from $P/plan_${CYCLE}.json"
 SCENE_REL=$("$PY" -c "import json,sys; print(json.load(open(sys.argv[1]))['scene_rel'])" "$P/plan_${CYCLE}.json") \
@@ -46,7 +49,7 @@ PYTHONPATH=src "$PY" scripts/link_e1_flight.py "$LOG" > "$P/control/linker_$NAME
 rc=$?; echo "linker exit=$rc" >> "$P/control/linker_$NAME.txt"
 [ $rc -eq 0 ] || stop "linker $NAME exit $rc"
 mkdir -p "$P/recorder_logs"
-cp "$LOG" "${LOG%.json}.link.json" "$P/recorder_logs/"
+cp "$LOG" "${LOG%.json}.link.json" "$P/recorder_logs/" || stop "archive $NAME failed"
 "$PY" scripts/experiment_gate.py "$LOG" > "$P/control/gate_$NAME.txt" 2>&1
 rc=$?; echo "gate exit=$rc" >> "$P/control/gate_$NAME.txt"
 [ $rc -eq 0 ] || stop "experiment gate $NAME rejected (see $P/control/gate_$NAME.txt): exit $rc"

@@ -2,11 +2,15 @@
 
 Connects to localhost:50051 via reachy-sdk, enumerates joints, exercises
 compliant toggle, sends bounded joint commands, and verifies convergence.
-Exits nonzero on any failure.  Does not require Jupyter.
+Then checks the scene (#2): its manipulable objects load, and every one's grasp
+point passes `SceneModel.check_point` -- above the tabletop and outside every
+static obstacle.  That is the pad-point rule, not a reachability or clearance
+check.  Exits nonzero on any failure.  Does not require Jupyter.
 
 Usage:
     python3 scripts/smoke_test_host.py
     python3 scripts/smoke_test_host.py --host 127.0.0.1 --port 50051
+    python3 scripts/smoke_test_host.py --scene scenes/FWDCenterLabSivaPool.yaml
 
 The simulator Docker container must be running before this script is called.
 """
@@ -22,8 +26,17 @@ import time
 try:
     from reachy_sdk import ReachySDK
 except ImportError:
-    print("FAIL: reachy-sdk not installed.  Run: pip install reachy-sdk==0.7.0")
-    sys.exit(1)
+    # Reported by main(); importing this module must not exit, so the
+    # scene check below can be exercised without the SDK.
+    ReachySDK = None
+
+# The bounded command goes through the motion primitives and the safety gate
+# like every other move (#107), never as a raw goal_position write here.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+from reachy_ai.motion import primitives as P  # noqa: E402
+from reachy_ai.scene.awareness import SceneModel  # noqa: E402
+
+_REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 PASS = "[PASS]"
 FAIL = "[FAIL]"
@@ -57,7 +70,78 @@ def _check(label: str, condition: bool, detail: str = "") -> bool:
     return condition
 
 
-def run_smoke_test(host: str, port: int) -> int:
+def _bounded_command(reachy) -> bool:
+    """[5]: nudge r_shoulder_pitch by _SAFE_COMMAND_DEG and back, through
+    `primitives.nudge_joint` (which checks `safety.gate_check()`).  A refused
+    gate is a FAIL, never a skip.  Returns True on pass."""
+    arm = reachy.r_arm
+    try:
+        reachy.turn_on("r_arm")
+        time.sleep(0.3)
+        j = arm.r_shoulder_pitch
+        start_pos = j.present_position
+        target = P.nudge_joint(arm, "r_shoulder_pitch", _SAFE_COMMAND_DEG)
+        time.sleep(_CONVERGE_WAIT_S)
+        final = j.present_position
+        error = abs(final - target)
+        ok = _check(
+            f"r_shoulder_pitch: target={target:.2f}° final={final:.2f}° err={error:.2f}°",
+            error <= _CONVERGE_TOL_DEG)
+        # Return to start
+        P.nudge_joint(arm, "r_shoulder_pitch", start_pos - j.present_position)
+        time.sleep(_CONVERGE_WAIT_S)
+        return ok
+    except P.MotionRefused as exc:
+        print(f"  {FAIL}  safety gate refused the bounded command: {exc}")
+        return False
+    except Exception as exc:
+        print(f"  {FAIL}  command/convergence error: {exc}")
+        return False
+    finally:
+        try:
+            reachy.turn_off("r_arm")
+        except Exception as exc:
+            print(f"  {FAIL}  turn_off after the bounded command: {exc}")
+
+
+def default_scene_path() -> str:
+    """The scene the simulator is configured for, as a path in this checkout.
+
+    The container names it by its in-container path (`/opt/scenes/...`), which
+    does not exist on the host, so only the file name is taken from
+    REACHY_SIM_SCENE_FILE.  Unset means the panel's scene.
+    """
+    name = os.path.basename(os.environ.get("REACHY_SIM_SCENE_FILE", "")
+                            or "FWDCenterLabSivaPool.yaml")
+    return os.path.join(_REPO, "scenes", name)
+
+
+def check_scene(scene_path: str) -> int:
+    """[7]: the scene's manipulable objects load, and each grasp point passes
+    `SceneModel.check_point`.  Returns the number of failures."""
+    try:
+        scene = SceneModel.from_yaml(scene_path)
+    except Exception as exc:
+        print(f"  {FAIL}  {scene_path}: scene did not load: {exc}")
+        return 1
+    ids = scene.manipulable_ids()
+    print(f"  {PASS}  {os.path.basename(scene_path)} loaded: "
+          f"{len(ids)} manipulable object(s)")
+    if not ids:
+        print(f"  {SKIP}  grasp points: the scene declares no manipulable objects")
+        return 0
+    failures = 0
+    for oid in ids:
+        point = scene.grasp_point(oid)
+        violation = scene.check_point(point)
+        where = "(" + ", ".join(f"{v:.3f}" for v in point) + ")"
+        if not _check(f"{oid} grasp point {where}", violation is None,
+                      "" if violation is None else str(violation)):
+            failures += 1
+    return failures
+
+
+def run_smoke_test(host: str, port: int, scene_path: str = "") -> int:
     """Run all checks.  Returns number of failures."""
     failures = 0
     print(f"\nReachy 1.2 simulator smoke test — {host}:{port}")
@@ -125,28 +209,7 @@ def run_smoke_test(host: str, port: int) -> int:
 
     # ── 5. Bounded joint command + convergence ────────────────────────────────
     print(f"\n[5] Bounded command ({_SAFE_COMMAND_DEG}°) + convergence")
-    try:
-        reachy.turn_on("r_arm")
-        time.sleep(0.3)
-        j = reachy.r_arm.r_shoulder_pitch
-        start_pos = j.present_position
-        target = start_pos + _SAFE_COMMAND_DEG
-        j.goal_position = target
-        time.sleep(_CONVERGE_WAIT_S)
-        final = j.present_position
-        error = abs(final - target)
-        ok = error <= _CONVERGE_TOL_DEG
-        if not _check(
-            f"r_shoulder_pitch: target={target:.2f}° final={final:.2f}° err={error:.2f}°",
-            ok
-        ):
-            failures += 1
-        # Return to start
-        j.goal_position = start_pos
-        time.sleep(_CONVERGE_WAIT_S)
-        reachy.turn_off("r_arm")
-    except Exception as exc:
-        print(f"  {FAIL}  command/convergence error: {exc}")
+    if not _bounded_command(reachy):
         failures += 1
 
     # ── 6. Force sensors + fans ───────────────────────────────────────────────
@@ -174,6 +237,10 @@ def run_smoke_test(host: str, port: int) -> int:
             if not _check(f"{fname} readable", ok):
                 failures += 1
 
+    # ── 7. Scene objects + grasp points ──────────────────────────────────────
+    print("\n[7] Scene objects + grasp points (SceneModel.check_point)")
+    failures += check_scene(scene_path or default_scene_path())
+
     # ── Summary ───────────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
     if failures == 0:
@@ -189,8 +256,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Reachy 1.2 simulator host smoke test")
     parser.add_argument("--host", default=os.environ.get("REACHY_IP", "localhost"))
     parser.add_argument("--port", type=int, default=50051)
+    parser.add_argument("--scene", default="",
+                        help="scene YAML for check [7] (default: the file named "
+                             "by REACHY_SIM_SCENE_FILE, else FWDCenterLabSivaPool)")
     args = parser.parse_args()
-    sys.exit(run_smoke_test(args.host, args.port))
+    if ReachySDK is None:
+        print("FAIL: reachy-sdk not installed.  Run: pip install reachy-sdk==0.7.0")
+        sys.exit(1)
+    sys.exit(run_smoke_test(args.host, args.port, args.scene))
 
 
 if __name__ == "__main__":

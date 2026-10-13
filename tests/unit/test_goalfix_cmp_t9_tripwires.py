@@ -1,7 +1,7 @@
 """T9 acceptance tests (assignment §2, T9): reset tripwires anchored to
 the real source lines (review §3.7) -- "lease acquisition" never matched
 anything the native server logs (it logs "Execution lease granted to
-...", server.py:1059) and "pause" was a bare substring. Includes a
+...", server.py:1072) and "pause" was a bare substring. Includes a
 source-drift guard: each cited line is grepped from the real file, so a
 future edit that changes the wording fails this test loudly rather than
 silently reopening the gap."""

@@ -1,0 +1,65 @@
+Simulator identity verified: run_dir=/Users/terrancehamilton/e1-stage2-B1-s1-2026-09-19/e1_server_runs/run_20260919_090342
+Recording PLACE_ROUTE for 3.0s at 20 Hz -- fly the route now. This only reads present_position.
+Saved 60 samples to /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_PLACE_ROUTE_20260919T095554Z.json
+Saved link sidecar to /Users/terrancehamilton/reachy-1-2-sim-stage2/runs/route_clearance_PLACE_ROUTE_20260919T095554Z.link.json
+{
+  "route": "PLACE_ROUTE",
+  "scene": "/Users/terrancehamilton/reachy-1-2-sim-stage2/scenes/e1_boards/B1_evidence.yaml",
+  "n_samples": 60,
+  "realised": {
+    "tube": {
+      "red_cube": 1.0937209000397683,
+      "blue_cylinder": 1.125625829315316,
+      "soda_can": 0.37389483309601457,
+      "foam_block": 0.3618082233151303,
+      "pool_box_1": 0.9177962411930446,
+      "pool_box_2": 0.9641051140117237,
+      "pool_box_3": 1.0454551749622585,
+      "pool_cyl_1": 0.5568662691052269,
+      "pool_cyl_2": 0.6316936633321912,
+      "pool_cyl_3": 0.7494782007304552
+    },
+    "shells": {
+      "red_cube": 1.1276121616864925,
+      "blue_cylinder": 1.159238342337744,
+      "soda_can": 0.37389483309601457,
+      "foam_block": 0.3618082233151303,
+      "pool_box_1": 0.9524484989574319,
+      "pool_box_2": 0.9988305004171943,
+      "pool_box_3": 1.0802940561851146,
+      "pool_cyl_1": 0.5611104362084183,
+      "pool_cyl_2": 0.6394610377846963,
+      "pool_cyl_3": 0.7614405101719466
+    }
+  },
+  "realised_aperture_assumed_samples": [],
+  "realised_aperture_source": "measured per-sample r_gripper.present_position, validated; see realised_aperture_assumed_samples for any indices that instead used the safe wide-open assumption under allow_missing_aperture",
+  "planned": {
+    "tube": {
+      "red_cube": 1.2726757904479509,
+      "blue_cylinder": 1.210463497167953,
+      "soda_can": 0.29663680735482784,
+      "foam_block": -0.05698863376767846,
+      "pool_box_1": 1.1377778474261628,
+      "pool_box_2": 1.090310850821304,
+      "pool_box_3": 1.0749772450451227,
+      "pool_cyl_1": 0.756784199026922,
+      "pool_cyl_2": 0.7173710081253459,
+      "pool_cyl_3": 0.7232146417241443
+    },
+    "shells": {
+      "red_cube": 1.3337600288366345,
+      "blue_cylinder": 1.3193305411459646,
+      "soda_can": 0.33551140931540135,
+      "foam_block": 0.04478557775315227,
+      "pool_box_1": 1.189308384345165,
+      "pool_box_2": 1.1987796655466867,
+      "pool_box_3": 1.1873300109814875,
+      "pool_cyl_1": 0.8278533380183508,
+      "pool_cyl_2": 0.7877499831738577,
+      "pool_cyl_3": 0.7879078443412554
+    }
+  },
+  "planned_aperture_policy": "per FOOTPRINT_LEGS leg, the worst-case (largest-hand_radius) of that leg's two commanded ENDPOINT apertures, applied to every interpolated sample along the leg -- not a per-sample commanded value"
+}
+recorder exit=0

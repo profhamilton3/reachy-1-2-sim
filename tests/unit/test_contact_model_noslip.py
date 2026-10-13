@@ -20,6 +20,7 @@ for _p in (_ROOT / "native_mujoco", _ROOT / "src", _ROOT / "web"):
         sys.path.insert(0, str(_p))
 
 import mujoco  # noqa: E402
+import numpy as np  # noqa: E402
 
 import contact_model as cm  # noqa: E402
 import server as native_server  # noqa: E402
@@ -190,16 +191,25 @@ def _hold_cube_drift_mm(noslip, seconds=2.0):
         n = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, model.actuator_trnid[a][0])
         recorded = {j["name"]: j["position_rad"] for j in fx["joints"]}
         d.ctrl[a] = fx["commanded_targets_rad"].get(n, recorded.get(n, 0.0))
+    # Slip is the cube moving RELATIVE TO THE HAND, measured in the hand's own
+    # frame.  Measuring the cube's world height instead also counted the hand
+    # settling: since the forearm-yaw / wrist-pitch armature (#74, ADR-0006
+    # §5) the recorded fixture's joint velocities are no longer an equilibrium,
+    # and the hand rises ~0.12 mm as it settles -- a transient of the arm, not
+    # creep of the grip.
     cube = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "red_cube")
-    adr = model.jnt_qposadr[model.body_jntadr[cube]]
-    z0 = d.qpos[adr + 2]
+    hand = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "r_gripper_thumb")
+
+    def in_hand():
+        return d.xmat[hand].reshape(3, 3).T @ (d.xpos[cube] - d.xpos[hand])
+    r0 = in_hand()
     for _ in range(int(seconds / model.opt.timestep)):
         mujoco.mj_step(model, d)
-    return 1000.0 * (d.qpos[adr + 2] - z0)
+    return 1000.0 * float(np.linalg.norm(in_hand() - r0))
 
 
 def test_recorded_hold_creep_default_vs_override_zero():
     on = _hold_cube_drift_mm(None)
     off = _hold_cube_drift_mm(0)
-    assert abs(on) <= 0.1, f"default (no-slip 10) hold drifted {on:+.4f} mm in 2 s"
-    assert off <= -1.0, f"no-slip 0 should reproduce the creep; got {off:+.4f} mm"
+    assert on <= 0.1, f"default (no-slip 10) hold slipped {on:.4f} mm in the hand in 2 s"
+    assert off >= 1.0, f"no-slip 0 should reproduce the creep; got {off:.4f} mm in the hand"

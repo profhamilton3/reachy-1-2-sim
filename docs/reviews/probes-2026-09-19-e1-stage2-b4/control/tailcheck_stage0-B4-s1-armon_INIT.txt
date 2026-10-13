@@ -1,0 +1,6 @@
+target INIT (Stage 0 initialization acceptance -- not a posture target; see check_init's docstring)
+tail_samples=60 (last 3.0s)  max_spread_deg=0.0
+samples_ok=True still_ok=True evidence_ok=True
+experiment_accepted=True
+STAGE0_INIT_OK=yes
+tailcheck exit=0 (mode=end)

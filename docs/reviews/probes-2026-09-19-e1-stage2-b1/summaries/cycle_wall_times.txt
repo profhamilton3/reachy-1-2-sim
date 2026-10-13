@@ -1,0 +1,10 @@
+# B1 s1 wall times from control/ marker mtimes: cycle = reset_<gen>.txt mtime (reset done) -> last legsh_*.txt mtime (LEG ok); leg chain = go_<leg> -> legsh_<leg>.txt
+# Stage 0: server start 09:03:42Z; armon LEG ok 09:05:24Z
+set r1: 22.3 min  | a: 14.6 min (setup 126s, flight 82s) | b: 2.9 min (flight 140s) | c: 4.5 min (setup 151s, flight 86s)
+set r2: 14.7 min  | a: 5.1 min (setup 158s, flight 108s) | b: 3.7 min (flight 183s) | c: 5.8 min (setup 194s, flight 114s)
+set r3: 18.5 min  | a: 6.4 min (setup 201s, flight 137s) | b: 4.7 min (flight 231s) | c: 7.4 min (setup 244s, flight 146s)
+set r4: 23.5 min  | a: 8.1 min (setup 253s, flight 177s) | b: 5.9 min (flight 290s) | c: 9.4 min (setup 310s, flight 187s)
+set r5: 30.0 min  | a: 10.4 min (setup 330s, flight 223s) | b: 7.5 min (flight 371s) | c: 12.0 min (setup 396s, flight 241s)
+set r6: 22.6 min  | a: 13.2 min (setup 409s, flight 289s) | b: 9.4 min (flight 461s) | c: not flown
+sets r1..r6 (reset 1 -> last LEG ok): 134.0 min; server uptime 09:03:42Z -> shutdown 11:20:50Z = 137 min
+note r1 cycle a includes ~10 min operator idle (harness output-pipe hold, see checkpoint_1.txt); r6 cycle c not flown (control/stop at reset 18)

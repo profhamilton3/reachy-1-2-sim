@@ -1,0 +1,12 @@
+camera-ros-publisher             RUNNING   pid 17, uptime 0:00:09
+camera-web-server                RUNNING   pid 15, uptime 0:00:09
+fluxbox                          RUNNING   pid 165, uptime 0:00:08
+joint-state-bridge               RUNNING   pid 14, uptime 0:00:09
+jupyterlab                       RUNNING   pid 21, uptime 0:00:09
+novnc                            RUNNING   pid 12, uptime 0:00:09
+reachy-sdk-server                RUNNING   pid 13, uptime 0:00:09
+robot-state-publisher            RUNNING   pid 16, uptime 0:00:09
+rviz2                            RUNNING   pid 20, uptime 0:00:09
+scene-marker-publisher           RUNNING   pid 18, uptime 0:00:09
+x11vnc                           RUNNING   pid 166, uptime 0:00:08
+xvfb                             RUNNING   pid 9, uptime 0:00:09

@@ -82,6 +82,16 @@ def an_identity(scene_revision="rev-1"):
                                working_tree_dirty=False)
 
 
+#: The version the panel's stow_arm ability asks for today (2 since SWING_1
+#: moved, #74).  A stored trial the planner is meant to reuse has to carry it.
+def _stow_version():
+    import panel_abilities
+    return panel_abilities.REGISTRY["stow_arm"].route_version
+
+
+_STOW_V = 2
+
+
 def write_trial(db, *, promoted=True, kind=KIND_ABILITY_ROUTE, route="STOW_ROUTE",
                 route_version=1, parameters=None, obstacles=("soda_can",),
                 live=False, arm="right", identity=None, start_posture="rest"):
@@ -268,7 +278,7 @@ def test_with_nothing_promoted_the_plan_is_what_it_always_was(db):
 
 
 def test_a_retrieved_recipe_is_named_on_the_card(db):
-    tid = write_trial(db, start_posture="")      # stow_arm declares none
+    tid = write_trial(db, start_posture="", route_version=_STOW_V)      # stow_arm declares none
     out = plan(make_scene(), "stow your arm", recipes=library(db))
     assert out.kind == "proposal"
     assert out.proposal.recipe_trial_id == tid
@@ -287,7 +297,7 @@ def test_the_card_says_only_what_the_record_actually_holds(db):
     naming the trial twice and reporting a version that was 0 only because
     nothing ever set one — and every substring assertion above still passed.
     """
-    tid = write_trial(db, start_posture="")
+    tid = write_trial(db, start_posture="", route_version=_STOW_V)
     out = plan(make_scene(), "stow your arm", recipes=library(db))
     summary = out.proposal.summary
 
@@ -513,7 +523,7 @@ def test_the_policy_that_allowed_a_reuse_is_carried_and_recorded(db):
     """The gate's contract is that an accepted reuse carries the trial it came
     from AND the rule that accepted it, so a bad episode traces back to the
     rule.  That link used to die in the planner."""
-    write_trial(db, start_posture="")
+    write_trial(db, start_posture="", route_version=_STOW_V)
     out = plan(make_scene(), "stow your arm", recipes=library(db))
     assert out.proposal.recipe_policy_version == 1
     assert out.proposal.as_dict()["recipe_policy_version"] == 1
@@ -524,3 +534,14 @@ def test_the_policy_that_allowed_a_reuse_is_carried_and_recorded(db):
         out.proposal, [], {}, "TestScene", ["soda_can"])
     assert meta["recipe_policy_version"] == 1
     assert meta["recipe_trial_id"] == out.proposal.recipe_trial_id
+
+
+def test_a_stow_trial_flown_before_swing_1_moved_is_not_reused(db):
+    """#74: the corridor changed under the same route name, so the version
+    moved with it.  A version-1 stow trial describes a SWING_1 that no longer
+    exists, and a version-2 request must not be offered it."""
+    assert _stow_version() == _STOW_V == 2
+    write_trial(db, route_version=1)
+    assert find(library(db), route_version=1)[0] is not None      # control
+    recipe, _reasons = find(library(db), route_version=_STOW_V)
+    assert recipe is None

@@ -1,0 +1,18 @@
+Closest link per route x role x hand (moving segment for setup/flight; whole recording for parked), cm.
+delta = planned - realised, mean over reps; 'all' = 18 cycles, 'excl' = without S2-B4-c-r1.
+
+route           role    hand   link          n  planned   real min..max  delta all  delta excl  |diff|
+LIFT_TO_PRESENT flight  shells forearm       6     6.46       6.2..6.43        0.1        0.07    0.03
+LIFT_TO_PRESENT flight  tube   hand          6    -3.72     -4.0..-3.74        0.1        0.09    0.01
+LOWER_TO_REST   flight  shells forearm       6     6.46      6.39..6.45       0.04        0.04    0.00
+LOWER_TO_REST   flight  tube   hand          6    -3.72    -3.74..-3.69        0.0         0.0    0.00
+PLACE_ROUTE     flight  shells forearm       6     6.26      5.36..6.05       0.66        0.66    0.00
+PLACE_ROUTE     flight  tube   hand          6    -3.72    -3.87..-3.82       0.13        0.13    0.00
+PLACE_ROUTE     parked  shells upper_arm    12    20.89    37.72..37.72     -16.83      -16.83    0.00
+PLACE_ROUTE     parked  tube   upper_arm    12    20.89    37.72..37.72     -16.83      -16.83    0.00
+PLACE_ROUTE     setup   shells forearm       6     6.26       5.5..5.73       0.65        0.68    0.03
+PLACE_ROUTE     setup   tube   hand          6    -3.72    -3.94..-3.76       0.13        0.14    0.01
+RAISE_TO_SIDE   parked  shells upper_arm     6    20.89    37.72..37.72     -16.83      -16.83    0.00
+RAISE_TO_SIDE   parked  tube   upper_arm     6    20.89    37.72..37.72     -16.83      -16.83    0.00
+RAISE_TO_SIDE   setup   shells forearm       6     6.26      5.45..5.69       0.68        0.68    0.00
+RAISE_TO_SIDE   setup   tube   hand          6    -3.72    -3.91..-3.82       0.14        0.14    0.00

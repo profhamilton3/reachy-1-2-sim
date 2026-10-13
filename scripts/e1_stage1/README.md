@@ -76,6 +76,16 @@ If a future cycle's operator flow needs a settle-wait step, copy it from
    `plan_<cycle>.json` (written alongside the notebook) rather than a
    positional argument.
 
+   **Stop-progression is enforced when the next `leg.sh` starts, not in the
+   notebook.** The generated notebook writes `control/stop` but never reads
+   it; what holds leg N+1 back is the operator's `go_<leg>` marker and the
+   recorder's "fly the route now" line, which only `leg.sh` produces, and
+   `leg.sh` refuses to start while `control/stop` exists. So do not launch
+   the next `leg.sh`, or write the next `go_<leg>`, until the previous leg
+   has printed `LEG <name> ok`. Leg and parked-recording names are
+   single-use: `leg.sh` and `parked.sh` refuse a name whose
+   `recorder_<name>.log` already exists.
+
    `leg.sh` takes an optional 7th argument, `MODE` (`start` or `end`,
    default `end`), carried over from PR #117 for pre-flight parked
    recordings: in `start` mode a failed tail check is informational only
@@ -213,17 +223,21 @@ does `reachy.turn_on("r_arm")` still advance `cmd_seq`, and can that make
    `require_compliance(min_cmd_seq=baseline)` does **not** falsely time out
    for *this* reason: the already-stiff case still produces a fresh
    `cmd_seq` past the baseline, same as a genuine compliance transition.
-4. **Residual false STOP that does exist** (separate from the already-stiff
-   path, not "fixed" by this branch, per the assignment's scope): a bridge
-   container restart resets `MujocoRemoteBackend._cmd_seq` to 0 while the
-   native server's own counter and any baseline read from an existing run
-   directory stay at their old, higher value. The operator symptom is
-   `require_compliance`'s reason string, `cmd_seq=k has not advanced past
-   the pre-call baseline (min_cmd_seq=N)` with `k < N`, persisting past
-   `timeout_s` on the very first attempt after the restart. Recovery:
-   restart the native server too, so both counters start from 0 together --
-   never lower the baseline by hand to work around it, since that reopens
-   the gap `min_cmd_seq` exists to close.
+4. **Bridge-restart false STOP (a004, 2026-10-02) -- repaired by the
+   `cmd_baseline` path.** A bridge container restart resets
+   `MujocoRemoteBackend._cmd_seq` to 0 while the native server's own counter
+   keeps its old, higher value, so the next `turn_on` moved the native
+   `cmd_seq` *down* (2 -> 1) and `require_compliance(min_cmd_seq=2)` refused
+   it (`cmd_seq=1 has not advanced past the pre-call baseline`). The
+   generated cells now capture `e1_identity.capture_cmd_baseline` (baseline
+   `cmd_seq`/`seq` plus byte offsets into `commands.jsonl`/`states.jsonl`)
+   immediately before `turn_on` and call
+   `require_compliance(..., cmd_baseline=...)`, which accepts either a
+   same-sequence advance or native evidence of a new bridge sequence
+   (appended `joint_command` rows exactly `1..m`, and an applied `cmd_seq`
+   change after the baseline) -- see that function's docstring for the exact
+   contract and its fail-closed limit (old final value == new final value
+   with no sampled change). Never lower the baseline by hand.
 
 (Evidence trail: `reachy_sdk` 0.7.0 source read read-only from the copy
 noted in the assignment's verified facts; `mujoco_remote_backend.py` and
@@ -461,6 +475,12 @@ rejected recording's log and sidecar are preserved for review, not lost
 to the STOP -- evidence validity and experiment acceptance are
 deliberately kept distinct (see the module's docstring): `evaluate()`
 never writes to the sidecar or the log, only reads them.
+
+Because the gate runs before the tail check, a rejected recording gets no
+`tailcheck_<name>_<TARGET>.txt`. Its archived log can still be judged by
+hand: `PYTHONPATH=src python3 scripts/e1_tail_check.py <recorder_logs/...json>
+<TARGET>`. The archive copy itself is checked: a failed copy is a STOP
+(`archive <name> failed`), never a silent gap in the preserved evidence.
 
 ### `parked.sh` promoted into the package (decision note §6 item 3)
 

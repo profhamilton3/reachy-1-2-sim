@@ -51,6 +51,8 @@ set -u
 for a in "$@"; do
   case "$a" in
     *measure_route_clearance.py) exec python3 "$STUB_RECORDER" "$@" ;;
+    # #127: stderr noise from start_variant must not reach its JSON.
+    e1_stage1.start_variant) [ -n "${E1_TEST_STDERR_NOISE:-}" ] && echo "$E1_TEST_STDERR_NOISE" >&2 ;;
   esac
 done
 exec python3 "$@"
@@ -359,3 +361,69 @@ class TestParkedShGate:
         doc = json.loads(archived[0].read_text())
         assert doc["contacts_recorded"] is True
         assert len(doc["contacts"]) >= 1
+
+
+class TestArchiveAndNameGuards:
+    """Issue #127 (M1 and the recorder-log namespace residual): a failed
+    archive copy is a STOP, not a silent gap; a recording name is
+    single-use; and `parked.sh` keeps start_variant's stderr out of the
+    JSON it later parses."""
+
+    @staticmethod
+    def _unwritable_recorder_logs(tmp_path):
+        logs = tmp_path / "evidence" / "recorder_logs"
+        logs.mkdir(parents=True)
+        logs.chmod(0o555)
+        return logs
+
+    def test_leg_unwritable_recorder_logs_stops(self, tmp_path, fake_python):
+        logs = self._unwritable_recorder_logs(tmp_path)
+        try:
+            result, evidence_dir = _run_leg(tmp_path, fake_python)
+        finally:
+            logs.chmod(0o755)
+        assert result.returncode != 0
+        assert "LEG test-leg ok" not in result.stdout
+        assert "archive test-leg failed" in (evidence_dir / "control/stop").read_text()
+        assert not (evidence_dir / "control/gate_test-leg.txt").exists()
+
+    def test_parked_unwritable_recorder_logs_stops(self, tmp_path, fake_python):
+        logs = self._unwritable_recorder_logs(tmp_path)
+        try:
+            result, evidence_dir = _run_parked(
+                tmp_path, fake_python, cycle="S2-TEST-parked-archive-r1")
+        finally:
+            logs.chmod(0o755)
+        assert result.returncode != 0
+        assert "PARKED test-parked ok" not in result.stdout
+        assert "archive test-parked failed" in (evidence_dir / "control/stop").read_text()
+
+    def test_leg_refuses_an_existing_recorder_log(self, tmp_path, fake_python):
+        control = tmp_path / "evidence" / "control"
+        control.mkdir(parents=True)
+        (control / "recorder_test-leg.log").write_text("prior attempt\n")
+        result, evidence_dir = _run_leg(tmp_path, fake_python)
+        assert result.returncode != 0
+        assert "already exists" in (evidence_dir / "control/stop").read_text()
+        assert (control / "recorder_test-leg.log").read_text() == "prior attempt\n"
+
+    def test_parked_refuses_an_existing_recorder_log(self, tmp_path, fake_python):
+        control = tmp_path / "evidence" / "control"
+        control.mkdir(parents=True)
+        (control / "recorder_test-parked.log").write_text("prior attempt\n")
+        result, evidence_dir = _run_parked(
+            tmp_path, fake_python, cycle="S2-TEST-parked-name-r1")
+        assert result.returncode != 0
+        assert "already exists" in (evidence_dir / "control/stop").read_text()
+
+    def test_parked_start_variant_stderr_does_not_corrupt_its_json(
+            self, tmp_path, fake_python):
+        cycle = "S2-TEST-parked-stderr-r1"
+        result, evidence_dir = _run_parked(
+            tmp_path, fake_python, cycle=cycle,
+            E1_TEST_STDERR_NOISE="DeprecationWarning: noise on stderr")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "PARKED test-parked ok" in result.stdout
+        doc = json.loads((evidence_dir / f"control/start_variant_{cycle}.json").read_text())
+        assert doc["start_variant"] == "stiff-zero"
+        assert "noise on stderr" in (evidence_dir / f"control/start_variant_{cycle}.err").read_text()

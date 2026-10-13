@@ -567,3 +567,30 @@ def test_travel_still_refuses_from_somewhere_it_does_not_recognise():
     with pytest.raises(M.RecoveryNeeded) as exc:
         M.travel(arm, R.POSTURE_HOME, robot=None)
     assert "not guess" in str(exc.value)
+
+
+# -- #74: no corridor entry with the forearm yaw off (docs/adr/0006 §5) --------
+
+def test_fly_route_refuses_the_corridor_with_the_forearm_yaw_off_and_commands_nothing():
+    arm = StubArm(dict(R.HOME, r_forearm_yaw=-24.0))
+    moves = []
+    with pytest.raises(M.RouteError) as exc:
+        M.fly_route(arm, R.PLACE_ROUTE, move=lambda a, p, s: moves.append(p))
+    assert "forearm yaw is 24 deg off" in str(exc.value)
+    assert moves == []
+
+
+def test_primitives_fly_refuses_the_corridor_with_the_forearm_yaw_off_and_commands_nothing(monkeypatch):
+    from reachy_ai.motion import primitives as P
+    arm = StubArm(dict(R.HOME, r_forearm_yaw=-24.0))
+    calls = []
+    monkeypatch.setattr(P, "converge", lambda *a, **k: calls.append(a) or True)
+    with pytest.raises(RuntimeError) as exc:
+        P.fly(arm, R.RAISE_TO_SIDE, label="the route out of the pocket")
+    assert "forearm yaw is 24 deg off" in str(exc.value)
+    assert calls == []
+
+
+def test_a_healthy_start_flies_the_corridor():
+    arm = StubArm(R.HOME)
+    assert M.fly_route(arm, R.PLACE_ROUTE, move=exact_move) == [w.name for w in R.PLACE_ROUTE]

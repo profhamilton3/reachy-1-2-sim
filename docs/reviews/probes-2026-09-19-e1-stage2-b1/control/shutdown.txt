@@ -1,0 +1,15 @@
+# session shutdown 2026-09-19T11:20:50Z -- session ended by control/stop (reset 18 not verified); no c-r6 flight, no retry
+ Container reachy-1-2-sim Stopping 
+ Container reachy-1-2-sim Stopped 
+ Container reachy-1-2-sim Removing 
+ Container reachy-1-2-sim Removed 
+ Network reachy-1-2-sim-stage2_default Removing 
+ Network reachy-1-2-sim-stage2_default Removed 
+SIGTERM to mjpython 48843
+server exited
+listeners 8765/50051/8080: 0
+containers: 0 reachy-1-2-sim remaining
+caffeinate 48760 kept alive until the archive is verified
+worktree porcelain=[] (runs/ is gitignored)
+caffeinate 48760 killed 2026-09-19T11:30:01Z after archive verification; assertions now: 0
+archive: ~/e1-evidence-archive/e1-stage2-B1-s1-2026-09-19.tar.zst a0d3ff224f0e9619de9122c97d7f6bf30a3579a666d328169078320197afd292 392.3 MB; extraction verify 635/635 OK

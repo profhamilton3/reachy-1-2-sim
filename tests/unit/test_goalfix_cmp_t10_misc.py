@@ -26,17 +26,19 @@ class TestT10_1_RestreamLiterals:
         rig_motion = os.path.join(_REPO, "src/reachy_ai/tasks/rig_motion.py")
         with open(rig_motion) as f:
             lines = f.readlines()
-        # settle_pass_s's default (line 94) and its own use (line 139).
+        # settle_pass_s's default (line 94) and its own use (line 142; was 139
+        # before the corridor entry check, #74).
         assert "settle_pass_s: float = 0.8" in lines[93]
-        assert "settle_pass_s * (1 + k)" in lines[138]
+        assert "settle_pass_s * (1 + k)" in lines[141]
         assert float(re.search(r"settle_pass_s: float = ([\d.]+)", lines[93]).group(1)) \
             == U.FLY_ROUTE_RESTREAM_BASE_S
 
         primitives = os.path.join(_REPO, "src/reachy_ai/motion/primitives.py")
         with open(primitives) as f:
             lines = f.readlines()
-        assert "0.6 * (1 + k)" in lines[554]
-        assert float(re.search(r"([\d.]+) \* \(1 \+ k\)", lines[554]).group(1)) \
+        # Line 560 (was 555 before the corridor entry check in `fly`, #74).
+        assert "0.6 * (1 + k)" in lines[559]
+        assert float(re.search(r"([\d.]+) \* \(1 \+ k\)", lines[559]).group(1)) \
             == U.CONVERGE_RESTREAM_BASE_S
 
     def test_mutation_mirrored_value_drift_is_caught(self):

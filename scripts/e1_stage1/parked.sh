@@ -54,6 +54,7 @@ REPO=$1; P=$2; NAME=$3; BOARD=$4; ROUTE=$5; CYCLE=$6
 PY=${E1_PYTHON:-python3}
 stop() { echo "STOP: $1" | tee -a "$P/control/stop"; exit 9; }
 [ -f "$P/control/stop" ] && stop "stop marker already present"
+[ -e "$P/control/recorder_$NAME.log" ] && stop "recorder_$NAME.log already exists -- recording names are single-use"
 [ -f "$P/control/start_variant_$CYCLE.json" ] && stop "start_variant already recorded for cycle $CYCLE -- no re-recording (decision note §5: no re-fly, no recovery)"
 SCENE_REL=$(PYTHONPATH="$REPO/scripts" "$PY" -c "
 from e1_stage1 import plan
@@ -70,16 +71,16 @@ LOG=$(grep -o 'Saved [0-9]* samples to .*' "$P/control/recorder_$NAME.log" | sed
 PYTHONPATH=src "$PY" scripts/link_e1_flight.py "$LOG" > "$P/control/linker_$NAME.txt" 2>&1
 rc=$?; echo "linker exit=$rc" >> "$P/control/linker_$NAME.txt"
 [ $rc -eq 0 ] || stop "linker $NAME exit $rc"
-mkdir -p "$P/recorder_logs"; cp "$LOG" "${LOG%.json}.link.json" "$P/recorder_logs/"
+mkdir -p "$P/recorder_logs"; cp "$LOG" "${LOG%.json}.link.json" "$P/recorder_logs/" || stop "archive $NAME failed"
 "$PY" scripts/experiment_gate.py "$LOG" > "$P/control/gate_$NAME.txt" 2>&1
 rc=$?; echo "gate exit=$rc" >> "$P/control/gate_$NAME.txt"
 [ $rc -eq 0 ] || stop "experiment gate $NAME rejected (see $P/control/gate_$NAME.txt): exit $rc"
 PYTHONPATH=src "$PY" scripts/e1_tail_check.py "$LOG" HOME > "$P/control/tailcheck_${NAME}_HOME.txt" 2>&1
 rc=$?; echo "tailcheck exit=$rc (mode=start)" >> "$P/control/tailcheck_${NAME}_HOME.txt"
-PYTHONPATH="$REPO/scripts" "$PY" -m e1_stage1.start_variant "$LOG" --cycle "$CYCLE" > "$P/control/start_variant_$CYCLE.json" 2>&1
+PYTHONPATH="$REPO/scripts" "$PY" -m e1_stage1.start_variant "$LOG" --cycle "$CYCLE" > "$P/control/start_variant_$CYCLE.json" 2> "$P/control/start_variant_$CYCLE.err"
 rc=$?
 if [ $rc -ne 0 ]; then
-  stop "start_variant for cycle $CYCLE did not match a known policy-A variant (see $P/control/start_variant_$CYCLE.json) -- decision note §4: failure stops progression"
+  stop "start_variant for cycle $CYCLE did not match a known policy-A variant (see $P/control/start_variant_$CYCLE.json and .err) -- decision note §4: failure stops progression"
 fi
 VARIANT=$(PYTHONPATH="$REPO/scripts" "$PY" -c "
 import json, sys

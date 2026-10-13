@@ -333,6 +333,60 @@ def open_gripper(arm, duration: float = 0.8, side: str = "right") -> None:
     smooth_move(arm, {jn: val}, duration)
 
 
+def release_grip(arm, open_deg: float, released, duration: float = 0.8,
+                 joint: str = "r_gripper") -> float:
+    """Open toward ``open_deg`` only until ``released()`` says the grip let go.
+
+    The same linear ramp `smooth_move` flies over ``duration`` (from the
+    measured angle, at ``_INTERP_HZ``), stopped at the first step after which
+    ``released()`` is true -- the caller's grip-force reading at zero.  The
+    hand is left there: the object is free, and nothing has opened further
+    than it took to free it (#173: the way out is checked before the hand
+    opens fully).  Returns the last commanded angle.
+    """
+    steps = max(1, int(duration * _INTERP_HZ))
+    start = getattr(arm, joint).present_position
+    dt = duration / steps
+    goal = start
+    for i in range(1, steps + 1):
+        goal = start + i / steps * (open_deg - start)
+        getattr(arm, joint).goal_position = goal
+        time.sleep(dt)
+        if released():
+            break
+    log.debug("release_grip: let go at %.1f°", goal)
+    return goal
+
+
+def release_grip_retreating(arm, open_deg: float, released, arm_path, arm_joints,
+                            duration: float = 0.8, joint: str = "r_gripper"):
+    """`release_grip`, with the arm moving along ``arm_path`` in step with it.
+
+    Step ``i`` of the gripper ramp commands ``arm_path[i - 1]`` (the last pose
+    once the path is used up) -- a checked joint line from the last commanded
+    pose, which the caller builds (#174: the hand backs away on the thumb's
+    side while the grip lets go, the release with the least drag offline).
+    Stopped, like `release_grip`, at the first step after which ``released()``
+    is true.  Returns (last commanded gripper angle, last commanded arm pose).
+    """
+    steps = max(1, int(duration * _INTERP_HZ))
+    start = getattr(arm, joint).present_position
+    dt = duration / steps
+    goal, q = start, None
+    for i in range(1, steps + 1):
+        goal = start + i / steps * (open_deg - start)
+        if arm_path:
+            q = list(arm_path[min(i, len(arm_path)) - 1])
+            for name, val in zip(arm_joints, q):
+                getattr(arm, name).goal_position = float(val)
+        getattr(arm, joint).goal_position = goal
+        time.sleep(dt)
+        if released():
+            break
+    log.debug("release_grip_retreating: let go at %.1f°", goal)
+    return goal, q
+
+
 def close_gripper(arm, duration: float = 0.8, side: str = "right") -> None:
     """Close the gripper to a firm grip (side-aware sign)."""
     jn = f"{side[0]}_gripper"
@@ -401,6 +455,11 @@ def fly(arm, route, *, label: str = "route", move=None) -> List[str]:
     """
     from reachy_ai.motion import rig_routes as R
 
+    present = {n: getattr(arm, n).present_position for n in R.R_JOINTS
+               if hasattr(arm, n)}
+    refusal = R.corridor_entry_refusal(present, route)
+    if refusal:
+        raise RuntimeError(f"{label}: {refusal}")
     flown: List[str] = []
     for wp in route:
         guard = list(wp.guard) if wp.guard else list(R.CRITICAL_JOINTS)
@@ -628,3 +687,38 @@ def go_home(robot, arm, duration: float = 2.5) -> None:
     Routes through the side-clearing stow path so the hand never crosses the
     tabletop on the way down."""
     stow_from_side(robot, arm, duration)
+
+
+# ── Bounded single-joint nudge (#107) ────────────────────────────────────────
+# Kept at the end of the module so no existing line moves: tests and
+# tools/goalfix_cmp cite line numbers in this file.
+
+class MotionRefused(RuntimeError):
+    """`safety.gate_check()` refused motion; nothing was commanded."""
+
+
+#: The largest single-joint nudge `nudge_joint` will command (degrees).
+NUDGE_MAX_DEG = 10.0
+
+
+def nudge_joint(arm, joint_name: str, delta_deg: float, *,
+                max_delta_deg: float = NUDGE_MAX_DEG) -> float:
+    """Command one joint ``delta_deg`` from its present position.
+
+    A bounded, single-joint move for checks such as the host smoke test
+    (#107), not a planned motion.  Refuses before sending anything: a
+    non-finite or larger-than-``max_delta_deg`` step raises ``ValueError``,
+    and a refused ``safety.gate_check()`` raises ``MotionRefused``.
+
+    Returns the commanded target (degrees).
+    """
+    delta = float(delta_deg)
+    if not math.isfinite(delta) or abs(delta) > max_delta_deg:
+        raise ValueError(f"nudge of {delta_deg!r} deg is outside +/-{max_delta_deg} deg")
+    from reachy_ai.motion import safety
+    if not safety.gate_check():
+        raise MotionRefused("safety.gate_check() refused motion")
+    joint = getattr(arm, joint_name)
+    target = float(joint.present_position) + delta
+    joint.goal_position = target
+    return target

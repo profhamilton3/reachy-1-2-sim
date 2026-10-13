@@ -1,0 +1,62 @@
+pool_box_1 worst clearance per recording (cm; recorder's own report, whole-recording min incl. parked tail; NOT a margin)
+recording                 route             plan_shells real_shells  plan_tube  real_tube
+S2-B4-a-r1-flight         LOWER_TO_REST            6.46         6.4      -3.72      -3.78
+S2-B4-a-r1-parked         RAISE_TO_SIDE            6.26       37.72      -3.72      37.72
+S2-B4-a-r1-setup          RAISE_TO_SIDE            6.26         5.6      -3.72      -3.83
+S2-B4-a-r2-flight         LOWER_TO_REST            6.46        6.39      -3.72      -3.77
+S2-B4-a-r2-parked         RAISE_TO_SIDE            6.26       37.72      -3.72      37.72
+S2-B4-a-r2-setup          RAISE_TO_SIDE            6.26        5.69      -3.72      -3.86
+S2-B4-a-r3-flight         LOWER_TO_REST            6.46        6.41      -3.72      -3.75
+S2-B4-a-r3-parked         RAISE_TO_SIDE            6.26       37.72      -3.72      37.72
+S2-B4-a-r3-setup          RAISE_TO_SIDE            6.26         5.6      -3.72      -3.85
+S2-B4-a-r4-flight         LOWER_TO_REST            6.46        6.39      -3.72      -3.77
+S2-B4-a-r4-parked         RAISE_TO_SIDE            6.26       37.72      -3.72      37.72
+S2-B4-a-r4-setup          RAISE_TO_SIDE            6.26        5.55      -3.72      -3.89
+S2-B4-a-r5-flight         LOWER_TO_REST            6.46        6.42      -3.72      -3.74
+S2-B4-a-r5-parked         RAISE_TO_SIDE            6.26       37.72      -3.72      37.72
+S2-B4-a-r5-setup          RAISE_TO_SIDE            6.26        5.45      -3.72      -3.82
+S2-B4-a-r6-flight         LOWER_TO_REST            6.46        6.44      -3.72      -3.75
+S2-B4-a-r6-parked         RAISE_TO_SIDE            6.26       37.72      -3.72      37.72
+S2-B4-a-r6-setup          RAISE_TO_SIDE            6.26         5.6      -3.72      -3.91
+S2-B4-b-r1-flight         PLACE_ROUTE              6.26        5.61      -3.72      -3.91
+S2-B4-b-r1-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-b-r2-flight         PLACE_ROUTE              6.26        5.36      -3.72      -3.87
+S2-B4-b-r2-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-b-r3-flight         PLACE_ROUTE              6.26        5.56      -3.72       -3.9
+S2-B4-b-r3-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-b-r4-flight         PLACE_ROUTE              6.26        5.47      -3.72      -3.83
+S2-B4-b-r4-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-b-r5-flight         PLACE_ROUTE              6.26        6.05      -3.72      -3.82
+S2-B4-b-r5-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-b-r6-flight         PLACE_ROUTE              6.26        5.55      -3.72      -3.93
+S2-B4-b-r6-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-c-r1-flight         LIFT_TO_PRESENT          6.46         6.2      -3.72      -3.85
+S2-B4-c-r1-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-c-r1-setup          PLACE_ROUTE              6.26        5.72      -3.72      -3.83
+S2-B4-c-r2-flight         LIFT_TO_PRESENT          6.46        6.26      -3.72       -4.0
+S2-B4-c-r2-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-c-r2-setup          PLACE_ROUTE              6.26        5.73      -3.72      -3.98
+S2-B4-c-r3-flight         LIFT_TO_PRESENT          6.46        6.43      -3.72      -3.74
+S2-B4-c-r3-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-c-r3-setup          PLACE_ROUTE              6.26        5.57      -3.72      -3.76
+S2-B4-c-r4-flight         LIFT_TO_PRESENT          6.46        6.43      -3.72      -3.77
+S2-B4-c-r4-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-c-r4-setup          PLACE_ROUTE              6.26        5.58      -3.72      -3.93
+S2-B4-c-r5-flight         LIFT_TO_PRESENT          6.46        6.43      -3.72      -3.76
+S2-B4-c-r5-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-c-r5-setup          PLACE_ROUTE              6.26        5.51      -3.72       -3.8
+S2-B4-c-r6-flight         LIFT_TO_PRESENT          6.46        6.43      -3.72      -3.78
+S2-B4-c-r6-parked         PLACE_ROUTE              6.26       37.72      -3.72      37.72
+S2-B4-c-r6-setup          PLACE_ROUTE              6.26         5.5      -3.72      -3.84
+stage0-B4-s1-armon        RAISE_TO_SIDE            6.26       37.72      -3.72      37.72
+
+realised shells clearance to pool_box_1 by role/route: min..max over recordings
+  armon  RAISE_TO_SIDE    n=1    37.72 .. 37.72 cm
+  flight LIFT_TO_PRESENT  n=6     6.20 .. 6.43 cm
+  flight LOWER_TO_REST    n=6     6.39 .. 6.44 cm
+  flight PLACE_ROUTE      n=6     5.36 .. 6.05 cm
+  parked PLACE_ROUTE      n=12   37.72 .. 37.72 cm
+  parked RAISE_TO_SIDE    n=6    37.72 .. 37.72 cm
+  setup  PLACE_ROUTE      n=6     5.50 .. 5.73 cm
+  setup  RAISE_TO_SIDE    n=6     5.45 .. 5.69 cm
+aperture_assumed_samples total: 0

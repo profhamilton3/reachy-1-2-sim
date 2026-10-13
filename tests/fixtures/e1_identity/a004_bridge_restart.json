@@ -1,0 +1,434 @@
+{
+ "baseline_state": {
+  "cmd_seq": 2,
+  "joints": [
+   {
+    "compliant": false,
+    "effort": 2.775559507038279e-17,
+    "name": "r_shoulder_pitch",
+    "position_rad": -9.251857472575162e-20
+   },
+   {
+    "compliant": false,
+    "effort": -0.049550578466099546,
+    "name": "r_shoulder_roll",
+    "position_rad": 0.0001651685948869982
+   },
+   {
+    "compliant": false,
+    "effort": 3.067503245358877e-21,
+    "name": "r_arm_yaw",
+    "position_rad": -1.0024739148800651e-23
+   },
+   {
+    "compliant": false,
+    "effort": 1.3877851283501673e-17,
+    "name": "r_elbow_pitch",
+    "position_rad": -6.938894245542285e-20
+   },
+   {
+    "compliant": false,
+    "effort": 7.999328506807671e-21,
+    "name": "r_forearm_yaw",
+    "position_rad": -9.738971605431192e-23
+   },
+   {
+    "compliant": false,
+    "effort": 3.4409792210873304e-23,
+    "name": "r_wrist_pitch",
+    "position_rad": -1.773839104467202e-26
+   },
+   {
+    "compliant": false,
+    "effort": -0.05074271964713092,
+    "name": "r_wrist_roll",
+    "position_rad": 0.0008457119941188494
+   },
+   {
+    "compliant": false,
+    "effort": 1.3734525617533767e-05,
+    "name": "r_gripper",
+    "position_rad": -9.156350411686496e-07
+   }
+  ],
+  "seq": 3723,
+  "sim_step": 13830,
+  "type": "state",
+  "wall_time_ns": 1351655628484166
+ },
+ "commands": [
+  {
+   "compliant": [
+    false,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "seq": 1,
+   "speed_limit_rad_s": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "target_rad": [
+    -1.251889914576648e-18,
+    0.00018581017681691003,
+    -1.9775563394708384e-19,
+    1.7762954293701033e-19,
+    -3.4811459879793196e-19,
+    -7.884876451901066e-18,
+    0.6312579712260793,
+    -0.3215541906385636,
+    -1.251889914576648e-18,
+    -0.00018581017681691003,
+    1.9775563394708384e-19,
+    1.7762954293701033e-19,
+    3.4811459879793196e-19,
+    -7.884876451901066e-18,
+    -0.6312579712260793,
+    0.3215541906385636,
+    1.0826385975650837e-37,
+    0.46754613514131654,
+    -1.7115644315705928e-37,
+    1.4691889935757157e-24,
+    -1.469341194865743e-24
+   ],
+   "torque_limit_percent": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "type": "joint_command"
+  },
+  {
+   "compliant": [
+    null,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "seq": 2,
+   "speed_limit_rad_s": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "target_rad": [
+    -1.251889914576648e-18,
+    0.00018581017681691003,
+    -1.9775563394708384e-19,
+    1.7762954293701033e-19,
+    -3.4811459879793196e-19,
+    -7.884876451901066e-18,
+    0.6312579712260793,
+    -0.3215541906385636,
+    -1.251889914576648e-18,
+    -0.00018581017681691003,
+    1.9775563394708384e-19,
+    1.7762954293701033e-19,
+    3.4811459879793196e-19,
+    -7.884876451901066e-18,
+    -0.6312579712260793,
+    0.3215541906385636,
+    1.0826385975650837e-37,
+    0.46754613514131654,
+    -1.7115644315705928e-37,
+    1.4691889935757157e-24,
+    -1.469341194865743e-24
+   ],
+   "torque_limit_percent": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "type": "joint_command"
+  },
+  {
+   "seed": null,
+   "sim_step": 23409,
+   "type": "reset",
+   "wall_time_s": 46.85924792289734
+  },
+  {
+   "compliant": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "seq": 1,
+   "speed_limit_rad_s": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "target_rad": [
+    -9.251857460692736e-20,
+    0.00016516859488699818,
+    -1.1671347460754555e-23,
+    -6.938892446672055e-20,
+    -9.773002864062823e-23,
+    1.4437368491064053e-26,
+    0.0008457119941188494,
+    -9.156350411686423e-07,
+    -1.3067206204868492e-18,
+    -0.00011841185427696518,
+    2.151974347795945e-19,
+    2.194441434973567e-19,
+    3.8490068339213127e-19,
+    -8.624415341827125e-18,
+    -0.6475220165932938,
+    0.3992609370195736,
+    -7.200499997170014e-21,
+    0.46754613514131654,
+    -6.983042704669517e-21,
+    2.1032985231736324e-18,
+    -2.2883102467895083e-18
+   ],
+   "torque_limit_percent": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "type": "joint_command"
+  }
+ ],
+ "plan_leg": {
+  "name": "S2-B4-c-r1-setup",
+  "plan_entry": {
+   "dur_s": 64.1,
+   "route": "PLACE_ROUTE"
+  }
+ },
+ "post_state": {
+  "cmd_seq": 1,
+  "joints": [
+   {
+    "compliant": false,
+    "effort": 4.8257677316075656e-18,
+    "name": "r_shoulder_pitch",
+    "position_rad": -9.331209014296949e-20
+   },
+   {
+    "compliant": false,
+    "effort": -0.01760345952480461,
+    "name": "r_shoulder_roll",
+    "position_rad": 0.0001709704634305335
+   },
+   {
+    "compliant": false,
+    "effort": -1.2054297383549678e-19,
+    "name": "r_arm_yaw",
+    "position_rad": -1.7912627101995243e-22
+   },
+   {
+    "compliant": false,
+    "effort": 2.537430217101127e-18,
+    "name": "r_elbow_pitch",
+    "position_rad": -7.376154438266273e-20
+   },
+   {
+    "compliant": false,
+    "effort": -1.7258557961535858e-19,
+    "name": "r_forearm_yaw",
+    "position_rad": -4.197045885832615e-22
+   },
+   {
+    "compliant": false,
+    "effort": -2.6454596740368436e-18,
+    "name": "r_wrist_pitch",
+    "position_rad": -7.663151810443104e-22
+   },
+   {
+    "compliant": false,
+    "effort": -0.04662142640026512,
+    "name": "r_wrist_roll",
+    "position_rad": 0.000981409812931533
+   },
+   {
+    "compliant": false,
+    "effort": 7.168887266665505e-05,
+    "name": "r_gripper",
+    "position_rad": -2.83313687481905e-06
+   }
+  ],
+  "seq": 3724,
+  "sim_step": 13840,
+  "type": "state",
+  "wall_time_ns": 1351655639479375
+ },
+ "source": {
+  "files": {
+   "e1_server_runs/run_20261002_035557/commands.jsonl": {
+    "sha256": "f3df0acf0601d729c61f24ae689a4b39b33ae6ee6b1c0f1e0e6bc9d4e4a5873a"
+   },
+   "e1_server_runs/run_20261002_035557/states.jsonl": {
+    "sha256": "1918c5b717fff59125b95b10cba5c403374a5f213049b48e712c682200a9b25b"
+   },
+   "plan_S2-B4-c-r1.json": {
+    "sha256": "8d03d5e035143699227ee95f72385952fb5b0caaad2e3a42fa0af5c85b1e4220"
+   }
+  },
+  "note": "a004 (2026-10-02): r1 setup turn_on after a bridge restart; native cmd_seq 2 -> 1",
+  "session": "20261001T235211Z-b4s1-a004"
+ }
+}

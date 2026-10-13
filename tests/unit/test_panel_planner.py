@@ -155,12 +155,16 @@ def test_a_grid_cell_is_never_called_a_bin():
     assert "not a container" in out.message
 
 
-def test_a_configured_destination_is_used_when_one_exists():
+def test_a_configured_destination_is_resolved_and_then_refused():
+    """The bin resolves to the scene's tray -- and is refused: the place
+    ability sets objects down on grid cells only, and the open-loop arc that
+    could drop into a tray is retired from the panel (#174)."""
     scene = make_scene(destinations=True, live=True)
     scene.objects["soda_can"].on_board = True
     out = plan(scene, "Put the recycle item in the bin.")
-    assert out.kind == "proposal"
-    assert out.proposal.destination == "destination:left_tray"
+    assert out.kind == "unsupported"
+    assert "only place onto a grid cell" in out.message
+    assert "tray" in out.message
 
 
 def test_unknown_destination_is_rejected():
@@ -466,8 +470,8 @@ def test_proposal_labels_its_semantic_source_and_scene():
     assert p.semantic_source == "scene_data"      # not "camera perception"
     assert p.scene_name == "TestScene"
     assert p.requires_confirmation is True
-    assert p.task_type == "pick_place"
-    assert "grid cell r2c2" in p.summary
+    assert p.task_type == "place_on_cell"
+    assert p.summary == "move soda_can to r2c2"
 
 
 def test_proposal_without_live_poses_says_the_position_is_unverified():

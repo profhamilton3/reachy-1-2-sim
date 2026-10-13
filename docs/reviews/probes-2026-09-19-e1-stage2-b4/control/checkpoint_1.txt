@@ -1,0 +1,28 @@
+CHECKPOINT 1 -- Stage 2 B4 session s1, set r1 (Stage 0 + S2-B4-a-r1, b-r1, c-r1)
+Recorded at 2026-09-19T05:30Z against plan §4 (outputs/e1-stage2-b4-execution-plan-2026-09-18.md).
+Code e6c30b74e09c38e616dee0819a7e205d12c5853e; server run e1_server_runs/run_20260919_043924.
+
+1  Stage 0 armon: LEG ok, STAGE0_INIT_OK=yes, EXPERIMENT_ACCEPTED=yes, compliance_check.ok=True
+   (all 8 joints compliant=False, cmd_seq advanced), 0.055 s                        PASS
+2  Resets gen 1/2/3 verified (ack==gen, reset count +1, sim_step restarted); settles 15.2/15.5/16.1 s,
+   max_spread 0.0; parked recordings PARKED ok, start_variant stiff-zero x3          PASS
+3  binding_ok_S2-B4-{a,b,c}-r1: identity ok, provenance_ok, start_variant gate True,
+   pre-cycle compliance gate True                                                   PASS
+4  5 motion legs outcome=returned, elapsed 33.24 / 6.72 / 33.59 / 33.60 / 3.41 s
+   (nominal 33.0 / 6.6 / 33.3 / 33.3 / 3.3; no retry passes)                        PASS
+5  5 x LEG ok: EXPERIMENT_ACCEPTED=yes, contacts=0, max displacement 4e-10..8.5e-9 m,
+   N/N coverage, seq_contiguous, reset_in_window=False, tail PRESENT/REST/REST/REST/PRESENT=yes  PASS
+6  ledger.csv: 9 rows (armon, 3 parked, 2 setup, 3 flight), start_variant=stiff-zero on all 3 cycles  PASS
+7  recorder_logs/: 9 logs + 9 .link.json; runs/ originals present (9)               PASS
+
+DEVIATION (recorded, not a gate failure): the host went to idle sleep at ~04:53Z, after the
+S2-B4-c-r1-setup recording and sidecar were written (04:52:16Z / 04:52:20Z) and before the
+recorder's clearance report finished; it woke at ~05:22Z. Verified from the server's own record
+(control/sleep_gap_check_c-r1.txt): one wall gap, pose identical across it (max delta 0.0 deg),
+all joints compliant=False on both sides, cmd_seq 4473 unchanged, zero commands in the window,
+no reset (sim_step 58700->58710). The container bridge reconnected on wake (native_server.log
+22:22:52/22:23:03 local); the container itself did not restart (supervisor uptime continuous).
+The c-r1 flight then passed check_start(REST), compliance, identity, gate and tail.
+caffeinate -i -s -d started for the remainder of the session (control/caffeinate_pid.txt).
+
+Decision D2(a): all seven criteria pass -> continue to r2..r6 in the same server session.

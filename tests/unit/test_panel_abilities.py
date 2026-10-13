@@ -244,17 +244,30 @@ def test_naming_the_destination_removes_the_ambiguity():
 
 
 # ---------------------------------------------------------------------------
-# Pick-and-place still belongs to the old grammar
+# The grammar's other phrasings stay with the grammar; the two the owner named
+# (#174) are the place ability's own
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("text", [
     "put soda_can on r2c2",
-    "move the foam block to r1c1",
     "Put the recycle item in the bin.",
     "sort the recyclable item",
 ])
 def test_the_registry_declines_pick_and_place_phrases(text):
     assert match(text) is None
+
+
+@pytest.mark.parametrize("text, obj, cell", [
+    ("move the foam block to r1c1", "foam block", "r1c1"),
+    ("pick and place the red cube at r2c1", "red cube", "r2c1"),
+    ("please pick and place red_cube on the r2c1 cell", "red_cube", "r2c1"),
+    ("move red cube onto cell r2c1", "red cube", "r2c1"),
+])
+def test_pick_and_place_and_move_name_the_place_ability(text, obj, cell):
+    m = match(text)
+    assert m.name == "place_on_cell"
+    assert m.slots == {abilities.SLOT_OBJECT: obj, abilities.SLOT_CELL: cell}
+    assert m.ability.route == "CRANE_PLACE"
 
 
 # ---------------------------------------------------------------------------
@@ -641,7 +654,8 @@ def test_each_ability_carries_its_route_identity(text, action, route):
     assert out.kind == "proposal", out.message
     assert out.proposal.task_type == action
     assert out.proposal.route == route
-    assert out.proposal.route_version == 1
+    # The corridor routes moved with SWING_1 (#74, docs/adr/0006).
+    assert out.proposal.route_version == (2 if route in ("STOW_ROUTE", "PLACE_ROUTE") else 1)
 
 
 def test_the_reason_names_the_route_because_the_route_is_the_claim():
@@ -765,7 +779,7 @@ def test_a_pick_and_place_command_during_a_clarification_replaces_it_too():
     out = plan(make_scene(), "point to a cell",
                answers=["put soda_can on r1c1"])
     assert out.kind == "proposal"
-    assert out.proposal.task_type == "pick_place"
+    assert out.proposal.task_type == "place_on_cell"
     assert out.proposal.destination == "cell:r1c1"
 
 

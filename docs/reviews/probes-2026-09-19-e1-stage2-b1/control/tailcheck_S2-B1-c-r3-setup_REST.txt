@@ -1,0 +1,7 @@
+target REST = {"r_shoulder_pitch": -40.0, "r_shoulder_roll": -10.0, "r_arm_yaw": 0.0, "r_elbow_pitch": -45.0, "r_forearm_yaw": 0.0, "r_wrist_pitch": -10.0, "r_wrist_roll": 30.0, "r_gripper": -45.0}
+tail_samples=61 (last 3.0s)  max_gross_err_deg=0.6  max_spread_deg=0.0  r_gripper=-44.3 (target -45.0)
+gross residuals: r_shoulder_pitch=0.2, r_shoulder_roll=0.2, r_arm_yaw=0.0, r_elbow_pitch=0.6
+wrist residuals (info): r_forearm_yaw=0.0, r_wrist_pitch=0.4, r_wrist_roll=0.0
+samples_ok=True posture_ok=True still_ok=True gripper_ok=True
+PARKED_AT_REST=yes
+tailcheck exit=0 (mode=end)

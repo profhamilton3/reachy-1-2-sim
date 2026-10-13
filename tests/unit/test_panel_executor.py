@@ -90,7 +90,10 @@ class StubLink:
         self.released = 0
 
     def snapshot(self):
-        return SimSnapshot(received_at=time.monotonic()) if self._live else None
+        # The can's orientation is reported, as the simulator does: a crane
+        # ability (lift, place) will not start without it.
+        return SimSnapshot(received_at=time.monotonic(),
+                           quats={"soda_can": (1.0, 0.0, 0.0, 0.0)}) if self._live else None
 
     def acquire_control(self, motion_client_id, *, reason="", ttl_s=120.0):
         self.acquired.append((motion_client_id, reason, ttl_s))
@@ -98,6 +101,11 @@ class StubLink:
 
     def release_control(self, timeout=5.0):
         self.released += 1
+
+    def wait_newer(self, seq, timeout):
+        """No new state ever arrives on a stub link."""
+        time.sleep(min(float(timeout), 0.01))
+        return False
 
 
 class StubExecutor:
@@ -133,6 +141,20 @@ class StubExecutor:
 
 
 def a_proposal(**kw):
+    """A placement (#174): soda_can, from where it stands, to r2c2."""
+    base = dict(plan_id="plan-1", plan_version=0, task_type="place_on_cell",
+                target_id="soda_can", destination="cell:r2c2",
+                destination_kind="cell", destination_label="grid cell r2c2",
+                object_id="soda_can", cell="r2c2", arm="right",
+                route="CRANE_PLACE", route_version=1,
+                expected_start_posture="present", end_posture="present",
+                brief_reason="tagged recyclable", summary="move soda_can to r2c2")
+    base.update(kw)
+    return Proposal(**base)
+
+
+def a_pick_place(**kw):
+    """The retired open-loop arc's proposal, as `tasks.Proposal` still accepts it."""
     base = dict(plan_id="plan-1", plan_version=0, task_type="pick_place",
                 target_id="soda_can", destination="cell:r2c2",
                 destination_kind="cell", destination_label="grid cell r2c2",
@@ -259,13 +281,29 @@ def test_a_simulator_without_arbitration_refuses(fake_sdk):
     assert "arbitrate" in why
 
 
-def test_a_non_cell_destination_refuses(fake_sdk):
+def test_the_pick_place_arc_is_retired_from_the_panel(fake_sdk):
+    """#174, owner decision: the open-loop arc did not check it had grasped
+    anything.  It is refused by name, before the lease, and the refusal says
+    what to ask for instead."""
+    link = StubLink()
+    worker = StubWorker()
+    ex = SimulatorExecutor(link, live_scene, "scene.yaml", worker=worker)
+    ok, why = ex.available(a_pick_place())
+    assert ok is False
+    assert "retired from the panel" in why and "move <object> to <cell>" in why
+    out = ex.execute(a_pick_place())
+    assert out.status == "failed" and "retired" in out.detail
+    assert link.acquired == [] and worker.jobs == []
+
+
+def test_a_placement_onto_something_that_is_not_a_cell_refuses(fake_sdk, monkeypatch):
+    _validated(monkeypatch)
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    ok, why = ex.available(a_proposal(destination="destination:left_tray",
+    ok, why = ex.available(a_proposal(cell="left_tray", destination="destination:left_tray",
                                       destination_kind="destination",
                                       destination_label="tray"))
     assert ok is False
-    assert "only place onto a grid cell" in why
+    assert "grid cells only" in why
 
 
 def test_an_unsupported_task_type_refuses(fake_sdk):
@@ -273,7 +311,7 @@ def test_an_unsupported_task_type_refuses(fake_sdk):
     three reasons it is: no motion at all, no validated route in this scene,
     or the wrong arm."""
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    ok, why = ex.available(a_proposal(task_type="handover"))
+    ok, why = ex.available(a_proposal(task_type="handover", route=""))
     assert ok is False
     assert "handover" in why
     assert "not yet built" in why
@@ -312,7 +350,8 @@ def test_pointing_is_refused_in_a_scene_it_was_not_flown_in(fake_sdk):
     assert "TestScene" in why
 
 
-def test_an_object_off_the_board_refuses(fake_sdk):
+def test_an_object_off_the_board_refuses(fake_sdk, monkeypatch):
+    _validated(monkeypatch)
     def scene_provider():
         scene = make_scene()
         from panel_scene import apply_snapshot
@@ -328,19 +367,52 @@ def test_an_object_off_the_board_refuses(fake_sdk):
     assert "not on the board" in why
 
 
-def test_an_unreachable_destination_refuses(fake_sdk):
+def test_an_unreachable_destination_refuses(fake_sdk, monkeypatch):
+    _validated(monkeypatch)
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
-    ok, why = ex.available(a_proposal(destination="cell:r3c1"))
+    ok, why = ex.available(a_proposal(cell="r3c1", destination="cell:r3c1"))
     assert ok is False
     assert "out of the arm's reach" in why
 
 
-def test_a_healthy_proposal_is_accepted(fake_sdk):
+def test_an_occupied_destination_refuses(fake_sdk, monkeypatch):
+    _validated(monkeypatch)
+
+    def scene_provider():
+        scene = make_scene()
+        from panel_scene import apply_snapshot
+        apply_snapshot(scene, SimSnapshot(
+            objects={"soda_can": on_cell(scene, "r1c1"),
+                     "red_cube": on_cell(scene, "r2c2")},
+            received_at=time.monotonic()))
+        return scene
+
+    ok, why = SimulatorExecutor(StubLink(), scene_provider, "scene.yaml").available(
+        a_proposal())
+    assert ok is False
+    assert "r2c2 is not free: red_cube" in why
+
+
+def test_a_placement_needs_the_object_s_orientation(fake_sdk, monkeypatch):
+    _validated(monkeypatch)
+
+    class Unoriented(StubLink):
+        def snapshot(self):
+            return SimSnapshot(received_at=time.monotonic())
+
+    ok, why = SimulatorExecutor(Unoriented(), live_scene, "scene.yaml").available(
+        a_proposal())
+    assert ok is False and "which way" in why
+
+
+def test_a_healthy_proposal_is_accepted(fake_sdk, monkeypatch):
+    _validated(monkeypatch)
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
     assert ex.available(a_proposal()) == (True, "")
 
 
-def test_a_refused_lease_is_reported_and_nothing_moves(fake_sdk):
+def test_a_refused_lease_is_reported_and_nothing_moves(fake_sdk, monkeypatch):
+    _validated(monkeypatch)
     link = StubLink(grant=False)
     ex = SimulatorExecutor(link, live_scene, "scene.yaml")
     result = ex.execute(a_proposal())
@@ -350,8 +422,9 @@ def test_a_refused_lease_is_reported_and_nothing_moves(fake_sdk):
     assert link.released == 0       # and never held it, so never released it
 
 
-def test_the_lease_names_the_bridge_as_the_mover(fake_sdk):
+def test_the_lease_names_the_bridge_as_the_mover(fake_sdk, monkeypatch):
     """The panel holds the lease; the SDK bridge is what actually moves."""
+    _validated(monkeypatch)
     from panel_executor import MOTION_CLIENT_ID
     link = StubLink(grant=False)
     SimulatorExecutor(link, live_scene, "scene.yaml").execute(a_proposal())
@@ -369,13 +442,14 @@ def test_the_lease_names_the_bridge_as_the_mover(fake_sdk):
 # success, but the failure read as a slipped grasp rather than as a race.
 # ---------------------------------------------------------------------------
 
-def test_the_lease_is_taken_before_the_board_is_read(fake_sdk):
+def test_the_lease_is_taken_before_the_board_is_read(fake_sdk, monkeypatch):
     """The scene the MOTION is planned from is read under the lease.
 
     `execute()` reads the board before taking anything, to decide whether to
     try at all; that read pins nothing and costs no lease.  This is about
     `_execute_locked`, where a cell and a sim_step get fixed.
     """
+    _validated(monkeypatch)
     order = []
     link = StubLink()
     inner = link.acquire_control
@@ -397,8 +471,9 @@ def test_the_lease_is_taken_before_the_board_is_read(fake_sdk):
     assert "read" in order
 
 
-def test_a_board_change_under_the_lease_is_reported_as_one(fake_sdk):
+def test_a_board_change_under_the_lease_is_reported_as_one(fake_sdk, monkeypatch):
     """Not as a motion failure.  The operator can act on the difference."""
+    _validated(monkeypatch)
     link = StubLink()
     reads = {"n": 0}
 
@@ -419,6 +494,7 @@ def test_a_board_change_under_the_lease_is_reported_as_one(fake_sdk):
 
 def test_a_snapshot_older_than_the_lease_is_not_planned_against(monkeypatch,
                                                                 fake_sdk):
+    _validated(monkeypatch)
     """Moving the read below `acquire_control` is not on its own enough.
 
     The link hands back whatever the simulator last pushed, which may predate
@@ -430,7 +506,8 @@ def test_a_snapshot_older_than_the_lease_is_not_planned_against(monkeypatch,
 
     class StaleLink(StubLink):
         def snapshot(self):
-            return SimSnapshot(received_at=time.monotonic() - 10.0)
+            return SimSnapshot(received_at=time.monotonic() - 10.0,
+                               quats={"soda_can": (1.0, 0.0, 0.0, 0.0)})
 
     link = StaleLink()
     out = SimulatorExecutor(link, live_scene, "scene.yaml").execute(a_proposal())
@@ -448,8 +525,9 @@ def test_a_scene_that_falls_back_to_the_file_is_not_fresh(monkeypatch, fake_sdk)
     assert ex._fresh_scene() is None
 
 
-def test_the_lease_is_released_even_when_the_board_changed(fake_sdk):
+def test_the_lease_is_released_even_when_the_board_changed(fake_sdk, monkeypatch):
     """The refusal paths added by #60 sit inside the try, not before it."""
+    _validated(monkeypatch)
     link = StubLink()
     reads = {"n": 0}
 
@@ -754,6 +832,64 @@ def _with(worker, provider=live_scene):
     return SimulatorExecutor(StubLink(), provider, "scene.yaml", worker=worker)
 
 
+class _LiftWorker(StubWorker):
+    """Takes the feed a lift is given, and counts closes."""
+
+    def __init__(self, *results):
+        super().__init__(*results)
+        self.closed = 0
+
+    def run(self, job, *, on_phase=None, should_cancel=None, feed=None, deadline_s=None):
+        self.deadlines = getattr(self, "deadlines", []) + [deadline_s]
+        return super().run(job, on_phase=on_phase, should_cancel=should_cancel)
+
+    def close(self):
+        self.closed += 1
+
+
+class _OrientedLink(StubLink):
+    """Reports the can's orientation, which a lift needs before it starts."""
+
+    def snapshot(self):
+        return SimSnapshot(received_at=time.monotonic(),
+                           quats={"soda_can": (1.0, 0.0, 0.0, 0.0)})
+
+
+def _lifting(worker):
+    return SimulatorExecutor(_OrientedLink(), live_scene, "scene.yaml", worker=worker)
+
+
+def _lift(**kw):
+    return _ability(task_type="lift_object", object_id="soda_can",
+                    route="CRANE_LIFT", expected_start_posture="home", **kw)
+
+
+def test_the_next_job_after_a_lift_gets_a_fresh_worker(monkeypatch, fake_sdk):
+    """Backstop for the SDK command-poll leak (sdk_compat): whatever a lift
+    left in the worker's heap goes with the process."""
+    import panel_executor as PE
+    _validated(monkeypatch)
+    monkeypatch.setattr(PE, "RESTART_WORKER_AFTER_LIFT", True)
+    for result in ({"status": "failed", "detail": "halted", "evidence": {}},
+                   {"status": "moved", "flown": [], "final_posture": "present"}):
+        worker = _LiftWorker(result)
+        out = _lifting(worker).execute(_lift())
+        assert len(worker.jobs) == 1 and worker.closed == 1, out
+
+
+def test_other_jobs_and_a_disabled_backstop_keep_the_worker(monkeypatch, fake_sdk):
+    import panel_executor as PE
+    _validated(monkeypatch)
+    monkeypatch.setattr(PE, "RESTART_WORKER_AFTER_LIFT", True)
+    worker = _LiftWorker()
+    _with(worker).execute(_ability(expected_start_posture="home"))
+    assert len(worker.jobs) == 1 and worker.closed == 0
+    monkeypatch.setattr(PE, "RESTART_WORKER_AFTER_LIFT", False)
+    worker = _LiftWorker({"status": "failed", "detail": "halted", "evidence": {}})
+    out = _lifting(worker).execute(_lift())
+    assert len(worker.jobs) == 1 and worker.closed == 0, out
+
+
 def test_the_job_names_the_ability_the_scene_and_where_it_must_start(
         monkeypatch, fake_sdk):
     """Everything the motion process needs and nothing it does not: it has no
@@ -888,59 +1024,63 @@ def test_a_route_stopped_part_way_is_not_reported_as_arrival(
     assert out.evidence["final_posture"] is None
 
 
-def test_the_pick_place_job_carries_the_live_poses_and_the_cell(fake_sdk):
-    """The motion process has no link to the simulator, so everything the arc
-    used to read here has to travel with the job.
-
-    This is the whole regression surface of moving pick-and-place out of
-    process: the scene document supplies geometry, the live snapshot supplies
-    where things actually are, and planning against the YAML's initial poses
-    would aim the gripper at where an object started.
-    """
-    worker = StubWorker({"status": "moved"})
+def test_the_place_job_carries_the_object_the_cell_and_the_live_poses(
+        fake_sdk, monkeypatch):
+    """The motion process has no link to the simulator, so what the placement
+    plans against travels with the job: the object, the destination cell (the
+    scene's own id), the scene document, the live poses -- and a feed of live
+    observations, as the lift gets (#174)."""
+    _validated(monkeypatch)
+    worker = _LiftWorker({"status": "moved", "flown": [], "final_posture": "present"})
     scene = live_scene()
-    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml",
-                           worker=worker)
+    seen = {}
+
+    class Feeding(_LiftWorker):
+        def run(self, job, *, on_phase=None, should_cancel=None, feed=None, deadline_s=None):
+            seen["feed"], seen["deadline_s"] = feed, deadline_s
+            return super().run(job, on_phase=on_phase, should_cancel=should_cancel)
+
+    worker = Feeding({"status": "moved", "flown": [], "final_posture": "present"})
+    ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml", worker=worker)
     ex.execute(a_proposal())
 
     job, = worker.jobs
-    assert job["kind"] == "pick_place"
-    assert job["target_id"] == "soda_can"
+    assert job["kind"] == "ability" and job["task_type"] == "place_on_cell"
+    assert job["route"] == "CRANE_PLACE"
+    assert job["object_id"] == "soda_can" and job["cell"] == "cell_r2c2"
     assert job["scene_file"] == "scene.yaml"
-    assert job["cell_xy"] == [scene.cells["r2c2"].x, scene.cells["r2c2"].y]
     assert job["live"]["soda_can"] == list(scene.objects["soda_can"].position)
+    assert callable(seen["feed"])
+    # A placement is longer than a lift: its own motion deadline, and a lease
+    # that outlives it by the same margin as the default lease does.
+    import panel_executor as PE
+    assert seen["deadline_s"] == PE.PLACE_MOTION_DEADLINE_S > PE.MOTION_DEADLINE_S
+    assert ex._link.acquired[-1][2] == pytest.approx(
+        PE.PLACE_MOTION_DEADLINE_S + PE.LEASE_TTL_S - PE.MOTION_DEADLINE_S)
 
 
-def test_a_cancelled_arc_is_reported_as_cancelled_not_as_a_failure(fake_sdk):
-    """Only with the arm actually stopped and parked is it true to say the
-    motion has stopped, and the motion process is what knows that."""
-    worker = StubWorker({"status": "cancelled",
-                         "detail": "Stopped, and the arm is back at rest.",
-                         "evidence": {"cancelled_at_phase": True}})
-    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml", worker=worker)
-    out = ex.execute(a_proposal())
-    assert out.status == "cancelled"
-    assert "back at rest" in out.detail
+def test_a_lift_keeps_the_default_deadline(fake_sdk, monkeypatch):
+    _validated(monkeypatch)
+    worker = _LiftWorker({"status": "failed", "detail": "halted", "evidence": {}})
+    _lifting(worker).execute(_lift())
+    assert worker.deadlines == [None]
 
 
-def test_a_preflight_refusal_reaches_the_operator_through_the_detail(fake_sdk):
-    """Issue #56: the worker preflights the whole arc and answers `failed` with
-    the segment, link, obstacle and model.  The panel needs no pick/place check
-    of its own: it relays the worker's detail, and the evidence travels with it.
-    """
-    detail = ("soda_can: descend to place: hand would come within -1.2 cm of "
-              "red_cube (tube hand model, margin 0.0 cm, gripper -45 deg)")
-    evidence = {"refused_before_motion": True, "segment": "descend to place",
-                "link": "hand", "obstacle": "red_cube", "clearance_m": -0.012,
-                "margin_m": 0.0, "model": "tube"}
-    worker = StubWorker({"status": "failed", "detail": detail,
-                         "evidence": evidence})
-    ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml", worker=worker)
-    out = ex.execute(a_proposal())
+def test_a_refusal_from_the_placement_preflight_reaches_the_operator(
+        fake_sdk, monkeypatch):
+    """The worker plans and checks the whole placement before the arm moves,
+    and answers `failed` with the stage and the reason; the panel relays it."""
+    _validated(monkeypatch)
+    detail = ("I will not move soda_can to r2c2: exit: soda_can on r2c2 would "
+              "leave no validated exit from PRESENT")
+    worker = _LiftWorker({"status": "failed", "detail": detail,
+                          "evidence": {"refused_before_motion": True, "stage": "exit"}})
+    out = SimulatorExecutor(StubLink(), live_scene, "scene.yaml",
+                            worker=worker).execute(a_proposal())
     assert out.status == "failed"
     assert out.detail == detail
     assert out.evidence["refused_before_motion"] is True
-    assert out.evidence["obstacle"] == "red_cube" and out.evidence["model"] == "tube"
+    assert out.evidence["stage"] == "exit"
 
 
 # ---------------------------------------------------------------------------
