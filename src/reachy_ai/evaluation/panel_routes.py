@@ -33,6 +33,11 @@ actually asked of the motion:
     ATTEMPT_START to the release, and ends at PRESENT.  The withdrawal is
     REPORTED (`completed` / `refused`), not judged: a refused withdrawal is a
     lift that passed and a full cycle that did not (ADR-0007).
+  * **Place** (#174, D6) sets the object down within 1 cm (horizontally) of
+    the target cell's centre, tilted no more than 5 degrees, moves nothing
+    else on the board more than 1 mm, and leaves no pad on it after the
+    release; touches nothing unintended before the release; and its plan's
+    preflight passed.  The withdrawal is REPORTED, as for the lift.
 
 MEASURED AND PLANNED ROUTES (#172, D7)
 --------------------------------------
@@ -106,6 +111,7 @@ ABILITY_ROUTES: Dict[str, str] = {
     "point_cell": "POINT",
     "point_object": "POINT",
     "lift_object": "CRANE_LIFT",
+    "place_on_cell": "CRANE_PLACE",
 }
 
 
@@ -128,6 +134,7 @@ ROUTE_TYPES: Dict[str, RouteType] = {
     "WAVE": RouteType.MEASURED,
     "POINT": RouteType.MEASURED,
     "CRANE_LIFT": RouteType.PLANNED,
+    "CRANE_PLACE": RouteType.PLANNED,
 }
 
 
@@ -185,6 +192,13 @@ class PanelRoutePolicy(EvaluationPolicy):
     #: hand opens.  A TARGET, reported against and never judged (owner
     #: decision on #173: report it, target <= 5 mm, non-blocking).
     release_drag_target_m: float = 0.005
+    #: The place (#174, D6): the object's centre within 1 cm (horizontally)
+    #: of the target cell's centre, tilted no more than 5 degrees, nothing
+    #: else on the board moved more than 1 mm, and no pad touching it after
+    #: the release.
+    place_position_tol_m: float = 0.010
+    place_tilt_max_deg: float = 5.0
+    place_others_moved_max_m: float = 0.001
 
 
 # ---------------------------------------------------------------------------
@@ -1324,6 +1338,194 @@ def evaluate_lift_object(
                                   else float(drag) <= policy.release_drag_target_m)})
 
 
+#: Where a placement's measurements live in `EpisodeResult.metrics` (#174),
+#: each from simulator truth (the replay of a recorded run).
+PLACE_ERROR_KEY = "placement_error_xy_m"     #: final centre to the target, horizontal
+PLACE_TILT_KEY = "placement_tilt_deg"        #: final tilt from upright
+#: 1.0 when the placement was aborted and the object set down where it was
+#: picked up instead; absent otherwise.
+PLACE_ABORTED_KEY = "placement_aborted"
+
+
+def evaluate_place(
+    result: EpisodeResult,
+    spec: PanelRouteTaskSpec,
+    recipe: Optional[TrajectoryRecipe] = None,
+    policy: Optional[PanelRoutePolicy] = None,
+    plan: Optional[Mapping[str, Any]] = None,
+) -> EpisodeVerdict:
+    """The placement passed (#174, D6) when all of these held:
+
+      * the object ended within `place_position_tol_m` (1 cm, horizontal) of
+        the target cell's centre (`PLACE_ERROR_KEY`, at the end of the job);
+      * tilted no more than `place_tilt_max_deg` (5 deg) from upright;
+      * nothing else on the board moved more than `place_others_moved_max_m`
+        (1 mm);
+      * no pad touched the object after the release (the WITHDRAW phase);
+      * nothing was touched that the shared rule table does not allow, from
+        ATTEMPT_START to the release (pads on the target from grasp to
+        release; the target on the table except while held or carried);
+      * the plan's preflight passed and its hash was recorded.
+
+    An aborted placement -- the object carried back and set down where it was
+    picked up -- did not place.  THE WITHDRAWAL IS REPORTED, NOT JUDGED, as for
+    the lift (`reported["withdrawal"]`); `reported["full_cycle"]` is the
+    placement passing, the withdrawal completing with nothing touched after
+    the release, and the arm back at PRESENT.
+    """
+    policy = policy or PanelRoutePolicy()
+    route = ABILITY_ROUTES["place_on_cell"]
+    lines = [f"=== Place Verdict: {spec.task_id or spec.ability} ==="]
+    violations = _common(result, policy, recipe, route, lines)
+
+    if plan is None:
+        lines.append("NOTE: no plan record was supplied, so the plan's integrity "
+                     "(preflight passed, plan hash recorded) was not checked.")
+    else:
+        integrity = check_plan_integrity(route, plan)
+        violations.extend(integrity)
+        for v in integrity:
+            lines.append(f"NOT THIS PLAN: {v.description}")
+        if not integrity:
+            lines.append(f"PLAN: preflight passed; plan "
+                         f"{str(plan.get(PLAN_HASH_KEY))[:12]} recorded.")
+
+    metrics = result.metrics or {}
+
+    def measured(key: str, what: str) -> Optional[float]:
+        raw = metrics.get(key)
+        if raw is None:
+            lines.append(f"{what.upper()}: not recorded, so it cannot be told.")
+            violations.append(Violation(kind=ViolationKind.INVALID_EPISODE,
+                                        description=f"the episode recorded no {what}",
+                                        severity="hard"))
+            return None
+        return float(raw)
+
+    def failed(description: str) -> None:
+        violations.append(Violation(kind=ViolationKind.TASK_FAILURE,
+                                    description=description, severity="soft"))
+
+    aborted = bool(metrics.get(PLACE_ABORTED_KEY))
+    if aborted:
+        lines.append("ABORTED: the object was carried back and set down where it "
+                     "was picked up.")
+        failed("the placement was aborted; the object was set down where it was "
+               "picked up")
+
+    err = measured(PLACE_ERROR_KEY, "placement error")
+    on_target = err is not None and err <= policy.place_position_tol_m and not aborted
+    if err is not None:
+        lines.append(f"POSITION: {err * 1000:.2f} mm (xy) from the target cell's "
+                     f"centre, {policy.place_position_tol_m * 1000:.0f} mm allowed.")
+        if err > policy.place_position_tol_m:
+            failed(f"the object ended {err * 1000:.2f} mm from the target's centre")
+
+    tilt = measured(PLACE_TILT_KEY, "tilt")
+    upright = tilt is not None and tilt <= policy.place_tilt_max_deg
+    if tilt is not None:
+        lines.append(f"TILT: {tilt:.2f} deg from upright, "
+                     f"{policy.place_tilt_max_deg:.0f} deg allowed.")
+        if not upright:
+            failed(f"the object ended tilted {tilt:.2f} deg")
+
+    target = spec.target_object_id
+    drift = object_drift(result, spec, (target,) if target else ())
+    if drift is None:
+        lines.append("OTHERS: cannot be told -- no starting positions recorded.")
+        violations.append(Violation(kind=ViolationKind.INVALID_EPISODE,
+                                    description="no initial object positions were "
+                                                "recorded", severity="hard"))
+        others_ok, worst_other = False, None
+    else:
+        worst_other = max(drift.values(), default=0.0)
+        others_ok = worst_other <= policy.place_others_moved_max_m
+        lines.append(f"OTHERS: the most any other object moved is "
+                     f"{worst_other * 1000:.3f} mm, "
+                     f"{policy.place_others_moved_max_m * 1000:.0f} mm allowed.")
+        if not others_ok:
+            moved = max(drift, key=drift.get)
+            violations.append(Violation(
+                kind=ViolationKind.FORBIDDEN_CONTACT,
+                description=f"{moved} moved {drift[moved] * 1000:.2f} mm",
+                severity="hard"))
+
+    samples = contact_samples(result)
+    after_release: List[CR.JudgedContact] = []
+    if samples is None:
+        lines.append("CONTACT: no phase-tagged contacts were recorded, so neither "
+                     "an unintended contact nor a pad on the object after the "
+                     "release can be ruled out.")
+        violations.append(Violation(kind=ViolationKind.INVALID_EPISODE,
+                                    description="the episode recorded no phase-tagged "
+                                                "contacts", severity="hard"))
+        clean, let_go = False, False
+    else:
+        own = [c for c in samples if not c.route or c.route == route]
+        after = [c for c in own if c.phase is CR.Phase.WITHDRAW]
+        before = [c for c in own if c.phase is not CR.Phase.WITHDRAW]
+        clean = _contacts_by_rule(result, spec, before, violations, lines)
+        after_release = [j for j in CR.judge_all(after, route=route, target_id=target)
+                         if not j.allowed]
+        pads_on_it = [j for j in after_release
+                      if {j.role1, j.role2} == {CR.Role.PAD, CR.Role.TARGET}]
+        let_go = not pads_on_it
+        if pads_on_it:
+            deepest = max(j.sample.deepest_m for j in pads_on_it)
+            lines.append(f"AFTER THE RELEASE: a pad touched the object "
+                         f"({deepest * 1000:.2f} mm deep).")
+            violations.append(Violation(
+                kind=ViolationKind.FORBIDDEN_CONTACT,
+                description=f"a pad touched the object after the release "
+                            f"({deepest * 1000:.2f} mm)", severity="hard"))
+        else:
+            lines.append("AFTER THE RELEASE: no pad touched the object.")
+
+    withdrawal = withdrawal_of(result)
+    at_present = False
+    if withdrawal == WITHDRAWAL_REFUSED:
+        lines.append("ENDS AT PRESENT: not judged -- the withdrawal was refused.")
+    else:
+        at_present = _arrived(result, R.POSTURE_PRESENT, policy, [], lines)
+    detail = withdrawal
+    if after_release:
+        detail = (f"{withdrawal}, contact after the release "
+                  f"{max(j.sample.deepest_m for j in after_release) * 1000:.2f} mm")
+    clauses = (on_target, upright, others_ok, let_go, clean)
+    placed = all(clauses)
+    full_cycle = bool(placed and withdrawal == WITHDRAWAL_COMPLETED and at_present
+                      and not after_release)
+    lines.append(f"WITHDRAWAL: {detail} (reported; not part of the place verdict).")
+    lines.append(f"FULL CYCLE: {'yes' if full_cycle else 'no'}.")
+
+    extra: Dict[str, float] = {"full_cycle": float(full_cycle)}
+    for key, value in ((PLACE_ERROR_KEY, err), (PLACE_TILT_KEY, tilt)):
+        if value is not None:
+            extra[key] = float(value)
+    if worst_other is not None:
+        extra["others_moved_max_m"] = float(worst_other)
+    if withdrawal != WITHDRAWAL_NOT_REACHED:
+        extra[WITHDRAWAL_KEY] = float(withdrawal == WITHDRAWAL_COMPLETED)
+    drag = metrics.get(RELEASE_DRAG_KEY)
+    if drag is not None:
+        extra[RELEASE_DRAG_KEY] = float(drag)
+        lines.append(f"RELEASE DRAG: {float(drag) * 1000:.2f} mm (reported).")
+    return _verdict(result, spec, policy, violations, lines,
+                    accuracy=sum(map(bool, clauses)) / len(clauses),
+                    successful=placed, extra=extra,
+                    reported={"withdrawal": withdrawal, "withdrawal_detail": detail,
+                              "withdrawal_contacts": [f"{j.describe()}: {j.why}"
+                                                      for j in after_release],
+                              "full_cycle": full_cycle, "ends_at_present": bool(at_present),
+                              "aborted": aborted,
+                              "placement_error_mm": None if err is None else round(err * 1000, 2),
+                              "tilt_deg": None if tilt is None else round(tilt, 3),
+                              "others_moved_max_mm": (None if worst_other is None
+                                                      else round(worst_other * 1000, 3)),
+                              "release_drag_mm": (None if drag is None
+                                                  else round(float(drag) * 1000, 2))})
+
+
 #: One evaluator per ability, by the name `panel_abilities` registers it under.
 #: `point_cell` and `point_object` share an evaluator because they share a
 #: route; what differs between them is the target, which is in the task spec.
@@ -1334,6 +1536,7 @@ EVALUATORS: Dict[str, Callable[..., EpisodeVerdict]] = {
     "point_cell": evaluate_point,
     "point_object": evaluate_point,
     "lift_object": evaluate_lift_object,
+    "place_on_cell": evaluate_place,
 }
 
 

@@ -339,6 +339,11 @@ CRANE_PHASES: Tuple[Tuple[str, Phase], ...] = (
     ("lift", Phase.GRASP),
     ("hold", Phase.HOLD),
     ("replace", Phase.SET_DOWN),
+    # The placement (#174): the carry between the ladders, the set-down at
+    # the destination, and an abort's carry back to where it was picked up.
+    ("carry", Phase.CARRY),
+    ("set-down", Phase.SET_DOWN),
+    ("abort: carry back", Phase.CARRY),
     ("withdrawal", Phase.WITHDRAW),
     ("back at PRESENT", Phase.WITHDRAW),
     ("stow_from_side", Phase.WITHDRAW),

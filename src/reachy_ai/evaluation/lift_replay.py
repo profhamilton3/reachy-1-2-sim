@@ -45,7 +45,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Mapping, Optional,
 from reachy_ai.evaluation import contact_rules as CR
 from reachy_ai.evaluation.panel_routes import (
     COLLIDABLE_KEY, CONTACT_SAMPLES_KEY, LIFT_PUT_BACK_KEY, LIFT_RISE_KEY,
-    RELEASE_DRAG_KEY,
+    PLACE_ABORTED_KEY, PLACE_ERROR_KEY, PLACE_TILT_KEY, RELEASE_DRAG_KEY,
     LIFT_SLIP_KEY, WITHDRAWAL_KEY,
 )
 from reachy_ai.experience.models import (EpisodeResult, EpisodeStatus,
@@ -408,3 +408,46 @@ def replay_lift(task: Mapping[str, Any], states: Sequence[Mapping[str, Any]],
             "criteria": crane.get("criteria"),
             "panel_state": task.get("state"),
         })
+
+
+def tilt_deg(quat_wxyz: Sequence[float]) -> float:
+    """The angle between an object's own z axis and the vertical (deg)."""
+    w, x, y, z = (float(v) for v in quat_wxyz)
+    return math.degrees(math.acos(max(-1.0, min(1.0, 1.0 - 2.0 * (x * x + y * y)))))
+
+
+def replay_place(task: Mapping[str, Any], states: Sequence[Mapping[str, Any]],
+                 *, contacts_at: Optional[Contacts] = None,
+                 collidable: Sequence[str] = (), episode_id: str = "",
+                 hold_s: float = DEFAULT_HOLD_S) -> ReplayedLift:
+    """A recorded placement (#174) for `panel_routes.evaluate_place`.
+
+    The same replay as the lift's -- the crane's phases (the carry and the
+    set-down are its own segments), the contacts, the hold, the release drag,
+    the withdrawal -- plus where the object stood at the END of the job,
+    measured from the states against the target the crane recorded: its
+    horizontal distance from the target and its tilt.  An aborted placement
+    is marked so."""
+    r = replay_lift(task, states, contacts_at=contacts_at, collidable=collidable,
+                    episode_id=episode_id, hold_s=hold_s)
+    crane = (task.get("execution_evidence") or {}).get("crane") or {}
+    place = crane.get("place") or {}
+    oid = r.spec.target_object_id
+    last = next((st for st in states if int(st["sim_step"]) == r.result.end_sim_step), None)
+    metrics = dict(r.result.metrics)
+    metrics.pop(LIFT_PUT_BACK_KEY, None)
+    target = place.get("target")
+    if last is not None and target:
+        pos = object_pos(last, oid)
+        metrics[PLACE_ERROR_KEY] = math.dist(pos[:2], [float(v) for v in target[:2]])
+        metrics[PLACE_TILT_KEY] = tilt_deg(object_quat(last, oid))
+    if place.get("aborted"):
+        metrics[PLACE_ABORTED_KEY] = 1.0
+    proposal = task.get("proposal") or {}
+    result = dataclasses.replace(r.result, metrics=metrics)
+    spec = dataclasses.replace(
+        r.spec, task_id=f"panel:place_on_cell:{result.episode_id}",
+        task_type="place_on_cell", ability="place_on_cell",
+        route=str(proposal.get("route") or "CRANE_PLACE"))
+    reported = dict(r.crane_reported, place=place)
+    return dataclasses.replace(r, result=result, spec=spec, crane_reported=reported)

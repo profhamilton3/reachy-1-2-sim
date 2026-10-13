@@ -776,3 +776,38 @@ def test_a_board_that_cannot_be_read_costs_the_fields_not_the_motion(
     assert evidence["sim_step_end"] is None
     assert evidence["object_displacement_m"] is None
     assert evidence["command_poll_fixed"] is None
+
+
+def test_a_placement_record_carries_where_it_went(db, fake_sdk, validated):
+    """#174: a placement records its target cell, how far from the cell's
+    centre the object ended, its tilt, whether it was aborted, and the
+    release retreat -- beside the plan and the withdrawal, as the lift does."""
+    proposal = Proposal(
+        plan_id="p-place", plan_version=0, task_type="place_on_cell",
+        target_id="red_cube", destination="cell:r2c1", destination_kind="cell",
+        brief_reason="", summary="move red_cube to r2c1", object_id="red_cube",
+        cell="r2c1", route="CRANE_PLACE", expected_start_posture="present",
+        end_posture="present")
+    plan = {"preflight_passed": True, "plan_sha256": "c" * 64, "rungs": 38,
+            "object_id": "red_cube", "target_cell": "cell_r2c1"}
+    result = types.SimpleNamespace(status="completed", detail="placed", evidence={
+        "route": "CRANE_PLACE", "object_displacement_m": {"red_cube": 0.152},
+        "crane": {"plan": plan,
+                  "replaced": {"release_drag_mm": 3.8, "opening_deg": -68.0,
+                               "release_retreat_mm": 9.0},
+                  "place": {"target_cell": "cell_r2c1", "at_destination": True,
+                            "error_from_target_mm": 3.87, "tilt_deg": 0.0,
+                            "aborted": None},
+                  "withdrawal": {"clean": True, "way_out": "direct",
+                                 "opened_wider": False}}})
+    EpisodeRecorder("scene.yaml", db_path=db).record(proposal, result)
+
+    row, = rows(db)
+    meta = json.loads(row["optimizer_metadata_json"])
+    assert meta["plan"] == plan
+    assert meta["seed"]["planner"].startswith("deterministic") and \
+        "PLACE_GRASP" in meta["seed"]["planner"]
+    assert meta["placement"] == {"target_cell": "cell_r2c1", "at_destination": True,
+                                 "error_from_target_mm": 3.87, "tilt_deg": 0.0,
+                                 "aborted": None, "release_retreat_mm": 9.0}
+    assert meta["withdrawal"]["completed"] is True

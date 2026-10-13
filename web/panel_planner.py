@@ -502,6 +502,10 @@ class DeterministicPlanner:
             cell = given.get(SLOT_CELL, "")
             if not cell:
                 scene = self._scene_provider()
+                if match.name == "place_on_cell":
+                    choices = [] if scene.error else scene.available_cells()
+                    return _clarify("Which cell should I put it on?", choices,
+                                    SLOT_CELL)
                 choices = [] if scene.error else scene.reachable_cells()
                 return _clarify("Which cell should I point to?", choices,
                                 SLOT_CELL)
@@ -512,7 +516,8 @@ class DeterministicPlanner:
             if not obj:
                 scene = self._scene_provider()
                 choices = [] if scene.error else sorted(scene.objects)
-                verb = "lift" if match.name == "lift_object" else "point to"
+                verb = {"lift_object": "lift", "place_on_cell": "move"}.get(
+                    match.name, "point to")
                 return _clarify(f"Which object should I {verb}?", choices,
                                 SLOT_OBJECT)
             match.slots[SLOT_OBJECT] = obj
@@ -552,10 +557,20 @@ class DeterministicPlanner:
                     f"There is no cell called {cell} in this scene. "
                     "Pick one of these.", scene.reachable_cells(), SLOT_CELL)
             if not scene.cells[cell].reachable:
+                verb = "put anything on" if match.name == "place_on_cell" else "point at"
                 return _clarify(
                     f"{cell} was measured out of the right arm's reach, so I "
-                    "cannot point at it. Pick another cell.",
+                    f"cannot {verb} it. Pick another cell.",
                     scene.reachable_cells(), SLOT_CELL)
+            if match.name == "place_on_cell":
+                # A placement needs the cell FREE (pointing does not).  The
+                # object itself standing there is not "occupied": the plan
+                # refuses a move of less than 2 cm with its own reason.
+                occupant = scene.cells[cell].occupant
+                if occupant and occupant != _match_object_id(obj or "", scene):
+                    return _clarify(
+                        f"{cell} is already occupied by {occupant}. "
+                        "Pick another cell.", scene.available_cells(), SLOT_CELL)
             summary = f"{summary} {cell}"
 
         if obj is not None:
@@ -579,6 +594,8 @@ class DeterministicPlanner:
             match.slots[SLOT_OBJECT] = oid
             obj = oid
             summary = f"{summary} {oid}"
+        if match.name == "place_on_cell" and obj and cell:
+            summary = f"move {obj} to {cell}"
 
         # A PROMOTED RECIPE, OR THE ROUTE THE ABILITY ALWAYS FLIES.  Looked up
         # at planning time and not at execution time, because the card the
@@ -587,6 +604,14 @@ class DeterministicPlanner:
         if recipe is not None:
             summary = f"{summary} — {recipe.describe()}"
 
+        # A PLACEMENT NAMES WHAT IT MOVES AND WHERE, in the fields the card
+        # and the revalidator have always read for that (target, destination),
+        # as well as the ability's own (object, cell).
+        placing = match.name == "place_on_cell" and obj and cell
+        place_fields = dict(
+            target_id=obj, destination=f"cell:{cell}", destination_kind="cell",
+            destination_label=f"grid cell {cell}", semantic_source="scene_data",
+        ) if placing else {}
         proposal = Proposal(
             plan_id=uuid.uuid4().hex,
             plan_version=0,
@@ -594,6 +619,7 @@ class DeterministicPlanner:
             arm=match.arm,
             cell=cell,
             object_id=obj,
+            **place_fields,
             route=ability.route,
             route_version=ability.route_version,
             recipe_trial_id=recipe.trial_id if recipe else "",
@@ -604,7 +630,8 @@ class DeterministicPlanner:
             expected_start_posture=(ability.start_postures[0]
                                     if ability.start_postures else ""),
             end_posture=ability.end_posture,
-            brief_reason=_ability_reason(match),
+            brief_reason=(_place_reason(scene, obj, match) if placing
+                          else _ability_reason(match)),
             requires_confirmation=ability.requires_confirmation,
             scene_name=(scene.name if scene is not None else ""),
             summary=summary,
@@ -771,40 +798,23 @@ class DeterministicPlanner:
 
     def _propose(self, scene: SceneView, target_id: str,
                  destination: DestinationRef) -> PlannerOutcome:
-        summary = f"move {target_id} to {destination.describe()}"
+        """The grammar's placement, as the place ability (#174).
 
-        obj = scene.objects.get(target_id)
-        if obj is not None and obj.is_recyclable:
-            reason = f"{target_id} is tagged recyclable in this scene."
-        elif obj is not None and obj.semantic_class:
-            reason = f"{target_id} is a {obj.semantic_class} in this scene."
-        else:
-            reason = f"{target_id} is a placeable object in this scene."
-        if scene.live and obj is not None and obj.cell:
-            reason += f" It is on {obj.cell} now."
-        elif not scene.live:
-            reason += " Its current position has not been verified."
-
-        return PlannerOutcome(
-            kind="proposal",
-            message=f"Proposed action: {summary}.",
-            proposal=Proposal(
-                plan_id=uuid.uuid4().hex,
-                plan_version=0,          # the coordinator stamps the real one
-                task_type="pick_place",
-                target_id=target_id,
-                destination=destination.as_str(),
-                destination_kind=destination.kind,
-                destination_label=destination.describe(),
-                legacy_destination=destination.legacy_destination(),
-                brief_reason=reason,
-                requires_confirmation=True,
-                semantic_source="scene_data",
-                scene_name=scene.name,
-                summary=summary,
-                state_evidence=_evidence(scene, target_id, destination),
-            ),
-        )
+        The open-loop pick-and-place arc is retired from the panel (owner
+        decision): every "put / place / move / drop X on Y" that names a grid
+        cell becomes the `place_on_cell` ability -- the crane pick, a checked
+        carry, a measured set-down.  A destination that is not a grid cell is
+        refused: the ability places onto cells only.
+        """
+        if destination.kind != "cell":
+            return _unsupported(
+                f"I can only place onto a grid cell, and {destination.describe()} "
+                "is not one. Ask me to move it to a cell, for example "
+                f"\"move {target_id} to r2c1\".")
+        match = abilities.AbilityMatch(
+            name="place_on_cell", ability=abilities.REGISTRY["place_on_cell"],
+            slots={SLOT_OBJECT: target_id, SLOT_CELL: destination.ref_id})
+        return self._ability_proposal(match)
 
 
 def _ability_reason(match) -> str:
@@ -822,6 +832,23 @@ def _ability_reason(match) -> str:
         abilities.SLOT_CELL) else ""
     return (f"{ability.route} with my {match.arm} arm{where}, ending "
             f"{ability.end_posture or 'where it started'}")
+
+
+def _place_reason(scene: SceneView, target_id: str, match) -> str:
+    """Why this placement, in terms the operator can check: what the object
+    is in this scene and where it is now, then the route."""
+    obj = scene.objects.get(target_id)
+    if obj is not None and obj.is_recyclable:
+        reason = f"{target_id} is tagged recyclable in this scene."
+    elif obj is not None and obj.semantic_class:
+        reason = f"{target_id} is a {obj.semantic_class} in this scene."
+    else:
+        reason = f"{target_id} is a placeable object in this scene."
+    if scene.live and obj is not None and obj.cell:
+        reason += f" It is on {obj.cell} now."
+    elif not scene.live:
+        reason += " Its current position has not been verified."
+    return f"{reason} {_ability_reason(match)}."
 
 
 def _ability_evidence(match, scene) -> Dict[str, Any]:
@@ -845,6 +872,13 @@ def _ability_evidence(match, scene) -> Dict[str, Any]:
     if oid and oid in scene.objects and scene.objects[oid].position is not None:
         ev["object_id"] = oid
         ev["object_position"] = list(scene.objects[oid].position)
+    if match.name == "place_on_cell" and scene.live:
+        # What a placement assumed besides the object: where it stood, and
+        # that the destination was free.
+        if oid and oid in scene.objects:
+            ev["target_cell"] = scene.objects[oid].cell
+        if cell and cell in scene.cells:
+            ev["destination_occupant"] = scene.cells[cell].occupant
     return ev
 
 
@@ -899,38 +933,6 @@ def _dest_ref(scene: SceneView, destination_id: str) -> DestinationRef:
         kind="destination", ref_id=destination_id,
         label=view.label if view else destination_id,
     )
-
-
-def _evidence(scene: SceneView, target_id: str,
-              destination: DestinationRef) -> dict:
-    """What this plan assumed about the world, so it can be rechecked.
-
-    Empty when the scene is not live: there is nothing to recheck against, and
-    a plan built from the scene file alone never claimed a position in the
-    first place.
-
-    `sim_step` is recorded but deliberately NOT compared at confirm time.  The
-    simulator advances it hundreds of times a second, so treating a changed
-    step as a changed world would invalidate every proposal before anyone
-    could read it.  What is compared is what actually matters: the scene
-    revision, where the target is, and whether the destination is still free.
-    """
-    if not scene.live:
-        return {}
-    obj = scene.objects.get(target_id)
-    occupant = None
-    if destination.kind == "cell":
-        cell = scene.cells.get(destination.ref_id)
-        occupant = cell.occupant if cell else None
-    return {
-        "scene_revision": scene.scene_revision,
-        "sim_step": scene.sim_step,
-        "target_id": target_id,
-        "target_pos": list(obj.position) if obj and obj.position else None,
-        "target_cell": obj.cell if obj else None,
-        "destination": destination.as_str(),
-        "destination_occupant": occupant,
-    }
 
 
 class LiveProposalValidator:
@@ -1016,8 +1018,13 @@ class LiveProposalValidator:
                 return False, f"{cell_name} is no longer in this scene."
             if not cell.reachable:
                 return False, f"{cell_name} is no longer within reach."
-            # Deliberately NOT checking occupancy.  Pointing is a hover, and
-            # a cell with something on it is a cell worth pointing at.
+            # Deliberately NOT checking occupancy for pointing: it is a hover,
+            # and a cell with something on it is a cell worth pointing at.  A
+            # placement needs it free (or holding the object itself).
+            if action == "place_on_cell" and cell.occupant and \
+                    cell.occupant != (evidence.get("object_id") or proposal.object_id):
+                return False, (f"{cell_name} now holds {cell.occupant}, so I cannot "
+                               "put anything there. Ask me again.")
 
         object_id = evidence.get("object_id") or proposal.object_id
         expected_pos = evidence.get("object_position")
@@ -1155,7 +1162,8 @@ def _provisional_kind(command: str) -> str:
         return ""
     if match is not None and match.ability is not None:
         return match.name
-    return "pick_place" if parse_intent(command) is not None else ""
+    # The placement grammar resolves to the place ability (#174).
+    return "place_on_cell" if parse_intent(command) is not None else ""
 
 
 def _split_history(history: List[ConversationEvent], latest: str

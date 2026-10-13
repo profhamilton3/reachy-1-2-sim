@@ -503,6 +503,57 @@ class CarriedReport:
                 "other_id": self.other_id, "others_at": self.others_at}
 
 
+def _rot_to_quat(R: np.ndarray) -> Tuple[float, float, float, float]:
+    """wxyz quaternion of a rotation matrix (Shepperd's method)."""
+    m = np.asarray(R, dtype=float)
+    tr = float(np.trace(m))
+    if tr > 0.0:
+        s = 2.0 * math.sqrt(tr + 1.0)
+        q = (0.25 * s, (m[2, 1] - m[1, 2]) / s, (m[0, 2] - m[2, 0]) / s,
+             (m[1, 0] - m[0, 1]) / s)
+    else:
+        i = int(np.argmax(np.diag(m)))
+        j, k = (i + 1) % 3, (i + 2) % 3
+        s = 2.0 * math.sqrt(max(1e-12, 1.0 + m[i, i] - m[j, j] - m[k, k]))
+        v = [0.0, 0.0, 0.0]
+        v[i] = 0.25 * s
+        v[j] = (m[j, i] + m[i, j]) / s
+        v[k] = (m[k, i] + m[i, k]) / s
+        q = ((m[k, j] - m[j, k]) / s, v[0], v[1], v[2])
+    n = math.sqrt(sum(c * c for c in q)) or 1.0
+    return tuple(float(c) / n for c in q)
+
+
+def box_object(box: Box, object_id: str = "") -> SceneObject:
+    """``box`` as a scene object, for `awareness.segment_object_distance`."""
+    return SceneObject(id=object_id or box.name, kind="box",
+                       center=tuple(float(v) for v in box.center),
+                       size=tuple(float(2.0 * v) for v in box.half),
+                       dynamic=True, tracked=False, quat=_rot_to_quat(box.axes))
+
+
+def carried_arm_clearance(seq: Sequence[Sequence[float]], gripper_deg: float,
+                          obj: Box, rel: Tuple[np.ndarray, np.ndarray],
+                          max_step_deg: float = 0.5) -> Tuple[float, str, int]:
+    """The carried object against the upper arm and the forearm along a
+    commanded route: (worst distance m, link, sample index).
+
+    The whole-arm preflight models a carried target at the planned PAD POINT
+    (`kinematics.TargetContact.carried`); this is the held box itself, where
+    ``rel`` (`grasp_transform`) puts it, against the two links that are not
+    holding it."""
+    worst = (math.inf, "", -1)
+    for k, q in enumerate(densify(seq, max_step_deg)):
+        b = box_object(carried_box(hand_frames(q, gripper_deg), obj, rel))
+        for name, p0, p1, r in K.link_capsules(q, "right", gripper_deg, hand="tube"):
+            if name not in TABLE_LINKS:
+                continue
+            d, _at = segment_object_distance(b, p0, p1, r)
+            if d < worst[0]:
+                worst = (d, name, k)
+    return worst
+
+
 def carried_clearance(scene: SceneModel, object_id: str,
                       seq: Sequence[Sequence[float]], gripper_deg: float,
                       obj: Box, rel: Tuple[np.ndarray, np.ndarray],

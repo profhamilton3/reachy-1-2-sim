@@ -231,7 +231,7 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
     # (whole arm, table, both pads, the carried object) from the raised pose
     # with the IK service alone; a refusal here leaves the arm untouched.
     crane: Dict[str, Any] = {}
-    if job.get("task_type") == "lift_object":
+    if job.get("task_type") in ("lift_object", "place_on_cell"):
         refused = _crane_preflight(job, arm, phase, crane)
         if refused is not None:
             return refused
@@ -287,6 +287,7 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
               "point_cell": point,
               "point_object": point,
               "lift_object": lambda a, **kw: _crane_lift(robot, a, phase, crane, **kw),
+              "place_on_cell": lambda a, **kw: _crane_lift(robot, a, phase, crane, **kw),
               }.get(job.get("task_type"))
     if runner is None:
         return _fail(f"I have no runner wired up for {job.get('task_type')}")
@@ -348,7 +349,10 @@ KEPT_CRANE_EVENTS = ("phase", "CORRECTION", "CORRECTION_COMMANDED", "ALIGNED", "
                      "DESCENT_CHECK_FAILED", "STRADDLE", "CLOSED", "HELD", "SUPPORTED",
                      "RELEASED", "WITHDRAWAL_PRECHECK", "WITHDRAWAL_JUDGED",
                      "WITHDRAWAL_CORRECTION",
-                     "WITHDRAWN", "HALT", "REFUSED", "RETREAT_REFUSED")
+                     "WITHDRAWN", "HALT", "REFUSED", "RETREAT_REFUSED",
+                     # the placement (#174)
+                     "CARRY_PLANNED", "IN_HAND", "SETDOWN_MEASURE", "SETDOWN_CORRECTION",
+                     "ABORT", "RELEASE_RETREAT")
 
 
 def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
@@ -399,6 +403,20 @@ def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
             what = "separating from the object by" if kw.get("way_out") == "separating" \
                 else "shifting the way out by"
             phase(f"lift: {what} {mm(kw['shift_mm'] or [0, 0, 0])}")
+        elif kind == "CARRY_PLANNED":
+            phase(f"lift: the destination re-planned from where the object sits in my hand; "
+                  f"carrying it at +{kw.get('carry_rung')} cm")
+        elif kind == "SETDOWN_MEASURE":
+            phase(f"lift: the held object is {kw.get('error_mm', 0):.1f} mm from the cell's "
+                  f"centre ({kw.get('label')})")
+        elif kind == "SETDOWN_CORRECTION":
+            phase(f"lift: correcting the set-down by {mm(kw['shift_mm'])}")
+        elif kind == "ABORT":
+            phase(f"lift: not placing it -- {kw.get('reason')}; carrying it back to where "
+                  "I picked it up")
+        elif kind == "RELEASE_RETREAT":
+            phase("lift: backing my hand off the object as I let go" if kw.get("ok")
+                  else f"lift: letting go without backing off ({kw.get('reason')})")
         elif kind == "HALT":
             phase(f"lift: stopped -- {kw.get('reason')}")
         elif kind in ("REFUSED", "RETREAT_REFUSED"):
@@ -427,6 +445,21 @@ def _crane_preflight(job, arm, phase, crane: Dict[str, Any]) -> Optional[Dict[st
     o = observe()
     model.update_poses({oid: o.position})
     planner = CartesianPlanner(arm, scene=model)
+    if job.get("task_type") == "place_on_cell":
+        from reachy_ai.tasks import crane_place_live as PL
+        cell = job.get("cell") or ""
+        phase(f"lift: planning and checking the whole placement of {oid} on "
+              f"{cell.replace('cell_', '')} before moving")
+        try:
+            place = PL.plan_crane_place(planner, model, oid, cell, o,
+                                        on_event=_crane_phases(phase))
+        except CP.CraneRefused as exc:
+            return _fail(f"I will not move {oid} to {cell.replace('cell_', '')}: "
+                         f"{exc.stage}: {exc.reason}",
+                         refused_before_motion=True, stage=exc.stage)
+        crane.update(plan=place.pick, place=place, planner=planner, model=model,
+                     observe=observe, plan_record=plan_record(place))
+        return None
     phase(f"lift: planning and checking the whole lift of {oid} before moving")
     try:
         plan = CP.plan_crane_pick(planner, model, oid, o, on_event=_crane_phases(phase))
@@ -445,14 +478,20 @@ def _jsonable(v):
 def plan_record(plan) -> Dict[str, Any]:
     """What identifies the plan that flew (#172, D7: a planned route's
     integrity is "preflight passed, plan hash recorded").  Made only after
-    `plan_crane_pick` returned, i.e. after every preflight check passed; a
-    refused plan never gets this far and never moves the arm."""
+    `plan_crane_pick` (or, for a placement, `plan_crane_place`) returned, i.e.
+    after every preflight check passed; a refused plan never gets this far and
+    never moves the arm."""
     summary = json.loads(json.dumps(plan.summary(), default=_jsonable))
     digest = hashlib.sha256(json.dumps(summary, sort_keys=True,
                                        separators=(",", ":")).encode()).hexdigest()
-    return {"preflight_passed": True, "plan_sha256": digest,
-            "rungs": len(summary.get("rungs") or ()),
-            "object_id": summary.get("object_id")}
+    # A placement's plan is two ladders (the pickup's and the destination's).
+    rungs = summary.get("rungs") or (list((summary.get("pick") or {}).get("rungs") or ())
+                                     + list((summary.get("dest") or {}).get("rungs") or ()))
+    record = {"preflight_passed": True, "plan_sha256": digest, "rungs": len(rungs),
+              "object_id": summary.get("object_id")}
+    if summary.get("target_cell"):
+        record["target_cell"] = summary["target_cell"]
+    return record
 
 
 def _arm_state(arm) -> Dict[str, Any]:
@@ -477,7 +516,8 @@ def _crane_lift(robot, arm, phase, crane, *, should_abort=None, on_phase=None):
     kept: List[Dict[str, Any]] = []
     out = CP.execute_crane_pick(robot, crane["planner"], crane["model"], crane["plan"],
                                 crane["observe"], on_event=_crane_phases(phase, kept),
-                                should_abort=should_abort, stow=False)
+                                should_abort=should_abort, stow=False,
+                                place=crane.get("place"))
     crane["outcome"] = json.loads(json.dumps(dict(out, events=kept, arm_state=_arm_state(arm),
                                                   plan=crane.get("plan_record")),
                                          default=_jsonable))
