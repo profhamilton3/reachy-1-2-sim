@@ -76,8 +76,9 @@ Working rule for all three: offline replay and preflight sweeps first, focused t
 | Issue | What | Notes |
 |---|---|---|
 | #180 | Placement breadth: more cell pairs live, and cylinders | Offline sweep first; 5 live runs per pair |
-| #179 | Measure the physical gripper's travel and load (scripts for the robot team) | Validates −68° and feeds the real grasp checks in #182 stage 3 |
-| reachy-tabletop-ai#23 | Port the SDK 0.7.0 leak fix and latest-wins delivery to the workstation app | Client-side only; no robot or NUC change |
+| reachy-tabletop-ai#27 | Robot-side gripper capture: primitives, script, operator doc (split from #179) | Under tabletop-ai's motion rules; dry-run against the sim's fake server first |
+| #179 | Analyse that capture against the simulator's gripper model | Validates −68°; feeds the real grasp checks in #182 stage 3 |
+| ✅ reachy-tabletop-ai#23 | SDK 0.7.0 leak fix and latest-wins delivery ported (tabletop PRs #25, #26) | Client-side only; no robot or NUC change |
 | #181 | Autonomy (b): adapt from outcomes | First slice: release strategy |
 | #182 | Autonomy (c): perception-driven generalisation | 5 stages; perception lives in tabletop-ai |
 
