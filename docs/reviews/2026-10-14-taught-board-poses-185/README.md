@@ -46,6 +46,14 @@ The notebook's gripper values are Siva's chosen settings for his objects, not li
    - **Forward:** the camera agrees with the tape-measured board to within 3.5 cm. The arm's taught positions are the outlier, about 0.24 m short, with spacing compressed to 0.84× / 0.92×. A torso offset does not explain that; the arm's readings or teaching reference do. The earlier "torso about 0.21 m forward" estimate is withdrawn.
    - **Reach:** a higher torso puts the board further below the shoulder. That makes the far row *harder* to reach in the sim, not easier. So the far-row reach shown by the taught A1/A2 is tied up with the arm-side discrepancy, not with the mount.
 
+5. **The arm gap: the board was in a different place when Siva taught it.**
+   - **The arm can't reach the August board with Siva's joints.** At the camera/tape position, B2 is 0.640 m from the right shoulder; the arm's maximum reach, fully straight, is 0.648 m. Siva's physical B2 pick (`B2_PICK` joints, cell 71) had the elbow bent 93°, which puts the tip 0.450 m from the shoulder. The far-left square would be 0.81 m away, out of reach entirely.
+   - **No plausible arm error explains it.** It would take the elbow to be about 90° straighter than recorded. Link lengths are the URDF's, matching the robot.
+   - **The board has moved before.** The same camera check on Siva's own empty-board photos (late August; `photo_check/results_siva_2026-08.json`, 2 views) puts the board centre at (0.47, **0.10**, −0.41). That is the same distance and height as the Aug 20 MCC photos, but 8.5 cm to the robot's left.
+   - **Dates:** `CalibrateBoard.ipynb` was first committed 2026-10-13, about seven weeks after any photo.
+   - **Conclusion:** in October the board sat about 0.24 m closer to the robot, at the same surface height. Height agrees across all three sources and sessions. That also reconciles the reach question: the August placement leaves `r3c1`/`r3c2` out of reach (the sim's verdict); the October placement put the whole board in reach (Siva taught A1 and A2).
+   - **Still open:** the taught spacing (0.84× / 0.92×).
+
 ## Files and reproduction
 
 | File | What it is |
@@ -55,7 +63,7 @@ The notebook's gripper values are Siva's chosen settings for his objects, not li
 | `urdf_fk.py`, `ik.py` | URDF chain FK; damped least-squares IK with joint clamping. Numpy only. |
 | `analyze.py` | Every number above |
 | `analysis.txt` | Raw output of `analyze.py` |
-| `photo_check/` | `board_pnp.py` (board pose from each MCC photo), `results.json` (per view), `summary.txt` |
+| `photo_check/` | `board_pnp.py` (board pose from each MCC photo), `results.json` (per view, Aug 20 MCC photos), `results_siva_2026-08.json` (Siva's empty-board photos), `summary.txt` |
 
 ```bash
 python3 extract.py <CalibrateBoard.ipynb> taught_poses.json f207378
