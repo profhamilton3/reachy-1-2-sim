@@ -1,0 +1,5 @@
+usable views (reprojection rms < 2 px): 17 of 40 photos (13 left, 4 right)
+Left  board centre in torso: median [ 0.468  0.015 -0.417]  std [0.003 0.005 0.003]  n=13
+Right board centre in torso: median [ 0.456  0.015 -0.397]  std [0.001 0.001 0.003]  n=4
+all   board centre in torso: median [ 0.467  0.015 -0.416]  std [0.006 0.004 0.009]  n=17
+head pitch spread across views: 12-42 deg

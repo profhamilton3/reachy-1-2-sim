@@ -29,12 +29,22 @@ The notebook's gripper values are Siva's chosen settings for his objects, not li
    - residual rms 16 mm, max 29 mm. That is teaching scatter: no choice of hand point improves it.
    - The gripper was horizontal at every square, so the height doesn't depend on which point of the hand is used.
    - Square names map as A = far, C = near, columns 1–3 = +y to −y. Against sim cells: A ↔ r3, C ↔ r1, columns agree.
-4. **Measured board vs taught board: they disagree, and the likely cause is the torso mount.**
-   - **Positions:** the measured grid centre (`cell_r2c2`, 0.4318 m ahead of the pedestal axis, on the 0.74 m surface) sits at (0.432, 0.000, −0.260) in the model's torso frame, because the model mounts the torso at (0, 0, 1.0) over the pedestal. The taught centre is (0.226, 0.000, −0.377): **0.206 m nearer and 0.117 m lower**.
-   - **Rotation:** none to speak of (0.8°), so the difference is almost a pure offset.
-   - **Implied torso mount:** if the board measurement is right, the real torso origin sits at about **(0.21, 0.00, 1.12–1.15) m in the pedestal frame**, not (0, 0, 1.0). The height range covers the unknown height of the tip above the surface when taught (0–3 cm). Nothing in the repo measures the torso mount; the scene notes that the mast is not modelled.
-   - **Spacing:** taught spacing is 0.838 × (rows) and 0.916 × (columns) the measured 0.1524 m. A mount offset doesn't explain that. It is left open: teaching scatter is 16 mm rms, too small to cause it alone.
-   - **Reach:** with the implied mount, the far row comes within reach, as on the robot (A1 and A2 were taught). The sim currently marks `cell_r3c1` and `cell_r3c2` out of right-arm reach.
+4. **Measured board vs taught board vs camera.**
+
+   **The sources** (board centre, `cell_r2c2`, in the torso frame):
+
+   | Source | Forward x | Left y | Height z |
+   |---|---|---|---|
+   | Model: tape-measured board, torso mounted at (0, 0, 1.0) | 0.432 | 0.000 | −0.260 |
+   | Arm: Siva's taught poses (gripper tip, slightly above the surface) | 0.226 | 0.000 | −0.377 |
+   | Camera: `photo_check/`, 17 views, head pitch 12–42° | **0.467** | 0.015 | **−0.416** |
+
+   **How the camera check works.** It solves each photo against the taped grid, using the measured intrinsics (`calibration_measured_2026_08_27.yaml`). The board is level and square to the torso, so its orientation in the image gives the camera's orientation. The camera's position then follows from the URDF neck and camera offsets. No head angles are needed. Spread across views: 6 mm (x), 4 mm (y), 9 mm (z). The left and right eyes differ by 1–2 cm.
+
+   **What it says:**
+   - **Height:** the camera and the arm agree that the board surface is about **0.40–0.42 m below the shoulder line**, not the model's 0.26 m. With the measured 0.74 m surface, the shoulder line is about **1.15 m** above the floor, against the model's 1.0 m.
+   - **Forward:** the camera agrees with the tape-measured board to within 3.5 cm. The arm's taught positions are the outlier, about 0.24 m short, with spacing compressed to 0.84× / 0.92×. A torso offset does not explain that; the arm's readings or teaching reference do. The earlier "torso about 0.21 m forward" estimate is withdrawn.
+   - **Reach:** a higher torso puts the board further below the shoulder. That makes the far row *harder* to reach in the sim, not easier. So the far-row reach shown by the taught A1/A2 is tied up with the arm-side discrepancy, not with the mount.
 
 ## Files and reproduction
 
@@ -45,8 +55,10 @@ The notebook's gripper values are Siva's chosen settings for his objects, not li
 | `urdf_fk.py`, `ik.py` | URDF chain FK; damped least-squares IK with joint clamping. Numpy only. |
 | `analyze.py` | Every number above |
 | `analysis.txt` | Raw output of `analyze.py` |
+| `photo_check/` | `board_pnp.py` (board pose from each MCC photo), `results.json` (per view), `summary.txt` |
 
 ```bash
 python3 extract.py <CalibrateBoard.ipynb> taught_poses.json f207378
 python3 analyze.py taught_poses.json > analysis.txt
+python3 photo_check/board_pnp.py <reachy-tabletop-ai>/tests/Pictures <out_dir>   # needs opencv
 ```
