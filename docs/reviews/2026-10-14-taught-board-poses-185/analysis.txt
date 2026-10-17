@@ -30,5 +30,11 @@ centre [ 0.2262  0.0003 -0.3769]  row step [0.1277 0.0034 0.0015]  column step [
   C3 residual mm [-19.2 -12.7  -0.3]  |23.0|
 rms 16.1 mm, max 28.7 mm
 
-== 4. Context only: MCC/SivaPool grid (a different lab) in the torso frame
-sim cell_r2c2 (0.4318, 0.0, 0.74 - 1.0), pitch 0.1524; taught minus sim centre: [-0.2056  0.0003 -0.1169]
+== 4. Measured board (scenes/FWDCenterLabMCC.yaml, pedestal frame) vs taught board (torso frame)
+measured centre in the model's torso frame: [ 0.4318  0.     -0.26  ]  pitch 0.1524 m
+taught minus measured centre: [-0.2056  0.0003 -0.1169]
+pitch ratio taught/measured: rows 0.838 cols 0.916
+implied torso origin in the pedestal frame, tip 0.00 m above surface: [ 0.206 -0.     1.117]
+implied torso origin in the pedestal frame, tip 0.01 m above surface: [ 0.206 -0.     1.127]
+implied torso origin in the pedestal frame, tip 0.02 m above surface: [ 0.206 -0.     1.137]
+implied torso origin in the pedestal frame, tip 0.03 m above surface: [ 0.206 -0.     1.147]

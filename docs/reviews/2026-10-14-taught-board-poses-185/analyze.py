@@ -59,6 +59,12 @@ for k, rr in zip(keys, r):
     print(f"  {k} residual mm {np.round(1000 * rr, 1)}  |{1000 * np.linalg.norm(rr):.1f}|")
 print("rms %.1f mm, max %.1f mm" % (1000 * np.sqrt((r ** 2).sum(1).mean()), 1000 * np.linalg.norm(r, axis=1).max()))
 
-print("\n== 4. Context only: MCC/SivaPool grid (a different lab) in the torso frame")
-print("sim cell_r2c2 (0.4318, 0.0, 0.74 - 1.0), pitch 0.1524; taught minus sim centre:",
-      np.round(O - np.array([0.4318, 0.0, -0.26]), 4))
+print("\n== 4. Measured board (scenes/FWDCenterLabMCC.yaml, pedestal frame) vs taught board (torso frame)")
+board = np.array([0.4318, 0.0, 0.74])          # grid centre cell_r2c2 on the surface, measured
+model_torso = np.array([0.0, 0.0, 1.0])        # reachy_1_2.xml torso pos / ARM_BASE_IN_WORLD
+print("measured centre in the model's torso frame:", board - model_torso, " pitch 0.1524 m")
+print("taught minus measured centre:", np.round(O - (board - model_torso), 4))
+print("pitch ratio taught/measured: rows %.3f cols %.3f" % (np.linalg.norm(u) / 0.1524, np.linalg.norm(v) / 0.1524))
+for h in (0.0, 0.01, 0.02, 0.03):            # tip height above the surface at the taught pose
+    t = board - (O - np.array([0, 0, h]))
+    print("implied torso origin in the pedestal frame, tip %.2f m above surface: %s" % (h, np.round(t, 3)))

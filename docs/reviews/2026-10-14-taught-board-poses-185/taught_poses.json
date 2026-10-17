@@ -10,7 +10,7 @@
    "B2_PICK": 24
   },
   "b2_safe_joints_cell": 54,
-  "how_taught": "by hand on the real robot in Siva's lab, read back with r_arm.forward_kinematics()",
+  "how_taught": "by hand on the real robot (the one lab), read back with r_arm.forward_kinematics()",
   "frame": "robot torso frame, metres; 4x4 homogeneous poses of the right_tip frame"
  },
  "board_poses": {

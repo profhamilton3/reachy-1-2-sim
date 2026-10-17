@@ -37,7 +37,7 @@ json.dump({
         "notebook": "tests/CalibrateBoard.ipynb", "sha256": hashlib.sha256(raw).hexdigest(),
         "board_poses_cell": board_cell, "named_pose_cells": named_cells,
         "b2_safe_joints_cell": safe_cell,
-        "how_taught": "by hand on the real robot in Siva's lab, read back with r_arm.forward_kinematics()",
+        "how_taught": "by hand on the real robot (the one lab), read back with r_arm.forward_kinematics()",
         "frame": "robot torso frame, metres; 4x4 homogeneous poses of the right_tip frame",
     },
     "board_poses": board,
