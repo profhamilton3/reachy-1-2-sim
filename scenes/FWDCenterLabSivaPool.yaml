@@ -11,7 +11,8 @@ name: FWDCenterLabSivaPool
 # four manipulables on the grid; this scene is the one where the board starts
 # empty and the caller decides what goes on it.
 #
-# Ten placeable objects: the four inherited manipulables plus six spare slots.
+# Fourteen placeable objects: the four inherited manipulables (in the MCC colours)
+# plus ten grey spare slots (five boxes, five cylinders, all one size).
 # Spares exist because MuJoCo freezes nbody/njnt/ngeom at compile time — there
 # is no add_body(), so having MORE objects available than a scene declares means
 # declaring them up front and moving them.  reshape() then makes one slot stand
@@ -21,8 +22,8 @@ name: FWDCenterLabSivaPool
 description: >-
   FWDCenterLabSiva plus a pool of spare manipulables parked on the floor, for
   putting objects on the board while the simulation is running.  Geometry,
-  calibration, grid, reachability and the achromatic object palette are all
-  inherited; this file adds slots and nothing else.
+  calibration, grid, reachability and the grid and reachability are all
+  inherited; this file adds slots and restores the four named objects' colours.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WHY A CHILD SCENE AND NOT FWDCenterLabSiva ITSELF
@@ -48,7 +49,10 @@ description: >-
 # visible rather than magic), and at y = ±0.75 they are far outside the right
 # arm's 0.609 m reach, so nothing can disturb them by accident.
 #
-# SIZES ARE PROVISIONAL AND THAT IS FINE HERE
+# SIZES ARE PROVISIONAL AND THAT IS FINE HERE (#193: pool_box_4/5 and pool_cyl_4/5
+# copy the first six so every pool box and every pool cylinder is one size; the
+# photo-sizing attempt could not settle them, see docs/reviews/2026-10-19-pool-items-193/;
+# Siva's tape-measure values replace all ten together)
 #
 # 4 cm is used rather than the 6 cm the MCC objects inherit, simply as an
 # arbitrary stand-in distinct from them — these pool_box_*/pool_cyl_* slots
@@ -127,6 +131,46 @@ objects:
     semantic_class: cylinder
     tags: [pool, manipulable, pickable]
 
+  - id: pool_box_4
+    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
+    pose: {position: [0.75, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: cube
+    tags: [pool, manipulable, pickable]
+
+  - id: pool_box_5
+    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
+    pose: {position: [0.95, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: cube
+    tags: [pool, manipulable, pickable]
+
+  - id: pool_cyl_4
+    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
+    pose: {position: [0.75, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, manipulable, pickable]
+
+  - id: pool_cyl_5
+    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
+    pose: {position: [0.95, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.05,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, manipulable, pickable]
+
   # ───────────────────────────────────────────────────────────────────────────
   # THE BOARD STARTS EMPTY.
   #
@@ -147,17 +191,21 @@ objects:
   # ───────────────────────────────────────────────────────────────────────────
 
   - id: red_cube
+    material: {rgba: [0.78, 0.16, 0.14, 1.0]}
     pose: {position: [0.15, 0.95, 0.03], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     tags: [pool, manipulable, pickable, cube, detector-target]
 
   - id: blue_cylinder
+    material: {rgba: [0.16, 0.33, 0.75, 1.0]}
     pose: {position: [0.35, 0.95, 0.05], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     tags: [pool, manipulable, pickable, cylinder, detector-target]
 
   - id: soda_can
+    material: {rgba: [0.85, 0.85, 0.88, 1.0]}
     pose: {position: [0.55, 0.95, 0.061], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     tags: [pool, manipulable, pickable, recyclable, detector-target, sort-item]
 
   - id: foam_block
+    material: {rgba: [0.94, 0.90, 0.80, 1.0]}
     pose: {position: [0.15, -0.95, 0.025], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     tags: [pool, manipulable, pickable, non-recyclable, detector-target, sort-item]

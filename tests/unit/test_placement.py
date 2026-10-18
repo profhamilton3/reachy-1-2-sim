@@ -71,10 +71,10 @@ class TestSceneInheritanceStillHolds:
         assert len(doc["objects"]) == 27
         assert not [o for o in doc["objects"] if "pool" in (o.get("tags") or [])]
 
-    def test_the_pool_scene_inherits_everything_and_adds_six(self, pool_doc):
-        assert len(pool_doc["objects"]) == 33
-        # 6 new slots + the 4 inherited manipulables, now parked on the floor
-        assert len(pool_ids(pool_doc)) == 10
+    def test_the_pool_scene_inherits_everything_and_adds_ten(self, pool_doc):
+        assert len(pool_doc["objects"]) == 37
+        # 10 grey slots (#193 added 4) + the 4 inherited manipulables, parked on the floor
+        assert len(pool_ids(pool_doc)) == 14
         # inherited, not restated
         ids = {o["id"] for o in pool_doc["objects"]}
         assert {"table_top", "rig_rail_back", "cell_r2c2", "red_cube"} <= ids
@@ -498,10 +498,10 @@ class TestServerPath:
         """
         from scene_loader import load_scene as validate
         direct = validate(_POOL_SCENE)
-        assert len(direct.objects) == 33            # the parent's, not just 10
+        assert len(direct.objects) == 37            # the parent's, not just 10
         assert any(o.id == "table_top" for o in direct.objects)
         # and passing an already-resolved document agrees with it
-        assert len(validate(_POOL_SCENE, document=load_scene(_POOL_SCENE)).objects) == 33
+        assert len(validate(_POOL_SCENE, document=load_scene(_POOL_SCENE)).objects) == 37
 
     def test_each_result_names_the_connection_that_asked(self, sim_state):
         """The ack has to go back to the client that requested it.
