@@ -78,7 +78,9 @@ GRIPPER_SAMPLES = (-68.8, -45.0, 0.0, 20.0)
 #: Every hand box the MJCF hangs under r_wrist2hand.  The pads are what
 #: physics contacts with; the shells are the project's description of the
 #: hand's volume.  The tube must contain all four.
-HAND_BOXES = ("r_thumb_body", "r_finger_body", "r_thumb_col", "r_finger_col")
+HAND_BOXES = ("r_thumb_body", "r_finger_body", "r_thumb_col", "r_finger_col",
+              # #192: the hand's collision boxes, inside r_thumb_body's volume
+              "r_hand_back_col", "r_palm_col")
 
 #: Dense coverage grid over both joints' supported ranges.
 ROLL_GRID = tuple(float(r) for r in range(-45, 46, 5))
@@ -132,8 +134,7 @@ def _named_poses():
     poses = {}
     for name, p in R.POSTURES.items():
         poses[name] = p
-    for route_name in ("PLACE_ROUTE", "STOW_ROUTE", "LIFT_TO_PRESENT",
-                       "LOWER_TO_REST", "RAISE_TO_SIDE", "STOW_FROM_SIDE"):
+    for route_name in ("LIFT_TO_PRESENT", "LOWER_TO_REST"):
         for wp in R.route_named(route_name):
             poses.setdefault(wp.name, wp.pose)
     poses["WAVE_A"] = R.WAVE_A
@@ -263,11 +264,11 @@ class TestTubeCoversMJCFHand:
 
     def test_full_gripper_and_roll_range(self, compiled):
         """A grid over the whole supported r_gripper x r_wrist_roll range, on
-        HOVER (the pose the coverage depends on only through those two
+        PRESENT (the pose the coverage depends on only through those two
         joints -- everything upstream rotates tube and hand together)."""
         m, d = compiled
         jq = _joint_qpos_addrs(m)
-        base = [R.HOVER[j] for j in R.ARM7]
+        base = [R.PRESENT[j] for j in R.ARM7]
         worst_excess, worst_slack = -1.0, 1.0
         for roll in ROLL_GRID:
             q7 = list(base)
@@ -301,11 +302,11 @@ class TestTubeCoversMJCFHand:
 
     def test_the_tube_is_the_pose_own_roll_not_the_worst(self):
         """link_capsules sizes the tube for the pose's actual wrist roll."""
-        hover = [R.HOVER[j] for j in R.ARM7]     # roll 0
-        rest = [R.REST[j] for j in R.ARM7]       # roll 30
-        assert _tube(hover, -45.0)[2] == pytest.approx(hand_radius(-45.0, 0.0))
-        assert _tube(rest, -45.0)[2] == pytest.approx(hand_radius(-45.0, 30.0))
-        assert _tube(rest, -45.0)[2] > _tube(hover, -45.0)[2]
+        present = [R.PRESENT[j] for j in R.ARM7]   # roll 0
+        rest = [R.REST[j] for j in R.ARM7]         # roll 44 (#192)
+        assert _tube(present, -45.0)[2] == pytest.approx(hand_radius(-45.0, 0.0))
+        assert _tube(rest, -45.0)[2] == pytest.approx(hand_radius(-45.0, 44.0))
+        assert _tube(rest, -45.0)[2] > _tube(present, -45.0)[2]
 
 
 class TestDemonstratedMisses:
@@ -315,23 +316,24 @@ class TestDemonstratedMisses:
 
     `old_miss_cm` is how far the geom's farthest corner sat OUTSIDE the old
     tube, straight off MuJoCo's geom frames; it is recorded so the size of
-    what was being flown through is not lost, and is not asserted.
+    what was being flown through is not lost, and is not asserted.  The
+    misses depend on the wrist roll, not the mount: the roll-0 rows were
+    measured at HOVER (August, retired with #192) and hold for PRESENT, which
+    has the same roll; the October REST (roll 44) was never in the old tube's
+    era, so its rows carry None.
     """
 
     @pytest.mark.parametrize("posture,gripper_deg,geom,old_miss_cm", [
-        ("HOVER", -68.8, "r_finger_col", 2.19),
-        ("HOVER", -68.8, "r_finger_body", 2.88),
-        ("HOVER", -45.0, "r_finger_col", 1.77),    # PLACE_ROUTE's guarded aperture
-        ("HOVER", -45.0, "r_finger_body", 2.37),
-        ("REST", -68.8, "r_finger_col", 3.80),
-        ("REST", -68.8, "r_finger_body", 4.50),
-        ("REST", -45.0, "r_finger_col", 3.38),
-        ("REST", -45.0, "r_finger_body", 3.99),
-        ("REST", 0.0, "r_finger_col", 1.05),
-        ("REST", 0.0, "r_finger_body", 1.20),
-        ("REST_SHUT", -68.8, "r_finger_col", 3.80),
         ("PRESENT", -68.8, "r_finger_col", 2.19),
-        ("HOME", -68.8, "r_finger_col", 2.19),
+        ("PRESENT", -68.8, "r_finger_body", 2.88),
+        ("PRESENT", -45.0, "r_finger_col", 1.77),
+        ("PRESENT", -45.0, "r_finger_body", 2.37),
+        ("REST", -68.8, "r_finger_col", None),
+        ("REST", -68.8, "r_finger_body", None),
+        ("REST", -45.0, "r_finger_col", None),
+        ("REST", 20.0, "r_palm_col", None),
+        ("REST", 20.0, "r_hand_back_col", None),
+        ("REST_OUT", -68.8, "r_finger_col", None),
     ])
     def test_geom_now_inside_the_tube(self, compiled, posture, gripper_deg,
                                       geom, old_miss_cm):
@@ -402,11 +404,11 @@ class TestShellsCoverMJCFHand:
 
     def test_full_gripper_and_roll_range(self, compiled):
         """A grid over the whole supported r_gripper x r_wrist_roll range, on
-        HOVER, matching `TestTubeCoversMJCFHand.test_full_gripper_and_roll_
+        PRESENT, matching `TestTubeCoversMJCFHand.test_full_gripper_and_roll_
         range`'s coverage."""
         m, d = compiled
         jq = _joint_qpos_addrs(m)
-        base = [R.HOVER[j] for j in R.ARM7]
+        base = [R.PRESENT[j] for j in R.ARM7]
         worst_excess = -1.0
         for roll in ROLL_GRID:
             q7 = list(base)
@@ -464,17 +466,19 @@ class TestTubeVsShellsCapsules:
     which capsule is widest at any of these poses.
     """
 
+    # #192: the October REST has wrist roll 44 (August's had 30: -1.1946,
+    # -0.8424, -0.4704, -0.4704); the roll-0 rows were HOVER's and are
+    # PRESENT's, unchanged.
     @pytest.mark.parametrize("posture,gripper_deg,expected_surface_cm", [
-        ("REST", -68.8, -1.1946),
-        ("REST", -45.0, -0.8424),
-        ("REST", 0.0, -0.4704),
-        ("REST", 20.0, -0.4704),
-        ("REST_SHUT", -68.8, -1.1946),
-        ("HOVER", -68.8, -1.1864),
-        ("HOVER", -45.0, -0.8320),
-        ("HOVER", 0.0, -0.3182),
+        ("REST", -68.8, -1.1972),
+        ("REST", -45.0, -0.8457),
+        ("REST", 0.0, -0.5122),
+        ("REST", 20.0, -0.5122),
+        ("REST_OUT", -68.8, -1.1972),
         ("PRESENT", -68.8, -1.1864),
-        ("HOME", -68.8, -1.1864),
+        ("PRESENT", -45.0, -0.8320),
+        ("PRESENT", 0.0, -0.3182),
+        ("PRESENT_SHUT", -68.8, -1.1864),
     ])
     def test_centreline_inside_surface_shortfall_is_capsule_slack(
             self, posture, gripper_deg, expected_surface_cm):
@@ -512,8 +516,8 @@ class TestShellsCoversThumbAndFingerPads:
     """
 
     @pytest.mark.parametrize("posture,gripper_deg,old_thumb_pad_out_cm", [
-        ("HOVER", -68.8, 2.05), ("HOVER", -45.0, 2.05), ("HOVER", 0.0, 2.05),
-        ("HOVER", 20.0, 1.25),
+        ("PRESENT", -68.8, 2.05), ("PRESENT", -45.0, 2.05), ("PRESENT", 0.0, 2.05),
+        ("PRESENT", 20.0, 1.25),
         ("REST", -68.8, 2.05), ("REST", -45.0, 2.05), ("REST", 0.0, 2.05),
         ("REST", 20.0, 1.25),
     ])

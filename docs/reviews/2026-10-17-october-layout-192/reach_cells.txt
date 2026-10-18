@@ -1,0 +1,8 @@
+torso at (0 0 1, roll stop +10); right shoulder world [ 0.   -0.19  1.  ]
+   r1c1 0.489m reach err   0.0mm stops:- | r1c2 0.398m reach err   0.0mm stops:- | r1c3 0.351m reach err   0.0mm stops:-
+   r2c1 0.590m reach err   0.0mm stops:arm_yaw | r2c2 0.516m reach err   0.0mm stops:arm_yaw | r2c3 0.481m reach err   0.0mm stops:-
+   r3c1 0.709m NO err 100.5mm stops:shoulderoll,elbow_pitch | r3c2 0.649m NO err  41.7mm stops:shoulderoll,arm_yaw | r3c3 0.622m reach err   0.0mm stops:-
+torso at (as in the MJCF); right shoulder world [ 0.206 -0.19   1.15 ]
+   r1c1 0.502m reach err   0.0mm stops:- | r1c2 0.413m reach err   0.0mm stops:- | r1c3 0.369m reach err   0.0mm stops:-
+   r2c1 0.545m reach err   0.0mm stops:- | r2c2 0.465m reach err   0.0mm stops:- | r2c3 0.426m reach err   0.0mm stops:shoulderoll
+   r3c1 0.624m reach err   0.0mm stops:- | r3c2 0.555m reach err   0.0mm stops:shoulderoll | r3c3 0.523m reach err   0.0mm stops:-

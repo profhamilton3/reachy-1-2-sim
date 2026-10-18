@@ -26,8 +26,8 @@ them: STRADDLE (the close begins), HELD (the hold ends; it began `hold_s`
 earlier), SUPPORTED (the hand opens), RELEASED (the withdrawal begins).
 
 THE APPROACH TO THE START POSTURE IS NOT THE LIFT (owner ruling, 2026-10-10).
-From HOME the worker first flies the measured route to PRESENT
-(`rig_routes.path`: RAISE_TO_SIDE), and only then does the crane's
+From REST the worker first flies the measured route to PRESENT
+(`rig_routes.path`: LIFT_TO_PRESENT), and only then does the crane's
 ATTEMPT_START begin the lift.  States before ATTEMPT_START are tagged with the
 leg's route, so their contacts are judged under that route's rules and
 exceptions and reported apart from the lift.  ATTEMPT_START is the crane's

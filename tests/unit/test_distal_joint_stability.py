@@ -59,6 +59,17 @@ def _world():
     doc = load_scene(SCENE)
     core = SimulationCore(mujoco.MjModel.from_xml_string(build_scene_model_xml(doc, MODEL)),
                           tracked_ids=tracked_object_ids(doc))
+    # In free air, at PRESENT: the sim starts at REST since #192, with the
+    # hand resting on the board, where an excursion would drive it into the
+    # table rather than test the joint.
+    sys.path.insert(0, str(_ROOT / "src"))
+    from reachy_ai.motion import rig_routes as R
+    m, d = core.model, core.data
+    for e in JOINT_TABLE:
+        if e.sdk_name in R.PRESENT:
+            d.qpos[m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, e.sdk_name)]] = \
+                math.radians(R.PRESENT[e.sdk_name])
+    mujoco.mj_forward(m, d)
     for e in JOINT_TABLE:
         if e.sdk_name.startswith("r_"):
             core.controller.set_compliant(e.mjcf_index, False)

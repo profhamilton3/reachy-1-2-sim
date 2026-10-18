@@ -1,18 +1,24 @@
 """The measured pose set and routes for the FWD Center Lab rig (issue #64).
 
-Extracted from `notebooks/tlh_motion-routine.ipynb`, whose cell sources are the
-source of truth for every number here but one: SWING_1 was moved for margin
-(#74, docs/adr/0006), and the notebook's pose is kept as `SWING_1_NOTEBOOK`.  The notebook is preserved and is not
-imported: importing it would execute its cells, which connect to a robot.
+The pose set was extracted from `notebooks/tlh_motion-routine.ipynb`, which is
+preserved and not imported: importing it would execute its cells, which
+connect to a robot.
 
-WHY THESE NUMBERS CANNOT BE TIDIED
-----------------------------------
-The corridor out of the rail pocket is a few millimetres wide in places, and
-the numbers were checked at 0.2 degree resolution against the board, all five
-rig rails, the pedestal and the robot's own links.  The per-waypoint tolerances
-are not a style choice: settling into GRIP_SHUT happens with 79 mm of clearance
-all round, while SWING_3 -> HOVER passes the elbow 4.8 mm from the board's
-edge.  A single uniform tolerance would be a rewrite, not an extraction.
+THE OCTOBER LAYOUT (#192)
+-------------------------
+The robot moved.  Since the October layout (owner decision 2026-10-17) the
+torso sits at (0.206, 0, 1.15) in the scene frame, and its shoulders are over
+the board.  Everything the August mount (torso at (0, 0, 1.0)) needed is gone:
+the rail-pocket HOME, the corridor out of it (PLACE_ROUTE, STOW_ROUTE,
+RAISE_TO_SIDE, STOW_FROM_SIDE), its poses and its margin rule (#74), and every
+route record flown there.  They are in git history and in
+docs/reviews/; nothing here replays them (owner decision 2026-10-18).
+
+REST IS HOME.  Siva confirms the arm rests on the table, as in the lab photos,
+so REST -- on the board's right margin, outside the grid -- is where the arm is
+stored, what "stow", "store" and "put your arm away" mean, and the pose the
+simulator starts in.  The posture graph is REST and PRESENT; WAVE and POINT
+happen at PRESENT.  See docs/adr/0010-october-layout.md.
 
 The comments that explain a number travel WITH the number.  PRESENT in
 particular carries the reason it is not the pose it used to be, and without
@@ -20,31 +26,32 @@ that reason it looks like a value somebody could improve.
 
 WHICH SCENE
 -----------
-The pose set is labelled FWDCenterLabMCC.  Endpoint equality does not prove the
-path is clear, and the panel runs FWDCenterLabSivaPool.  So a route is not
-usable in a scene until it has been flown there and recorded in
-`ROUTE_COMPATIBILITY`; `check_route()` refuses the pair otherwise, in the
-scene's own name rather than by claiming the arm is unavailable.
+Endpoint equality does not prove the path is clear, and the panel runs
+FWDCenterLabSivaPool.  So a route is not usable in a scene until it has been
+flown there, at the current mount, and recorded in `ROUTE_COMPATIBILITY`;
+`check_route()` refuses the pair otherwise, in the scene's own name rather than
+by claiming the arm is unavailable.
 """
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-log = logging.getLogger(__name__)
-
-#: Named postures.  `REST` is the forearm supported on the tabletop; `HOME` is
-#: stored in the rail pocket.  They are eleven waypoints apart, and the
-#: operator's word for both of them is "rest".
-POSTURE_HOME = "home"
+#: Named postures.  `REST` is the hand resting on the board's right margin.
+#: There used to be a second, `HOME`, in the rig's rail pocket; in the
+#: October layout there is no pocket to be in (#192), and HOME IS REST:
+#: `POSTURE_HOME` is kept as a name for callers that mean "stored", and it
+#: names the same posture.
 POSTURE_REST = "rest"
+POSTURE_HOME = POSTURE_REST
 POSTURE_PRESENT = "present"
-#: There is no side-hub posture.  There used to be one at roll -88, invented
-#: for `raise_to_side` and reached by a sweep the clearance model puts inside
-#: both the board and the outer rail.  PRESENT is the junction now, and PRESENT
-#: is a measured pose — see the routes below.
+
+#: Where the robot is mounted, as recorded against each route validation.
+#: `check_route` accepts only records made at `CURRENT_MOUNT`: a route flown
+#: with the torso somewhere else proves nothing about the arm here.
+MOUNT_OCTOBER = "october: torso (0.206, 0, 1.15)"
+CURRENT_MOUNT = MOUNT_OCTOBER
 
 #: Gripper angles.  The sign is inverted from the obvious reading: negative
 #: OPENS.  Verified on the physical robot, not inferred from the joint name.
@@ -86,47 +93,6 @@ SAFE_MARGIN = 0.05
 #: data neither this constant nor this commit has.
 FOOTPRINT_MARGIN = 0.0
 
-# ── The corridor margin (#74; owner decision D1, 2026-10-09) ────────────────
-#
-# The margin this project flies the rig corridor at, stated where a route can
-# be checked against it rather than left implicit in whether a run happened to
-# clear.  `check_route` enforces it for every route in `CORRIDOR_ROUTES`.
-#
-# Both figures use the model the planner enforces (`CartesianPlanner.
-# check_arm_path`): the TUBE hand (`kinematics.WHOLE_ARM_HAND_MODEL`), against
-# the manipulable objects and the rig rails -- `SceneModel.obstacle_ids(
-# include_static=True)`, which leaves out the tabletop, because REST lands on
-# it by design.  ADR-0003 measures the tube as up to 9 cm more conservative
-# than the MJCF hand; the margin is stated on it anyway, because it is the
-# model the guard flies.
-
-#: Worst clearance the COMMANDED route may plan, in metres: every leg of the
-#: full route, joint-space lines sampled at <= 2 degrees, each leg's hand sized
-#: to the wider of its two endpoint apertures.
-CORRIDOR_PLANNED_MARGIN = 0.020
-
-#: Worst clearance any FLIGHT may realise, in metres: the same model on the
-#: arm's own joint readings and realised aperture, sampled at 20 Hz through
-#: the whole flight, against the object poses the simulator reported.
-CORRIDOR_REALISED_MARGIN = 0.010
-
-#: The realised figure is the worst over at least this many flights.  Four was
-#: what #74 had, and four is not a distribution.
-CORRIDOR_MIN_FLIGHTS = 20
-
-#: Scenes where the corridor margin is REPORTED and NOT ENFORCED (owner
-#: decision, 2026-10-09, "Option B").  FWDCenterLabSivaPool's corridor was
-#: flown twenty times per route with the moved SWING_1 and did not meet the
-#: realised margin -- every reading under +2.31 cm came from a flight where
-#: `r_forearm_yaw` swung 24-52 deg off its command (docs/adr/0006 §3).  Until
-#: that fix lands, `check_route` there still names the shortfall but lets the
-#: route fly.  The forearm-yaw fix is what removes the scene from this tuple,
-#: with the re-flown figures in the rows.  Anywhere else the margin refuses.
-CORRIDOR_REPORT_ONLY_SCENES: Tuple[str, ...] = ()
-#: EMPTY since the forearm-yaw fix (docs/adr/0006 §5): FWDCenterLabSivaPool was
-#: listed from #170 until then, by owner decision ("Option B").  The tuple is
-#: kept so the exception, if ever needed again, is a visible owner decision.
-
 #: How far an object may move before the board counts as disturbed, in metres.
 #:
 #: ONE NUMBER, NOT THREE.  The live executor's post-move check, the episode
@@ -149,58 +115,60 @@ def pose(**kw) -> Dict[str, float]:
     return base
 
 
-# ── Verified pose set for FWDCenterLabMCC ────────────────────────────────────
-# Checked at 0.2 deg resolution against the board, all five rig rails, the
-# pedestal and the robot's own links.  Do not tweak blind — the corridor out of
-# the pocket is only a few millimetres wide in places.
-
-HOME = pose()
-GRIP_SHUT = pose(r_gripper=SHUT)
-
-# 1. back out of the pocket — extension only, roll stays at 0
-BACK = pose(r_gripper=SHUT, r_shoulder_pitch=40.0)
-
-# 2. curl the forearm up tight against the upper arm
-CURL = pose(r_gripper=SHUT, r_shoulder_pitch=40.0,
-            r_elbow_pitch=-125.0, r_wrist_pitch=45.0)
-CURL_HIGH = pose(r_gripper=SHUT, r_shoulder_pitch=70.0,
-                 r_elbow_pitch=-120.0, r_wrist_pitch=45.0)
-TUCK = pose(r_gripper=SHUT, r_shoulder_pitch=70.0,
-            r_elbow_pitch=-120.0, r_wrist_pitch=-45.0)
-
-# 3. swing the folded unit forward and out over the rail
+# ── REST, October layout (#192) ──────────────────────────────────────────────
 #
-# SWING_1 IS THE ONE POSE THAT IS NOT THE NOTEBOOK'S (#74, owner decisions D1
-# and D2, 2026-10-09).  The notebook's crossing of `rig_rail_outer_right`
-# planned +0.6 cm at the pose and +0.4 cm along TUCK -> SWING_1 (tube hand),
-# and the physics arm's tracking error is the same size, so every flight read
-# a few millimetres negative (ADR-0002).  Searched, not eyeballed: about 170k
-# nearby poses, each leg in and out sampled at <= 2 deg against the objects,
-# the rails, the tabletop and the URDF torso.  The fold doing the work is the
-# ELBOW, -120 -> -125 (CURL's own fold): alone it takes the crossing from
-# +0.44 to +2.08 cm.  Five degrees of pitch, roll and arm yaw take it to +3.48,
-# where SWING_2 itself (+3.53, upper arm) becomes the ceiling.  The wrist is
-# untouched: opening it fouls the board's edge instead.  The tabletop goes
-# from -0.25 to +0.53 cm on the same legs.  See docs/adr/0006.
+# The hand rests on the board's RIGHT MARGIN, outside the taped grid, as the
+# lab photos show the real gripper doing: on its palm and back, fingers at the
+# board's edge (tip at about (0.37, -0.37) in the scene; the outer tape border
+# is at y = -0.2286, the board's edge at -0.349), with the forearm along the
+# margin.
 #
-# The notebook's pose is kept, by name, because the notebook is still the
-# source of truth for every OTHER number here and is not edited.
-SWING_1_NOTEBOOK = pose(r_gripper=SHUT, r_shoulder_pitch=37.5,
-                        r_shoulder_roll=-32.5, r_elbow_pitch=-120.0,
-                        r_wrist_pitch=-45.0)
-SWING_1 = pose(r_gripper=SHUT, r_shoulder_pitch=32.5, r_shoulder_roll=-27.5,
-               r_arm_yaw=5.0, r_elbow_pitch=-125.0, r_wrist_pitch=-45.0)
-SWING_2 = pose(r_gripper=SHUT, r_shoulder_pitch=20.0, r_shoulder_roll=-35.0,
-               r_elbow_pitch=-120.0, r_wrist_pitch=-45.0)
-SWING_3 = pose(r_gripper=SHUT, r_shoulder_pitch=-17.5, r_shoulder_roll=-37.5,
-               r_elbow_pitch=-120.0, r_wrist_pitch=-45.0)
+# FOUND BY LETTING GO OF THE ARM, NOT BY CHOOSING A POSE.  The arm is stored
+# here and the simulator starts here with the motors off, exactly like the
+# robot, so REST has to be a pose the arm STAYS in when nothing holds it.  An IK
+# pose on the margin with the elbow swung out slid off the board's edge in two
+# seconds.  This one is a settled pose: dropped motors-off in MuJoCo from many
+# starts on the margin, kept only where a second drop moved it by under 2 deg
+# and the gripper stayed shut, then scored against a soda can, blue cylinder,
+# red cube, pool cylinder, foam block and pool box standing on each column-3
+# cell.  Motors off for 10 s from here: under 1.3 deg of drift on any arm
+# joint, the gripper 3 deg off shut, and still.  The wrist roll rests on its
+# stop (44 deg, 1 deg inside); the shoulder roll does NOT lean on the +20.3 deg
+# stop (docs/adr/0010), so REST does not depend on that deviation.
+#
+# WITH THE HAND'S COLLISION BOXES (#192).  The first October REST rested on
+# the finger pad, and the hand's visual shell sank 38 mm into the board,
+# because the hand had no collision geometry but the pads.  With the back-of-
+# hand and palm boxes the hand rests on them, and that REST no longer stayed
+# put (wrist roll fell 35 deg, the gripper fell open), so it was searched
+# again; this is the result.
+#
+# THE GRIPPER IS SHUT AT REST.  The footprint guard sizes the hand to its
+# aperture, and an open hand's tube (8-11.5 cm radius) on a 10.8 cm margin
+# reaches into column 3 whatever the arm does.  Shut, it is 3.9-6.7 cm.
+#
+#     the footprint guard's own number (`footprint.route_footprint_clearances`,
+#     every leg of LOWER_TO_REST and LIFT_TO_PRESENT), one object on the cell:
+#         r1c3 +2.6 cm   r2c3 +7.4 cm   r3c3 +13.2 cm   (worst of six objects)
+#     the August REST and its routes, at the August mount, same objects:
+#         r1c3 +2.3 cm   r2c3 -5.7 cm   r3c3 -9.4 cm    (every r2c3/r3c3 refused;
+#                                                      pool_box_3 on r2c3: -3.7)
+#
+# Numbers and the search: docs/reviews/2026-10-17-october-layout-192/.
+REST = pose(r_gripper=SHUT, r_shoulder_pitch=12.0, r_shoulder_roll=14.0,
+            r_arm_yaw=-54.5, r_elbow_pitch=-81.0, r_forearm_yaw=-5.5,
+            r_wrist_pitch=-21.5, r_wrist_roll=44.0)
+#: REST already has the hand shut.  The name is kept for callers that mean
+#: "rest, closed", and it is the same pose.
+REST_SHUT = REST
 
-# 4. unfold onto the board
-HOVER = pose(r_gripper=SHUT, r_shoulder_pitch=-40.0, r_shoulder_roll=-10.0,
-             r_elbow_pitch=-60.0, r_wrist_pitch=-15.0)
-REST_SHUT = pose(r_gripper=SHUT, r_shoulder_pitch=-40.0, r_shoulder_roll=-10.0,
-                 r_elbow_pitch=-45.0, r_wrist_pitch=-10.0, r_wrist_roll=30.0)
-REST = dict(REST_SHUT, r_gripper=OPEN)
+#: REST's arm shape swung OUT to the side, at PRESENT's roll and level
+#: pitch: the hand clear of the board's right edge.  The lift and the lowering
+#: pass through it, so the hand comes onto the margin from outside the board
+#: rather than across column 3.  The straight joint-space line from PRESENT to
+#: REST crossed a soda can on r1c3 by -2.2 cm; via this pose the worst is the
+#: +3.3 cm of REST itself.
+REST_OUT = dict(REST, r_shoulder_pitch=0.0, r_shoulder_roll=-25.0)
 
 # Raised pose for the joint sweeps and the wave.  Not eyeballed: this is the
 # pose that keeps every LINK of the arm clear of every object through every
@@ -226,6 +194,11 @@ REST = dict(REST_SHUT, r_gripper=OPEN)
 PRESENT = pose(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0,
                r_elbow_pitch=-80.0)
 
+#: PRESENT with the hand shut: the gripper closes up here before the arm
+#: descends to REST, and opens up here after the lift, so the legs over the
+#: board are judged with the narrow hand (see REST).
+PRESENT_SHUT = dict(PRESENT, r_gripper=SHUT)
+
 
 @dataclass(frozen=True)
 class Waypoint:
@@ -239,101 +212,11 @@ class Waypoint:
     seconds: float
     tol: float
     #: Which joints must actually arrive.  None means every one but the
-    #: gripper, which is right for the pocket corridor — there the wrist angles
-    #: are part of the shape that fits.  The presentation route names the gross
-    #: joints instead: the wave ends with the forearm yaw at +-60 by design,
-    #: and holding the return to that refuses a move that is perfectly safe.
+    #: gripper.  The routes here name the gross joints instead: the wave ends
+    #: with the forearm yaw at +-60 by design, and holding the return to that
+    #: refuses a move that is perfectly safe.
     guard: Optional[Tuple[str, ...]] = None
 
-
-#: The joints a corridor waypoint is judged on: the notebook's CRITICAL set
-#: (`CRITICAL_JOINTS`, below) plus the FOREARM YAW (#74, 2026-10-09).
-#:
-#: Forearm yaw was left out of CRITICAL as a weak joint that only spins the
-#: hand.  In the rig corridor that reasoning failed: it ran 24-52 deg off its
-#: commanded 0 in 8 of 80 corridor flights, and every reading under +2.31 cm
-#: of rig clearance came from those flights (docs/adr/0006 §3).  The cause was a
-#: simulator limit cycle, fixed in the model (joint armature, docs/adr/0006
-#: §5); this guard is what would catch the next thing that moves the hand off
-#: the shape the corridor was measured for.  Every corridor waypoint commands
-#: forearm yaw 0, so guarding it refuses nothing a healthy arm does.
-_CORRIDOR_GUARD: Tuple[str, ...] = (
-    "r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw", "r_elbow_pitch",
-    "r_wrist_pitch", "r_forearm_yaw",
-)
-
-#: Out of the pocket and onto the board.
-PLACE_ROUTE: Tuple[Waypoint, ...] = (
-    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.5, 25.0, _CORRIDOR_GUARD),
-    Waypoint("BACK", BACK, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("CURL", CURL, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("TUCK", TUCK, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("SWING_1", SWING_1, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("HOVER", HOVER, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("REST_SHUT", REST_SHUT, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("REST", REST, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
-)
-
-#: The placement route run backwards.  Nothing may cut across it: a direct move
-#: from anywhere over the board to HOME drives the upper arm through the
-#: board's near edge.
-STOW_ROUTE: Tuple[Waypoint, ...] = (
-    Waypoint("REST_SHUT", REST_SHUT, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("HOVER", HOVER, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("SWING_3", SWING_3, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("SWING_2", SWING_2, 2.5, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("SWING_1", SWING_1, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("TUCK", TUCK, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("CURL_HIGH", CURL_HIGH, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("CURL", CURL, 2.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("BACK", BACK, 3.0, TRACK_TOL, _CORRIDOR_GUARD),
-    Waypoint("GRIP_SHUT", GRIP_SHUT, 3.0, 25.0, _CORRIDOR_GUARD),
-    Waypoint("HOME", HOME, 2.5, 25.0, _CORRIDOR_GUARD),
-)
-
-# ── Getting to the presentation pose (notebook section 4) ───────────────────
-#
-# THE NOTEBOOK HAS NO SIDE HUB, AND THIS NO LONGER INVENTS ONE.  There used to
-# be a `SIDE_HUB` at roll -88 with a two-leg `PRESENT_ROUTE` onto it, none of
-# which appears anywhere in the measured route.  The notebook reaches the
-# raised pose from REST, in one move (cell 18), and it comes back down by
-# flying STOW_ROUTE from PRESENT (cell 34) — whose first waypoint is REST_SHUT.
-# Those two moves are what these routes are.
-#
-# The -88 hub was worse than unmeasured, it was wrong: getting to it swept the
-# hand from 0 to -88 of roll at a fixed pitch, which the clearance model puts
-# 4.3 to 6.5 cm inside `table_top` — the HAND against the board's near edge —
-# for every degree of that sweep, clearing only in the last ten.  The notebook
-# names that
-# exact manoeuvre as its FAILURE exercise: "Try the sideways version and watch
-# it fail ... the arm jams against the outer rail.  That jamming IS the
-# feedback."
-#
-# PRESENT IS THE RAISED SIDE POSE.  It is what "out to the robot's right"
-# means here, and unlike the hub it was measured: notebook section 4 records
-# +8.9 cm worst whole-arm clearance over the entire routine, against the -1.9
-# cm of the pose it replaced.  So there is no separate hub posture any more —
-# PRESENT is the junction, and it is a notebook pose.
-
-#: REST -> PRESENT.  Notebook cell 18, one move.  Modelled monotonic the whole
-#: way: +4.1 cm a quarter in, +7.2 at the half, +13.8 cm on arrival, with the
-#: only negative at the REST end where the forearm is deliberately supported on
-#: the board.
-#:
-#: The notebook flies this with `tol=LESSON_TOL`, which switches the abort off
-#: because section 4 is a teaching sweep and stopping it would hide the joint
-#: behaviour it exists to show.  That is not a safety judgement about the move,
-#: so the guard here is the gross joints at 10 degrees, as every other route
-#: in this module uses.
-LIFT_TO_PRESENT: Tuple["Waypoint", ...] = ()
-
-#: PRESENT -> REST.  The first move of the notebook's stow (PRESENT ->
-#: REST_SHUT, cell 34) followed by the route's own last waypoint, which opens
-#: the hand.  Both poses are the measured ones; neither move is new.
-LOWER_TO_REST: Tuple["Waypoint", ...] = ()
 
 # ── The wave (notebook 4.6) ──────────────────────────────────────────────────
 # Defined relative to PRESENT, so the wave inherits PRESENT's clearance
@@ -350,11 +233,17 @@ WAVE_B = dict(PRESENT, r_forearm_yaw=+60.0, r_wrist_pitch=-25.0,
 WAVE_CYCLES = 3
 WAVE_SECONDS = 1.8
 
-#: The wave ends where it began.  Returning to tabletop rest or to the pocket
-#: is a separate validated transition, not something to append so the arm looks
-#: tidy.
+#: The wave ends where it began.  Returning to REST is a separate validated
+#: transition, not something to append so the arm looks tidy.
 WAVE_START = "present"
 WAVE_END = "present"
+
+# ── Getting to the presentation pose, and back ──────────────────────────────
+#
+# PRESENT IS THE RAISED SIDE POSE and the junction of the posture graph: the
+# wave and pointing start and end there, and REST is one route away.  There is
+# no side hub; one at roll -88, reached by a sweep the clearance model put
+# inside both the board and the outer rail, was removed before #192.
 
 _PRESENT_GUARD = ("r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
                   "r_elbow_pitch")
@@ -367,21 +256,24 @@ _PRESENT_GUARD = ("r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
 #: presentation pose" — which is true, confusing, and avoidable.  A route that
 #: says it got there and a posture check that says it did not are the same
 #: question asked twice with different answers.
+#:
+#: REST -> PRESENT, October layout (#192).  Out to the side first, so the hand
+#: leaves the margin away from column 3, then up; the hand opens only once it
+#: is raised.  Flown offline in MuJoCo with tall objects on column 3: nothing
+#: moved, worst MJCF distance 3.6 cm (docs/reviews/2026-10-17-october-layout-192).
 LIFT_TO_PRESENT = (
-    Waypoint("PRESENT", PRESENT, 3.0, 8.0, _PRESENT_GUARD),
+    Waypoint("REST_OUT", REST_OUT, 3.0, TRACK_TOL, _PRESENT_GUARD),
+    Waypoint("PRESENT_SHUT", PRESENT_SHUT, 3.0, 8.0, _PRESENT_GUARD),
+    Waypoint("PRESENT", PRESENT, 1.5, 8.0, _PRESENT_GUARD),
 )
 
+#: PRESENT -> REST, October layout: the reverse.  The hand shuts while raised,
+#: swings out, and comes onto the margin from outside the board.
 LOWER_TO_REST = (
-    Waypoint("REST_SHUT", REST_SHUT, 3.0, TRACK_TOL, _PRESENT_GUARD),
+    Waypoint("PRESENT_SHUT", PRESENT_SHUT, 1.5, 8.0, _PRESENT_GUARD),
+    Waypoint("REST_OUT", REST_OUT, 3.0, TRACK_TOL, _PRESENT_GUARD),
     Waypoint("REST", REST, 3.0, TRACK_TOL, _PRESENT_GUARD),
 )
-
-#: HOME -> PRESENT and back, as `primitives.raise_to_side` and
-#: `primitives.stow_from_side` fly them: the measured route out of the pocket,
-#: then the lift, and the exact reverse coming back.  Named because the posture
-#: graph and the compatibility record work in route names.
-RAISE_TO_SIDE: Tuple["Waypoint", ...] = PLACE_ROUTE + LIFT_TO_PRESENT
-STOW_FROM_SIDE: Tuple["Waypoint", ...] = STOW_ROUTE
 
 # ── Pointing (notebook 4.7) ──────────────────────────────────────────────────
 #: Air wanted under the pad.  This number is about POINTING; it is not what
@@ -436,11 +328,10 @@ POINT_APPROACH_SLACK = 0.02
 POINT_LEGS = 6
 POINT_MARGIN = SAFE_MARGIN
 
-#: The joints that decide where the arm sits in the rig.  The wrist angles and
-#: the gripper do not move the elbow or forearm through the rails, and on a
-#: freshly reset sim they read wherever gravity left them while the motors were
-#: off (wrist_roll drifts to ~40 deg, the gripper falls open) — so judging "is
-#: the arm home?" on those would report a clean reset as a fault.
+#: The joints that decide where the arm sits.  The wrist angles and the gripper
+#: do not move the elbow or forearm, and on a freshly reset sim they read
+#: wherever gravity left them while the motors were off -- so judging "is the
+#: arm at rest?" on those would report a clean reset as a fault.
 GROSS_JOINTS: Tuple[str, ...] = (
     "r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw", "r_elbow_pitch",
 )
@@ -448,15 +339,14 @@ GROSS_JOINTS: Tuple[str, ...] = (
 #: The joints a route waypoint is JUDGED on — the notebook's `CRITICAL`.
 #:
 #: The gross four, which put the elbow and forearm where the clearance was
-#: measured, plus the WRIST PITCH: that one folds the hand and is part of the
-#: shape that fits through the pocket, which is why CURL carries +45.
+#: measured, plus the WRIST PITCH: that one folds the hand.
 #:
 #: The forearm yaw, the wrist roll and the gripper are NOT in it, and leaving
 #: them out is not laziness.  They spin the hand about its own axis and move
 #: the elbow nowhere; they are weak (kp=60, 10 Nm) and converge over several
 #: waypoints; and a few degrees on them moves the pad by millimetres inside
 #: margins of 20 mm or more.  Holding them to TRACK_TOL aborts routes that are
-#: in no danger — measured: a stow flown from PRESENT stopped at SWING_2
+#: in no danger -- measured, in August: a stow flown from PRESENT stopped
 #: because `r_wrist_roll` was 23 degrees into a 30 degree move, with the whole
 #: arm 2.3 cm from anything and the board untouched.
 CRITICAL_JOINTS: Tuple[str, ...] = GROSS_JOINTS + ("r_wrist_pitch",)
@@ -479,244 +369,112 @@ class RouteValidation:
     route: str
     scene: str
     evidence: str
-    #: The corridor-margin figures (#74, D1).  Required to be present -- and
-    #: to meet the margin -- for a route in `CORRIDOR_ROUTES`; see
-    #: `corridor_shortfall`.  Metres, and a flight count.
-    planned_worst_m: Optional[float] = None
-    realised_worst_m: Optional[float] = None
-    flights: int = 0
+    #: Where the robot was mounted when this was flown (#192).  Required: a
+    #: record that does not say where the robot stood cannot be held to the
+    #: mount it is checked against.
+    mount: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.mount:
+            raise ValueError(f"the {self.route} record in {self.scene} names no mount")
 
 
 #: Routes proven in a scene by flying them there.
 #:
-#: FWDCenterLabMCC is where the pose set was measured, so its entries carry the
-#: notebook as their evidence.  FWDCenterLabSivaPool is deliberately ABSENT.
-#: The two scenes differ in object population, endpoint equality does not prove
-#: the corridor between the endpoints is clear, and the corridor is a few
-#: millimetres wide in places.  Adding a row here without a flown run would be
-#: the whole safety argument of this module, undone by a one-line edit.
+#: EVERY ROW IS AT THE OCTOBER MOUNT, torso at (0.206, 0, 1.15) (#192).  The
+#: August rows -- the rail-pocket corridor and the routes flown from it -- went
+#: with the August mount (owner decision 2026-10-18); their evidence is in git
+#: history and docs/reviews/.  The evidence here is OFFLINE physics: the
+#: simulator's own MuJoCo model and contact settings, the arm streamed with the
+#: motors on, without the server, SDK or bridge
+#: (docs/reviews/2026-10-17-october-layout-192/).  FWDCenterLabSivaPool and
+#: FWDCenterLabMCC share the board, grid and rig.
+#:
+#: Adding a row here without a flown run would be the whole safety argument of
+#: this module, undone by a one-line edit.
 ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
     RouteValidation(
-        "PLACE_ROUTE", "FWDCenterLabMCC",
-        "notebooks/tlh_motion-routine.ipynb section 3: flown, board untouched, "
-        "waypoint clearances checked at 0.2 deg resolution",
-    ),
-    RouteValidation(
-        "STOW_ROUTE", "FWDCenterLabMCC",
-        "notebooks/tlh_motion-routine.ipynb section 5: flown, arm verified at "
-        "HOME on the gross joints",
-    ),
-    RouteValidation(
-        "WAVE", "FWDCenterLabMCC",
-        "notebooks/tlh_motion-routine.ipynb section 4.6: three cycles at 1.8 s, "
-        "scene drift checked afterwards",
-    ),
-    RouteValidation(
-        "LIFT_TO_PRESENT", "FWDCenterLabMCC",
-        "notebooks/tlh_motion-routine.ipynb cell 18: REST -> PRESENT in one "
-        "move, then the whole of section 4 flown from it with the board "
-        "instrumented cell by cell and every object still on its cell",
-    ),
-    RouteValidation(
-        "LOWER_TO_REST", "FWDCenterLabMCC",
-        "notebooks/tlh_motion-routine.ipynb cell 34: PRESENT -> REST_SHUT is "
-        "the first move of the stow, flown at the end of every section 4 run",
-    ),
-    RouteValidation(
-        "RAISE_TO_SIDE", "FWDCenterLabMCC",
-        "PLACE_ROUTE then LIFT_TO_PRESENT, both above: "
-        "notebooks/tlh_motion-routine.ipynb flies exactly this pair, in this "
-        "order, in sections 3 and 4",
-    ),
-    RouteValidation(
-        "STOW_FROM_SIDE", "FWDCenterLabMCC",
-        "STOW_ROUTE, above: the stow in notebooks/tlh_motion-routine.ipynb IS "
-        "the return from PRESENT, because its first waypoint is REST_SHUT",
-    ),
-    # ── FWDCenterLabSivaPool, accepted 2026-09-10 ───────────────────────────
-    #
-    # THE CORRIDOR ROWS CARRY THE CORRIDOR-MARGIN FIGURES (docs/adr/0006 §6):
-    # PLACE_ROUTE, STOW_ROUTE, RAISE_TO_SIDE and STOW_FROM_SIDE were re-flown 20
-    # times each on 2026-10-09 with the moved SWING_1 and the forearm-yaw fix,
-    # and `check_route` enforces the margin here again.  The 2026-09-10 text in
-    # each row is kept after the new evidence, as the superseded record.  The
-    # 2026-10-09 campaign flew the moved SWING_1 twenty times per route and did
-    # not meet the realised margin (PLACE_ROUTE +0.03 cm, STOW_FROM_SIDE -1.09
-    # cm, both on flights where r_forearm_yaw swung 46-52 deg off its command),
-    # so no figures were added.  The text below is the 2026-09-10 record.
-    #
-    # THE DECISION THESE ROWS REST ON IS RECORDED IN docs/adr/0002.  In short:
-    # the SWING_1 crossing has about 6 mm of modelled budget and the physics
-    # arm's tracking error is the same size, so every flight of every route
-    # through it reads a few millimetres negative.  #74 rejected PLACE_ROUTE on
-    # exactly that and was right to, on the evidence it had.  What is different
-    # now is the evidence: eighteen legs sampled at 20 Hz through the whole
-    # flight rather than at the waypoints, WITH OBJECTS ON THE BOARD, and the
-    # board undisturbed in all eighteen.  A graze that never moves anything,
-    # measured through the move rather than at its ends, is a model
-    # disagreement at a known rail — the one #73 documents as disagreeing in
-    # both directions — and not a collision.
-    #
-    # This is deliberately not the same argument the deleted hub rows made.
-    # Those rested on "flown six times, board undisturbed" against a board that
-    # was EMPTY, for a path that was 4.3 to 6.5 cm inside the board.  Rows are
-    # not evidence; the runs behind them are, and an empty board proves nothing
-    # about disturbance.
-    RouteValidation(
-        "RAISE_TO_SIDE", "FWDCenterLabSivaPool",
-        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.35, p5 +2.35, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
-        "2026-09-10: HOME->PRESENT, flown SIX times, sampled at 20 Hz through "
-        "the flight. Completed every time, 37-45 s; recognised at PRESENT on "
-        "five of six (the sixth arrived 8-12 deg short, which is why "
-        "LIFT_TO_PRESENT's tolerance is now 8 and not 10). Worst realised vs "
-        "the rig -0.33, -0.55, -0.59, -0.76, -0.77 and -1.32 cm at the SWING_1 "
-        "crossing of rig_rail_outer_right. Worst overall -2.55 to -4.41 cm, "
-        "hand vs table_top, which is REST and is the route's INTENT. Board "
-        "undisturbed all six runs, soda_can on r1c1 and foam_block on r2c3.",
-        planned_worst_m=0.02573, realised_worst_m=0.02352, flights=20,
-    ),
-    RouteValidation(
-        "PLACE_ROUTE", "FWDCenterLabSivaPool",
-        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.35, p5 +2.35, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
-        "2026-09-10: the first eleven waypoints of every RAISE_TO_SIDE flight "
-        "above are this route, so its six flights are these six. Supersedes "
-        "the rejection recorded in VALIDATION_ATTEMPTS, which measured the "
-        "waypoints rather than the flight and had no objects on the board.",
-        planned_worst_m=0.02573, realised_worst_m=0.02351, flights=20,
-    ),
-    RouteValidation(
         "LIFT_TO_PRESENT", "FWDCenterLabSivaPool",
-        "2026-09-10: the last waypoint of every RAISE_TO_SIDE flight above. "
-        "Clear throughout: the leg runs from REST's deliberate board contact "
-        "up to +13 cm and the rig is never the limiting obstacle on it.",
-    ),
-    RouteValidation(
-        "STOW_FROM_SIDE", "FWDCenterLabSivaPool",
-        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.34, p5 +2.35, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
-        "2026-09-10: PRESENT->HOME, flown three times, arrived at HOME every "
-        "time, 32-34 s. Worst realised vs the rig -0.61, -0.62 and -0.69 cm at "
-        "the same SWING_1 crossing; worst overall -2.77 to -3.36 cm vs "
-        "table_top. Board undisturbed every run.",
-        planned_worst_m=0.02573, realised_worst_m=0.02337, flights=20,
-    ),
-    RouteValidation(
-        "STOW_ROUTE", "FWDCenterLabSivaPool",
-        "2026-10-09 (corridor margin, #74; docs/adr/0006 §5-6): flown 20 times with the moved SWING_1 and the forearm-yaw fix, every flight arrived, board undisturbed (0.00 mm). Realised worst (tube, objects+rails) min +2.33, p5 +2.33, median +2.36 cm; planned +2.57 cm. Evidence: Reachy-Lab outputs/sim/working/trial-2026-10-09-p2-74-fyfix-flights. Superseded record follows. "
-        "2026-09-10: REST->HOME, flown three times separately from the six "
-        "STOW_FROM_SIDE legs that also fly it, arrived at HOME every time, "
-        "33-39 s. Worst vs the rig -1.03, -1.15 and -1.58 cm. Board "
-        "undisturbed. Supersedes the rejection in VALIDATION_ATTEMPTS.",
-        planned_worst_m=0.02573, realised_worst_m=0.02331, flights=20,
+        "2026-10-18 (#192, offline physics, fly_rest.py and fly_wave_point.py): "
+        "REST -> REST_OUT -> PRESENT_SHUT -> PRESENT, from the REST the hand "
+        "collision boxes settle at, flown with soda_can / blue_cylinder / "
+        "red_cube or blue_cylinder / soda_can / foam_block standing on r1c3 / "
+        "r2c3 / r3c3, and as the approach of every WAVE and POINT flight "
+        "below (12 flights). Arrived within 1.0 deg on the gross joints; no "
+        "object moved (0.0 mm); worst MJCF distance to any of them 2.7 cm "
+        "(blue_cylinder on r1c3). Only robot contacts: the forearm and the "
+        "hand's palm and back on table_top, leaving REST.",
+        mount=MOUNT_OCTOBER,
     ),
     RouteValidation(
         "LOWER_TO_REST", "FWDCenterLabSivaPool",
-        "2026-09-10: PRESENT->REST, flown three times, arrived at REST every "
-        "time in 7 s. Worst vs the rig +6.07, +6.08 and +6.09 cm — this leg "
-        "does not go near the rail. Board undisturbed. SEE THE CAVEAT BELOW: "
-        "this is the leg that hit an object when there was one in its way.",
+        "2026-10-18 (#192, offline physics): PRESENT -> PRESENT_SHUT -> "
+        "REST_OUT -> REST, the same layouts as LIFT_TO_PRESENT and the return "
+        "of every WAVE and POINT flight (12 flights). Arrived within 0.2 deg; "
+        "no object moved (0.0 mm); worst MJCF distance 2.7 cm. Only robot "
+        "contacts: the forearm and palm coming to rest on table_top.",
+        mount=MOUNT_OCTOBER,
     ),
     RouteValidation(
         "WAVE", "FWDCenterLabSivaPool",
-        "2026-09-10: three cycles at PRESENT, flown three times through the "
-        "REBUILT approach (the earlier row described the approach through the "
-        "hub and was deleted with it). Worst realised whole-arm clearance "
-        "+13.11, +13.17 and +14.20 cm vs rig_rail_outer_right, +8.95 to "
-        "+9.79 cm counting the board. Board undisturbed. Two of the three ran; "
-        "the third correctly refused because its approach had left the arm "
-        "short of PRESENT.",
+        "2026-10-18 (#192, offline physics, fly_wave_point.py): REST -> "
+        "LIFT_TO_PRESENT -> WAVE (3 cycles, 1.8 s a swing, rig_motion.wave "
+        "unchanged) -> LOWER_TO_REST, in three layouts: soda_can / "
+        "blue_cylinder / red_cube on r1c3 / r2c3 / r3c3; blue_cylinder / "
+        "soda_can / foam_block on the same cells; soda_can on r2c2 with "
+        "blue_cylinder on r1c1 and pool_cyl_1 on r3c1. All three cycles every "
+        "time, back at PRESENT within 1.0 deg; no object moved (0.0 mm); no "
+        "robot contact during the wave; worst MJCF distance during it 3.6 cm "
+        "(soda_can on r1c3).",
+        mount=MOUNT_OCTOBER,
     ),
     RouteValidation(
         "POINT", "FWDCenterLabSivaPool",
-        "2026-09-10: AN EMPTY BOARD ONLY, and the executor enforces that — "
-        "see `_ability_available`. All nine grid cells attempted from PRESENT "
-        "at the 12 cm hover an empty board derives; EIGHT flown, board "
-        "undisturbed on every one, and cell_r3c1 refused as out of reach, "
-        "which is the arm's own limit and the cell the notebook names as "
-        "unreachable at every height (Siva confirmed the same on the physical "
-        "robot). No cell needed a lift. Realised whole-arm clearance +10.4 to "
-        "+15.3 cm. Pad miss 2.2 to 8.8 cm, which is why this is described as "
-        "a HOVER POINTER and not a calibrated ray. "
-        "THEN ONE OBJECT AT A TIME, each alone on the centre cell, which is "
-        "the harshest single-object case because everything in the middle of "
-        "the grid is crossed by every reach. Every derived hover held, and "
-        "the board was undisturbed in all six runs: "
-        "pool_box_1 4.0 cm -> 12.0 cm hover, 8/9 cells, worst +3.1; "
-        "foam_block 5.0 -> 12.0, 5/9, +3.9; red_cube 6.0 -> 12.0, 7/9, +3.3; "
-        "pool_cyl_1 8.0 -> 14.0, 8/9, +3.0; blue_cylinder 10.0 -> 16.0, 5/9, "
-        "+3.5; soda_can 11.5 -> 17.5, 7/9, +4.8. Pointing AT the object "
-        "itself worked for five of the six (miss 1.2 to 4.6 cm, nothing "
-        "moved); red_cube was refused at 0.7 cm by the escort, which is the "
-        "guard costing coverage rather than safety. The refused CELLS are the "
-        "same: 'hand clears blue_cylinder by 3.6 cm on leg 6 of 6, under the "
-        "5.0 cm margin'. TWO OR MORE OBJECTS IS NOT COVERED — what has not "
-        "been flown is a reach threading past a second object — and "
-        "`_ability_available` enforces that. "
-        "AND THEN POINTING AT THE OBJECT ITSELF, wired through the panel "
-        "(#57), where the hover is the object's OWN top plus POINT_CLEARANCE "
-        "rather than the board-wide floor. Nine attempts reached the pointing "
-        "code, over six object types alone on the centre cell, each started "
-        "from the rail pocket: EIGHT left the board untouched, and ONE THREW "
-        "foam_block 13.4 m. Every one of the eight needed a +5 cm lift; pad "
-        "miss 2.2 to 6.6 cm at the centre cell and 13.0 cm at r1c1 through "
-        "the panel, which is why this is a hover pointer. "
-        "THE ONE FAILURE IS SECTION 4.7'S RESIDUAL, NOT A NEW DEFECT: the "
-        "closed-loop guard stopped the flight at leg 6 of 6 reading 0.5 cm "
-        "against a 1.1 cm floor where it had planned 4.2 cm — it measured the "
-        "contact AFTER it happened, because contact happens between samples. "
-        "Re-run three times each on the two types that failed first: "
-        "foam_block 2 clean of 3, blue_cylinder 2 clean of 3, and the third "
-        "of each never reached the pointing code at all — the arm was "
-        "stranded by the previous run's abort and recovery stopped at HOVER "
-        "and at SWING_3 rather than inventing a path, which is the correct "
-        "answer. "
-        "IT SHIPS ENABLED ANYWAY, and that is a decision rather than a "
-        "measurement: the operator asked for it on, the failure mode is a "
-        "knocked object rather than a damaged arm or rig, and the guard does "
-        "stop the motion when it sees it. A run that reads 'I moved "
-        "something' is the system working as designed. Closing that last gap "
-        "needs a guard that bounds the excursion BETWEEN legs, not another "
-        "constant — see ADR-0002.",
+        "2026-10-18 (#192, offline physics, fly_wave_point.py): the panel's "
+        "own `_point_at_target` (hover height, point_at's lift search and "
+        "escort, the return to PRESENT), flown from REST via LIFT_TO_PRESENT "
+        "and back by LOWER_TO_REST. AN EMPTY BOARD: all nine cells, miss 0.4 "
+        "to 1.4 cm, no lift, nothing touched. ONE OBJECT AT A TIME on the "
+        "centre cell (pool_box_1, foam_block, red_cube, pool_cyl_1, "
+        "blue_cylinder, soda_can), every cell and then the object itself: "
+        "57 of 60 cells pointed (miss 0.3 to 1.5 cm, lifts of 5-10 cm over "
+        "r1c1, r1c2 and r2c2); cell_r1c2 refused three times by the guard "
+        "(foam_block: 4.8 cm on leg 5 of 6 under the 5 cm margin; "
+        "blue_cylinder and soda_can before any motion). The object itself: "
+        "3 of 6 (the boxes, miss 0.6 cm); the three cylinders were stopped "
+        "by the escort's realised check on leg 6, the tube hand reading 0.1 "
+        "to 0.6 cm inside the object while the MJCF hand was 2.9 to 3.1 cm "
+        "clear, then flown back to PRESENT. NOTHING MOVED in any of the 69 "
+        "pointings (0.0 mm), and the arm touched nothing but table_top at "
+        "REST. TWO OR MORE OBJECTS IS NOT COVERED, and `_ability_available` "
+        "still enforces that. August, for comparison: 8 of 9 empty-board "
+        "cells (r3c1 out of reach), miss 2.2 to 8.8 cm.",
+        mount=MOUNT_OCTOBER,
     ),
-    # THE ONE THING THESE ROWS DO NOT COVER: AN OBJECT IN THE REST FOOTPRINT.
-    #
-    # These routes END on the board — that is what REST is — and the forearm
-    # lands on the near-right cells.  Observed, on a run where foam_block had
-    # slid 7 cm off r2c3 into that footprint: LOWER_TO_REST moved it 5.3 cm and
-    # the STOW_ROUTE that followed pushed it to 17 cm total.  Nothing in these
-    # routes can see that; `primitives` has no scene.  The notebook says the
-    # same thing about red_cube in FWDCenterLabMCC ("An object parked there
-    # will be hit, and nothing in this function can know it is"), and the
-    # abilities brief requires `rest_forearm` to refuse when an object occupies
-    # the forearm footprint.  THAT CHECK IS NOT BUILT.  Until it is, these rows
-    # certify the corridor, not the tabletop.
-    #
-    # THE SivaPool ROWS FOR THE OLD HUB ROUTES WERE DELETED RATHER THAN EDITED.
-    #
-    # They certified a different implementation.  RAISE_TO_SIDE and
-    # STOW_FROM_SIDE used to be four hand-built steps through a roll -88 hub
-    # that appears nowhere in the notebook, and their rows rested on "flown six
-    # times, board undisturbed" — true, and not evidence about a board that was
-    # empty at the time.  Modelled afterwards: the ascent runs 4.3 to 6.5 cm
-    # inside `table_top` for the whole of its roll sweep, and the descent's
-    # join into CURL puts the hand 6.4 cm inside it.  Both are the gripper
-    # through the board's near edge, which is what an operator watched.  A
-    # validation row for code that no longer exists is worse than no row.
-    # PRESENT_ROUTE and PRESENT_RETURN went with the hub they connected to.
-    #
-    # The WAVE row for SivaPool went too.  The wave itself was measured there
-    # — +13.1, +13.3 and +13.2 cm across three runs — but the row described
-    # the approach it was flown through, and that approach was the hub.  The
-    # pose the wave happens at has not changed; the way the arm reaches it has.
-    #
-    # All of these have to be flown in SivaPool and measured before they get a
-    # row here, exactly as PLACE_ROUTE and STOW_ROUTE do (#74).
-    # POINT is not listed for any scene.  Section 4.7 documents runs that moved
-    # objects — a can shifted 0.189 m by an arm reporting positive clearance —
-    # so it is not a validated route anywhere, and saying so here is more use
-    # than a comment somewhere else saying it is imperfect.
-    #
-    # FWDCenterLabSivaPool is not listed either, and that is now a MEASURED
-    # answer rather than an untested assumption.  See VALIDATION_ATTEMPTS.
+    RouteValidation(
+        "LIFT_TO_PRESENT", "FWDCenterLabMCC",
+        "2026-10-18 (#192, offline physics): as the FWDCenterLabSivaPool row; "
+        "MCC is the same board, grid and rig.",
+        mount=MOUNT_OCTOBER,
+    ),
+    RouteValidation(
+        "LOWER_TO_REST", "FWDCenterLabMCC",
+        "2026-10-18 (#192, offline physics): as the FWDCenterLabSivaPool row; "
+        "MCC is the same board, grid and rig.",
+        mount=MOUNT_OCTOBER,
+    ),
+    RouteValidation(
+        "WAVE", "FWDCenterLabMCC",
+        "2026-10-18 (#192, offline physics): as the FWDCenterLabSivaPool row; "
+        "MCC is the same board, grid and rig.",
+        mount=MOUNT_OCTOBER,
+    ),
+    RouteValidation(
+        "POINT", "FWDCenterLabMCC",
+        "2026-10-18 (#192, offline physics): as the FWDCenterLabSivaPool row; "
+        "MCC is the same board, grid and rig.",
+        mount=MOUNT_OCTOBER,
+    ),
 )
 
 
@@ -736,34 +494,9 @@ class ValidationAttempt:
     detail: str
 
 
-VALIDATION_ATTEMPTS: Tuple[ValidationAttempt, ...] = (
-    ValidationAttempt(
-        "PLACE_ROUTE", "FWDCenterLabSivaPool", "2026-09-10", "rejected",
-        "Flown three times, HOME->REST. Twice complete and arrived; the third "
-        "stopped at REST_SHUT with r_wrist_roll 9 deg off its 6 deg tolerance "
-        "after five re-streamed passes. Board undisturbed every time (all 10 "
-        "objects 0.0000 m). Rejected on clearance: worst realised at SWING_1 "
-        "vs rig_rail_outer_right was +0.2, +0.1 and +0.2 cm against a planned "
-        "+0.6 cm.",
-    ),
-    ValidationAttempt(
-        "STOW_ROUTE", "FWDCenterLabSivaPool", "2026-09-10", "rejected",
-        "Flown three times, REST->HOME, complete and arrived every time, board "
-        "undisturbed. Rejected on clearance: SWING_1 vs rig_rail_outer_right "
-        "measured +0.7, -0.2 and +0.5 cm — the model puts the arm INSIDE the "
-        "rail on the second pass. Six SWING_1 samples across both routes: "
-        "+0.2, +0.7, +0.1, -0.2, +0.2, +0.5 cm, one of six negative, spread "
-        "0.9 cm on a 0.6 cm budget. The corridor completes, and it has no "
-        "margin at its tightest waypoint.",
-    ),
-    ValidationAttempt(
-        "POINT", "FWDCenterLabMCC", "2026-08", "rejected",
-        "Measured in notebook section 4.7 and not accepted: pad miss up to "
-        "21.2 cm across the grid, and cell_r2c1 reported +5.5 cm of clearance "
-        "while moving the can 0.189 m. The arm bows off the line the guard "
-        "cleared, between the points where anything was measured.",
-    ),
-)
+#: Empty at the October mount: every rejection on record was an August flight
+#: (#192).  Kept so the next rejection is written down with its numbers.
+VALIDATION_ATTEMPTS: Tuple[ValidationAttempt, ...] = ()
 
 
 def attempts_for(route: str, scene: str) -> Tuple[ValidationAttempt, ...]:
@@ -771,40 +504,15 @@ def attempts_for(route: str, scene: str) -> Tuple[ValidationAttempt, ...]:
                  if a.route == route and a.scene == scene)
 
 
-def validation_for(route: str, scene: str) -> Optional[RouteValidation]:
+def validation_for(route: str, scene: str,
+                   mount: Optional[str] = None) -> Optional[RouteValidation]:
+    """The record of `route` flown in `scene` at `mount` (default: the current
+    mount), or None."""
+    mount = CURRENT_MOUNT if mount is None else mount
     for row in ROUTE_COMPATIBILITY:
-        if row.route == route and row.scene == scene:
+        if row.route == route and row.scene == scene and row.mount == mount:
             return row
     return None
-
-
-#: (route, scene) pairs whose report-only shortfall has been logged in this
-#: process -- once each, because `check_route` runs on every panel request.
-_REPORTED: set = set()
-
-
-def corridor_shortfall(row: RouteValidation) -> str:
-    """Why this record does not meet the corridor margin, or "" if it does.
-
-    Every figure has to be there.  A row without them is the implicit margin
-    #74 was filed about: whatever a run happened to clear.
-    """
-    missing = [name for name, v in (("planned", row.planned_worst_m),
-                                    ("realised", row.realised_worst_m))
-               if v is None]
-    if missing:
-        return (f"it records no {' or '.join(missing)} worst clearance, so "
-                "there is nothing to hold to the margin")
-    short = []
-    if row.planned_worst_m < CORRIDOR_PLANNED_MARGIN:
-        short.append(f"planned {100 * row.planned_worst_m:+.2f} cm against "
-                     f"{100 * CORRIDOR_PLANNED_MARGIN:.1f} cm")
-    if row.realised_worst_m < CORRIDOR_REALISED_MARGIN:
-        short.append(f"realised {100 * row.realised_worst_m:+.2f} cm against "
-                     f"{100 * CORRIDOR_REALISED_MARGIN:.1f} cm")
-    if row.flights < CORRIDOR_MIN_FLIGHTS:
-        short.append(f"{row.flights} flights against {CORRIDOR_MIN_FLIGHTS}")
-    return "; ".join(short)
 
 
 def check_route(route: str, scene: str) -> Tuple[bool, str]:
@@ -814,31 +522,21 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
     scene" sends someone to the compatibility record; "the arm is unavailable"
     sends them to the robot, which is fine.
 
-    A route that crosses the rig corridor needs more than a row: the row must
-    carry figures that meet the corridor margin (`corridor_shortfall`).  In a
-    scene listed in `CORRIDOR_REPORT_ONLY_SCENES` a shortfall is REPORTED, not
-    enforced: the answer is (True, note), the note naming the shortfall, and
-    it is logged once per route and scene.
+    The record must be at `CURRENT_MOUNT`: one flown with the robot mounted
+    somewhere else is refused, and says so.
     """
     if not route:
         return False, "that action names no route"
     row = validation_for(route, scene)
+    if row is None and any(r.route == route and r.scene == scene
+                           for r in ROUTE_COMPATIBILITY):
+        # Flown here, but with the robot mounted somewhere else (#192).  Said
+        # in those words: "not validated" would send someone looking for a
+        # missing run, and the run exists; it is the robot that moved.
+        return False, (f"the {route} route was flown in {scene} with the "
+                       f"robot mounted elsewhere, and it has not been re-flown "
+                       f"since the robot moved ({CURRENT_MOUNT})")
     if row is not None:
-        if route in CORRIDOR_ROUTES:
-            short = corridor_shortfall(row)
-            if short and scene in CORRIDOR_REPORT_ONLY_SCENES:
-                note = (f"REPORTED, NOT ENFORCED in {scene} (owner decision "
-                        f"2026-10-09, until the forearm-yaw fix): the {route} "
-                        f"route does not meet the corridor margin (#74): {short}")
-                if (route, scene) not in _REPORTED:
-                    _REPORTED.add((route, scene))
-                    log.warning("%s", note)
-                return True, note
-            if short:
-                return False, (
-                    f"the {route} route crosses the rig corridor at SWING_1, "
-                    f"and its record in {scene} does not meet the corridor "
-                    f"margin (#74): {short}")
         return True, ""
     tried = attempts_for(route, scene)
     if tried:
@@ -852,7 +550,8 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
                            f"{attempt.when} and rejected: {attempt.detail}")
         return False, (f"the {route} route has not been flown in {scene}: "
                        f"{attempt.detail}")
-    flown_in = sorted({r.scene for r in ROUTE_COMPATIBILITY if r.route == route})
+    flown_in = sorted({r.scene for r in ROUTE_COMPATIBILITY
+                       if r.route == route and r.mount == CURRENT_MOUNT})
     if not flown_in:
         # No pass anywhere.  If it was tried somewhere else and failed, that
         # reason travels: a route rejected in the scene it was designed for is
@@ -868,83 +567,25 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
     return False, (f"the {route} route was measured in "
                    f"{', '.join(flown_in)} and has not been flown in {scene}. "
                    "The endpoints matching does not mean the path between them "
-                   "is clear, and this corridor is a few millimetres wide in "
-                   "places.")
-
-
-#: The routes the corridor margin applies to: every one that flies SWING_1,
-#: the tightest crossing of the rig (`rig_rail_outer_right`, #74).  Computed,
-#: not listed, so a new route through the corridor cannot be left off.
-CORRIDOR_ROUTES: Tuple[str, ...] = tuple(sorted(
-    name for name, route in (("PLACE_ROUTE", PLACE_ROUTE),
-                             ("STOW_ROUTE", STOW_ROUTE),
-                             ("LIFT_TO_PRESENT", LIFT_TO_PRESENT),
-                             ("LOWER_TO_REST", LOWER_TO_REST),
-                             ("RAISE_TO_SIDE", RAISE_TO_SIDE),
-                             ("STOW_FROM_SIDE", STOW_FROM_SIDE))
-    if any(w.name == "SWING_1" for w in route)))
-
-
-def with_notebook_swing_1(route: Tuple[Waypoint, ...]) -> Tuple[Waypoint, ...]:
-    """`route` as it was flown before SWING_1 moved (docs/adr/0006).
-
-    For replaying recordings made before 2026-10-09: they passed the
-    notebook's SWING_1, and judging them against the moved one reads a flight
-    nobody made.  Never for commanding motion.
-    """
-    from dataclasses import replace
-    return tuple(replace(w, pose=SWING_1_NOTEBOOK) if w.name == "SWING_1" else w
-                 for w in route)
-
-
-#: How far the forearm yaw may sit off the first waypoint's before a corridor
-#: route refuses to start, in degrees.
-CORRIDOR_ENTRY_TOL = TRACK_TOL
-
-
-def corridor_entry_refusal(present: Dict[str, float],
-                           route: Tuple[Waypoint, ...]) -> str:
-    """Why a corridor route must not start from `present`, or "".
-
-    Only routes through SWING_1.  The first waypoint commands the forearm yaw
-    too, but an arm that is ALREADY off before the corridor is an arm whose
-    hand is not the shape the corridor was measured for -- the case #74's
-    flights started from at HOME -- and refusing at the door costs nothing,
-    where stopping between rails strands the arm.
-    """
-    if not route or not any(w.name == "SWING_1" for w in route):
-        return ""
-    want = route[0].pose.get("r_forearm_yaw", 0.0)
-    off = abs(present.get("r_forearm_yaw", want) - want)
-    if off <= CORRIDOR_ENTRY_TOL:
-        return ""
-    return (f"the forearm yaw is {off:.0f} deg off before the rig corridor "
-            f"(tolerance {CORRIDOR_ENTRY_TOL:.0f}), so the hand is not the shape "
-            "the corridor was measured for; I will not start this route")
+                   "is clear.")
 
 
 def route_named(name: str) -> Tuple[Waypoint, ...]:
-    routes = {"PLACE_ROUTE": PLACE_ROUTE, "STOW_ROUTE": STOW_ROUTE,
-              "LIFT_TO_PRESENT": LIFT_TO_PRESENT,
-              "LOWER_TO_REST": LOWER_TO_REST,
-              "RAISE_TO_SIDE": RAISE_TO_SIDE,
-              "STOW_FROM_SIDE": STOW_FROM_SIDE}
+    routes = {"LIFT_TO_PRESENT": LIFT_TO_PRESENT,
+              "LOWER_TO_REST": LOWER_TO_REST}
     if name not in routes:
         raise KeyError(f"no route called {name!r}")
     return routes[name]
 
 
 def nearest_waypoint(present: Dict[str, float],
-                     route: Tuple[Waypoint, ...] = STOW_ROUTE) -> Tuple[str, float]:
+                     route: Tuple[Waypoint, ...] = LIFT_TO_PRESENT + LOWER_TO_REST,
+                     ) -> Tuple[str, float]:
     """The route waypoint the arm is closest to now, and how far off it is.
 
-    Used for recovery, and the reason it is only half an answer is worth
-    stating where the function is: `ensure_home()` in the notebook eases onto
-    this waypoint and retraces from there, and says plainly that the connecting
-    segment is the ONE move on an unverified path.  An arm threaded under the
-    front rail is not a routine stow start, and no commanded pose pulls it back
-    out — the pad ends up below the tabletop.  So this reports; it does not
-    authorise.
+    For the recovery message, and only half an answer: moving onto the
+    nearest waypoint is the ONE move on an unverified path.  So this reports;
+    it does not authorise.
     """
     def distance(target: Dict[str, float]) -> float:
         return max(abs(present.get(n, 0.0) - v)
@@ -965,9 +606,9 @@ def at_pose(present: Dict[str, float], target: Dict[str, float],
 # The posture graph
 # ---------------------------------------------------------------------------
 
-#: The named postures a route may start or end at.
+#: The named postures a route may start or end at.  No separate HOME: in the
+#: October layout HOME IS REST (#192).
 POSTURES: Dict[str, Dict[str, float]] = {
-    POSTURE_HOME: HOME,
     POSTURE_REST: REST,
     POSTURE_PRESENT: PRESENT,
 }
@@ -975,79 +616,29 @@ POSTURES: Dict[str, Dict[str, float]] = {
 #: Which route takes the arm from one posture to another.
 #:
 #: A pair that is not here is not a transition.  There is no "just move there"
-#: edge, and the absence is the point: a direct move from anywhere over the
-#: board to HOME drives the upper arm through the board's near edge, and the
-#: side-hub exit that IS named "go home" drives it through the outer rail in at
-#: least one scene (#73).  Two motions can both be reasonably called going
-#: home; only one of them is measured for the trip you are making.
+#: edge, and the absence is the point: two motions can both be reasonably
+#: called going to rest; only one of them is measured for the trip you are
+#: making.
 POSTURE_TRANSITIONS: Dict[Tuple[str, str], str] = {
-    (POSTURE_HOME, POSTURE_REST): "PLACE_ROUTE",
-    (POSTURE_REST, POSTURE_HOME): "STOW_ROUTE",
-    (POSTURE_HOME, POSTURE_PRESENT): "RAISE_TO_SIDE",
-    (POSTURE_PRESENT, POSTURE_HOME): "STOW_FROM_SIDE",
     (POSTURE_REST, POSTURE_PRESENT): "LIFT_TO_PRESENT",
     (POSTURE_PRESENT, POSTURE_REST): "LOWER_TO_REST",
     (POSTURE_PRESENT, POSTURE_PRESENT): "WAVE",
 }
 
 
-#: The tabletop-adjacent portion of each route — the part #82 checks a swept
-#: capsule path against LIVE object poses before flying, because nothing below
-#: `primitives` has a scene and cannot know an object drifted into it.
-#:
-#: Deliberately NOT the whole route.  The rail corridor before HOVER (or after
-#: it, on the way back) never comes near an object on the board — that is what
-#: `SceneModel.obstacle_ids()`'s own measurements are about — so checking it
-#: here would cost real time for zero chance of catching anything.  Only the
-#: leg(s) that actually cross onto REST are worth the cost:
-#:
-#:   PLACE_ROUTE / RAISE_TO_SIDE   HOVER -> REST_SHUT -> REST  (arriving)
-#:   STOW_ROUTE                    REST -> REST_SHUT -> HOVER  (departing,
-#:                                 the identical corridor flown backwards)
-#:   STOW_FROM_SIDE                PRESENT -> REST_SHUT -> HOVER  (also
-#:                                 departing, but STOW_FROM_SIDE *is*
-#:                                 STOW_ROUTE's Waypoint objects flown from a
-#:                                 different actual start: PRESENT, not REST —
-#:                                 see the note above LIFT_TO_PRESENT/STOW_ROUTE.
-#:                                 Its real first leg is therefore the
-#:                                 PRESENT -> REST_SHUT descent, not the
-#:                                 gripper-only REST -> REST_SHUT change; using
-#:                                 the latter here left that descent unchecked
-#:                                 (#82 incident, corrected here).)
-#:   LOWER_TO_REST                 PRESENT -> REST_SHUT -> REST
-#:   LIFT_TO_PRESENT                REST -> PRESENT  (arriving on PRESENT;
-#:                                 the single joint-space line LIFT_TO_PRESENT
-#:                                 flies IS LOWER_TO_REST's PRESENT ->
-#:                                 REST_SHUT descent swept backwards, so it
-#:                                 crosses the identical footprint LOWER_TO_REST
-#:                                 is already checked against — see the
-#:                                 2026-09-12 review, R1: a wave or point_*
-#:                                 requested from REST resolves this route
-#:                                 (`web/motion_worker.py`), so leaving it out
-#:                                 left that lift unguarded on a live path.)
+#: The legs of each route #82 checks as a swept capsule path against LIVE
+#: object poses before flying, because nothing below `primitives` has a scene
+#: and cannot know an object drifted into it.  In the October layout (#192)
+#: that is the whole of LOWER_TO_REST and LIFT_TO_PRESENT, every waypoint,
+#: because the whole of each is over or beside the board; both legs are
+#: checked whichever way the arm is going, from wherever it starts.
 #:
 #: WAVE and POINT are absent on purpose: neither lands the arm on REST or
-#: departs from it, so neither can catch an object in this footprint that its
-#: own named route did not already put there. WAVE's exclusion is a measured
-#: number, not an assertion: its two joint-space legs (PRESENT -> WAVE_A,
-#: PRESENT -> WAVE_B) read worst +1.6 cm (tube hand, fully open) against a
-#: 12 cm block anywhere on the board (x=0.23, y=-0.32 — the same near-right
-#: corner strip LIFT_TO_PRESENT and LOWER_TO_REST are worst on), positive on
-#: both models (`docs/reviews/probes-2026-09-12/probe_wave_legs.txt`).
-#:
-#: THE DECISION #82 ASKS FOR: this gates every ability whose available() call
-#: resolves to one of these route names, not only `rest_forearm`.  A `wave` or
-#: `point_*` request flown from the rail pocket enters PRESENT by way of
-#: RAISE_TO_SIDE — the exact PLACE_ROUTE waypoints — and crosses the identical
-#: footprint on the way, so it is checked too.  `stow_arm` is checked the same
-#: way through STOW_ROUTE / STOW_FROM_SIDE.
+#: departs from it.  The wave happens at PRESENT, and pointing is guarded by
+#: its own escort (`motion.escort`), against the live poses, leg by leg.
 FOOTPRINT_LEGS: Dict[str, Tuple[Dict[str, float], ...]] = {
-    "PLACE_ROUTE": (HOVER, REST_SHUT, REST),
-    "RAISE_TO_SIDE": (HOVER, REST_SHUT, REST),
-    "STOW_ROUTE": (REST, REST_SHUT, HOVER),
-    "STOW_FROM_SIDE": (PRESENT, REST_SHUT, HOVER),
-    "LOWER_TO_REST": (PRESENT, REST_SHUT, REST),
-    "LIFT_TO_PRESENT": (REST, PRESENT),
+    "LOWER_TO_REST": (PRESENT, PRESENT_SHUT, REST_OUT, REST),
+    "LIFT_TO_PRESENT": (REST, REST_OUT, PRESENT_SHUT, PRESENT),
 }
 
 
@@ -1055,8 +646,8 @@ def posture_of(present: Dict[str, float], tol: float = 8.0) -> Optional[str]:
     """Which named posture the arm is standing at, or None.
 
     Judged on the gross joints: the wrist angles and the gripper do not decide
-    where the arm sits in the rig, and on a freshly reset simulator they read
-    wherever gravity left them.
+    where the arm sits, and on a freshly reset simulator they read wherever
+    gravity left them.
     """
     for name, target in POSTURES.items():
         if at_pose(present, target, tol=tol, joints=list(GROSS_JOINTS)):
@@ -1074,10 +665,10 @@ def transition(frm: str, to: str) -> Optional[str]:
 def path(frm: str, to: str) -> Optional[List[str]]:
     """The routes that get from one posture to another, in order.
 
-    Breadth-first over the measured edges, so "wave" asked of an arm in the
-    rail pocket answers RAISE_TO_SIDE rather than refusing.  The arm has to
-    leave the pocket before it can do anything, and that is a fact about the
-    rig rather than something the operator should have to know and type.
+    Breadth-first over the measured edges, so "wave" asked of an arm at REST
+    answers LIFT_TO_PRESENT rather than refusing.  The arm has to be raised
+    before it can wave, and that is a fact about the rig rather than something
+    the operator should have to know and type.
 
     None means no measured sequence exists.  That is still a real answer: it
     is what stops a plan inventing a way through.

@@ -127,7 +127,7 @@ def test_broader_phrasing_becomes_the_same_typed_action():
                language_adapter=adapter(says("stow_arm")))
     assert out.kind == "proposal"
     assert out.proposal.task_type == "stow_arm"
-    assert out.proposal.route == "STOW_ROUTE"
+    assert out.proposal.route == "LOWER_TO_REST"
 
 
 def test_the_panel_says_which_path_read_the_sentence():

@@ -57,7 +57,11 @@ UNREACHABLE_TAG = "no-right-arm"
 
 # Right shoulder in world coordinates, and the height above the board that
 # MCC's reachability sweep targeted.  Both are needed to reproduce its table.
-SHOULDER_XYZ = (0.0, -0.19, 1.0)
+# October layout (#192): the torso at (0.206, 0, 1.15) plus the shoulder's
+# -0.19 in y; it was (0.0, -0.19, 1.0).  This module runs in the native server
+# and cannot import reachy_ai, so it restates the mount, and
+# tests/unit/test_robot_mount.py holds it to the MJCF.
+SHOULDER_XYZ = (0.206, -0.19, 1.15)
 GRASP_APPROACH_M = 0.05
 
 # Objects are placed this far above their exact resting height, so they settle
@@ -171,9 +175,9 @@ def resolve_cell(cells: Mapping[str, Cell], cell: str,
     if not found.reachable and not allow_unreachable:
         raise PlacementError(
             f"cell {found.name} is {found.shoulder_distance_m*100:.0f} cm from "
-            f"the right shoulder and was measured UNREACHABLE by IK in "
-            f"FWDCenterLabMCC (Siva confirmed physically).  Placing here gives "
-            f"a target the arm cannot pick.  Pass allow_unreachable=True if "
+            f"the right shoulder and the scene tags it UNREACHABLE "
+            f"({UNREACHABLE_TAG}, measured by IK).  Placing here gives a "
+            f"target the arm cannot pick.  Pass allow_unreachable=True if "
             f"that is the point of the run — e.g. testing that a planner "
             f"declines rather than flails.")
     return found

@@ -41,7 +41,12 @@ def q(**kw):
     return [d[j] for j in R_ARM_JOINTS]
 
 
-PRESENT = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
+# The start of every fixture move: a pose low over the board, where pointing
+# flies.  It was START at the August mount; at the October mount (#192) the
+# torso is 0.15 m higher and START is ~27 cm above everything, out of reach
+# of any bow, so the fixture starts here instead.
+START = q(r_shoulder_pitch=6.2, r_shoulder_roll=-18.7, r_arm_yaw=-39.8,
+          r_elbow_pitch=-93.3)
 
 
 @pytest.fixture
@@ -131,27 +136,29 @@ def slip_on(joint, amplitude, after):
 
 
 # A move that the plan-time guard passes comfortably: both endpoints and every
-# point on the joint-space line between them stay ~10 cm clear of everything.
+# point on the joint-space line between them stay ~11 cm clear of everything.
 # Found by sweeping the reachable poses for the widest gap between what the
-# straight line promises and what a bowed flight delivers.
-CLEAR_GOAL = q(r_shoulder_pitch=-50.0, r_shoulder_roll=-30.0,
-               r_elbow_pitch=-90.0, r_arm_yaw=-20.0)
+# straight line promises and what a bowed flight delivers (re-found at the
+# October mount, #192).
+CLEAR_GOAL = q(r_shoulder_pitch=-12.6, r_shoulder_roll=-24.7,
+               r_elbow_pitch=-50.3, r_arm_yaw=-29.0)
 
-# +30 deg of roll at mid-move takes the UPPER ARM to within 1.7 cm of red_cube —
+# +30 deg of roll at mid-move takes the FOREARM to within 1.1 cm of red_cube —
 # not the hand, and not at either end of the move.  This is the measured shape
-# of the failure that made the module necessary.
+# of the failure that made the module necessary.  (August, from START: the
+# upper arm, 1.7 cm.)
 BOW_JOINT, BOW_DEG = "r_shoulder_roll", 30.0
 
-# A pose whose FOREARM ends up 1.8 cm from red_cube while every other object and
-# rail stays 8.5 cm clear — the shape of a deliberate approach.  Under one global
-# 5 cm margin this move is refused outright, which is the problem per-object
-# margins exist to solve.
-HOVER_OVER_CUBE = q(r_shoulder_pitch=-45.0, r_shoulder_roll=-10.0,
-                    r_elbow_pitch=-50.0, r_arm_yaw=15.0)
+# A pose whose FOREARM ends up 1.9 cm from red_cube while every other object and
+# rail stays 12.5 cm clear — the shape of a deliberate approach.  Under one
+# global 5 cm margin this move is refused outright, which is the problem
+# per-object margins exist to solve.
+HOVER_OVER_CUBE = q(r_shoulder_pitch=0.7, r_shoulder_roll=-11.8,
+                    r_elbow_pitch=-61.4, r_arm_yaw=14.9)
 
-# +15 deg of arm_yaw appearing mid-move walks the forearm through the cube:
-# per leg, red_cube goes 11.4, 9.4, 7.5, 5.7, 2.4, -0.6 cm while nothing else
-# drops below 8.0 cm.  An approach that turns into a collision.
+# +15 deg of arm_yaw appearing mid-move walks the forearm through the cube
+# (-1.4 cm at the hover) while nothing else comes near.  An approach that turns
+# into a collision.
 INTO_CUBE = ("r_arm_yaw", 15.0)
 
 
@@ -165,19 +172,19 @@ class TestTheFixtureItself:
     """If the fixture move is not actually clear, nothing below means anything."""
 
     def test_the_clear_move_passes_the_plan_time_guard(self, planner):
-        c = planner.path_clearance(PRESENT, CLEAR_GOAL, steps=21,
+        c = planner.path_clearance(START, CLEAR_GOAL, steps=21,
                                    gripper_deg=SHUT, **STATIC)
         assert c.distance > 0.08
 
     def test_a_perfect_tracker_ends_where_it_was_sent(self):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         arm.send(CLEAR_GOAL, 1.0)
         assert arm.read() == pytest.approx(CLEAR_GOAL)
 
 
 class TestACleanMove:
     def test_it_completes(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read,
                    margin=0.05, legs=6, gripper_deg=SHUT, **STATIC)
         assert r.completed
@@ -186,7 +193,7 @@ class TestACleanMove:
         assert r.reached == pytest.approx(CLEAR_GOAL)
 
     def test_it_flies_the_number_of_legs_it_was_asked_for(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read,
                    margin=0.05, legs=4, gripper_deg=SHUT, **STATIC)
         assert len(r.legs) == 4
@@ -194,35 +201,35 @@ class TestACleanMove:
         assert all(leg.flown for leg in r.legs)
 
     def test_the_legs_are_evenly_spaced_along_the_commanded_move(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         escort(planner, CLEAR_GOAL, arm.send, arm.read,
                margin=0.05, legs=4, gripper_deg=SHUT, **STATIC)
         for i, (pose, _) in enumerate(arm.sent, start=1):
-            want = [a + (i / 4) * (b - a) for a, b in zip(PRESENT, CLEAR_GOAL)]
+            want = [a + (i / 4) * (b - a) for a, b in zip(START, CLEAR_GOAL)]
             assert pose == pytest.approx(want)
 
     def test_a_perfect_tracker_shows_no_degradation(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read,
                    margin=0.05, legs=6, gripper_deg=SHUT, **STATIC)
         assert r.worst_degraded == pytest.approx(0.0, abs=1e-9)
 
     def test_one_leg_reproduces_the_old_unguarded_shape(self, planner):
         """legs=1 is the pre-existing behaviour: check, fly, check once."""
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read,
                    margin=0.05, legs=1, gripper_deg=SHUT, **STATIC)
         assert r.completed and len(arm.sent) == 1
 
     def test_legs_must_be_positive(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         with pytest.raises(ValueError):
             escort(planner, CLEAR_GOAL, arm.send, arm.read, margin=0.05, legs=0)
 
 
 class TestLegDuration:
     def test_the_move_is_split_across_the_legs(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         escort(planner, CLEAR_GOAL, arm.send, arm.read, margin=0.05, legs=4,
                duration=4.0, min_leg_secs=0.1, gripper_deg=SHUT, **STATIC)
         assert [secs for _, secs in arm.sent] == [1.0, 1.0, 1.0, 1.0]
@@ -230,7 +237,7 @@ class TestLegDuration:
     def test_a_leg_is_never_shorter_than_the_floor(self, planner):
         """Six legs of a 1.2 s move is 0.2 s each, which the weak wrist joints
         cannot track.  The floor buys the time back rather than pretending."""
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         escort(planner, CLEAR_GOAL, arm.send, arm.read, margin=0.05, legs=6,
                duration=1.2, min_leg_secs=0.4, gripper_deg=SHUT, **STATIC)
         assert [secs for _, secs in arm.sent] == [0.4] * 6
@@ -240,7 +247,7 @@ class TestThePlanTimeRefusal:
     """The old guard, still in place — it just no longer works alone."""
 
     def test_an_impossible_margin_refuses_the_first_leg(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read,
                    margin=5.0, legs=6, gripper_deg=SHUT, **STATIC)
         assert not r.completed
@@ -250,7 +257,7 @@ class TestThePlanTimeRefusal:
         assert r.legs[-1].flown is False
 
     def test_a_refused_leg_reports_what_it_was_refused_for(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read,
                    margin=5.0, legs=6, gripper_deg=SHUT, **STATIC)
         assert r.legs[-1].planned is not None
@@ -267,10 +274,10 @@ class TestTheDefectThisModuleExistsFor:
     """
 
     def _arm(self):
-        return TracedArm(PRESENT, CLEAR_GOAL, bow=bow_on(BOW_JOINT, BOW_DEG))
+        return TracedArm(START, CLEAR_GOAL, bow=bow_on(BOW_JOINT, BOW_DEG))
 
     def test_the_plan_time_guard_says_the_move_is_clear(self, planner):
-        c = planner.path_clearance(PRESENT, CLEAR_GOAL, steps=41,
+        c = planner.path_clearance(START, CLEAR_GOAL, steps=41,
                                    gripper_deg=SHUT, **STATIC)
         assert c.distance > 0.09
 
@@ -279,14 +286,14 @@ class TestTheDefectThisModuleExistsFor:
         worst = min(
             (planner.clearance(
                 [a + t * (b - a) + d
-                 for a, b, d in zip(PRESENT, CLEAR_GOAL, bow(t))],
+                 for a, b, d in zip(START, CLEAR_GOAL, bow(t))],
                 SHUT, **STATIC)
              for t in (i / 40 for i in range(41))),
             key=lambda c: c.distance,
         )
         assert worst.distance < 0.025
         assert worst.object_id == "red_cube"
-        assert worst.link == "upper_arm"   # not the hand, and not the pad
+        assert worst.link == "forearm"     # not the hand, and not the pad
 
     def test_checked_once_at_the_ends_the_move_goes_through(self, planner):
         """legs=1 is the behaviour that shipped, and this is what it does."""
@@ -313,7 +320,7 @@ class TestTheReplanCatch:
     """
 
     def _arm(self):
-        return TracedArm(PRESENT, CLEAR_GOAL, bow=bow_on(BOW_JOINT, BOW_DEG))
+        return TracedArm(START, CLEAR_GOAL, bow=bow_on(BOW_JOINT, BOW_DEG))
 
     def test_it_stops_at_plan_time_on_a_later_leg(self, planner):
         arm = self._arm()
@@ -361,11 +368,11 @@ class TestTheRealisedCatch:
     Measured on this fixture, six legs, the slip appearing during leg 4:
 
         leg   planned   realised
-         3     12.5 cm   12.5 cm    tracking cleanly
-         4     12.5 cm    1.4 cm    <- planned clear, flown into the cube
+         3     11.0 cm   11.0 cm    tracking cleanly
+         4     11.1 cm    0.8 cm    <- planned clear, flown into the cube
 
-    1.4 cm is under the 2.5 cm floor, so leg 4 is the last one flown, and legs 5
-    and 6 — which the same slip would have taken to 0.6 cm — never happen.  That
+    0.8 cm is under the 2.5 cm floor, so leg 4 is the last one flown, and legs 5
+    and 6 never happen.  That
     is the guarantee on offer: not that nothing is ever touched, but that one
     disturbance does not become three.
     """
@@ -373,7 +380,7 @@ class TestTheRealisedCatch:
     SLIP = BOW_DEG
 
     def _arm(self):
-        return TracedArm(PRESENT, CLEAR_GOAL,
+        return TracedArm(START, CLEAR_GOAL,
                          bow=slip_on(BOW_JOINT, self.SLIP, after=0.55))
 
     def test_it_stops_on_the_realised_measurement(self, planner):
@@ -429,7 +436,7 @@ class TestTheAbortMargin:
     def test_it_defaults_to_half_the_margin(self, planner):
         """Documented behaviour, and the number a caller is most likely to get
         wrong by leaving it out."""
-        a, b = (TracedArm(PRESENT, CLEAR_GOAL,
+        a, b = (TracedArm(START, CLEAR_GOAL,
                           bow=slip_on(BOW_JOINT, BOW_DEG, after=0.55))
                 for _ in range(2))
         implicit = escort(planner, CLEAR_GOAL, a.send, a.read,
@@ -442,7 +449,7 @@ class TestTheAbortMargin:
 
     def test_a_generous_floor_lets_the_slip_through(self, planner):
         """The knob does what it says — which is also the way to misuse it."""
-        arm = TracedArm(PRESENT, CLEAR_GOAL,
+        arm = TracedArm(START, CLEAR_GOAL,
                         bow=slip_on(BOW_JOINT, BOW_DEG, after=0.55))
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read,
                    margin=-1.0, abort_margin=-1.0, legs=6,
@@ -479,14 +486,14 @@ class TestPerObjectMargins:
 
     def test_the_full_margin_refuses_the_approach(self, planner, scene):
         """The state of affairs an override exists to escape."""
-        arm = TracedArm(PRESENT, HOVER_OVER_CUBE)
+        arm = TracedArm(START, HOVER_OVER_CUBE)
         r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
                    margin=0.05, legs=6, gripper_deg=SHUT, **STATIC)
         assert not r.completed
         assert "red_cube" in r.reason
 
     def test_an_override_lets_it_through(self, planner):
-        arm = TracedArm(PRESENT, HOVER_OVER_CUBE)
+        arm = TracedArm(START, HOVER_OVER_CUBE)
         r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
                    margin=0.05, margins={"red_cube": 0.005}, legs=6,
                    gripper_deg=SHUT, **STATIC)
@@ -495,7 +502,7 @@ class TestPerObjectMargins:
     def test_but_the_target_is_still_watched(self, planner):
         """The point of the override over an exclusion: 0.5 cm is a limit, and
         a flight that drives INTO the cube still gets stopped."""
-        arm = TracedArm(PRESENT, HOVER_OVER_CUBE,
+        arm = TracedArm(START, HOVER_OVER_CUBE,
                         bow=slip_on(*INTO_CUBE, after=0.55))
         r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
                    margin=0.05, margins={"red_cube": 0.005}, legs=6,
@@ -507,7 +514,7 @@ class TestPerObjectMargins:
         """The old behaviour, kept as a test so the regression is visible."""
         others = [o for o in scene.obstacle_ids(include_static=True)
                   if o != "red_cube"]
-        arm = TracedArm(PRESENT, HOVER_OVER_CUBE,
+        arm = TracedArm(START, HOVER_OVER_CUBE,
                         bow=slip_on(*INTO_CUBE, after=0.55))
         r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
                    margin=0.05, legs=6, gripper_deg=SHUT, ids=others,
@@ -517,7 +524,7 @@ class TestPerObjectMargins:
     def test_an_overridden_object_gets_half_its_own_floor(self, planner):
         """Not half the global one — that would hold a 0.5 cm target to 2.5 cm
         and refuse every approach anyway, which is the bug in disguise."""
-        arm = TracedArm(PRESENT, HOVER_OVER_CUBE)
+        arm = TracedArm(START, HOVER_OVER_CUBE)
         r = escort(planner, HOVER_OVER_CUBE, arm.send, arm.read,
                    margin=0.05, margins={"red_cube": 0.005}, legs=6,
                    gripper_deg=SHUT, **STATIC)
@@ -539,7 +546,7 @@ class TestPerObjectMargins:
 class TestTheSceneIsRefreshed:
     def test_refresh_runs_before_every_measurement(self, planner):
         calls = []
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         escort(planner, CLEAR_GOAL, arm.send, arm.read, margin=0.05, legs=3,
                gripper_deg=SHUT, refresh=lambda: calls.append(1), **STATIC)
         # One before each leg's plan check and one after each leg's flight.
@@ -549,7 +556,7 @@ class TestTheSceneIsRefreshed:
         """The guard reads the scene it is given.  Move the can under the arm
         and the realised check has to see it, or the model is checking a board
         that no longer exists."""
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         state = {"n": 0}
 
         def refresh():
@@ -557,7 +564,7 @@ class TestTheSceneIsRefreshed:
             if state["n"] == 5:
                 # Put the can directly under the elbow's path.
                 from reachy_ai.motion.kinematics import link_frames
-                mid = [a + 0.5 * (b - a) for a, b in zip(PRESENT, CLEAR_GOAL)]
+                mid = [a + 0.5 * (b - a) for a, b in zip(START, CLEAR_GOAL)]
                 elbow = tuple(float(v) for v in link_frames(mid)[1])
                 scene.update_poses({"soda_can": elbow})
 
@@ -570,7 +577,7 @@ class TestTheSceneIsRefreshed:
 class TestReporting:
     def test_on_leg_sees_every_leg_as_it_happens(self, planner):
         seen = []
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read, margin=0.05,
                    legs=5, gripper_deg=SHUT, on_leg=seen.append, **STATIC)
         assert [l.index for l in seen] == [1, 2, 3, 4, 5]
@@ -582,13 +589,13 @@ class TestReporting:
         assert leg.drift == pytest.approx(8.0)
 
     def test_a_completed_result_says_so(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read,
                    margin=0.05, legs=3, gripper_deg=SHUT, **STATIC)
         assert "arrived in 3 legs" in str(r)
 
     def test_a_stopped_result_says_where(self, planner):
-        arm = TracedArm(PRESENT, CLEAR_GOAL,
+        arm = TracedArm(START, CLEAR_GOAL,
                         bow=slip_on(BOW_JOINT, BOW_DEG, after=0.55))
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read, margin=0.05,
                    legs=6, gripper_deg=SHUT, **STATIC)
@@ -601,7 +608,7 @@ class TestNoScene:
 
     def test_it_flies_the_whole_move(self):
         planner = CartesianPlanner(arm=None, scene=None, side="right")
-        arm = TracedArm(PRESENT, CLEAR_GOAL)
+        arm = TracedArm(START, CLEAR_GOAL)
         r = escort(planner, CLEAR_GOAL, arm.send, arm.read, margin=0.05,
                    legs=3, gripper_deg=SHUT)
         assert r.completed

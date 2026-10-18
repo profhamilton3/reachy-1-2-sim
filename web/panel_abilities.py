@@ -54,11 +54,14 @@ SLOT_POSTURE = "which_posture"
 #: that is not symmetric, so the left arm is a question, not a mirror.
 DEFAULT_ARM = "right"
 
-#: `REST` is the forearm supported on the tabletop; `HOME` is stored in the
-#: rail pocket.  The operator says "rest" for both, and the two are eleven
-#: waypoints apart.
+#: `REST` is the hand resting on the board's right margin.  It used to be one
+#: of two "rest"s eleven waypoints apart, the other being `HOME` in the rail
+#: pocket.  In the October layout there is no pocket to be in, and HOME IS
+#: REST (#192, owner decision 2026-10-17): "stow", "store" and "put your arm
+#: away" all end there.  `POSTURE_HOME` is kept as a name and is the same
+#: posture.
 POSTURE_REST = "rest"
-POSTURE_HOME = "home"
+POSTURE_HOME = POSTURE_REST
 
 
 @dataclass(frozen=True)
@@ -66,11 +69,9 @@ class Ability:
     """One thing Reachy can be asked to do.
 
     `route` names the motion this ability flies, and is deliberately not the
-    name of a function that already exists.  `P.go_home()` routes through
-    `stow_from_side()` — a lateral abduction and lower, correct as the exit
-    from the pick-and-place side hub and NOT the rail-pocket corridor the
-    operator means by "store your arm".  Two motions, both fairly called
-    "go home"; binding an ability to one by its name is how they get confused.
+    name of a function that already exists: two motions can both be fairly
+    called "go home", and binding an ability to one by its name is how they
+    get confused.
     """
 
     name: str
@@ -130,7 +131,7 @@ _register(Ability(
 
 _register(Ability(
     name="rest_forearm",
-    summary="rest the forearm on the table",
+    summary="rest the arm on the table, on the board's right margin",
     patterns=(
         # The posture is named explicitly, so there is nothing to ask about.
         rf"{_POLITE}(?:place|put|lay|rest|set)\s+{_YOUR}{_ARM}(?:forearm|arm|hand)"
@@ -139,15 +140,17 @@ _register(Ability(
         rf"{_POLITE}rest\s+{_YOUR}{_ARM}(?:forearm)\s*{_TRAIL}",
     ),
     slots=(SLOT_ARM,),
-    route="PLACE_ROUTE",
-    route_version=2,      # SWING_1 moved for margin (#74, docs/adr/0006)
-    start_postures=(POSTURE_HOME,),
+    # October layout (#192): REST is reached from PRESENT, and is where the
+    # arm is stored, so this and `stow_arm` are the same motion asked two ways.
+    route="LOWER_TO_REST",
+    route_version=3,      # 2: SWING_1 moved (#74); 3: the October REST (#192)
+    start_postures=("present",),
     end_posture=POSTURE_REST,
 ))
 
 _register(Ability(
     name="stow_arm",
-    summary="stow the arm in the rail pocket",
+    summary="put the arm away: rest it on the board's right margin",
     patterns=(
         rf"{_POLITE}(?:store|stow|put away)\s+{_YOUR}{_ARM}arm{_TRAIL}",
         rf"{_POLITE}put\s+{_YOUR}{_ARM}arm\s+(?:away|back){_TRAIL}",
@@ -159,8 +162,8 @@ _register(Ability(
         rf"{_POLITE}reset{_TRAIL}",
     ),
     slots=(SLOT_ARM,),
-    route="STOW_ROUTE",
-    route_version=2,      # SWING_1 moved for margin (#74, docs/adr/0006)
+    route="LOWER_TO_REST",
+    route_version=3,      # 2: SWING_1 moved (#74); 3: HOME is REST (#192)
     end_posture=POSTURE_HOME,
 ))
 
@@ -174,6 +177,7 @@ _register(Ability(
     ),
     slots=(SLOT_ARM,),
     route="WAVE",
+    route_version=2,      # 2: re-flown at the October mount (#192)
     start_postures=("present",),
     end_posture="present",
 ))
@@ -189,6 +193,7 @@ _register(Ability(
     ),
     slots=(SLOT_CELL, SLOT_ARM),
     route="POINT",
+    route_version=2,      # 2: re-flown at the October mount (#192)
     start_postures=("present",),
     # It hovers, holds, and comes back to the raised pose — which is said
     # out loud, the way the wave's endpoint is.  The hover is not a posture
@@ -205,6 +210,7 @@ _register(Ability(
     ),
     slots=(SLOT_OBJECT, SLOT_ARM),
     route="POINT",
+    route_version=2,      # 2: re-flown at the October mount (#192)
     start_postures=("present",),
     # It hovers, holds, and comes back to the raised pose — which is said
     # out loud, the way the wave's endpoint is.  The hover is not a posture
@@ -369,7 +375,7 @@ class AbilityMatch:
     arm_was_named: bool = False
     #: Set when the phrasing names two abilities equally well.  `name` is then
     #: empty: choosing one would be inventing an answer the operator did not
-    #: give, and the two differ by eleven waypoints.
+    #: give.  Nothing is ambiguous since HOME became REST (#192).
     ambiguous_between: Tuple[str, ...] = ()
 
 
@@ -465,15 +471,15 @@ def match(text: str) -> Optional[AbilityMatch]:
         return direct
 
     if _AMBIGUOUS_REST_RE.fullmatch(norm):
-        # "Rest" colloquially means either posture.  REST is the forearm
-        # supported on the tabletop; HOME is stored in the rail pocket, eleven
-        # waypoints away through the rig.  Picking one would be guessing at a
-        # long arm movement.
+        # "Rest" used to mean either of two postures eleven waypoints apart,
+        # and the panel asked which.  In the October layout HOME IS REST
+        # (#192): there is one place to rest, and it is where the arm is
+        # stored, so this is `stow_arm` and there is nothing to ask.
         m = re.match(rf"^{_POLITE}\w+\s+{_YOUR}{_ARM}", norm)
         arm = (m.groupdict().get("arm") if m else None) or DEFAULT_ARM
-        return AbilityMatch(name="", ability=None, arm=arm,
-                            arm_was_named=bool(m and m.groupdict().get("arm")),
-                            ambiguous_between=("rest_forearm", "stow_arm"))
+        return AbilityMatch(name="stow_arm", ability=REGISTRY["stow_arm"],
+                            arm=arm,
+                            arm_was_named=bool(m and m.groupdict().get("arm")))
 
     parts = [p.strip() for p in _JOINER_RE.split(norm) if p and p.strip()]
     if len(parts) > 1 and sum(_looks_like_a_command(p) for p in parts) > 1:

@@ -10,7 +10,12 @@ Design notes
 * MuJoCo joint ordering is depth-first in reachy_1_2.xml (verified by loading).
 * SDK goal_position uses *degrees*; MuJoCo qpos/ctrl use *radians*.
 * sign=+1 means SDK positive → MuJoCo positive (calibrate against hardware).
-* limits_deg are the URDF joint limits converted to degrees for SDK display.
+* limits_deg are the URDF joint limits converted to degrees for SDK display,
+  with ONE DELIBERATE, SDK-VISIBLE DEVIATION: r_shoulder_roll's upper stop is
+  +0.354 rad (+20.3 deg), not the URDF's +0.174 (#192, docs/adr/0010).  The
+  physical robot held +20.3 deg in Siva's taught poses, and the October
+  layout needs it to reach r3c1.  An SDK client sees goals up to +20.3 deg
+  followed instead of clipped at +10.
 """
 
 from __future__ import annotations
@@ -47,7 +52,7 @@ class JointEntry:
 #   sdk_name             uid  mjcf_idx  axis              limits_rad
 JOINT_TABLE: List[JointEntry] = [
     JointEntry("r_shoulder_pitch",  10,  0, ( 0, 1, 0), (-2.618,  1.570)),
-    JointEntry("r_shoulder_roll",   11,  1, ( 1, 0, 0), (-3.140,  0.174)),
+    JointEntry("r_shoulder_roll",   11,  1, ( 1, 0, 0), (-3.140,  0.354)),  # +20.3 deg: #192, ADR-0010
     JointEntry("r_arm_yaw",         12,  2, ( 0, 0, 1), (-1.570,  1.570)),
     JointEntry("r_elbow_pitch",     13,  3, ( 0, 1, 0), (-2.182,  0.000)),
     JointEntry("r_forearm_yaw",     14,  4, ( 0, 0, 1), (-1.745,  1.745)),

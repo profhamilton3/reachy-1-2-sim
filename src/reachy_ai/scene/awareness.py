@@ -8,9 +8,8 @@ is, where each object rests, and whether a proposed gripper point would collide
 with a static obstacle (the table) or dip below its surface.
 
 Coordinates are in the scene ``frame_id`` (``pedestal``), which coincides with
-the robot world frame.  The right-arm FK/IK frame maps to this frame by adding
-(0, 0, 1.0) — the torso sits 1 m above the pedestal origin.  See
-``ARM_BASE_IN_WORLD``.
+the robot world frame.  The right-arm FK/IK frame (the torso) maps to this frame
+by adding ``ARM_BASE_IN_WORLD``: (0.206, 0, 1.15) in the October layout (#192).
 
 All geometry is parsed directly from the scene YAML so this module has no ROS,
 MuJoCo, or reachy_sdk dependency and is unit-testable on any host.
@@ -26,8 +25,13 @@ import pathlib
 import sys
 import yaml
 
-# Right-arm FK/IK frame origin expressed in world/pedestal coordinates.
-ARM_BASE_IN_WORLD: Tuple[float, float, float] = (0.0, 0.0, 1.0)
+# Right-arm FK/IK frame origin (the torso) expressed in world/pedestal
+# coordinates.  OCTOBER LAYOUT (#192, owner decision 2026-10-17; evidence #185,
+# PR #188): 1.15 m shoulder line, 0.206 m forward of the scene origin.  It was
+# (0, 0, 1.0), the URDF's own `pedestal` joint, until then.  The scenes did not
+# move; the robot did.  Must equal the MJCF torso pose in
+# native_mujoco/model/reachy_1_2.xml (tests/unit/test_robot_mount.py).
+ARM_BASE_IN_WORLD: Tuple[float, float, float] = (0.206, 0.0, 1.15)
 
 XYZ = Tuple[float, float, float]
 

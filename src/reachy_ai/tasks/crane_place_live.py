@@ -266,8 +266,9 @@ def _segments(place: PlacePlan) -> Dict[str, Tuple[List[List[float]], float, Tar
 
 
 #: The measured exits from PRESENT (`rig_routes.POSTURE_TRANSITIONS`).
-EXITS_FROM_PRESENT: Tuple[Tuple[str, str], ...] = (("rest", "LOWER_TO_REST"),
-                                                    ("home", "STOW_FROM_SIDE"))
+#: One since the October layout (#192): HOME IS REST, and the pocket route
+#: (STOW_FROM_SIDE) went with the pocket.
+EXITS_FROM_PRESENT: Tuple[Tuple[str, str], ...] = (("rest", "LOWER_TO_REST"),)
 
 
 def exits_open(scene: SceneModel, object_id: str, box: G.Box) -> Dict[str, Dict[str, object]]:
@@ -404,8 +405,8 @@ def check_place(planner, scene: SceneModel, place: PlacePlan,
 
     # 5. An exit from PRESENT with the object where it will stand (#174 exit
     # check): the placement ends at PRESENT, and an object left in the path
-    # of both measured exits (to REST, to HOME) leaves the arm nowhere to go
-    # that the executor's own footprint gate would let it fly.
+    # of every measured exit (since #192, only the one to REST) leaves the arm
+    # nowhere to go that the executor's own footprint gate would let it fly.
     exits = exits_open(scene, oid, place.dest.obj)
     rep["exits"] = exits
     if not any(e["open"] for e in exits.values()):

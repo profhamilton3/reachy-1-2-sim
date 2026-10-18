@@ -27,6 +27,11 @@ _MODEL = os.path.join(
     os.path.dirname(__file__), "../../native_mujoco/model/reachy_1_2.xml"
 )
 _CUBE_HALF = 0.010  # 20 mm cube fits the ~28 mm open pad gap
+# The arm hangs straight down from the torso (ADR-0010 moved it to the October
+# mount); the pillar stands under its hand wherever the torso is.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
+from reachy_ai.scene.awareness import ARM_BASE_IN_WORLD  # noqa: E402
+_PILLAR = (ARM_BASE_IN_WORLD[0], -0.20, ARM_BASE_IN_WORLD[2] - 0.8153)
 
 
 _ORIGINAL_CUBE_FRICTION = "2.5 0.1 0.01"
@@ -42,7 +47,7 @@ def _grasp_scene(cube_friction=_ORIGINAL_CUBE_FRICTION, noslip_iterations=None):
     xml = open(_MODEL).read()
     xml = re.sub(r'<body name="table".*?</body>\s*', "", xml, flags=re.DOTALL)
     extra = f"""
-    <body name="support" pos="0 -0.20 0.1847">
+    <body name="support" pos="{_PILLAR[0]} {_PILLAR[1]} {_PILLAR[2]}">
       <geom name="support" type="box" size="0.06 0.06 0.15"
             contype="8" conaffinity="4" rgba="0.4 0.4 0.9 0.35"/>
     </body>
@@ -159,6 +164,13 @@ def _run_grasp_scenario(**scene_kwargs):
         tg in (c.geom1, c.geom2)
         and cube_body in (m.geom_bodyid[c.geom1], m.geom_bodyid[c.geom2])
         for c in d.contact[:d.ncon])
+    # Every robot geom touching the cube while it is held (#192: the hand's
+    # collision boxes must leave the pinch to the pads).
+    touching = {mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM,
+                                  c.geom2 if m.geom_bodyid[c.geom1] == cube_body else c.geom1)
+                for c in d.contact[:d.ncon]
+                if cube_body in (m.geom_bodyid[c.geom1], m.geom_bodyid[c.geom2])
+                and 2 in (m.geom_contype[c.geom1], m.geom_contype[c.geom2])}
 
     # LIFT (shoulder pitch forward to -0.7, within the reliable envelope)
     ctl.set_goal_position(0, -0.7)
@@ -174,6 +186,7 @@ def _run_grasp_scenario(**scene_kwargs):
     z_rel = float(d.qpos[cadr + 2])
 
     return dict(noslip=int(m.opt.noslip_iterations), thumb_on_cube=thumb_on_cube,
+                touching=touching,
                 z_start=z_start, contacts_at_placement=contacts_at_placement,
                 close=close, lift=lift, rel=rel, z_lift=z_lift, z_rel=z_rel)
 
@@ -190,6 +203,9 @@ class TestGraspScenario:
 
     def test_clean_placement_no_penetration(self, result):
         assert result["contacts_at_placement"] == 0
+
+    def test_only_the_pads_touch_the_cube(self, result):
+        assert result["touching"] <= {"r_finger_col", "r_thumb_col"}
 
     def test_contacted_and_detected_on_close(self, result):
         assert result["close"].grasping is True

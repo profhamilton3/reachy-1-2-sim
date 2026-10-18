@@ -1,9 +1,8 @@
 """`motion.footprint.route_footprint_clearances` -- the guard's pure geometry,
 extracted from `panel_executor._footprint_refusal` for #56.
 
-The panel's own refusal tests (`test_panel_executor.TestFootprintCheck`,
-`TestLiftToPresentFootprint`) are the behavioural pin and are unmodified; these
-cover the helper's own contract.
+The panel's own refusal tests (`test_panel_executor.TestFootprintCheck`) are
+the behavioural pin; these cover the helper's own contract.
 """
 
 import os
@@ -31,7 +30,7 @@ def test_a_route_with_no_footprint_entry_contributes_nothing():
 
 def test_it_reports_manipulables_with_the_link_that_is_closest():
     model = _model()
-    out = route_footprint_clearances(model, ["RAISE_TO_SIDE"])
+    out = route_footprint_clearances(model, ["LIFT_TO_PRESENT"])
     assert set(out) == set(model.manipulable_ids())
     for oid, c in out.items():
         assert c.object_id == oid
@@ -45,12 +44,15 @@ def test_an_object_under_the_rest_pose_reads_as_inside_the_footprint():
     forearm = next(c for c in caps if c[0] == "forearm")
     mid = tuple(0.5 * (a + b) for a, b in zip(forearm[1], forearm[2]))
     model.update_poses({oid: mid})
-    c = route_footprint_clearances(model, ["RAISE_TO_SIDE"])[oid]
+    c = route_footprint_clearances(model, ["LIFT_TO_PRESENT"])[oid]
     assert c.distance < R.FOOTPRINT_MARGIN
     assert c.link == "forearm"
 
 
 def test_the_stow_legs_are_the_ones_the_table_lists():
-    # STOW_FROM_SIDE is PRESENT -> REST_SHUT -> HOVER, and nothing else.
-    assert R.FOOTPRINT_LEGS["STOW_FROM_SIDE"] == (R.PRESENT, R.REST_SHUT, R.HOVER)
-    assert R.FOOTPRINT_LEGS["RAISE_TO_SIDE"] == (R.HOVER, R.REST_SHUT, R.REST)
+    # LOWER_TO_REST is PRESENT -> PRESENT_SHUT -> REST_OUT -> REST, the whole
+    # route (#192), and LIFT_TO_PRESENT is the same legs reversed.
+    assert R.FOOTPRINT_LEGS["LOWER_TO_REST"] == (R.PRESENT, R.PRESENT_SHUT,
+                                                 R.REST_OUT, R.REST)
+    assert R.FOOTPRINT_LEGS["LIFT_TO_PRESENT"] == (R.REST, R.REST_OUT,
+                                                   R.PRESENT_SHUT, R.PRESENT)

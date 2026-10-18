@@ -1,11 +1,13 @@
-# Rest the forearm on the tabletop: the pocket-exit corridor, HOME -> REST.
+# Rest the arm on the board: PRESENT -> REST, the hand onto the board's right
+# margin from outside the board (LOWER_TO_REST; the October layout, #192).
 #
 # WHAT MAY BE SEARCHED HERE IS TIME, AND NOTHING ELSE.  Every pose below is a
-# measured waypoint and the ORDER is the safety argument — each waypoint's
-# clearance was measured from the one before it.  So the recipe varies
-# `seconds` per waypoint and leaves the geometry alone; a recipe that reorders
-# the corridor, drops a waypoint or loosens a tolerance is rejected by
-# `evaluation/panel_routes.check_route_integrity`, not scored.
+# measured waypoint and the ORDER is the safety argument — the hand shuts while
+# raised, swings out past the board's edge, and only then comes down onto the
+# margin.  So the recipe varies `seconds` per waypoint and leaves the geometry
+# alone; a recipe that reorders the route, drops a waypoint or loosens a
+# tolerance is rejected by `evaluation/panel_routes.check_route_integrity`,
+# not scored.
 #
 # Faster is the interesting direction and the dangerous one: the arm lags its
 # goal, and a segment flown too fast finishes short of the waypoint the next
@@ -13,23 +15,22 @@
 # catches that, which is exactly why it may not be loosened — a failed trial
 # there is evidence about the bound and is kept.
 #
-# REST HAS NO FOREARM-FOOTPRINT CHECK (#82).  It lowers the forearm without
-# asking what is underneath it.  Nothing in this recipe changes that, and the
-# evaluator says so in every verdict it writes.
+# Version 2 (#192): the rail-pocket corridor (PLACE_ROUTE, HOME -> REST) went
+# with the August mount; this is the October route.
 
 recipe_id: rest_forearm_baseline_v1
-recipe_version: 1
+recipe_version: 2
 task_type: rest_forearm
 arm: right
 source: baseline
 parent_recipe_id: ""
-route: PLACE_ROUTE
-route_version: 2   # SWING_1 moved for margin (#74, docs/adr/0006)
-expected_start_posture: home
+route: LOWER_TO_REST
+route_version: 3   # 2: SWING_1 moved (#74); 3: the October REST (#192)
+expected_start_posture: present
 
 bounded_parameters:
   # A multiplier on every waypoint's measured duration.  One knob
-  # rather than one per waypoint: the corridor is flown as a whole and
+  # rather than one per waypoint: the route is flown as a whole and
   # the tracking lag that a faster flight produces is a property of the
   # whole flight.  Below 1.0 is faster than measured, which is allowed
   # and is what the waypoint tolerances exist to catch.
@@ -62,19 +63,17 @@ effort_limits: {}
 primitive_sequence:
   - primitive: waypoint
     parameters:
-      name: GRIP_SHUT
-      seconds: 3.5
-      tol: 25.0
+      name: PRESENT_SHUT
+      seconds: 1.5
+      tol: 8.0
       guard:
         - r_shoulder_pitch
         - r_shoulder_roll
         - r_arm_yaw
         - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
   - primitive: waypoint
     parameters:
-      name: BACK
+      name: REST_OUT
       seconds: 3.0
       tol: 6.0
       guard:
@@ -82,104 +81,6 @@ primitive_sequence:
         - r_shoulder_roll
         - r_arm_yaw
         - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: CURL
-      seconds: 3.0
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: CURL_HIGH
-      seconds: 2.0
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: TUCK
-      seconds: 2.0
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: SWING_1
-      seconds: 3.0
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: SWING_2
-      seconds: 2.5
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: SWING_3
-      seconds: 2.5
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: HOVER
-      seconds: 2.5
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: REST_SHUT
-      seconds: 3.0
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
   - primitive: waypoint
     parameters:
       name: REST
@@ -190,7 +91,3 @@ primitive_sequence:
         - r_shoulder_roll
         - r_arm_yaw
         - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-
-# Ends at: rest

@@ -520,13 +520,12 @@ def test_real_pool_scene_the_worked_example_explains_the_missing_bin():
     assert out.choices          # only cells the arm can actually reach
 
 
-def test_real_pool_scene_keeps_the_measured_unreachable_cells_out():
-    scene = _real_pool_scene()
-    reachable = scene.reachable_cells()
-    # FWDCenterLabMCC measured r3c1 and r3c2 out of the right arm's reach.
-    assert "r3c1" not in reachable
-    assert "r3c2" not in reachable
-    assert "r2c2" in reachable
+def test_real_pool_scene_offers_every_cell_at_the_october_mount():
+    """August measured r3c1 and r3c2 out of the right arm's reach; the
+    October layout reaches all nine (#192, the scene's reach table)."""
+    reachable = _real_pool_scene().reachable_cells()
+    assert sorted(reachable) == sorted(f"r{r}c{c}" for r in (1, 2, 3)
+                                       for c in (1, 2, 3))
 
 
 def test_real_pool_scene_nothing_is_known_to_be_on_the_board():

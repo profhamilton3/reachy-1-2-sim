@@ -22,7 +22,7 @@ arm: right
 source: baseline
 parent_recipe_id: ""
 route: WAVE
-route_version: 1
+route_version: 2   # 2: re-flown at the October mount (#192)
 expected_start_posture: present
 
 bounded_parameters:

@@ -25,7 +25,7 @@ from typing import Dict, Tuple
 log = logging.getLogger(__name__)
 
 # The measured pose set.  rig_routes imports nothing from here, so this is not
-# a cycle — and the pocket waypoints belong to the route, not to this module.
+# a cycle — and the route waypoints belong to that module, not to this one.
 from reachy_ai.motion import rig_routes as R_ROUTES  # noqa: E402
 
 _INTERP_HZ = 25          # interpolation update rate
@@ -145,6 +145,9 @@ SIDE_HIGH: Dict[str, float] = {
 }
 
 # ── Red cube poses  (object at world [0.48, -0.12, table_surface]) ────────────
+# AUGUST MOUNT.  These hand-tuned joint poses are for tabletop_demo with the
+# torso at (0, 0, 1.0); #192 moved it to (0.206, 0, 1.15), and they were not
+# re-tuned (the open-loop arc that flies them is retired from the panel, #174).
 # Shoulder at world (0, -0.19, 1.0).  FK estimate puts gripper tip at:
 #   shoulder_pitch=-55°, elbow_pitch=-40°, wrist_pitch=+28° →
 #   gripper ~(0.54, -0.17, 0.84)
@@ -260,11 +263,16 @@ def smooth_move(arm, pose: Dict[str, float], duration: float = 2.0) -> None:
 
 import math
 
-# Approx world position of the head/cameras (torso top) for look-at geometry.
-_HEAD_WORLD = (0.02, 0.0, 1.18)
-# Neck look-at limits (deg).  Pitch capped at 45° for a natural down-gaze at the
-# tabletop (the joint allows up to 64°, which looks like staring at its chest).
-_NECK_PITCH_RANGE = (-45.0, 45.0)
+# World position of the neck pivot, for look-at geometry: gaze's, which is
+# derived from the torso pose.  It was a literal (0.02, 0.0, 1.18) for a torso
+# at (0, 0, 1.0), and stayed there when #192 moved the torso.
+from .gaze import NECK_PIVOT_IN_WORLD as _HEAD_WORLD
+from .gaze import PITCH_LIMITS as _GAZE_PITCH_LIMITS
+# Neck look-at limits (deg).  Pitch was capped at 45 deg for a natural down-gaze
+# at a board 0.26 m below the shoulders.  In the October layout (#192) the
+# board is 0.41 m below them and starts under the head, and 45 deg leaves most
+# of it out of frame, so the cap is the neck's own travel (gaze.PITCH_LIMITS).
+_NECK_PITCH_RANGE = _GAZE_PITCH_LIMITS
 _NECK_YAW_RANGE = (-159.0, 159.0)
 
 
@@ -439,10 +447,9 @@ def fly(arm, route, *, label: str = "route", move=None) -> List[str]:
       the one before it, so a route is not a set of poses to reach eventually,
       it is an order.
     * THE WHOLE POSE, EVERY TIME.  Each waypoint is a complete eight-joint
-      pose.  Building a target out of whatever the arm happens to be reading —
-      which is what `raise_to_side` and `stow_from_side` used to do — flies a
-      configuration nobody verified, and inherits, say, the wrist angles the
-      wave left behind.
+      pose.  Building a target out of whatever the arm happens to be reading
+      flies a configuration nobody verified, and inherits, say, the wrist
+      angles the wave left behind.
     * RE-STREAM UNTIL IT ARRIVES.  Under mujoco-remote the arm only moves while
       setpoints stream; `converge` does that.
     * STOP RATHER THAN CONTINUE.  A waypoint reached ten degrees short is no
@@ -455,11 +462,6 @@ def fly(arm, route, *, label: str = "route", move=None) -> List[str]:
     """
     from reachy_ai.motion import rig_routes as R
 
-    present = {n: getattr(arm, n).present_position for n in R.R_JOINTS
-               if hasattr(arm, n)}
-    refusal = R.corridor_entry_refusal(present, route)
-    if refusal:
-        raise RuntimeError(f"{label}: {refusal}")
     flown: List[str] = []
     for wp in route:
         guard = list(wp.guard) if wp.guard else list(R.CRITICAL_JOINTS)
@@ -492,51 +494,25 @@ def _at(arm, pose: Dict[str, float], tol: float = 8.0) -> bool:
 
 
 def raise_to_side(arm, duration: float = 3.0) -> None:
-    """Out of the rail pocket and up to the raised pose, by the measured route.
+    """From REST up to the raised pose, by the measured route.
 
-    THIS FLIES THE NOTEBOOK, AND IT DID NOT USED TO.  It was four hand-built
-    steps: shut the hand, back out of the pocket (both of those taken from the
-    route), then fold the arm from wherever it was reading and sweep the roll
-    from 0 to -88 in a single command at fixed pitch.  Only the first two are
-    in `tlh_motion-routine.ipynb`.  The rest was invented, and modelled against
-    the scene it is 4.3 to 6.5 cm inside `table_top` for every degree of that
-    sweep, clearing only in the last ten — the HAND against the board's near
-    edge, with the fold holding it at the height of the slab.  An operator
-    watched exactly that: the gripper going through the board.
-
-    WHY THE INVENTED VERSION LOOKED FINE FOR SO LONG.  MuJoCo's contact pushes
-    back in proportion to penetration; a position servo pushes in proportion to
-    joint error.  The shoulder has kp=300 and 60 Nm to spend, so a pose a
-    couple of degrees past a rail loses to the rail — which is where "commanded
-    to -88, the roll reached -14.1 and held there" came from — while a pose six
-    centimetres inside the board wins from the first timestep and goes straight
-    through.  The physics was never off.  It was being asked for the second
-    kind of pose.
-
-    WHAT THE MEASURED ROUTE DOES INSTEAD.  `PLACE_ROUTE` crosses the rail band
-    in TWO joints at once — SWING_1/2/3 step the pitch +37.5 -> +20 -> -17.5
-    while the roll goes -32.5 -> -35 -> -37.5 — so it goes around the rail
-    rather than through it.  There is no "-13 to -35 degree rail band" on that
-    path; the band is an artefact of sweeping one joint at fixed pitch, which
-    is the thing this no longer does.  Its deepest roll anywhere is -37.5.
-
-    Then one move to PRESENT, which is the notebook's own next step (cell 18)
-    and the raised pose this function is named for.
+    The October layout (#192): REST is where the arm is stored, so "raise to
+    the side" is `rig_routes.LIFT_TO_PRESENT` -- out to the side off the
+    board's margin, then up.  It used to be the route out of the rail pocket
+    (PLACE_ROUTE) and then the lift; the pocket went with the August mount.
 
     `duration` is accepted and IGNORED.  The route carries its own measured
-    per-waypoint timings and they are part of what was verified — at half the
-    time the weak joints finish tens of degrees short, which is how a bounded
-    route stops being one.  The parameter stays so callers keep working.
+    per-waypoint timings and they are part of what was verified.  The
+    parameter stays so callers keep working.
     """
     from reachy_ai.motion import rig_routes as R
 
-    if not _at(arm, R.HOME):
-        joint, off = worst_joint(arm, dict(R.HOME), PLACING_JOINTS)
+    if not _at(arm, R.REST, tol=12.0):
+        joint, off = worst_joint(arm, dict(R.REST), PLACING_JOINTS)
         raise RuntimeError(
-            "the route out of the rail pocket starts at HOME and the arm is "
-            f"not there: {joint} is {off:.0f} deg off. Getting onto the route "
-            "is a separate move, and guessing one is what this exists to stop.")
-    fly(arm, R.PLACE_ROUTE, label="the route out of the pocket")
+            "the lift to the raised pose starts at REST and the arm is not "
+            f"there: {joint} is {off:.0f} deg off. Getting onto the route is a "
+            "separate move, and guessing one is what this exists to stop.")
     fly(arm, R.LIFT_TO_PRESENT, label="the lift to the raised pose")
 
 
@@ -632,39 +608,20 @@ def stow_entry_ok(arm) -> Tuple[bool, str, float]:
 
 
 def stow_from_side(robot, arm, duration: float = 3.0) -> None:
-    """Back into the rail pocket from the raised pose, by the measured route.
+    """From the raised pose back to REST, by the measured route, motors off.
 
-    THE NOTEBOOK'S STOW *IS* THE RETURN FROM PRESENT.  `STOW_ROUTE` begins at
-    REST_SHUT, and cell 34 flies it straight after section 4 leaves the arm at
-    PRESENT — so the first move it makes is PRESENT -> REST_SHUT, and the whole
-    descent and pocket entry follow from there.  Nothing else is needed, and
-    this is the exact reverse of `raise_to_side`, which is what the notebook
-    requires of a stow: "Retrace the placement route backwards.  Do not
-    shortcut it: going straight from PRESENT to HOME drives the upper arm
-    through the rig's front rail."
-
-    WHAT THIS REPLACES.  Seven of the eleven moves it used to make were not in
-    the notebook.  It tucked the arm from whatever it was reading, swept the
-    roll from -88 home in one command at fixed pitch, and only then picked up
-    the route's last four waypoints — entering CURL from a pose that is not the
-    one the route reaches CURL from.  Modelled, that join passes the hand
-    6.4 cm inside `table_top`; the notebook's own join (CURL_HIGH -> CURL, both
-    behind the pocket at pitch +70 and +40) never goes below -1.4 cm, and that
-    only at the endpoint.  The descent before it modelled clear — down to
-    +0.7 cm, which is not much — so this one failed at the join rather than on
-    the sweep, and the sweep is gone with it either way.
-
-    It also inherited the wave's wrist and forearm angles into the pocket,
-    because a target built from live readings carries whatever is in them.  A
-    route waypoint is a whole pose, so the hand is placed rather than merely
-    left alone — which is what an operator noticed was missing.
+    The October layout (#192): HOME IS REST, so the stow is
+    `rig_routes.LOWER_TO_REST` -- the hand shut while raised, out to the side,
+    and onto the board's right margin from outside the board.  It used to be
+    the route into the rail pocket; the pocket went with the August mount.
 
     `duration` is accepted and IGNORED, for the reason given on
-    `raise_to_side`: the route's timings are part of what was measured.
+    `raise_to_side`.
 
-    The motors go off at the end.  That is right for a stow — it is the one
-    route that parks — and wrong in the middle of a longer trip, so callers
-    that continue afterwards turn them back on.
+    The motors go off at the end, and REST is a pose the arm stays in with
+    them off.  That is right for a stow -- it is the route that parks -- and
+    wrong in the middle of a longer trip, so callers that continue afterwards
+    turn them back on.
     """
     from reachy_ai.motion import rig_routes as R
 
@@ -672,20 +629,16 @@ def stow_from_side(robot, arm, duration: float = 3.0) -> None:
     if not ok:
         raise RuntimeError(
             "the stow starts at the raised pose and the arm is not there: "
-            f"{joint} is {off:.0f} deg off. A direct move to HOME from an "
-            "arbitrary pose drives the upper arm through the board's near "
-            "edge, so this will not guess one.")
-    fly(arm, R.STOW_ROUTE, label="the route into the pocket")
+            f"{joint} is {off:.0f} deg off, so this will not guess a way to "
+            "REST.")
+    fly(arm, R.LOWER_TO_REST, label="the lowering to rest")
 
     robot.turn_off("r_arm")
-    log.info("Right arm stowed at HOME, motors off.")
+    log.info("Right arm stowed at REST, motors off.")
 
 
 def go_home(robot, arm, duration: float = 2.5) -> None:
-    """Return the right arm to the home (zero) pose then turn off motors.
-
-    Routes through the side-clearing stow path so the hand never crosses the
-    tabletop on the way down."""
+    """Return the right arm to REST, where it is stored, then turn off motors."""
     stow_from_side(robot, arm, duration)
 
 

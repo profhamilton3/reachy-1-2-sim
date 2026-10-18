@@ -42,39 +42,57 @@ def _zero_motion(robot, spies):
     assert spies.calls == []
 
 
+def _rest_hand_xy():
+    """Where the hand lies at REST (the board's right margin, #192)."""
+    from reachy_ai.motion.kinematics import link_capsules
+    caps = link_capsules([R.REST[j] for j in R.ARM7], "right", R.SHUT)
+    _n, p0, p1, _r = next(c for c in caps if c[0] == "hand")
+    return tuple(0.5 * (a + b) for a, b in zip(p0[:2], p1[:2]))
+
+
+#: A place on the board's right margin, beside the grid, that the lowering to
+#: REST passes through (-4.7 cm, the hand): a placement there leaves the stow
+#: nowhere to go.
+_IN_THE_STOW = (0.38, -0.27)
+
+
 # ── the three places a job can be refused ───────────────────────────────────
 
 class TestJobPreflightRefusals:
     def test_refused_at_the_raise_footprint_before_any_arc_is_planned(
             self, monkeypatch):
         spies = Spies(monkeypatch)
-        scene, cells = board({"red_cube": "cell_r3c3"})   # -8.9 cm vs the REST leg
+        scene, cells = board({"red_cube": "cell_r2c2"})
+        # Standing where the hand rests (August: on r3c3, -8.9 cm vs the REST
+        # leg; the October REST is beside the grid, #192).
+        scene.update_poses({"red_cube": scene.rest_point(_rest_hand_xy(), "red_cube")})
         robot, planner = _planner(scene)
         with pytest.raises(L.PreflightRefused) as info:
             L.preflight_pick_place(planner, scene,
                                    [("red_cube", cells["cell_r2c2"][:2])],
                                    skip_refused=False)
         e = info.value
-        assert e.segment == "RAISE_TO_SIDE footprint"
+        assert e.segment == "LIFT_TO_PRESENT footprint"
         assert (e.obstacle, e.link, e.model) == ("red_cube", "hand", "tube")
         assert e.clearance_m < 0 and e.margin_m == R.FOOTPRINT_MARGIN
-        assert "RAISE_TO_SIDE" in str(e) and "red_cube" in str(e)
+        assert "LIFT_TO_PRESENT" in str(e) and "red_cube" in str(e)
         assert robot.r_arm.ik_calls == 0          # no arc was planned
         _zero_motion(robot, spies)
 
     def test_refused_at_an_arc(self, monkeypatch):
         spies = Spies(monkeypatch)
-        scene, cells = board({"red_cube": "cell_r1c1"})   # the rail beside r1c1
+        scene, cells = board({"red_cube": "cell_r2c2"})
         robot, planner = _planner(scene)
-        with pytest.raises(L.PreflightRefused) as info:
+        with pytest.raises(L.PreflightRefused) as info:   # the rail beside r1c1
             L.preflight_pick_place(planner, scene,
-                                   [("red_cube", cells["cell_r3c3"][:2])],
+                                   [("red_cube", cells["cell_r1c1"][:2])],
                                    skip_refused=False)
         e = info.value
         assert e.object_id == "red_cube"
         assert e.obstacle.startswith("rig_rail")
         assert e.segment in ("descend to grasp", "lift to clear height",
-                             "descend to hover", "swing in over table")
+                             "descend to hover", "swing in over table",
+                             "descend to place")
         assert e.link in ("upper_arm", "forearm", "hand")
         assert e.clearance_m < 0 and e.model == "tube"
         assert robot.r_arm.ik_calls > 0           # it WAS planned ...
@@ -85,14 +103,13 @@ class TestJobPreflightRefusals:
         spies = Spies(monkeypatch)
         scene, cells = board({"red_cube": "cell_r2c2"})
         robot, planner = _planner(scene)
-        # r2c2 clears the raise footprint (+8.9 cm); r2c3 does not (-5.0 cm).
+        # r2c2 clears the raise footprint; the place on the margin does not.
         assert L._footprint_refusal(scene, L.RAISE_ROUTE) is None
         with pytest.raises(L.PreflightRefused) as info:
-            L.preflight_pick_place(planner, scene,
-                                   [("red_cube", cells["cell_r2c3"][:2])],
+            L.preflight_pick_place(planner, scene, [("red_cube", _IN_THE_STOW)],
                                    skip_refused=False)
         e = info.value
-        assert e.segment == "STOW_FROM_SIDE footprint"
+        assert e.segment == "LOWER_TO_REST footprint"
         assert (e.obstacle, e.model) == ("red_cube", "tube")
         assert e.clearance_m < 0
         assert robot.r_arm.ik_calls > 0           # the arc passed first
@@ -234,8 +251,8 @@ def worker_env(monkeypatch):
 class TestWorker:
     def test_a_refused_job_returns_the_evidence_with_no_turn_on(self, worker_env):
         robot, spies, conn = worker_env
-        scene, cells = board({"red_cube": "cell_r1c1"})
-        out = W.run_pick_place(_worker_job(scene, cells, "red_cube", "cell_r3c3"),
+        scene, cells = board({"red_cube": "cell_r2c2"})
+        out = W.run_pick_place(_worker_job(scene, cells, "red_cube", "cell_r1c1"),
                                conn)
         assert out["status"] == "failed"
         ev = out["evidence"]

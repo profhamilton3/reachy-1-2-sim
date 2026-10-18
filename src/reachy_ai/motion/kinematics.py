@@ -373,7 +373,8 @@ def hand_radius(gripper_deg: Optional[float] = None,
 # Left/right differ only in the sign of the roll and yaw axes; mirrored below.
 _MJCF_RANGE_RAD: Dict[str, Tuple[float, float]] = {
     "r_shoulder_pitch": (-2.618, 1.57),
-    "r_shoulder_roll": (-3.14, 0.174),
+    # +0.354 (+20.3 deg), not the URDF's 0.174: #192, docs/adr/0010.
+    "r_shoulder_roll": (-3.14, 0.354),
     "r_arm_yaw": (-1.57, 1.57),
     "r_elbow_pitch": (-2.182, 0.0),
     "r_forearm_yaw": (-1.745, 1.745),

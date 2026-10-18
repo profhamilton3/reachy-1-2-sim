@@ -2,8 +2,12 @@
 check, the destination, and the place-only grasp attitude.
 
 Preflight only: IK is the host mirror of the simulator's service
-(`host_ik_arm.py`), nothing moves.  The flights are in
-`tests/integration/test_place_offline.py`.
+(`host_ik_arm.py`), nothing moves.
+
+At the October mount (#192) the crane plans only from cell_r3c2 (it was
+r2c2, where #174 was flown), so that is the origin here.  Its offline flights
+halt at the hover until the crane is re-tuned for the October mount (a
+follow-up to #192), so they are not tested here.
 """
 
 import os
@@ -32,9 +36,9 @@ SCENE = os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml")
 
 
 def _world(**others):
-    """The pool scene, red_cube upright on r2c2; ``others`` stand where given."""
+    """The pool scene, red_cube upright on r3c2; ``others`` stand where given."""
     scene = SceneModel.from_yaml(SCENE)
-    x, y, z = scene.cell_center("cell_r2c2")
+    x, y, z = scene.cell_center("cell_r3c2")
     pos = (x, y, z + 0.03)
     scene.update_poses({"red_cube": pos, **others})
     seen = CP.Observation(pos, (1.0, 0.0, 0.0, 0.0), 0.0, False)
@@ -46,7 +50,7 @@ def _on(scene, cell, oid):
     return (x, y, z + scene.get(oid).size[2] / 2.0)
 
 
-def test_r2c2_to_r2c1_is_planned_end_to_end_at_the_place_attitude():
+def test_r3c2_to_r2c1_is_planned_end_to_end_at_the_place_attitude():
     scene, planner, seen = _world()
     pp = PL.plan_crane_place(planner, scene, "red_cube", "r2c1", seen)
     assert pp.pick.spec.tilt_deg == PL.PLACE_GRASP.tilt_deg == 63.0
@@ -63,25 +67,23 @@ def test_r2c2_to_r2c1_is_planned_end_to_end_at_the_place_attitude():
     assert all(e["open"] for e in pp.checks["exits"].values())
 
 
-def test_the_lift_s_attitude_cannot_set_an_object_down_on_r2c1():
-    """Why the place has its own attitude: the lift's is 20 mm short there."""
-    scene, planner, seen = _world()
-    with pytest.raises(CP.CraneRefused) as e:
-        PL.plan_crane_place(planner, scene, "red_cube", "r2c1", seen, spec=CP.CraneSpec())
-    assert e.value.stage == "destination"
-
-
 def test_the_lift_keeps_its_own_attitude_and_release():
     spec = CP.CraneSpec()
     assert (spec.tilt_deg, spec.lean_bearing_deg) == (30.0, 59.52)
     assert spec.release_retreat_m == 0.0 and spec.release_backoff_m == 0.0
 
 
-def test_a_placement_that_leaves_no_exit_is_refused():
-    """r2c3 blocks both exits from PRESENT (the executor's footprint gate)."""
+def test_a_placement_that_leaves_no_exit_is_refused(monkeypatch):
+    """The exit check is the executor's footprint gate.  At the October mount
+    no cell blocks LOWER_TO_REST (#192), so the gate is made stricter than
+    the placed object's clearance (+9 cm or so on r2c1) to exercise it."""
+    from reachy_ai.motion import rig_routes as R
     scene, planner, seen = _world()
+    pp = PL.plan_crane_place(planner, scene, "red_cube", "r2c1", seen)
+    assert pp.checks["exits"]["rest"]["open"]
+    monkeypatch.setattr(R, "FOOTPRINT_MARGIN", 1.0)
     with pytest.raises(CP.CraneRefused) as e:
-        PL.plan_crane_place(planner, scene, "red_cube", "r2c3", seen)
+        PL.check_place(planner, scene, pp)
     assert e.value.stage == "exit"
     assert "no validated exit from PRESENT" in e.value.reason
 

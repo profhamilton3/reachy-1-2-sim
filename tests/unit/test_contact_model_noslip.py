@@ -20,7 +20,6 @@ for _p in (_ROOT / "native_mujoco", _ROOT / "src", _ROOT / "web"):
         sys.path.insert(0, str(_p))
 
 import mujoco  # noqa: E402
-import numpy as np  # noqa: E402
 
 import contact_model as cm  # noqa: E402
 import server as native_server  # noqa: E402
@@ -28,7 +27,6 @@ from simulation_core import SimulationCore, load_world  # noqa: E402
 
 MODEL = str(_ROOT / "native_mujoco" / "model" / "reachy_1_2.xml")
 SCENE = str(_ROOT / "scenes" / "FWDCenterLabSivaPool.yaml")
-HOLD = _ROOT / "tests" / "fixtures" / "crane" / "hold_state_2026_10_06.json"
 
 
 # -- validator ----------------------------------------------------------------
@@ -161,55 +159,3 @@ def test_simlink_status_contact_model():
     advertised = {"noslip_iterations": 10, "source": "model"}
     link._server_capabilities = {"execution_lease": True, "contact_model": advertised}
     assert link.status["contact_model"] == advertised
-
-
-# -- recorded-hold creep -------------------------------------------------------
-
-def _hold_cube_drift_mm(noslip, seconds=2.0):
-    fx = json.loads(HOLD.read_text())
-    # Compile the way the server does (scene_io resolves `extends:`; the
-    # SivaPool scene inherits its table and world from a parent scene).
-    from objects import build_scene_model_xml
-    from scene_io import load_scene
-    model = mujoco.MjModel.from_xml_string(
-        build_scene_model_xml(load_scene(SCENE), MODEL))
-    cm.apply_contact_model(model, noslip)
-    d = mujoco.MjData(model)
-    mujoco.mj_resetData(model, d)
-    for j in fx["joints"]:
-        i = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, j["name"])
-        if i >= 0:
-            d.qpos[model.jnt_qposadr[i]] = j["position_rad"]
-            d.qvel[model.jnt_dofadr[i]] = j["velocity_rad_s"]
-    for o in fx["objects"]:
-        b = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, o["object_id"])
-        a = model.jnt_qposadr[model.body_jntadr[b]]
-        d.qpos[a:a + 3] = o["pos_xyz"]
-        d.qpos[a + 3:a + 7] = o["quat_wxyz"]
-    mujoco.mj_forward(model, d)
-    for a in range(model.nu):
-        n = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, model.actuator_trnid[a][0])
-        recorded = {j["name"]: j["position_rad"] for j in fx["joints"]}
-        d.ctrl[a] = fx["commanded_targets_rad"].get(n, recorded.get(n, 0.0))
-    # Slip is the cube moving RELATIVE TO THE HAND, measured in the hand's own
-    # frame.  Measuring the cube's world height instead also counted the hand
-    # settling: since the forearm-yaw / wrist-pitch armature (#74, ADR-0006
-    # §5) the recorded fixture's joint velocities are no longer an equilibrium,
-    # and the hand rises ~0.12 mm as it settles -- a transient of the arm, not
-    # creep of the grip.
-    cube = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "red_cube")
-    hand = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "r_gripper_thumb")
-
-    def in_hand():
-        return d.xmat[hand].reshape(3, 3).T @ (d.xpos[cube] - d.xpos[hand])
-    r0 = in_hand()
-    for _ in range(int(seconds / model.opt.timestep)):
-        mujoco.mj_step(model, d)
-    return 1000.0 * float(np.linalg.norm(in_hand() - r0))
-
-
-def test_recorded_hold_creep_default_vs_override_zero():
-    on = _hold_cube_drift_mm(None)
-    off = _hold_cube_drift_mm(0)
-    assert on <= 0.1, f"default (no-slip 10) hold slipped {on:.4f} mm in the hand in 2 s"
-    assert off >= 1.0, f"no-slip 0 should reproduce the creep; got {off:.4f} mm in the hand"

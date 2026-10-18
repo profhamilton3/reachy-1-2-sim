@@ -1,19 +1,19 @@
 """Which exits from PRESENT a placed object leaves open (#174, exit check).
 
 A placement ends at PRESENT with the object standing on its destination
-cell.  From PRESENT the arm has two measured exits: LOWER_TO_REST (to REST,
-the forearm laid on the board) and STOW_FROM_SIDE (to HOME, through the rail
-pocket; its first leg drops to REST_SHUT over the near board).  An object put
-where an exit passes would make the arm's next request refuse -- or, worse,
-hit it.  Each exit is judged three ways, with the object standing on the
-cell (upright, turned as the placement would leave it):
+cell.  From PRESENT the arm has one measured exit: LOWER_TO_REST (to REST,
+the hand on the board's right margin; HOME IS REST since the October layout,
+#192, and the rail-pocket exit STOW_FROM_SIDE went with the pocket).  An
+object put where the exit passes would make the arm's next request refuse --
+or, worse, hit it.  The exit is judged three ways, with the object standing
+on the cell (upright, turned as the placement would leave it):
 
   * GATE -- the executor's own live check (`footprint.route_footprint_clearances`
     against `rig_routes.FOOTPRINT_MARGIN`, the rule `_footprint_refusal`
     applies before it flies the exit);
   * ROUTE -- the whole route, every leg, joint-space lines sampled at <= 2 deg,
-    tube hand at the wider aperture, against the object (reported; the
-    corridor's planned margin, 2 cm, given for comparison);
+    tube hand at the wider aperture, against the object (reported, with 2 cm
+    given for comparison: the planned margin the rig corridor was held to);
   * FLIGHT -- the route flown in the offline world (#172: table, rails),
     from PRESENT, waypoint by waypoint at its measured duration: any contact
     between the robot and the object, and how far the object moved.
@@ -35,7 +35,7 @@ MODEL = str(_REPO / "native_mujoco" / "model" / "reachy_1_2.xml")
 SCENE = str(_REPO / "scenes" / "FWDCenterLabSivaPool.yaml")
 
 #: The exits from PRESENT, by the posture they reach.
-EXITS = (("rest", "LOWER_TO_REST"), ("home", "STOW_FROM_SIDE"))
+EXITS = (("rest", "LOWER_TO_REST"),)
 #: The object may move this much in the flight and the exit still count.
 MOVED_MAX_M = 0.001
 _STEP_HZ = 25.0

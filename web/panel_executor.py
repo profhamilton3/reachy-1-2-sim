@@ -157,7 +157,7 @@ class _PhaseLog:
 
     The executor already announces its phases to the browser and then forgets
     them.  An episode record wants the sequence and the timings — "the wave
-    spent nine seconds leaving the pocket" is the kind of fact a later
+    spent nine seconds getting to the raised pose" is the kind of fact a later
     evaluator is built to notice — and capturing them here costs one tuple per
     phase on a path that is already doing IPC.
 
@@ -648,10 +648,8 @@ class SimulatorExecutor:
                     "runs this caution comes from.")
 
         # An ability is FOR a posture, not for one route.  "Store your arm"
-        # means end in the pocket, and which measured routes get there depends
-        # on where the arm is standing — from the presentation pose it is
-        # STOW_FROM_SIDE, which is not the same route as PLACE_ROUTE's reverse
-        # entered from rest.
+        # means end at REST, and which measured routes get there depends on
+        # where the arm is standing.
         # So availability asks whether ANY validated route leads where the
         # ability is going; the executor checks the ACTUAL path once it can
         # see the arm, and refuses there if a leg of it is not validated.
@@ -996,8 +994,8 @@ class SimulatorExecutor:
         # not something appended so the arm looks tidy.
         wanted = proposal.route
         end = proposal.end_posture or {
-            "PLACE_ROUTE": R.POSTURE_REST,
-            "STOW_ROUTE": R.POSTURE_HOME,
+            "LOWER_TO_REST": R.POSTURE_REST,
+            "LIFT_TO_PRESENT": R.POSTURE_PRESENT,
             "WAVE": R.POSTURE_PRESENT}.get(wanted, "")
         drift = {}
         scene = self._scene_provider()

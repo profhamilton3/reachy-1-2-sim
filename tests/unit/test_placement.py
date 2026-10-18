@@ -43,6 +43,24 @@ def cells(pool_doc):
     return cells_from_scene(pool_doc)
 
 
+def _with_unreachable(doc, cell="r3c1"):
+    """`doc` with one grid cell tagged out of the arm's reach.  At the October
+    mount (#192) every lab cell is reachable, so the refusal is exercised on
+    a cell tagged for the purpose, the way the scene tagged r3c1 and r3c2 in
+    August."""
+    import copy
+    doc = copy.deepcopy(doc)
+    for obj in doc["objects"]:
+        if obj.get("id") == f"cell_{cell}":
+            obj["tags"] = list(obj.get("tags") or []) + ["no-right-arm"]
+    return doc
+
+
+@pytest.fixture(scope="module")
+def tagged_cells(pool_doc):
+    return cells_from_scene(_with_unreachable(pool_doc))
+
+
 class TestSceneInheritanceStillHolds:
     """The pool is a CHILD of FWDCenterLabSiva on purpose: the detector handoff
     set was rendered from that scene at seed 2026 and its README promises the
@@ -102,11 +120,14 @@ class TestReachability:
     only the header's "maximum" framing was wrong, and it has been corrected.
     """
 
-    # FWDCenterLabMCC's published shoulder-to-cell table.
+    # FWDCenterLabMCC's published shoulder-to-cell table, October layout
+    # (#192, shoulder at (0.206, -0.19, 1.15)).  August, shoulder at
+    # (0, -0.19, 1.0): r1 0.489 / 0.398 / 0.352, r2 0.590 / 0.516 / 0.482,
+    # r3 0.709 / 0.649 / 0.622.
     PUBLISHED = {
-        "r1c1": 0.489, "r1c2": 0.398, "r1c3": 0.352,
-        "r2c1": 0.590, "r2c2": 0.516, "r2c3": 0.482,
-        "r3c1": 0.709, "r3c2": 0.649, "r3c3": 0.622,
+        "r1c1": 0.502, "r1c2": 0.413, "r1c3": 0.369,
+        "r2c1": 0.545, "r2c2": 0.465, "r2c3": 0.426,
+        "r3c1": 0.624, "r3c2": 0.555, "r3c3": 0.523,
     }
 
     def test_distances_still_match_the_published_table(self, cells):
@@ -117,23 +138,31 @@ class TestReachability:
             assert cells[name].shoulder_distance_m == pytest.approx(
                 expected, abs=0.002), name
 
-    def test_exactly_the_two_ik_verified_cells_are_unreachable(self, cells):
-        assert {n for n, c in cells.items() if not c.reachable} == {"r3c1", "r3c2"}
+    def test_every_cell_is_reachable_at_the_october_mount(self, cells):
+        """August: r3c1 and r3c2, IK-verified and confirmed physically.
+        October (#192): all nine, re-checked by IK (the scene's reach table)
+        and confirmed by Siva."""
+        assert {n for n, c in cells.items() if not c.reachable} == set()
 
     def test_the_approach_height_is_what_reproduces_the_table(self):
         """The sweep targeted 5 cm above the surface, not the surface."""
+        import math
+        from placement import SHOULDER_XYZ
         assert GRASP_APPROACH_M == 0.05
-        at_surface = shoulder_distance(0.5842, 0.1524, 0.741)
-        assert at_surface < self.PUBLISHED["r3c1"]
+        x, y, top = 0.5842, 0.1524, 0.741
+        surface_only = math.dist((x, y, top), SHOULDER_XYZ)
+        assert shoulder_distance(x, y, top) == pytest.approx(
+            self.PUBLISHED["r3c1"], abs=0.002)
+        assert surface_only > self.PUBLISHED["r3c1"]
 
-    def test_an_unreachable_cell_is_refused_by_name_with_the_reason(self, cells):
+    def test_an_unreachable_cell_is_refused_by_name_with_the_reason(self, tagged_cells):
         with pytest.raises(PlacementError) as exc:
-            resolve_cell(cells, "r3c1")
+            resolve_cell(tagged_cells, "r3c1")
         msg = str(exc.value)
-        assert "r3c1" in msg and "71 cm" in msg and "UNREACHABLE" in msg
+        assert "r3c1" in msg and "62 cm" in msg and "UNREACHABLE" in msg
 
-    def test_it_can_be_overridden_deliberately(self, cells):
-        assert resolve_cell(cells, "r3c1", allow_unreachable=True).name == "r3c1"
+    def test_it_can_be_overridden_deliberately(self, tagged_cells):
+        assert resolve_cell(tagged_cells, "r3c1", allow_unreachable=True).name == "r3c1"
 
     def test_an_unknown_cell_lists_the_ones_that_exist(self, cells):
         with pytest.raises(PlacementError) as exc:
@@ -210,8 +239,10 @@ def placer(scene_xml, pool_doc):
     """
     model = mujoco.MjModel.from_xml_string(scene_xml)
     data = mujoco.MjData(model)
-    mujoco.mj_resetData(model, data)
-    # Free joints start at their MJCF scene pose, which mj_resetData zeroes.
+    # The start keyframe, as the server resets: the arm at REST.  An arm at
+    # zero is inside the board at the October mount (#192).
+    mujoco.mj_resetDataKeyframe(model, data, 0)
+    # Free joints start at their MJCF scene pose.
     for jid in range(model.njnt):
         if model.jnt_type[jid] == mujoco.mjtJoint.mjJNT_FREE:
             adr = model.jnt_qposadr[jid]
@@ -278,8 +309,9 @@ class TestPlacement:
         adr = model.jnt_dofadr[jid]
         assert np.allclose(data.qvel[adr:adr + 6], 0.0)
 
-    def test_an_unreachable_cell_is_refused(self, placer):
-        p, _, _ = placer
+    def test_an_unreachable_cell_is_refused(self, placer, pool_doc):
+        _p, model, data = placer
+        p = ObjectPlacer(model, data, _with_unreachable(pool_doc))
         with pytest.raises(PlacementError, match="UNREACHABLE"):
             p.place("pool_box_1", "r3c1")
 
@@ -421,8 +453,11 @@ class TestServerPath:
         res = sim_state.drain_place_results()
         assert [r["placement"]["cell"] for r in res] == ["r1c1", "r1c2", "r1c3"]
 
-    def test_a_refusal_comes_back_as_an_ack_not_an_exception(self, sim_state):
+    def test_a_refusal_comes_back_as_an_ack_not_an_exception(self, scene_xml, pool_doc):
         """A bad placement must not take the sim thread down with it."""
+        from server import SimState
+        sim_state = SimState(mujoco.MjModel.from_xml_string(scene_xml),
+                             scene_doc=_with_unreachable(pool_doc))
         sim_state.submit_place({"object_id": "pool_box_1", "cell": "r3c1",
                                 "request_id": "z"})
         sim_state.apply_pending()
@@ -486,8 +521,11 @@ class TestServerPath:
                for r in sim_state.drain_place_results()}
         assert got == {"a": 7, "b": 9}
 
-    def test_a_refusal_also_names_the_connection(self, sim_state):
+    def test_a_refusal_also_names_the_connection(self, scene_xml, pool_doc):
         """Otherwise a rejected placement is the one that hangs the client."""
+        from server import SimState
+        sim_state = SimState(mujoco.MjModel.from_xml_string(scene_xml),
+                             scene_doc=_with_unreachable(pool_doc))
         sim_state.submit_place({"object_id": "pool_box_1", "cell": "r3c1",
                                 "_conn_id": 4, "request_id": "z"})
         sim_state.apply_pending()

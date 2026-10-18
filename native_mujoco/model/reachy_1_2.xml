@@ -100,13 +100,38 @@
          backend compiles in with collision. -->
 
     <!-- ── Pedestal (fixed base) ───────────────────────────────── -->
-    <!-- URDF: pedestal joint xyz=0 0 1  ⟹ torso origin is 1 m above world -->
+    <!-- OCTOBER LAYOUT (#192; owner decision 2026-10-17, evidence #185 /
+         PR #188): the torso origin sits at (0.206, 0, 1.15) in the scene
+         frame, against (0, 0, 1.0) before.  1.15 m is the shoulder-line
+         height the camera solve and Siva's taught poses agree on; 0.206 m is
+         the measured grid centre minus the taught centre.  The scenes do not
+         move: cell world coordinates keep their values and the robot moves to
+         them.  The `pedestal` body stays at the scene origin, because the
+         scene's frame_id and RViz's fixed frame are both called `pedestal`,
+         and the whole offset is the torso's: `pedestal` -> `torso` is one
+         pure translation, as in the URDF's `pedestal` joint, and
+         src/reachy_ai/scene/awareness.py ARM_BASE_IN_WORLD must equal it
+         (tests/unit/test_robot_mount.py checks).  The URDF says xyz=0 0 1;
+         supervisord.conf rewrites that for RViz from ARM_BASE_IN_WORLD.
+
+         THE PEDESTAL GEOM IS A RENDER-ONLY STUB, NOT THE MAST.  At x = 0.206 a
+         cylinder to the floor would pierce the board (x 0.16-0.747), and the
+         real mast reaches the rig in a way that is not modelled.  So the stand-
+         in starts 2 cm above the board surface (0.74) and ends inside the bust
+         (bottom of torso_main at about z = 0.89): it clears table_top, board
+         and rig (table_top +2.0 cm, inner rails +4.5 cm), and its radius stays
+         inside the bust's 0.055 m half-depth so the head cameras do not see it.
+         It does NOT collide.  It stands over the board's near edge, under the
+         chest, where nothing real is (the board runs under the robot), and as
+         a collider it was an obstacle only the sim had: pointing at r1c1, r1c2
+         and r2c2 drove the forearm and hand into it (#192 offline flights). -->
     <body name="pedestal" pos="0 0 0">
       <geom name="pedestal_geom" class="world" type="cylinder"
-            fromto="0 0 0 0 0 0.95" size="0.08" material="dark_gray"/>
+            fromto="0.206 0 0.76 0.206 0 0.92" size="0.05" material="dark_gray"
+            contype="0" conaffinity="0"/>
 
       <!-- ── Torso ─────────────────────────────────────────────── -->
-      <body name="torso" pos="0 0 1">
+      <body name="torso" pos="0.206 0 1.15">
         <inertial pos="0 0 0" mass="12" diaginertia="0.15 0.15 0.08"/>
         <!-- Bust box from the official URDF torso collision:
                origin xyz="0 0 -0.1" rpy="0 0.05 0"  box size="0.11 0.2 0.32"
@@ -133,8 +158,14 @@
 
           <!-- r_shoulder_x — URDF: r_shoulder→r_shoulder_x xyz=0 0 0 -->
           <body name="r_shoulder_x" pos="0 0 0">
+            <!-- UPPER STOP +0.354 rad (+20.3 deg), NOT the URDF's 0.174 (#192,
+                 owner decision 2026-10-17).  A deliberate, SDK-visible
+                 deviation: the physical robot held +20.3 deg at B2_SAFE in
+                 Siva's taught poses (#185), past the URDF stop, and the
+                 October board's far-left cell r3c1 needs about +20 deg.  See
+                 docs/adr/0010-october-layout.md. -->
             <joint name="r_shoulder_roll" type="hinge" axis="1 0 0"
-                   range="-3.14 0.174" damping="1.5"/>
+                   range="-3.14 0.354" damping="1.5"/>
             <!-- massless intermediate frame — tiny marker sphere -->
             <geom name="r_shx_marker" class="visual" type="sphere" size="0.005"
                   material="dark_gray" mass="0.001"/>
@@ -187,6 +218,20 @@
                            box, so the revolute finger forms a clean grasp. -->
                       <geom name="r_thumb_col" class="collision" type="box"
                             size="0.014 0.008 0.022" pos="0 0.005 -0.085"/>
+                      <!-- #192: simplified hand collision.  Without it the hand
+                           has only the two pads, and at REST (hand on the board)
+                           the r_thumb_body shell sank 38 mm into the board.  Two
+                           boxes fill the r_thumb_body volume: the back of the
+                           hand (wrist side) and the palm, whose underside stays
+                           5 mm above the pads' tops (z -0.063), so the pinch
+                           is unchanged (docs/reviews/2026-10-17-october-layout-192/
+                           grasp_before_after.py).  Both live in r_gripper_thumb,
+                           not r_wrist2hand, so they turn with wrist roll as the
+                           shell does (44 deg at REST). -->
+                      <geom name="r_hand_back_col" class="collision" type="box"
+                            size="0.025 0.028 0.019" pos="0 -0.018 -0.003"/>
+                      <geom name="r_palm_col" class="collision" type="box"
+                            size="0.025 0.028 0.018" pos="0 -0.018 -0.040"/>
 
                       <!-- r_gripper_finger — URDF: r_gripper_thumb→r_gripper_finger xyz=0 -0.037 -0.03998 -->
                       <body name="r_gripper_finger" pos="0 -0.037 -0.03998">
@@ -211,81 +256,89 @@
         </body>
 
         <!-- ════════════════════ LEFT ARM ═════════════════════════ -->
+        <!-- PHANTOM ARM (#192, owner decision 2026-10-17).  The physical
+             robot has no left arm; the SDK does, so the joints, bodies and
+             actuators stay and every l_* name answers as before.  In the
+             October layout the shoulders sit over the board, and an arm
+             hanging at zero runs through it in every pose.  So nothing on
+             this side collides (contype/conaffinity 0) or renders (visual
+             geoms and the tip site in group 4, which no camera draws).  Its
+             mass and inertia are unchanged.  A modelling gap, recorded. -->
         <!-- l_shoulder — URDF: torso→l_shoulder xyz=0 0.19 0 -->
         <body name="l_shoulder" pos="0 0.19 0">
           <joint name="l_shoulder_pitch" type="hinge" axis="0 1 0"
                  range="-2.618 1.57" damping="1.5"/>
-          <geom name="l_shoulder_ball" class="visual" type="sphere" size="0.042"
+          <geom name="l_shoulder_ball" class="visual" group="4" type="sphere" size="0.042"
                 material="white_plastic"/>
 
           <!-- l_shoulder_x -->
           <body name="l_shoulder_x" pos="0 0 0">
             <joint name="l_shoulder_roll" type="hinge" axis="1 0 0"
                    range="-0.174 3.14" damping="1.5"/>
-            <geom name="l_shx_marker" class="visual" type="sphere" size="0.005"
+            <geom name="l_shx_marker" class="visual" group="4" type="sphere" size="0.005"
                   material="dark_gray" mass="0.001"/>
 
             <!-- l_upper_arm -->
             <body name="l_upper_arm" pos="0 0 0">
               <joint name="l_arm_yaw" type="hinge" axis="0 0 1"
                      range="-1.57 1.57" damping="1.0"/>
-              <geom name="l_upper_arm_cap" class="visual" type="capsule"
+              <geom name="l_upper_arm_cap" class="visual" group="4" type="capsule"
                     fromto="0 0 0 0 0 -0.28" size="0.035"
                     material="white_plastic"/>
-              <geom name="l_upper_arm_col" class="collision" type="capsule"
+              <geom name="l_upper_arm_col" class="collision" contype="0" conaffinity="0" type="capsule"
                     fromto="0 0 0 0 0 -0.28" size="0.035"/>
 
               <!-- l_forearm -->
               <body name="l_forearm" pos="0 0 -0.28">
                 <joint name="l_elbow_pitch" type="hinge" axis="0 1 0"
                        range="-2.182 0" damping="0.8"/>
-                <geom name="l_elbow_ball" class="visual" type="sphere" size="0.032"
+                <geom name="l_elbow_ball" class="visual" group="4" type="sphere" size="0.032"
                       material="frame"/>
-                <geom name="l_forearm_cap" class="visual" type="capsule"
+                <geom name="l_forearm_cap" class="visual" group="4" type="capsule"
                       fromto="0 0 0 0 0 -0.25" size="0.030"
                       material="white_plastic"/>
-                <geom name="l_forearm_col" class="collision" type="capsule"
+                <geom name="l_forearm_col" class="collision" contype="0" conaffinity="0" type="capsule"
                       fromto="0 0 0 0 0 -0.25" size="0.030"/>
 
                 <!-- l_wrist -->
                 <body name="l_wrist" pos="0 0 0">
                   <joint name="l_forearm_yaw" type="hinge" axis="0 0 1"
                          range="-1.745 1.745" damping="0.4" armature="0.01"/>
-                  <geom name="l_wrist_marker" class="visual" type="sphere" size="0.005"
+                  <geom name="l_wrist_marker" class="visual" group="4" type="sphere" size="0.005"
                         material="dark_gray" mass="0.001"/>
 
                   <!-- l_wrist2hand -->
                   <body name="l_wrist2hand" pos="0 0 -0.25">
                     <joint name="l_wrist_pitch" type="hinge" axis="0 1 0"
                            range="-0.785 0.785" damping="0.4" armature="0.006"/>
-                    <geom name="l_wrist_ball" class="visual" type="sphere" size="0.028"
+                    <geom name="l_wrist_ball" class="visual" group="4" type="sphere" size="0.028"
                           material="frame"/>
 
                     <!-- l_gripper_thumb -->
                     <body name="l_gripper_thumb" pos="0 0 -0.0325">
                       <joint name="l_wrist_roll" type="hinge" axis="1 0 0"
                              range="-0.785 0.785" damping="0.4"/>
-                      <geom name="l_thumb_body" class="visual" type="box"
+                      <geom name="l_thumb_body" class="visual" group="4" type="box"
                             size="0.025 0.028 0.038" pos="0 0.018 -0.022"
                             material="gripper_mat"/>
                       <!-- R12-502: opposed-pad pinch model, mirrored (thumb pad at -y) -->
-                      <geom name="l_thumb_col" class="collision" type="box"
+                      <geom name="l_thumb_col" class="collision" contype="0" conaffinity="0" type="box"
                             size="0.014 0.008 0.022" pos="0 -0.005 -0.085"/>
 
                       <!-- l_gripper_finger — URDF: xyz=0 0.037 -0.03998 -->
                       <body name="l_gripper_finger" pos="0 0.037 -0.03998">
                         <joint name="l_gripper" type="hinge" axis="1 0 0"
                                range="-0.35 1.2" damping="0.3"/>
-                        <geom name="l_finger_body" class="visual" type="box"
+                        <geom name="l_finger_body" class="visual" group="4" type="box"
                               size="0.012 0.010 0.038" pos="0 0 -0.038"
                               material="gripper_mat"/>
                         <!-- moving pad: closes in -y toward the thumb pad -->
-                        <geom name="l_finger_col" class="collision" type="box"
+                        <geom name="l_finger_col" class="collision" contype="0" conaffinity="0" type="box"
                               size="0.014 0.008 0.014" pos="0 0 -0.055"/>
                       </body>
 
                       <!-- l_tip site — URDF: xyz=0 0.012 -0.085 from l_gripper_thumb -->
-                      <site name="l_tip" pos="0 0.012 -0.085" size="0.012"/>
+                      <site name="l_tip" pos="0 0.012 -0.085" size="0.012" group="4"/>
                     </body>
                   </body>
                 </body>
@@ -410,7 +463,7 @@
     <position name="act_r_shoulder_pitch" joint="r_shoulder_pitch"
               kp="300" kv="20" ctrlrange="-2.618  1.570" forcerange="-60 60"/>
     <position name="act_r_shoulder_roll"  joint="r_shoulder_roll"
-              kp="300" kv="20" ctrlrange="-3.140  0.174" forcerange="-60 60"/>
+              kp="300" kv="20" ctrlrange="-3.140  0.354" forcerange="-60 60"/>
     <position name="act_r_arm_yaw"        joint="r_arm_yaw"
               kp="150" kv="10" ctrlrange="-1.570  1.570" forcerange="-30 30"/>
     <position name="act_r_elbow_pitch"    joint="r_elbow_pitch"
@@ -465,10 +518,17 @@
        cameras look at the workspace in front (table/console) rather than the
        horizon.  Order: 8 right-arm, 8 left-arm, neck_roll, neck_pitch, neck_yaw,
        2 antennas. -->
+  <!-- The start pose.  OCTOBER LAYOUT (#192): the right arm starts at REST,
+       its hand on the board's right margin, because HOME IS REST (owner
+       decision 2026-10-17) and an arm at zero now runs through the board.  The
+       eight right-arm values are src/reachy_ai/motion/rig_routes.py REST in
+       radians (gripper shut); tests/unit/test_robot_mount.py holds them equal.
+       REST is a pose the arm stays in with the motors off, which is how the
+       simulator starts.  The phantom left arm stays at zero. -->
   <keyframe>
     <key name="home"
-         qpos="0 0 0 0 0 0 0 0  0 0 0 0 0 0 0 0  0 0.45 0  0 0"
-         ctrl="0 0 0 0 0 0 0 0  0 0 0 0 0 0 0 0  0 0.45 0  0 0"/>
+         qpos="0.2094 0.2443 -0.9512 -1.4137 -0.0960 -0.3752 0.7679 0.3491  0 0 0 0 0 0 0 0  0 0.45 0  0 0"
+         ctrl="0.2094 0.2443 -0.9512 -1.4137 -0.0960 -0.3752 0.7679 0.3491  0 0 0 0 0 0 0 0  0 0.45 0  0 0"/>
   </keyframe>
 
 </mujoco>

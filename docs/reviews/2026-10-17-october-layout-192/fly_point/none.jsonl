@@ -1,0 +1,12 @@
+{"layout": {}}
+{"leg": "LIFT_TO_PRESENT", "result": ["REST_OUT", "PRESENT_SHUT", "PRESENT"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": [["r_forearm_col", "table_top"], ["r_hand_back_col", "table_top"], ["r_palm_col", "table_top"]]}
+{"leg": "POINT cell cell_r1c1", "result": [["point: cell_r1c1 at a 12 cm hover", "point: missed by 0.7 cm", "point: lifted 0 cm"], "present"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": []}
+{"leg": "POINT cell cell_r1c2", "result": [["point: cell_r1c2 at a 12 cm hover", "point: missed by 0.4 cm", "point: lifted 0 cm"], "present"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": []}
+{"leg": "POINT cell cell_r1c3", "result": [["point: cell_r1c3 at a 12 cm hover", "point: missed by 0.8 cm", "point: lifted 0 cm"], "present"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": []}
+{"leg": "POINT cell cell_r2c1", "result": [["point: cell_r2c1 at a 12 cm hover", "point: missed by 1.4 cm", "point: lifted 0 cm"], "present"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": []}
+{"leg": "POINT cell cell_r2c2", "result": [["point: cell_r2c2 at a 12 cm hover", "point: missed by 0.6 cm", "point: lifted 0 cm"], "present"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": []}
+{"leg": "POINT cell cell_r2c3", "result": [["point: cell_r2c3 at a 12 cm hover", "point: missed by 0.6 cm", "point: lifted 0 cm"], "present"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": []}
+{"leg": "POINT cell cell_r3c1", "result": [["point: cell_r3c1 at a 12 cm hover", "point: missed by 1.1 cm", "point: lifted 0 cm"], "present"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": []}
+{"leg": "POINT cell cell_r3c2", "result": [["point: cell_r3c2 at a 12 cm hover", "point: missed by 1.4 cm", "point: lifted 0 cm"], "present"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": []}
+{"leg": "POINT cell cell_r3c3", "result": [["point: cell_r3c3 at a 12 cm hover", "point: missed by 1.2 cm", "point: lifted 0 cm"], "present"], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": []}
+{"leg": "LOWER_TO_REST", "result": [["PRESENT_SHUT", "REST_OUT", "REST"], {"r_shoulder_pitch": -0.2, "r_shoulder_roll": -0.2, "r_arm_yaw": -0.1, "r_elbow_pitch": 0.1}], "worst_mjcf_cm": {}, "moved_mm": {}, "robot_contacts": [["r_forearm_col", "table_top"], ["r_palm_col", "table_top"]]}

@@ -12,18 +12,19 @@ Three things the notebook's `move_to` provides and a naive loop does not:
     sent" is not "the arm is there".  A waypoint that did not converge is a
     stop, because the next waypoint's clearance was measured from this one.
   * A cancellation point between waypoints, and only between them.  A Stop
-    pressed mid-corridor cannot stop where it is — the arm is between rails.
-    It finishes the waypoint it is flying and holds, which is what the operator
-    is told.
-  * A phase callback, so the panel can say where in the corridor the arm is
-    rather than showing a spinner for thirty-five seconds.
+    pressed mid-route finishes the waypoint it is flying and holds, which is
+    what the operator is told.
+  * A phase callback, so the panel can say where on the route the arm is
+    rather than showing a spinner.
 
 WHAT IT DOES NOT DO
 -------------------
 It does not recover.  `nearest_waypoint` reports where the arm is; easing onto
-that waypoint is the one move on an unverified path, and an arm threaded under
-the front rail cannot be pulled out by any commanded pose.  Recovery is
-reported, not attempted, and the world is never reset to make it go away.
+that waypoint is the one move on an unverified path.  Recovery is reported,
+not attempted, and the world is never reset to make it go away.
+
+The rail-pocket routes and the recovery onto them went with the August mount
+(#192, docs/adr/0010-october-layout.md).
 """
 
 from __future__ import annotations
@@ -117,9 +118,6 @@ def fly_route(arm, route, *, should_abort: Abort = None, on_phase: Phase = None,
     clearance was measured FROM this one.
     """
     move = move or sdk_move
-    refusal = R.corridor_entry_refusal(present_pose(arm), route)
-    if refusal:
-        raise RouteError(refusal)
     flown: List[str] = []
     for wp in route:
         if should_abort is not None and should_abort():
@@ -180,47 +178,6 @@ def check_start(arm, route, *, tol: float = 8.0) -> Tuple[bool, str]:
                    f"this route is {name}, {distance:.1f} deg away")
 
 
-def deploy_to_rest(arm, *, should_abort: Abort = None,
-                   on_phase: Phase = None, move=None) -> List[str]:
-    """Out of the rail pocket and onto the board, ending with the forearm rested.
-
-    Resting deliberately allows forearm-to-table contact, which is why the last
-    two waypoints exist as a pair: REST_SHUT arrives with the hand closed, and
-    REST only opens the gripper once the forearm is already supported.  The
-    caller is responsible for having checked the footprint is clear — this
-    walks a corridor, it does not look at the table.
-    """
-    if R.at_pose(present_pose(arm), R.REST, joints=list(R.GROSS_JOINTS)):
-        if on_phase is not None:
-            on_phase("already at rest")
-        return []
-    ok, why = check_start(arm, R.PLACE_ROUTE)
-    if not ok:
-        raise RecoveryNeeded(why)
-    return fly_route(arm, R.PLACE_ROUTE, should_abort=should_abort,
-                     on_phase=on_phase, move=move)
-
-
-def stow_to_home(arm, *, should_abort: Abort = None,
-                 on_phase: Phase = None, move=None) -> List[str]:
-    """Back into the rail pocket, the placement route run backwards.
-
-    Nothing may cut across it: a direct move from anywhere over the board to
-    HOME drives the upper arm through the board's near edge.  That is why an
-    arm that is not at REST_SHUT is a recovery question rather than a starting
-    position to correct on the way.
-    """
-    if R.at_pose(present_pose(arm), R.HOME, joints=list(R.GROSS_JOINTS)):
-        if on_phase is not None:
-            on_phase("already stowed")
-        return []
-    ok, why = check_start(arm, R.STOW_ROUTE)
-    if not ok:
-        raise RecoveryNeeded(why)
-    return fly_route(arm, R.STOW_ROUTE, should_abort=should_abort,
-                     on_phase=on_phase, move=move)
-
-
 def wave(arm, *, cycles: int = R.WAVE_CYCLES, should_abort: Abort = None,
          on_phase: Phase = None, move=None) -> int:
     """A bounded wave from PRESENT, ending back at PRESENT.
@@ -236,7 +193,7 @@ def wave(arm, *, cycles: int = R.WAVE_CYCLES, should_abort: Abort = None,
     # Judged on the gross joints at a POSTURE tolerance, not the wave's
     # tracking tolerance.  LESSON_TOL is 90 degrees — the slack those three
     # weak joints need to be called converged mid-swing — and using it to ask
-    # "is the arm at PRESENT?" answers yes from the rail pocket.
+    # "is the arm at PRESENT?" answers yes from almost anywhere.
     if not R.at_pose(present_pose(arm), R.PRESENT, tol=8.0,
                      joints=list(R.GROSS_JOINTS)):
         raise RecoveryNeeded(
@@ -262,8 +219,8 @@ def wave(arm, *, cycles: int = R.WAVE_CYCLES, should_abort: Abort = None,
         on_phase("returning to the presentation pose")
     # Unguarded on purpose, and the notebook says so: WAVE_A and WAVE_B are
     # defined relative to PRESENT, so this retreat stays inside the envelope
-    # the wave was measured in.  It is not a jump to rest or to the pocket —
-    # those are separate validated transitions.
+    # the wave was measured in.  It is not a jump to rest -- that is a
+    # separate validated transition.
     #
     # It does have to ARRIVE, though, on the joints that say where the arm is
     # standing.  One run finished the cycles and left the shoulder far enough
@@ -516,11 +473,7 @@ def to_present(arm, *, should_abort: Abort = None, on_phase: Phase = None,
                move=None) -> List[str]:
     """REST -> PRESENT, the pose the wave starts and ends at.
 
-    One move, and it is the notebook's own (cell 18): section 4 lifts straight
-    out of the rest position and then sweeps every joint from there, with the
-    board instrumented and undisturbed.  It used to be two legs onto a roll -88
-    hub that appears nowhere in the notebook — see `primitives.raise_to_side`
-    for what that cost.
+    Out to the side, then up (`rig_routes.LIFT_TO_PRESENT`, #192).
     """
     if R.at_pose(present_pose(arm), R.PRESENT, tol=8.0,
                  joints=list(R.GROSS_JOINTS)):
@@ -539,10 +492,8 @@ def to_present(arm, *, should_abort: Abort = None, on_phase: Phase = None,
 
 def from_present(arm, *, should_abort: Abort = None, on_phase: Phase = None,
                  move=None) -> List[str]:
-    """PRESENT -> REST, by the first two waypoints of the measured stow.
-
-    Not a jump to the pocket: that is STOW_ROUTE in full, and going straight
-    from PRESENT to HOME drives the upper arm through the rig's front rail.
+    """PRESENT -> REST: `rig_routes.LOWER_TO_REST`, the hand onto the board's
+    right margin from outside the board (#192).
     """
     if not R.at_pose(present_pose(arm), R.PRESENT, tol=12.0,
                      joints=list(R.GROSS_JOINTS)):
@@ -558,37 +509,10 @@ def from_present(arm, *, should_abort: Abort = None, on_phase: Phase = None,
 # Travelling the posture graph
 # ---------------------------------------------------------------------------
 
-def _raise_to_side(arm, **kw):
-    """HOME -> PRESENT: the measured route out of the pocket, then the lift.
-
-    Flown through `primitives`, which owns the pocket geometry, rather than
-    assembled here — but it is the same waypoints `R.RAISE_TO_SIDE` names, and
-    a test asserts that.
-    """
-    from reachy_ai.motion import primitives as P
-    kw.pop("duration", None)
-    P.raise_to_side(arm)
-    return [w.name for w in R.RAISE_TO_SIDE]
-
-
-def _stow_from_side(arm, **kw):
-    from reachy_ai.motion import primitives as P
-    # stow_from_side turns the motors off when it arrives, which is right at
-    # the end of a trip and wrong in the middle of one.  The caller turns them
-    # back on; this is the only route that parks.
-    kw.pop("duration", None)
-    P.stow_from_side(kw.pop("robot"), arm)
-    return [w.name for w in R.STOW_FROM_SIDE]
-
-
 #: What actually flies each edge of the posture graph.
 ROUTE_RUNNERS = {
-    "PLACE_ROUTE": lambda arm, **kw: deploy_to_rest(arm, **kw),
-    "STOW_ROUTE": lambda arm, **kw: stow_to_home(arm, **kw),
     "LIFT_TO_PRESENT": lambda arm, **kw: to_present(arm, **kw),
     "LOWER_TO_REST": lambda arm, **kw: from_present(arm, **kw),
-    "RAISE_TO_SIDE": _raise_to_side,
-    "STOW_FROM_SIDE": _stow_from_side,
     "WAVE": lambda arm, **kw: ["wave x%d" % wave(arm, **kw)],
 }
 
@@ -597,19 +521,12 @@ def travel(arm, to: str, *, robot=None, should_abort: Abort = None,
            on_phase: Phase = None) -> List[str]:
     """Get the arm from wherever it is to a named posture.
 
-    Reads the posture first, then walks the measured edges.  An arm in the rail
-    pocket asked for the presentation pose leaves the pocket on its own — that
-    is a fact about the rig, not something an operator should have to know and
-    type.  What it will NOT do is invent an edge: no path is a refusal.
+    Reads the posture first, then walks the measured edges.  An arm at REST
+    asked to wave is raised first -- that is a fact about the rig, not
+    something an operator should have to know and type.  What it will NOT do
+    is invent an edge: no path is a refusal.
     """
-    recovered: List[str] = []
     here = R.posture_of(present_pose(arm))
-    if here is None and stranded_at(arm) is not None:
-        # Left part way through the pocket entry.  Finishing it is two
-        # measured moves, not a guess — and it is reported, because an arm
-        # that had to be recovered before it could start is worth saying.
-        recovered = resume_to_home(arm, on_phase=on_phase)
-        here = R.posture_of(present_pose(arm))
     if here is None:
         name, distance = R.nearest_waypoint(present_pose(arm))
         raise RecoveryNeeded(
@@ -623,86 +540,12 @@ def travel(arm, to: str, *, robot=None, should_abort: Abort = None,
             f"there is no measured way from {here} to {to}, so I will not "
             "invent one."
         )
-    flown: List[str] = list(recovered)
+    flown: List[str] = []
     for route in steps:
         if should_abort is not None and should_abort():
             break
         if on_phase is not None:
             on_phase(route)
-        kw = {"should_abort": should_abort, "on_phase": on_phase}
-        if route in ("RAISE_TO_SIDE", "STOW_FROM_SIDE"):
-            kw = {"robot": robot} if route == "STOW_FROM_SIDE" else {}
-        flown.extend(ROUTE_RUNNERS[route](arm, **kw))
-        if route == "STOW_FROM_SIDE" and robot is not None:
-            robot.turn_on("r_arm")
+        flown.extend(ROUTE_RUNNERS[route](arm, should_abort=should_abort,
+                                          on_phase=on_phase))
     return flown
-
-
-# ---------------------------------------------------------------------------
-# Resuming from a stranded pose
-# ---------------------------------------------------------------------------
-
-#: How close the arm must be to a known waypoint before it may be eased onto
-#: it and the rest of the sequence flown.
-#:
-#: The notebook's `ensure_home` does this and says plainly that the connecting
-#: move is the ONE segment on an unverified path.  That is a real warning and
-#: the answer is not to refuse every recovery — it is to keep the unverified
-#: part small.  At a few degrees the connecting move is nothing; at forty it is
-#: the whole problem.  So this is deliberately tight, and past it the arm is
-#: reported rather than driven.
-RESUME_TOL_DEG = 12.0
-
-#: The pocket entry, as poses, in the order they are flown.  This is the tail
-#: of the measured route and the same sequence `primitives.stow_from_side`
-#: uses; an arm stranded part way out of the pocket is on it.
-_POCKET_SEQUENCE = ("CURL", "BACK", "GRIP_SHUT", "HOME")
-
-
-def stranded_at(arm) -> Optional[Tuple[str, float]]:
-    """Which pocket waypoint the arm is sitting on, and how far off, or None.
-
-    Only the pocket waypoints, and only with the roll already home.  An arm out
-    over the board at the same shoulder pitch is a different situation with a
-    different answer, and guessing between them is exactly what this must not
-    do.
-    """
-    now = present_pose(arm)
-    if abs(now["r_shoulder_roll"]) > RESUME_TOL_DEG:
-        return None
-    best, best_off = None, 1e9
-    for name in _POCKET_SEQUENCE:
-        target = getattr(R, name)
-        off = max(abs(now[j] - target[j]) for j in R.GROSS_JOINTS)
-        if off < best_off:
-            best, best_off = name, off
-    if best_off > RESUME_TOL_DEG:
-        return None
-    return best, best_off
-
-
-def resume_to_home(arm, *, on_phase: Phase = None, move=None) -> List[str]:
-    """Finish the pocket entry from wherever on it the arm was left.
-
-    The case this exists for: something stopped part way and left the arm at
-    BACK — out of the pocket, roll home, nothing in front of it — and every
-    later request then refused for want of a posture to start from.  That is
-    correct and useless.  BACK is a measured waypoint with two measured moves
-    left in it.
-    """
-    where = stranded_at(arm)
-    if where is None:
-        raise RecoveryNeeded(
-            "the arm is not on the pocket sequence, so there is no measured "
-            "way to finish from here."
-        )
-    name, off = where
-    if on_phase is not None:
-        on_phase(f"resuming from {name} ({off:.0f} deg off)")
-    rest = _POCKET_SEQUENCE[_POCKET_SEQUENCE.index(name):]
-    route = tuple(Waypoint(n, getattr(R, n), 2.5, 12.0,
-                           guard=("r_shoulder_pitch", "r_shoulder_roll",
-                                  "r_arm_yaw", "r_elbow_pitch",
-                                  "r_wrist_pitch"))
-                  for n in rest)
-    return fly_route(arm, route, on_phase=on_phase, move=move)

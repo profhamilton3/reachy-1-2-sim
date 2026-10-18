@@ -168,7 +168,7 @@ def run_demo(host: str, port: int, scene_path: str) -> None:
     time.sleep(0.3)
     log.info("Right arm ON")
 
-    # Raise to the PRESENT pose by the measured route out of the rail pocket.
+    # Raise to the PRESENT pose by the measured route from REST.
     log.info("── Raise arm to the raised pose")
     P.raise_to_side(arm, duration=3.0)
 

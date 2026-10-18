@@ -15,7 +15,7 @@ The arc used to plan one segment, fly it, plan the next.  It planned with the
 PAD POINT only (tabletop and static boxes), so nothing along it ever asked
 whether the forearm, the upper arm or the hand would hit an object, and its
 last step (`P.raise_to_side`) cannot work from where the arm is (it requires
-HOME; the arm is above the place site).  Now:
+REST; the arm is above the place site).  Now:
 
   * `plan_pick_and_place` plans the COMPLETE arc -- approach, grasp, carry,
     place, retract AND the return to PRESENT -- sending NO motion command, and
@@ -28,8 +28,8 @@ HOME; the arm is above the place site).  Now:
     arcs; it does not choose clearance-optimal trajectories, and automatic
     replanning is deferred.
   * `preflight_pick_place` is the job-level preflight the worker, the demo and
-    the notebook all use: the RAISE_TO_SIDE footprint, every arc, and the
-    STOW_FROM_SIDE footprint, before any motion.
+    the notebook all use: the LIFT_TO_PRESENT footprint, every arc, and the
+    LOWER_TO_REST footprint, before any motion.
 
 THE START AND END POSTURE IS `rig_routes.PRESENT`, not `P.SIDE_HIGH`.  PRESENT
 and SIDE_HIGH are not interchangeable: `stow_from_side` requires PRESENT.
@@ -113,9 +113,11 @@ PHASE_CLOSE = "close gripper"
 PHASE_RELEASE = "release"
 
 #: The raise at the start and the stow at the end are flown by the caller
-#: through these routes; their footprints are what the job preflight checks.
-RAISE_ROUTE = "RAISE_TO_SIDE"
-STOW_ROUTE = "STOW_FROM_SIDE"
+#: through these routes (`P.raise_to_side`, `P.stow_from_side`); their
+#: footprints are what the job preflight checks.  REST <-> PRESENT since the
+#: October layout (#192); they were the rail-pocket routes.
+RAISE_ROUTE = "LIFT_TO_PRESENT"
+STOW_ROUTE = "LOWER_TO_REST"
 
 
 # ── The plan ──────────────────────────────────────────────────────────────────
@@ -456,8 +458,8 @@ def _refused_from_error(object_id: str, exc: Exception) -> PreflightRefused:
         obstacle=None, clearance_m=None, margin_m=None, model=model)
 
 
-_LEGS_TEXT = {RAISE_ROUTE: "HOVER -> REST_SHUT -> REST",
-              STOW_ROUTE: "PRESENT -> REST_SHUT -> HOVER"}
+_LEGS_TEXT = {RAISE_ROUTE: "REST -> REST_OUT -> PRESENT_SHUT -> PRESENT",
+              STOW_ROUTE: "PRESENT -> PRESENT_SHUT -> REST_OUT -> REST"}
 
 
 def _footprint_refusal(model: SceneModel, route: str) -> Optional[PreflightRefused]:
@@ -481,21 +483,19 @@ def preflight_pick_place(planner, scene, moves: Sequence[Tuple[str, XY]], *,
                          skip_refused: bool) -> JobPlan:
     """Check a whole pick/place job before ANY of it moves.
 
-    1. The RAISE_TO_SIDE footprint against the current board.  A refusal
+    1. The LIFT_TO_PRESENT footprint against the current board.  A refusal
        refuses the whole job.
     2. Each move's complete arc, in order, on a COPY of the model that is
        updated with each accepted arc's placed pose.  With
        ``skip_refused=False`` (the worker) a refusal refuses the job; with
        ``skip_refused=True`` (the demo, the notebook loop) a refused move is
        recorded in ``skipped`` and its object stays where it is.
-    3. The STOW_FROM_SIDE footprint against the predicted final board.  A
+    3. The LOWER_TO_REST footprint against the predicted final board.  A
        refusal refuses the whole job.
 
-    The footprint checks cover only the legs in `rig_routes.FOOTPRINT_LEGS`
-    (RAISE_TO_SIDE: HOVER -> REST_SHUT -> REST; STOW_FROM_SIDE: PRESENT ->
-    REST_SHUT -> HOVER), manipulable objects only (no rig fixtures), at each
-    leg's wider commanded aperture.  The rest of each measured route is
-    covered by the route's own rig validation, not by this live-object check.
+    The footprint checks cover the legs in `rig_routes.FOOTPRINT_LEGS` (the
+    whole of LIFT_TO_PRESENT and LOWER_TO_REST), manipulable objects only (no
+    rig fixtures), at each leg's wider commanded aperture.
 
     Raises PreflightRefused; sends no motion command of any kind.  ``scene`` is
     never mutated.

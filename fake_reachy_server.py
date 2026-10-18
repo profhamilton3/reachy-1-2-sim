@@ -428,8 +428,12 @@ _L_SHOULDER_Y =  0.19
 _UPPER_ARM    =  0.28
 _FOREARM      =  0.25
 
+# r_shoulder_roll's upper bound is +0.354 rad (+20.3 deg), past the URDF's
+# 0.174: a documented, SDK-visible deviation (#192, docs/adr/0010).  The
+# physical robot held +20.3 deg in Siva's taught poses, and IK answers for the
+# October board's far-left cell need it.  The left arm is unchanged.
 _R_ARM_LIMITS = [
-    (-3.14,  1.57), (-1.57,  0.17), (-2.09,  2.09),
+    (-3.14,  1.57), (-1.57,  0.354), (-2.09,  2.09),
     (-2.35,  0.0),  (-2.62,  2.62), (-0.79,  0.79), (-0.79,  0.79),
 ]
 _L_ARM_LIMITS = [
