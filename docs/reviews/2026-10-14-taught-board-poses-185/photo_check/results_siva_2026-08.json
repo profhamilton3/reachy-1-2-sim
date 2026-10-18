@@ -1,0 +1,54 @@
+[
+ {
+  "eye": "Left",
+  "file": "Left_empty_image_002.png",
+  "rms_px": 1.09,
+  "board_in_camera_m": [
+   -0.0412,
+   0.384,
+   0.6069
+  ],
+  "cells": 6,
+  "board_centre_in_torso_m": [
+   0.4808,
+   0.1006,
+   -0.4106
+  ],
+  "camera_in_torso_m": [
+   0.0412,
+   0.0289,
+   0.1544
+  ],
+  "head_rotation_deg": [
+   6.5,
+   10.3,
+   -1.9
+  ]
+ },
+ {
+  "eye": "Left",
+  "file": "Left_empty_image_003.png",
+  "rms_px": 1.27,
+  "board_in_camera_m": [
+   -0.0549,
+   0.1828,
+   0.6645
+  ],
+  "cells": 9,
+  "board_centre_in_torso_m": [
+   0.4669,
+   0.0984,
+   -0.4101
+  ],
+  "camera_in_torso_m": [
+   0.0577,
+   0.0304,
+   0.1429
+  ],
+  "head_rotation_deg": [
+   5.1,
+   28.6,
+   -1.6
+  ]
+ }
+]
