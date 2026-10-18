@@ -80,7 +80,7 @@ REACHY_PANEL_LANGUAGE=1 \
 
 # Restart container to drop stale joint goals
 echo "▶ Restarting the container …"
-docker compose restart reachy-1-2-sim
+docker compose restart reachy-sim
 sleep 2
 
 echo
