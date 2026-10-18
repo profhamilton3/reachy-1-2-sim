@@ -473,16 +473,17 @@ class DeterministicPlanner:
         given = {slot: text for slot, text in answers if slot}
 
         if match.ambiguous_between:
-            resolved = _posture_answer(given.get(SLOT_POSTURE, ""))
-            if resolved is None:
+            # No phrasing is ambiguous since HOME became REST (#192): "rest"
+            # used to mean the tabletop or the rail pocket.  Kept so the next
+            # ambiguity asks rather than guesses; the answer is the ability.
+            names = list(match.ambiguous_between)
+            resolved = given.get(SLOT_POSTURE, "")
+            if resolved not in names:
                 return _clarify(
-                    "\"Rest\" can mean two different places, and they are "
-                    "eleven waypoints apart: my forearm supported on the "
-                    "tabletop, or my arm stored back in the rail pocket. "
-                    "Which did you mean?",
-                    ["on the table", "in the rail pocket"],
-                    SLOT_POSTURE,
-                )
+                    "I can read that more than one way: "
+                    + " or ".join(abilities.REGISTRY[n].summary for n in names)
+                    + ". Which did you mean?",
+                    names, SLOT_POSTURE)
             match.name = resolved
             match.ability = abilities.REGISTRY[resolved]
             match.ambiguous_between = ()
@@ -908,23 +909,6 @@ def _is_a_command(text: str) -> bool:
 #: retrieval would simply never match, which reads exactly like "nothing has
 #: been promoted yet".
 _board_of = _P.observed_board
-
-
-def _posture_answer(text: str) -> Optional[str]:
-    """Which posture an answer to the rest/stow question names.
-
-    None means it named neither, and the question gets asked again rather than
-    resolved by preference.  The two postures are eleven waypoints apart
-    through the rig; a coin-flip here is a long arm movement nobody asked for.
-    """
-    norm = _normalise(text)
-    if not norm:
-        return None
-    if re.search(r"\b(table|tabletop|desk|board|forearm|down|surface)\b", norm):
-        return "rest_forearm"
-    if re.search(r"\b(pocket|rail|home|away|stow|store|default|back)\b", norm):
-        return "stow_arm"
-    return None
 
 
 def _dest_ref(scene: SceneView, destination_id: str) -> DestinationRef:

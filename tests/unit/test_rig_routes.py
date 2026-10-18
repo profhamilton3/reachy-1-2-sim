@@ -1,10 +1,9 @@
-"""Issue #64: the rig pose set and routes, extracted from the notebook.
+"""Issue #64: the rig pose set and routes; #192: the October layout.
 
-The first test is the one that matters.  Every other test here could pass
-against a transcription that quietly dropped a decimal, so the values are
-compared against the notebook's own cell source rather than trusted — the
-notebook stays the source of truth, and this file is what notices when the two
-drift apart.
+The poses still taken from the notebook (PRESENT, the wave) are compared
+against the notebook's own cell source rather than trusted.  REST is not the
+notebook's any more: it is the October layout's settled pose (#192), and the
+rail-pocket routes the notebook flew went with the August mount.
 
 Nothing here connects to anything.  The notebook is parsed, never executed:
 running its cells would connect to a robot.
@@ -94,27 +93,11 @@ def notebook():
 
 
 # ---------------------------------------------------------------------------
-# The extraction is faithful
+# What is still the notebook's
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", [
-    "HOME", "GRIP_SHUT", "BACK", "CURL", "CURL_HIGH", "TUCK",
-    "SWING_1", "SWING_2", "SWING_3", "HOVER", "REST_SHUT", "REST", "PRESENT",
-])
-def test_every_pose_matches_the_notebook(notebook, name):
-    # SWING_1 is the one pose moved off the notebook (#74, docs/adr/0006); the
-    # notebook's own pose is kept as SWING_1_NOTEBOOK and is what must match.
-    mine = R.SWING_1_NOTEBOOK if name == "SWING_1" else getattr(R, name)
-    assert mine == notebook[name], name
-
-
-def test_swing_1_departs_from_the_notebook_on_four_named_joints_only():
-    moved = {j for j in R.SWING_1 if R.SWING_1[j] != R.SWING_1_NOTEBOOK[j]}
-    assert moved == {"r_shoulder_pitch", "r_shoulder_roll", "r_arm_yaw",
-                     "r_elbow_pitch"}
-    assert R.SWING_1["r_gripper"] == R.SHUT            # still shut through the rig
-    assert R.SWING_1["r_elbow_pitch"] == R.CURL["r_elbow_pitch"]   # CURL's fold
-    assert max(abs(R.SWING_1[j] - R.SWING_1_NOTEBOOK[j]) for j in moved) == 5.0
+def test_present_matches_the_notebook(notebook):
+    assert R.PRESENT == notebook["PRESENT"]
 
 
 def test_the_gripper_constants_match(notebook):
@@ -129,44 +112,9 @@ def test_the_gripper_sign_is_the_inverted_one():
     assert R.OPEN < 0 < R.SHUT
 
 
-@pytest.mark.parametrize("route_name", ["PLACE_ROUTE", "STOW_ROUTE"])
-def test_route_waypoints_match_the_notebook(notebook, route_name):
-    mine = getattr(R, route_name)
-    theirs = notebook[route_name]
-    assert len(mine) == len(theirs)
-    for got, (name, target, secs, tol) in zip(mine, theirs):
-        assert got.name == name
-        if name == "SWING_1":                      # moved for margin, #74
-            assert target == R.SWING_1_NOTEBOOK and got.pose == R.SWING_1
-        else:
-            assert got.pose == target, name
-        assert got.seconds == secs, name
-        assert got.tol == tol, name
-
-
 def test_the_wave_poses_match_the_notebook(notebook):
     assert R.WAVE_A == notebook["WAVE_A"]
     assert R.WAVE_B == notebook["WAVE_B"]
-
-
-def test_the_tolerances_are_per_waypoint_not_uniform():
-    """Settling into GRIP_SHUT has 79 mm of clearance all round; SWING_3 to
-    HOVER passes the elbow 4.8 mm from the board's edge.  One tolerance for
-    both would be a rewrite, not an extraction."""
-    tols = {w.name: w.tol for w in R.STOW_ROUTE}
-    assert tols["GRIP_SHUT"] != tols["SWING_3"]
-    assert len({w.tol for w in R.STOW_ROUTE}) > 1
-
-
-def test_the_stow_route_is_the_placement_route_reversed():
-    place = [w.name for w in R.PLACE_ROUTE]
-    stow = [w.name for w in R.STOW_ROUTE]
-    # Exactly reversed, once the two differing endpoints are set aside:
-    # placement finishes by opening the gripper at REST, and stow finishes by
-    # settling at HOME.  Everything between is the same corridor backwards,
-    # which is the property that makes it safe — nothing may cut across it.
-    assert stow[:-1] == list(reversed(place[:-1]))
-    assert place[-1] == "REST" and stow[-1] == "HOME"
 
 
 def test_the_wave_is_bounded_and_relative_to_present():
@@ -179,136 +127,119 @@ def test_the_wave_is_bounded_and_relative_to_present():
 
 
 # ---------------------------------------------------------------------------
+# REST and its routes, October layout (#192)
+# ---------------------------------------------------------------------------
+
+def test_rest_is_shut_and_rest_shut_is_rest():
+    assert R.REST["r_gripper"] == R.SHUT
+    assert R.REST_SHUT == R.REST
+
+
+def test_rest_out_is_rests_arm_swung_out_at_presents_roll():
+    moved = {j for j in R.REST if R.REST_OUT[j] != R.REST[j]}
+    assert moved == {"r_shoulder_pitch", "r_shoulder_roll"}
+    assert R.REST_OUT["r_shoulder_roll"] == R.PRESENT["r_shoulder_roll"]
+
+
+def test_the_lowering_is_the_lift_reversed():
+    lift = [w.name for w in R.LIFT_TO_PRESENT]
+    lower = [w.name for w in R.LOWER_TO_REST]
+    assert lift == ["REST_OUT", "PRESENT_SHUT", "PRESENT"]
+    assert lower == ["PRESENT_SHUT", "REST_OUT", "REST"]
+
+
+def test_the_hand_is_shut_whenever_it_is_over_the_board():
+    """The footprint guard sizes the hand to its aperture: the hand opens only
+    at PRESENT, raised."""
+    for route in (R.LIFT_TO_PRESENT, R.LOWER_TO_REST):
+        for wp in route:
+            if wp.name != "PRESENT":
+                assert wp.pose["r_gripper"] == R.SHUT, wp.name
+
+
+def test_the_august_mount_is_retired():
+    """Owner decision 2026-10-18: no August routes, poses or replays."""
+    for name in ("HOME", "GRIP_SHUT", "BACK", "CURL", "CURL_HIGH", "TUCK",
+                 "SWING_1", "SWING_1_NOTEBOOK", "SWING_2", "SWING_3", "HOVER",
+                 "REST_AUGUST", "REST_SHUT_AUGUST", "PLACE_ROUTE", "STOW_ROUTE",
+                 "RAISE_TO_SIDE", "STOW_FROM_SIDE", "LIFT_TO_PRESENT_AUGUST",
+                 "LOWER_TO_REST_AUGUST", "MOUNT_AUGUST", "CORRIDOR_ROUTES",
+                 "corridor_entry_refusal", "with_notebook_swing_1"):
+        assert not hasattr(R, name), name
+    for name in ("PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE", "STOW_FROM_SIDE"):
+        with pytest.raises(KeyError):
+            R.route_named(name)
+
+
+# ---------------------------------------------------------------------------
 # Scene compatibility
 # ---------------------------------------------------------------------------
 
-def test_the_routes_are_validated_where_they_were_measured():
-    ok, why = R.check_route("WAVE", "FWDCenterLabMCC")
-    assert ok, why
+@pytest.mark.parametrize("route", ["LIFT_TO_PRESENT", "LOWER_TO_REST", "WAVE", "POINT"])
+@pytest.mark.parametrize("scene", ["FWDCenterLabSivaPool", "FWDCenterLabMCC"])
+def test_the_october_routes_are_validated_in_both_lab_scenes(route, scene):
+    assert R.check_route(route, scene) == (True, "")
+    assert R.validation_for(route, scene).mount == R.CURRENT_MOUNT
 
 
-@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE",
-                                   "STOW_FROM_SIDE"])
-def test_the_notebook_scene_rows_do_not_meet_the_corridor_margin(route):
-    """FWDCenterLabMCC's evidence is the notebook, which flew the notebook's
-    SWING_1 and records no clearance figures.  Under the corridor margin
-    (#74, D1) that is a refusal that says why, not a silent pass."""
-    ok, why = R.check_route(route, "FWDCenterLabMCC")
+def test_every_row_is_at_the_current_mount():
+    for row in R.ROUTE_COMPATIBILITY:
+        assert row.mount == R.CURRENT_MOUNT, (row.route, row.scene)
+
+
+def test_a_row_must_say_where_the_robot_stood():
+    with pytest.raises(ValueError, match="names no mount"):
+        R.RouteValidation("WAVE", "SomeRig", "2026-10-18: test row")
+
+
+def test_a_row_flown_at_another_mount_is_refused_and_says_so(monkeypatch):
+    row = R.RouteValidation("WAVE", "SomeRig", "2026-10-18: test row",
+                            mount="somewhere else")
+    monkeypatch.setattr(R, "ROUTE_COMPATIBILITY", (row,))
+    ok, why = R.check_route("WAVE", "SomeRig")
     assert not ok
-    assert "corridor margin (#74)" in why and "records no planned" in why
+    assert "robot mounted elsewhere" in why and R.CURRENT_MOUNT in why
 
 
-_CORRIDOR = ["PLACE_ROUTE", "STOW_ROUTE", "RAISE_TO_SIDE", "STOW_FROM_SIDE"]
-
-
-def test_the_margin_is_enforced_everywhere_again():
-    assert R.CORRIDOR_REPORT_ONLY_SCENES == ()
-
-
-@pytest.mark.parametrize("route", _CORRIDOR)
-def test_the_panel_scene_corridor_meets_the_margin_on_its_own_figures(route):
-    """Re-flown 2026-10-09 with the forearm-yaw fix (docs/adr/0006 §5-6)."""
-    ok, why = R.check_route(route, "FWDCenterLabSivaPool")
-    assert (ok, why) == (True, "")
-    row = R.validation_for(route, "FWDCenterLabSivaPool")
-    assert row.flights >= R.CORRIDOR_MIN_FLIGHTS
-    assert row.planned_worst_m >= R.CORRIDOR_PLANNED_MARGIN
-    assert row.realised_worst_m >= R.CORRIDOR_REALISED_MARGIN
-    assert row.evidence.startswith("2026-10-09")
-
-
-@pytest.mark.parametrize("route", _CORRIDOR)
-def test_each_rows_planned_figure_is_the_routes_geometry(route):
-    """The planned figure is not a number someone typed: it is the full
-    route's worst tube clearance against objects and rails, <= 2 deg legs."""
-    from reachy_ai.motion.kinematics import (hand_radius, joint_path,
-                                             link_capsules, sample_count)
-    from reachy_ai.scene.awareness import SceneModel
-    scene = SceneModel.from_yaml(os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml"))
-    ids = scene.obstacle_ids(include_static=True)
-    start = {"PLACE_ROUTE": R.HOME, "RAISE_TO_SIDE": R.HOME,
-             "STOW_ROUTE": R.REST, "STOW_FROM_SIDE": R.PRESENT}[route]
-    poses = (start,) + tuple(w.pose for w in R.route_named(route))
-    worst = None
-    for p0, p1 in zip(poses, poses[1:]):
-        a, b = [p0[j] for j in R.ARM7], [p1[j] for j in R.ARM7]
-        g = max(p0["r_gripper"], p1["r_gripper"], key=hand_radius)
-        for q in joint_path(a, b, sample_count(a, b)):
-            c = scene.clearance(link_capsules(q, "right", g), ids=ids)
-            worst = c.distance if worst is None else min(worst, c.distance)
-    assert R.validation_for(route, "FWDCenterLabSivaPool").planned_worst_m == \
-        pytest.approx(worst, abs=0.001)
-
-
-def test_the_report_only_exemption_still_works_if_an_owner_sets_it(monkeypatch):
-    monkeypatch.setattr(R, "CORRIDOR_REPORT_ONLY_SCENES", ("FWDCenterLabMCC",))
-    ok, why = R.check_route("PLACE_ROUTE", "FWDCenterLabMCC")
-    assert ok and why.startswith("REPORTED, NOT ENFORCED in FWDCenterLabMCC")
-
-
-def test_every_corridor_waypoint_guards_the_forearm_yaw():
-    for route in (R.PLACE_ROUTE, R.STOW_ROUTE):
-        for wp in route:
-            assert wp.guard == R.CRITICAL_JOINTS + ("r_forearm_yaw",), wp.name
-            assert wp.pose["r_forearm_yaw"] == 0.0
-
-
-def test_a_corridor_route_refuses_to_start_with_the_forearm_yaw_off():
-    home = dict(R.HOME)
-    assert R.corridor_entry_refusal(home, R.PLACE_ROUTE) == ""
-    assert R.corridor_entry_refusal(dict(home, r_forearm_yaw=R.CORRIDOR_ENTRY_TOL), R.PLACE_ROUTE) == ""
-    why = R.corridor_entry_refusal(dict(home, r_forearm_yaw=-24.0), R.PLACE_ROUTE)
-    assert "forearm yaw is 24 deg off" in why and "will not start" in why
-    for route in (R.RAISE_TO_SIDE, R.STOW_ROUTE, R.STOW_FROM_SIDE):
-        assert R.corridor_entry_refusal(dict(home, r_forearm_yaw=-24.0), route)
-    # off the corridor nothing is refused on this account
-    assert R.corridor_entry_refusal(dict(R.PRESENT, r_forearm_yaw=-60.0), R.LOWER_TO_REST) == ""
-
-
-def test_off_corridor_routes_in_the_panel_scene_are_unaffected():
-    for other in ("LIFT_TO_PRESENT", "LOWER_TO_REST", "WAVE"):
-        assert R.check_route(other, "FWDCenterLabSivaPool") == (True, "")
-
-
-def test_the_corridor_routes_ability_versions_moved_with_swing_1():
-    import panel_abilities as A
-    for name, a in A.REGISTRY.items():
-        if a.route in R.CORRIDOR_ROUTES:
-            assert a.route_version == 2, name
-
-
-def test_a_rejected_route_says_it_was_flown_and_why_it_failed():
-    """"Not listed" reads as "nobody has got to it yet", which invites a row
-    on the strength of one clean run.  Pointing in the scene it was DESIGNED
-    for is the standing example: flown, rejected, and the number travels."""
-    _, why = R.check_route("POINT", "FWDCenterLabMCC")
-    assert "rejected" in why
-    assert "0.189 m" in why
+def test_pointing_is_validated_up_to_one_object():
+    """Scoped on purpose: what has not been flown is a reach threading past a
+    second object, and `_ability_available` enforces that."""
+    row = R.validation_for("POINT", "FWDCenterLabSivaPool")
+    assert "AN EMPTY BOARD" in row.evidence
+    assert "ONE OBJECT AT A TIME" in row.evidence
+    assert "TWO OR MORE OBJECTS IS NOT COVERED" in row.evidence
 
 
 def test_a_route_nobody_flew_here_is_a_different_answer_from_one_that_failed():
-    _, why = R.check_route("PLACE_ROUTE", "SomeSceneNobodyTried")
+    _, why = R.check_route("LOWER_TO_REST", "SomeSceneNobodyTried")
     assert "has not been flown in SomeSceneNobodyTried" in why
     assert "rejected" not in why
 
 
-def test_the_hub_routes_were_reflown_before_they_were_relisted():
-    """The rows that were here certified four hand-built steps through a roll
-    -88 hub.  They were deleted, not edited, and what replaced them names the
-    flights that happened AFTER the rebuild — not the six that happened before
-    it against an empty board."""
-    for route in ("WAVE", "RAISE_TO_SIDE", "STOW_FROM_SIDE", "LIFT_TO_PRESENT"):
-        row = R.validation_for(route, "FWDCenterLabSivaPool")
-        assert row is not None
-        assert "hub" not in row.evidence or "deleted" in row.evidence
-    assert "REBUILT" in R.validation_for("WAVE", "FWDCenterLabSivaPool").evidence
+def test_a_rejected_attempt_travels(monkeypatch):
+    monkeypatch.setattr(R, "VALIDATION_ATTEMPTS", (R.ValidationAttempt(
+        "WAVE", "SomeRig", "2026-10-18", "rejected", "moved a can 0.189 m"),))
+    monkeypatch.setattr(R, "ROUTE_COMPATIBILITY", ())
+    _, why = R.check_route("WAVE", "SomeRig")
+    assert "rejected" in why and "0.189 m" in why
 
 
-def test_the_hub_routes_are_validated_where_the_notebook_flew_them():
-    # RAISE_TO_SIDE and STOW_FROM_SIDE cross the corridor; see the test above.
-    for route in ("LIFT_TO_PRESENT", "LOWER_TO_REST"):
-        ok, why = R.check_route(route, "FWDCenterLabMCC")
-        assert ok, "{}: {}".format(route, why)
+def test_a_route_never_validated_anywhere_is_refused():
+    assert R.check_route("NO_SUCH_ROUTE", "FWDCenterLabSivaPool")[0] is False
+
+
+def test_a_refusal_names_the_scene_not_the_arm():
+    _, why = R.check_route("LOWER_TO_REST", "SomeOtherScene")
+    assert "SomeOtherScene" in why
+    assert "arm is unavailable" not in why
+
+
+def test_every_validation_row_carries_dated_evidence():
+    """A row without a flown run recorded would undo this module's whole
+    safety argument in one line."""
+    for row in R.ROUTE_COMPATIBILITY:
+        assert row.evidence.startswith("2026-10-1"), (row.route, row.scene)
+        assert "#192" in row.evidence
 
 
 def test_every_attempt_records_an_outcome_and_the_numbers():
@@ -318,61 +249,27 @@ def test_every_attempt_records_an_outcome_and_the_numbers():
         assert len(attempt.detail) > 40
 
 
-def test_pointing_is_validated_over_an_empty_board_and_nowhere_else():
-    """Scoped on purpose.  The empty-board run had nothing to hit, so it says
-    nothing about section 4.7's catalogue of what an occupied board does — a
-    can moved 0.189 m by an arm reporting +5.5 cm of clearance.  The row says
-    "empty board only" and `_ability_available` is what enforces it."""
-    ok, why = R.check_route("POINT", "FWDCenterLabSivaPool")
-    assert ok, why
-    row = R.validation_for("POINT", "FWDCenterLabSivaPool")
-    assert "EMPTY BOARD ONLY" in row.evidence
-    assert "cell_r3c1" in row.evidence          # the arm's own limit, named
-
-    # And it is still refused where nobody has flown it.
-    ok, why = R.check_route("POINT", "FWDCenterLabMCC")
-    assert not ok
-    assert "0.189 m" in why
-
-
-def test_a_refusal_names_the_scene_not_the_arm():
-    _, why = R.check_route("STOW_ROUTE", "SomeOtherScene")
-    assert "SomeOtherScene" in why
-    assert "arm is unavailable" not in why
-
-
-def test_every_validation_row_carries_its_evidence():
-    """A row without a flown run recorded would undo this module's whole
-    safety argument in one line."""
-    for row in R.ROUTE_COMPATIBILITY:
-        assert row.evidence.strip()
-        # Either the notebook that measured it, or a dated flight of it.
-        assert ("tlh_motion-routine" in row.evidence
-                or "2026-" in row.evidence), row.route
-
-
 # ---------------------------------------------------------------------------
 # Recovery reports; it does not authorise
 # ---------------------------------------------------------------------------
 
 def test_nearest_waypoint_finds_the_one_the_arm_is_actually_at():
-    name, distance = R.nearest_waypoint(dict(R.SWING_2))
-    assert name == "SWING_2"
+    name, distance = R.nearest_waypoint(dict(R.REST_OUT))
+    assert name == "REST_OUT"
     assert distance == pytest.approx(0.0)
 
 
 def test_nearest_waypoint_ignores_the_gripper():
     """On a freshly reset sim the gripper falls open and wrist_roll drifts;
     judging where the arm is on those reports a clean reset as a fault."""
-    drifted = dict(R.TUCK, r_gripper=R.OPEN)
-    name, _ = R.nearest_waypoint(drifted)
-    assert name == "TUCK"
+    name, _ = R.nearest_waypoint(dict(R.REST_OUT, r_gripper=R.OPEN))
+    assert name == "REST_OUT"
 
 
 def test_at_pose_checks_only_the_gross_joints_when_asked():
-    drifted = dict(R.HOME, r_wrist_roll=40.0, r_gripper=R.OPEN)
-    assert R.at_pose(drifted, R.HOME, joints=list(R.GROSS_JOINTS))
-    assert not R.at_pose(drifted, R.HOME)
+    drifted = dict(R.REST, r_wrist_roll=10.0, r_gripper=R.OPEN)
+    assert R.at_pose(drifted, R.REST, joints=list(R.GROSS_JOINTS))
+    assert not R.at_pose(drifted, R.REST)
 
 
 # ---------------------------------------------------------------------------
@@ -380,76 +277,54 @@ def test_at_pose_checks_only_the_gross_joints_when_asked():
 # ---------------------------------------------------------------------------
 
 def test_the_named_postures_are_recognised_from_a_pose():
-    assert R.posture_of(dict(R.HOME)) == R.POSTURE_HOME
     assert R.posture_of(dict(R.REST)) == R.POSTURE_REST
     assert R.posture_of(dict(R.PRESENT)) == R.POSTURE_PRESENT
 
 
+def test_home_is_rest():
+    assert R.POSTURE_HOME == R.POSTURE_REST
+    assert set(R.POSTURES) == {R.POSTURE_REST, R.POSTURE_PRESENT}
+
+
 def test_a_pose_between_postures_is_not_any_of_them():
-    """"Somewhere in the corridor" is an answer, and it is not "close enough
-    to HOME"."""
-    assert R.posture_of(dict(R.SWING_2)) is None
+    assert R.posture_of(dict(R.REST_OUT)) is None
 
 
 def test_posture_is_judged_on_the_gross_joints():
-    drifted = dict(R.HOME, r_wrist_roll=40.0, r_gripper=R.OPEN)
-    assert R.posture_of(drifted) == R.POSTURE_HOME
+    drifted = dict(R.REST, r_wrist_roll=10.0, r_gripper=R.OPEN)
+    assert R.posture_of(drifted) == R.POSTURE_REST
 
 
 def test_only_measured_transitions_exist():
     """There is no "just move there" edge, and the absence is the point."""
-    assert R.transition(R.POSTURE_HOME, R.POSTURE_REST) == "PLACE_ROUTE"
-    assert R.transition(R.POSTURE_REST, R.POSTURE_HOME) == "STOW_ROUTE"
-    # Measured, all four, and every one of them is in the notebook.
-    assert R.transition(R.POSTURE_REST, R.POSTURE_PRESENT) == "LIFT_TO_PRESENT"
-    assert R.transition(R.POSTURE_PRESENT, R.POSTURE_REST) == "LOWER_TO_REST"
-    assert R.transition(R.POSTURE_HOME, R.POSTURE_PRESENT) == "RAISE_TO_SIDE"
-    assert R.transition(R.POSTURE_PRESENT, R.POSTURE_HOME) == "STOW_FROM_SIDE"
-    # Still not a posture, and not an edge: the invented side hub.
+    assert R.POSTURE_TRANSITIONS == {
+        (R.POSTURE_REST, R.POSTURE_PRESENT): "LIFT_TO_PRESENT",
+        (R.POSTURE_PRESENT, R.POSTURE_REST): "LOWER_TO_REST",
+        (R.POSTURE_PRESENT, R.POSTURE_PRESENT): "WAVE",
+    }
     assert not hasattr(R, "POSTURE_SIDE_HUB")
-    assert "side_hub" not in R.POSTURES
 
 
 def test_the_wave_is_a_transition_from_present_to_itself():
-    """It ends where it started.  Getting to rest or the pocket afterwards is
-    a separate transition, and there is not one."""
     assert R.transition(R.POSTURE_PRESENT, R.POSTURE_PRESENT) == "WAVE"
     assert R.POSTURE_PRESENT in R.reachable_from(R.POSTURE_PRESENT)
 
 
-def test_the_way_out_of_the_pocket_is_the_measured_route():
-    """It used to abduct to roll -88, which the notebook names as its FAILURE
-    exercise.  The route crosses the rail band in two joints at once and never
-    rolls past -37.5."""
-    assert [w.name for w in R.RAISE_TO_SIDE] == \
-        [w.name for w in R.PLACE_ROUTE] + ["PRESENT"]
-    assert [w.name for w in R.STOW_FROM_SIDE] == [w.name for w in R.STOW_ROUTE]
-    deepest = min(w.pose["r_shoulder_roll"] for w in R.RAISE_TO_SIDE)
-    assert deepest == -37.5
-
-
-def test_an_arm_in_the_pocket_is_routed_out_of_it():
-    """"Wave" asked of a stored arm answers with the route, not a refusal."""
-    assert R.path(R.POSTURE_HOME, R.POSTURE_PRESENT) == ["RAISE_TO_SIDE"]
-    assert R.path(R.POSTURE_HOME, R.POSTURE_HOME) == []
-
-
-def test_a_path_from_rest_is_the_notebooks_single_move():
-    """It used to be STOW_ROUTE, RAISE_TO_SIDE, PRESENT_ROUTE — all the way
-    home and back out through the hub.  The notebook lifts straight off the
-    board (cell 18)."""
+def test_a_stored_arm_is_raised_before_it_waves():
+    """"Wave" asked of an arm at rest answers with the lift, not a refusal."""
     assert R.path(R.POSTURE_REST, R.POSTURE_PRESENT) == ["LIFT_TO_PRESENT"]
+    assert R.path(R.POSTURE_PRESENT, R.POSTURE_HOME) == ["LOWER_TO_REST"]
 
 
 def test_already_there_is_no_moves_and_the_wave_is_the_exception():
-    assert R.path(R.POSTURE_HOME, R.POSTURE_HOME) == []
+    assert R.path(R.POSTURE_REST, R.POSTURE_REST) == []
     assert R.path(R.POSTURE_PRESENT, R.POSTURE_PRESENT) == ["WAVE"]
 
 
 def test_a_path_that_does_not_exist_is_still_a_real_answer():
     """It is what stops a plan inventing a way through."""
-    assert R.path("nowhere", R.POSTURE_HOME) is None
-    assert R.path(R.POSTURE_HOME, "nowhere") is None
+    assert R.path("nowhere", R.POSTURE_REST) is None
+    assert R.path(R.POSTURE_REST, "nowhere") is None
 
 
 def test_every_edge_has_something_that_can_fly_it():
@@ -460,132 +335,26 @@ def test_every_edge_has_something_that_can_fly_it():
 
 
 # ---------------------------------------------------------------------------
-# #82: FOOTPRINT_LEGS names the tabletop-adjacent tail/head of each route the
-# forearm-footprint check sweeps against live object poses.
+# #82: FOOTPRINT_LEGS, the legs swept against live object poses
 # ---------------------------------------------------------------------------
 
 class TestFootprintLegs:
     def test_every_named_route_is_a_real_posture_edge(self):
-        """A route this points at that does not exist in the posture graph
-        would be checking a footprint nothing ever flies."""
         edges = set(R.POSTURE_TRANSITIONS.values())
         for route in R.FOOTPRINT_LEGS:
             assert route in edges, route
 
-    def test_place_route_and_raise_to_side_share_the_same_tail(self):
-        """RAISE_TO_SIDE is PLACE_ROUTE + LIFT_TO_PRESENT, so it crosses the
-        identical tabletop corridor on its way through — checked once, by
-        route name, rather than duplicated per ability."""
-        assert R.FOOTPRINT_LEGS["RAISE_TO_SIDE"] == R.FOOTPRINT_LEGS["PLACE_ROUTE"]
+    def test_the_legs_are_the_whole_of_each_route(self):
+        """October layout: every waypoint is over or beside the board."""
+        assert R.FOOTPRINT_LEGS["LOWER_TO_REST"] == (R.PRESENT,) + tuple(
+            w.pose for w in R.LOWER_TO_REST)
+        assert R.FOOTPRINT_LEGS["LIFT_TO_PRESENT"] == (R.REST,) + tuple(
+            w.pose for w in R.LIFT_TO_PRESENT)
 
-    def test_stow_route_and_stow_from_side_share_the_same_tail_not_head(self):
-        """Both are STOW_ROUTE's Waypoint objects, so both cross the identical
-        REST_SHUT -> HOVER corridor.  Their heads differ because they are
-        actually flown from different postures: STOW_ROUTE departs REST
-        (a gripper-only change onto REST_SHUT); STOW_FROM_SIDE departs
-        PRESENT (the real PRESENT -> REST_SHUT descent onto the board, #82)."""
-        assert (R.FOOTPRINT_LEGS["STOW_FROM_SIDE"][-2:]
-                == R.FOOTPRINT_LEGS["STOW_ROUTE"][-2:]
-                == (R.REST_SHUT, R.HOVER))
-        assert R.FOOTPRINT_LEGS["STOW_ROUTE"][0] == R.REST
-        assert R.FOOTPRINT_LEGS["STOW_FROM_SIDE"][0] == R.PRESENT
-
-    def test_place_routes_tail_matches_its_own_last_three_waypoints(self):
-        """The checked legs are not an approximation of PLACE_ROUTE's real
-        tail — they are it, in the same order the route actually flies."""
-        last_three = tuple(w.pose for w in R.PLACE_ROUTE[-3:])
-        assert last_three == (R.HOVER, R.REST_SHUT, R.REST)
-        assert R.FOOTPRINT_LEGS["PLACE_ROUTE"] == last_three
-
-    def test_stow_routes_head_is_place_routes_tail_reversed(self):
-        """STOW_ROUTE departs the board the way PLACE_ROUTE arrives at it,
-        flown backwards — the same corridor, not a second one."""
-        assert (R.FOOTPRINT_LEGS["STOW_ROUTE"]
-                == tuple(reversed(R.FOOTPRINT_LEGS["PLACE_ROUTE"])))
-
-    def test_lower_to_rest_starts_from_present_not_hover(self):
-        """LOWER_TO_REST is flown FROM the presentation pose, not from the
-        pocket-exit corridor — a different entry, the same landing."""
-        assert R.FOOTPRINT_LEGS["LOWER_TO_REST"][0] == R.PRESENT
-        assert R.FOOTPRINT_LEGS["LOWER_TO_REST"][-2:] == (R.REST_SHUT, R.REST)
+    def test_the_lift_is_the_lowering_reversed(self):
+        assert R.FOOTPRINT_LEGS["LIFT_TO_PRESENT"] == tuple(
+            reversed(R.FOOTPRINT_LEGS["LOWER_TO_REST"]))
 
     def test_wave_is_absent_on_purpose(self):
-        """WAVE never lands the arm on REST or departs from it, so it cannot
-        catch an object its own named route did not already put there — and
-        that is a measured number, not just an assertion: WAVE's two legs
-        (PRESENT -> WAVE_A, PRESENT -> WAVE_B) read worst +1.6 cm (tube hand,
-        fully open) against a 12 cm block anywhere on the board (x=0.23,
-        y=-0.32), positive in both models
-        (docs/reviews/probes-2026-09-12/probe_wave_legs.txt)."""
+        """WAVE never lands the arm on REST or departs from it."""
         assert "WAVE" not in R.FOOTPRINT_LEGS
-
-    def test_lift_to_present_is_present_and_reverses_the_descent(self):
-        """LIFT_TO_PRESENT (#82/A3) is REST -> PRESENT, one joint-space line.
-        REST and REST_SHUT differ only in r_gripper (rig_routes.py: REST =
-        dict(REST_SHUT, r_gripper=OPEN)), so that line is the same arm sweep
-        as LOWER_TO_REST's first leg (PRESENT -> REST_SHUT) flown backwards —
-        the lift is the descent reversed, and is checked against the same
-        footprint for that reason."""
-        assert "LIFT_TO_PRESENT" in R.FOOTPRINT_LEGS
-        assert R.FOOTPRINT_LEGS["LIFT_TO_PRESENT"] == (R.REST, R.PRESENT)
-
-        arm_joints = [j for j in R.ARM7 if j != "r_gripper"]
-        for j in arm_joints:
-            assert R.REST[j] == R.REST_SHUT[j], j
-
-        descent_first_leg = R.FOOTPRINT_LEGS["LOWER_TO_REST"][:2]
-        assert descent_first_leg == (R.PRESENT, R.REST_SHUT)
-        reversed_descent = tuple(reversed(descent_first_leg))
-        lift = R.FOOTPRINT_LEGS["LIFT_TO_PRESENT"]
-        for a, b in zip(lift, reversed_descent):
-            for j in arm_joints:
-                assert a[j] == b[j], j
-
-
-# ---------------------------------------------------------------------------
-# The corridor margin (#74, owner decision D1, 2026-10-09)
-# ---------------------------------------------------------------------------
-
-def test_the_margin_is_the_owners_numbers():
-    assert R.CORRIDOR_PLANNED_MARGIN == 0.020
-    assert R.CORRIDOR_REALISED_MARGIN == 0.010
-    assert R.CORRIDOR_MIN_FLIGHTS == 20
-
-
-def test_the_corridor_routes_are_every_route_through_swing_1():
-    assert R.CORRIDOR_ROUTES == ("PLACE_ROUTE", "RAISE_TO_SIDE",
-                                 "STOW_FROM_SIDE", "STOW_ROUTE")
-    for name in ("LIFT_TO_PRESENT", "LOWER_TO_REST"):
-        assert name not in R.CORRIDOR_ROUTES
-
-
-def _with_row(monkeypatch, **figures):
-    row = R.RouteValidation("PLACE_ROUTE", "SomeRig", "2026-10-09: test row",
-                            **figures)
-    monkeypatch.setattr(R, "ROUTE_COMPATIBILITY", (row,))
-    return R.check_route("PLACE_ROUTE", "SomeRig")
-
-
-def test_a_corridor_row_meeting_the_margin_passes(monkeypatch):
-    assert _with_row(monkeypatch, planned_worst_m=0.020, realised_worst_m=0.010,
-                     flights=20) == (True, "")
-
-
-@pytest.mark.parametrize("figures,named", [
-    (dict(), "records no planned or realised"),
-    (dict(planned_worst_m=0.03, flights=20), "records no realised"),
-    (dict(planned_worst_m=0.0199, realised_worst_m=0.02, flights=20), "planned +1.99 cm"),
-    (dict(planned_worst_m=0.03, realised_worst_m=0.0099, flights=20), "realised +0.99 cm"),
-    (dict(planned_worst_m=0.03, realised_worst_m=0.02, flights=19), "19 flights against 20"),
-])
-def test_a_corridor_row_short_of_the_margin_is_refused_and_says_where(
-        monkeypatch, figures, named):
-    ok, why = _with_row(monkeypatch, **figures)
-    assert not ok
-    assert "crosses the rig corridor at SWING_1" in why and named in why
-
-
-def test_a_route_off_the_corridor_needs_no_figures(monkeypatch):
-    row = R.RouteValidation("WAVE", "SomeRig", "2026-10-09: test row")
-    monkeypatch.setattr(R, "ROUTE_COMPATIBILITY", (row,))
-    assert R.check_route("WAVE", "SomeRig") == (True, "")

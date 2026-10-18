@@ -18,8 +18,9 @@ correction (docs/adr/0003, "Correcting the tube"), and again the same day
     every guarded route: which boards the corrected tube refuses that the
     legacy tube allowed. Exactly two, both the 4 cm pool objects on r2c3.
 
-  * TestSweepOrdering -- a 224-position, 6 cm cube sweep on the PLACE_ROUTE
-    tail, comparing tube, shells, and the MJCF reference (geomdist.py's
+  * TestSweepOrdering -- a 224-position, 6 cm cube sweep on the guarded
+    tail (LOWER_TO_REST since #192; PLACE_ROUTE's before), comparing tube,
+    shells, and the MJCF reference (geomdist.py's
     method, copied in below; ALL hand geoms including the collision pads) at
     each position, all three at the same aperture. The tube never reads more
     clearance than the MJCF geometry (its coverage, on real objects).
@@ -121,27 +122,35 @@ class TestNamedBoards:
     boards the tube correction newly refuses (TestCorrectionNewlyRefuses);
     both are comfortably positive under shells-with-pads, same as under the
     visual shells before it (+6.3 / +5.9 cm, unchanged to displayed
-    precision -- neither board is anywhere near the thumb pad's gap)."""
+    precision -- neither board is anywhere near the thumb pad's gap).
+
+    THE OCTOBER LAYOUT (#192) MOVED EVERY NUMBER.  The boards are the same
+    and the robot is not: REST is on the board's right margin, beside column
+    3 rather than over it, and the guarded routes are LIFT_TO_PRESENT and
+    LOWER_TO_REST.  Every board is positive under both models now.  August
+    (tube / shells, cm): evidence -5.699 / +4.479, incident -11.944 / -2.414,
+    foam@r3c3 -9.369 / +2.106, soda@r2c3 -4.379 / +4.535, pool_box_1@r2c3
+    -3.719 / +6.258, pool_cyl_1@r2c3 -3.079 / +5.936."""
 
     @pytest.mark.parametrize("objects,oid,expected_tube_cm,expected_shells_cm", [
         pytest.param(
             {"soda_can": _cell_xy("cell_r1c1"), "foam_block": _cell_xy("cell_r2c3")},
-            "foam_block", -5.699, +4.479, id="evidence_board"),
+            "foam_block", +12.049, +13.100, id="evidence_board"),
         pytest.param(
             {"foam_block": (_cell_xy("cell_r2c3")[0], _cell_xy("cell_r2c3")[1] - 0.07)},
-            "foam_block", -11.944, -2.414, id="incident_board"),
+            "foam_block", +7.737, +8.483, id="incident_board"),
         pytest.param(
             {"foam_block": _cell_xy("cell_r3c3")},
-            "foam_block", -9.369, +2.106, id="foam_on_r3c3"),
+            "foam_block", +23.753, +23.753, id="foam_on_r3c3"),
         pytest.param(
             {"soda_can": _cell_xy("cell_r2c3")},
-            "soda_can", -4.379, +4.535, id="soda_can_on_r2c3"),
+            "soda_can", +12.837, +12.837, id="soda_can_on_r2c3"),
         pytest.param(
             {"pool_box_1": _cell_xy("cell_r2c3")},
-            "pool_box_1", -3.719, +6.258, id="pool_box_1_on_r2c3"),
+            "pool_box_1", +14.170, +15.215, id="pool_box_1_on_r2c3"),
         pytest.param(
             {"pool_cyl_1": _cell_xy("cell_r2c3")},
-            "pool_cyl_1", -3.079, +5.936, id="pool_cyl_1_on_r2c3"),
+            "pool_cyl_1", +14.999, +16.000, id="pool_cyl_1_on_r2c3"),
     ])
     def test_worst_clearance_under_the_corrected_tube(
             self, objects, oid, expected_tube_cm, expected_shells_cm):
@@ -190,54 +199,34 @@ def _worst_per_route(model, oid, legacy):
 
 
 class TestCorrectionNewlyRefuses:
-    """Every newly refused board, named.  Six scene objects (the four named
-    ones and one of each 4 cm pool shape) on each of the nine grid cells,
-    every guarded route: legacy tube >= 0 and corrected tube < 0.
+    """Every board the 2026-09-14 tube correction newly refuses, named.  Six
+    scene objects (the four named ones and one of each 4 cm pool shape) on
+    each of the nine grid cells, every guarded route: legacy tube >= 0 and
+    corrected tube < 0.
 
-    Exactly two boards flip -- the 4 cm pool box and pool cylinder on r2c3
-    -- on every guarded route (they all share the REST tail).  Both were
-    marginal under the legacy tube (+0.3 / +0.9 cm) and are 3-4 cm inside
-    the corrected one; the visual-shells clearance at the same positions is
-    +5.9 / +6.3 cm, i.e. the refusal is the isotropic tube's
-    over-conservatism around an asymmetric hand, not a predicted contact.
-    Everything larger on r2c3 and everything on r3c3 was already refused.
-
-    Recorded, not loosened: the tube is now a correct bound and a loose one;
-    recovering these boards is Slice 2's job ("shells", once it covers the
-    collision pads and E1 has flown), not this radius's.
+    At the August REST exactly two boards flipped -- the 4 cm pool box and
+    pool cylinder on r2c3 (+0.3 / +0.9 cm legacy, -3.7 / -3.1 cm corrected),
+    and everything larger on r2c3 and everything on r3c3 was already
+    refused.  At the October REST (#192) nothing on the grid is refused by
+    either tube, so nothing can flip: the correction still holds (a correct
+    bound, and a loose one), and the REST footprint no longer reaches the
+    grid.
     """
 
     OBJECTS = ("red_cube", "blue_cylinder", "soda_can", "foam_block",
                "pool_box_1", "pool_cyl_1")
     CELLS = tuple(f"cell_r{r}c{c}" for r in (1, 2, 3) for c in (1, 2, 3))
 
-    def test_exactly_the_two_pool_objects_on_r2c3_flip(self):
-        flips = {}
-        already = set()
+    def test_no_board_on_the_grid_is_refused_by_either_tube(self):
+        refused = {}
         for oid in self.OBJECTS:
             for cell in self.CELLS:
                 model = _board({oid: _cell_xy(cell)})
-                legacy = _worst_per_route(model, oid, legacy=True)
-                new = _worst_per_route(model, oid, legacy=False)
-                for route in R.FOOTPRINT_LEGS:
-                    if legacy[route] < 0:
-                        already.add((oid, cell))
-                    if legacy[route] >= 0 and new[route] < 0:
-                        flips[(oid, cell, route)] = (legacy[route], new[route])
-        assert {(o, c) for o, c, _r in flips} == {
-            ("pool_box_1", "cell_r2c3"), ("pool_cyl_1", "cell_r2c3")}
-        assert {r for _o, _c, r in flips} == set(R.FOOTPRINT_LEGS)
-        for (oid, cell, route), (lo, nw) in flips.items():
-            if oid == "pool_box_1":
-                assert lo == pytest.approx(0.003, abs=0.002) and nw == pytest.approx(-0.037, abs=0.003)
-            else:
-                assert lo == pytest.approx(0.009, abs=0.002) and nw == pytest.approx(-0.031, abs=0.003)
-        # and nothing that was refused stops being refused
-        for oid in self.OBJECTS:
-            for cell in self.CELLS:
-                if (oid, cell) in already:
-                    model = _board({oid: _cell_xy(cell)})
-                    assert min(_worst_per_route(model, oid, legacy=False).values()) < 0
+                for legacy in (True, False):
+                    worst = min(_worst_per_route(model, oid, legacy=legacy).values())
+                    if worst < 0:
+                        refused[(oid, cell, legacy)] = worst
+        assert refused == {}
 
 
 # ---------------------------------------------------------------------------
@@ -332,10 +321,12 @@ def _run_sweep(sweep_model):
     jq = {n: int(m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, n)])
           for n in R.R_JOINTS}
     # every arm geom MuJoCo can report contact on or draw: the collision
-    # capsules, both visual shells, BOTH collision pads, the wrist ball
+    # capsules, both visual shells, BOTH collision pads, the hand's two
+    # collision boxes (#192), the wrist ball
     arm_geom_names = ("r_upper_arm_col", "r_forearm_col",
                      "r_thumb_body", "r_finger_body",
-                     "r_thumb_col", "r_finger_col", "r_wrist_ball")
+                     "r_thumb_col", "r_finger_col",
+                     "r_hand_back_col", "r_palm_col", "r_wrist_ball")
     arm_geoms = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, n)
                 for n in arm_geom_names]
 
@@ -350,7 +341,7 @@ def _run_sweep(sweep_model):
     scene = SceneModel.from_yaml(_SCENE_PATH)
     scene._objects[OID] = replace(scene._objects[OID], size=(0.06, 0.06, 0.06))
 
-    leg = R.FOOTPRINT_LEGS["PLACE_ROUTE"]
+    leg = R.FOOTPRINT_LEGS["LOWER_TO_REST"]
     samples = []
     for a, b in zip(leg, leg[1:]):
         qa = [a[j] for j in R.ARM7]
@@ -468,5 +459,7 @@ class TestSweepOrdering:
         # the board -- the over-conservatism Slice 2 PR2 is meant to recover.
         # Unchanged by the pad coverage: the widened finger/thumb_pad add at
         # most ~0.05 cm here, well under the 1 cm threshold.
-        assert sum(1 for g in ts_gaps if g < -0.01) == 189
-        assert max(-g for g in tr_gaps) == pytest.approx(0.1296, abs=0.003)
+        # On the October lowering (#192; August's PLACE_ROUTE tail read 189
+        # and 12.96 cm).
+        assert sum(1 for g in ts_gaps if g < -0.01) == 18
+        assert max(-g for g in tr_gaps) == pytest.approx(0.0335, abs=0.003)

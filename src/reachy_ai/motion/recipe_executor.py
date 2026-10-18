@@ -121,7 +121,7 @@ KNOWN_PRIMITIVES = (KNOWN_CONTROL_PANEL_PRIMITIVES
 #: searchable would produce trials about a motion the robot does not fly, which
 #: is worse than the honest refusal below.  The recipe, the evaluator and the
 #: integrity check for pointing all exist; only the offline driver is missing.
-PANEL_ROUTES_EXECUTABLE = frozenset({"PLACE_ROUTE", "STOW_ROUTE", "WAVE"})
+PANEL_ROUTES_EXECUTABLE = frozenset({"LOWER_TO_REST", "LIFT_TO_PRESENT", "WAVE"})
 
 
 @dataclasses.dataclass
@@ -317,10 +317,11 @@ class RecipeExecutor(_PanelRouteMixin):
         `start_qpos` IS NOT A COSMETIC DEFAULT.  It used to be the home/zero
         position unconditionally, which is right for pick-and-place — home is
         its start — and wrong for any route with a different precondition.
-        Placing the arm at REST and then building from home makes the FIRST
-        commanded target ~0 degrees: the arm is driven from over the board
-        straight back toward the pocket before the corridor's first waypoint,
-        which is the exact unmeasured transit the corridor exists to forbid.
+        Placing the arm at a posture and then building from zero makes the
+        FIRST commanded target ~0 degrees: the arm is driven from where it
+        stands toward a pose nobody measured before the route's first
+        waypoint (and at the October mount, #192, an arm at zero is inside
+        the board).
         Placing the arm and building from home are two halves of one thing, and
         doing only the first is worse than doing neither, because it looks
         fixed.

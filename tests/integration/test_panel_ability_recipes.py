@@ -94,7 +94,7 @@ def test_the_corridor_actually_carries_the_arm_somewhere(ability):
     ranked physics noise and called it a trajectory.
 
     Asserted as "it left where it was PUT", not "it is away from home": stow
-    legitimately finishes at home, having started at rest."""
+    legitimately finishes at REST, which is home, having started at PRESENT."""
     _skip_without_mujoco()
     from joint_map import by_name
 
@@ -124,19 +124,19 @@ def test_the_wave_actually_swings():
         "the forearm never reached either side of the swing"
 
 
-def test_the_stow_corridor_starts_at_rest_not_at_the_pocket():
-    """A direct move from anywhere over the board to HOME drives the upper arm
-    through the board's near edge.  Flying STOW_ROUTE from the home keyframe
-    interpolates straight into REST_SHUT, which is that move."""
+def test_the_stow_starts_at_the_raised_pose_not_at_rest():
+    """HOME IS REST (#192): the stow is LOWER_TO_REST, so it is placed at
+    PRESENT before it flies.  Building it from the start keyframe (REST) would
+    command PRESENT_SHUT straight from the board, a move nobody measured."""
     _skip_without_mujoco()
     runner = runner_for("stow_arm")
     pose = runner._start_pose(load("stow_arm"))
-    assert pose, "stow must be placed at REST before it flies"
+    assert pose, "stow must be placed at PRESENT before it flies"
 
     from joint_map import by_name
     assert by_name("r_shoulder_pitch").mjcf_rad_to_sdk_deg(
-        pose["r_shoulder_pitch"]) == pytest.approx(R.REST["r_shoulder_pitch"])
-    # Only the joints REST names, so the neck keeps its keyframe pitch.
+        pose["r_shoulder_pitch"]) == pytest.approx(R.PRESENT["r_shoulder_pitch"])
+    # Only the joints PRESENT names, so the neck keeps its keyframe pitch.
     assert "neck_pitch" not in pose
 
 
@@ -162,8 +162,8 @@ def test_the_offline_world_has_the_board_and_the_rails():
 def test_the_panel_routes_make_no_unintended_contact(ability):
     """Every contact a measured route makes in the world WITH the board and
     rails is allowed by the shared rule table: rest and stow lay the forearm
-    on the board at REST, which is their declared route exception, and
-    nothing else touches anything."""
+    and the hand on the board at REST, which are their declared route
+    exceptions (#192), and nothing else touches anything."""
     _skip_without_mujoco()
     from reachy_ai.evaluation import contact_rules as CR
     from reachy_ai.evaluation.base import ViolationKind
@@ -177,7 +177,11 @@ def test_the_panel_routes_make_no_unintended_contact(ability):
                                             if not j.allowed]
     made = {(j.sample.body1, j.sample.body2, j.sample.pose) for j in judged}
     if ability in ("rest_forearm", "stow_arm"):
-        assert made == {("r_forearm", "table_top", "rest")}
+        # The forearm lands on the margin; the hand settles onto its palm
+        # only once the motors are off, which a flown route does not do.
+        assert made <= {("r_forearm", "table_top", "rest"),
+                        ("r_gripper_thumb", "table_top", "rest")}
+        assert ("r_forearm", "table_top", "rest") in made
     else:
         assert made == set()
 
@@ -291,13 +295,12 @@ def test_a_model_whose_timestep_moved_fails_loudly(monkeypatch):
 def test_the_first_command_is_where_the_arm_actually_is(ability):
     """PLACING THE ARM AND BUILDING FROM HOME ARE TWO HALVES OF ONE THING.
 
-    `start_pose_rad` put the arm at REST; `build_commands` then interpolated
-    from the home keyframe regardless, so the FIRST commanded target was ~0
-    degrees — the stiffened arm driven from over the board straight back
-    toward the pocket, outside the corridor, before the corridor's first
-    waypoint.  That is the exact unmeasured transit STOW_ROUTE exists to
-    forbid, and every duration, clearance and drift number from those episodes
-    described it.
+    `start_pose_rad` put the arm at its start posture; `build_commands` then
+    interpolated from zero regardless, so the FIRST commanded target was ~0
+    degrees — the stiffened arm driven along a path nobody measured before
+    the route's first waypoint (August: from over the board back toward the
+    rail pocket), and every duration, clearance and drift number from those
+    episodes described it.
 
     Doing only the placement was worse than doing neither, because it looked
     fixed.  This measures the thing that was actually wrong: the gap between

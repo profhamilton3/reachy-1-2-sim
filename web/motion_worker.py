@@ -180,8 +180,8 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
     """Fly one ability's route and report where the arm ended up.
 
     CANCELLATION IS PER STAGE, and the stages are not interchangeable.  Entry
-    and exit are corridors: mid-corridor the arm is between rails and cannot
-    stop where it is, so a Stop finishes the waypoint it is flying and holds.
+    and exit are measured routes: a Stop finishes the waypoint it is flying
+    and holds.
     The action itself — a wave — can stop between cycles.  None of these is an
     emergency stop, and the panel must not word them as one.
 
@@ -206,17 +206,9 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
 
     start = R.posture_of(M.present_pose(arm))
     recovered: List[str] = []
-    if start is None and M.stranded_at(arm) is not None:
-        # Left part way through the pocket entry by something that stopped
-        # early.  Finishing it is two measured moves, and refusing every later
-        # request until a human intervenes is correct and useless.
-        phase("finishing the move that was interrupted")
-        robot.turn_on("r_arm")
-        wait_for_motors(arm)
-        recovered = M.resume_to_home(arm, on_phase=phase)
-        start = R.posture_of(M.present_pose(arm))
     if start is None:
-        # Not at any named posture, and not on the pocket sequence either.
+        # Not at any named posture.  (The recovery onto the rail-pocket
+        # sequence went with the pocket, #192.)
         # The nearest waypoint is reported because it is the useful fact, and
         # NOT flown to, because the segment onto it is the one nobody
         # measured.
@@ -241,9 +233,9 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
         return _fail("the arm's motors did not come on, so I will not command "
                      "a move it cannot make.", motors_off=True)
 
-    # GETTING THERE IS PART OF DOING IT.  An arm stored in the rail pocket
-    # cannot wave from where it is, and that is a fact about the rig rather
-    # than something the operator should have to know and type.  So the
+    # GETTING THERE IS PART OF DOING IT.  An arm stored at REST cannot wave
+    # from where it is, and that is a fact about the rig rather than something
+    # the operator should have to know and type.  So the
     # approach is flown, by measured edges only — `travel` refuses rather than
     # inventing one.
     approach: List[str] = list(recovered)
@@ -279,6 +271,7 @@ def run_ability(job: Dict[str, Any], conn: Connection, *,
         return _point_at_target(job, robot, a, phase, **kw)
 
     runner = {"rest_forearm": go_to(R.POSTURE_REST),
+              # HOME IS REST in the October layout (#192): the same posture.
               "stow_arm": go_to(R.POSTURE_HOME),
               "wave": lambda a, **kw: ["wave x%d" % M.wave(a, **kw)],
               # THE SAME FLIGHT, AIMED DIFFERENTLY.  A cell and an object are
@@ -639,9 +632,9 @@ def run_pick_place(job: Dict[str, Any], conn: Connection, *,
     gripper at where an object started.
 
     THE WHOLE JOB IS PREFLIGHTED BEFORE THE ARM IS TURNED ON (#56): the
-    RAISE_TO_SIDE footprint, the complete arc -- approach, grasp, carry, place,
+    LIFT_TO_PRESENT footprint, the complete arc -- approach, grasp, carry, place,
     retract and the return to the raised pose, every segment against the whole
-    arm (tube hand model, 0 cm margin) -- and the STOW_FROM_SIDE footprint
+    arm (tube hand model, 0 cm margin) -- and the LOWER_TO_REST footprint
     against the predicted final board.  A refusal returns `failed` with
     `refused_before_motion` and the segment, link, obstacle, clearance, margin
     and model in the evidence; nothing has been turned on or commanded.  The
@@ -683,7 +676,7 @@ def run_pick_place(job: Dict[str, Any], conn: Connection, *,
     robot.turn_on("r_arm")
     time.sleep(0.3)
 
-    phase("raising to the transit hub")
+    phase("raising to the presentation pose")
     P.raise_to_side(robot.r_arm, duration=3.0)
 
     cancelled = {"flag": False}

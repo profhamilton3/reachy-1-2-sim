@@ -120,46 +120,49 @@ def test_the_table_is_shared_and_unchanged_by_route():
 # ---------------------------------------------------------------------------
 
 def test_the_exception_list_is_short_and_every_entry_says_why():
-    assert len(CR.ROUTE_EXCEPTIONS) <= 3
+    # Two links (forearm, hand) at REST, on the two routes that end or start
+    # there (#192: the hand rests on its palm and back now).
+    assert len(CR.ROUTE_EXCEPTIONS) <= 4
     for e in CR.ROUTE_EXCEPTIONS:
         assert e.reason and len(e.reason) > 20, e
 
 
-@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE"])
-def test_forearm_on_the_board_at_rest_for_rest_and_stow(route):
-    j = judged("r_forearm", "table_top", CR.MEASURED_ROUTE_PHASES[route],
+@pytest.mark.parametrize("route", ["LOWER_TO_REST", "LIFT_TO_PRESENT"])
+@pytest.mark.parametrize("link", ["r_forearm", "r_gripper_thumb"])
+def test_the_arm_on_the_board_at_rest_for_the_rest_routes(route, link):
+    j = judged(link, "table_top", CR.MEASURED_ROUTE_PHASES[route],
                pose="rest", route=route)
     assert j.allowed
     assert j.why.startswith("route exception:")
 
 
-@pytest.mark.parametrize("route", ["PLACE_ROUTE", "STOW_ROUTE"])
+@pytest.mark.parametrize("route", ["LOWER_TO_REST", "LIFT_TO_PRESENT"])
 def test_the_exception_is_that_link_at_that_pose_only(route):
     phase = CR.MEASURED_ROUTE_PHASES[route]
     assert not judged("r_forearm", "table_top", phase, pose=None, route=route).allowed
-    assert not judged("r_forearm", "table_top", phase, pose="home", route=route).allowed
+    assert not judged("r_forearm", "table_top", phase, pose="present", route=route).allowed
     assert not judged("r_upper_arm", "table_top", phase, pose="rest", route=route).allowed
     assert not judged("r_forearm", "rig_rail_back", phase, pose="rest", route=route).allowed
+    assert not judged("r_gripper_finger", "table_top", phase, pose="rest", route=route).allowed
 
 
-def test_no_exception_was_given_to_the_lift_or_its_approach():
+def test_no_exception_was_given_to_the_lift():
     """Owner ruling (2026-10-10): the lift's approach is judged under its own
-    route, and the lift route gets no exception for the forearm at REST."""
-    for route in ("CRANE_LIFT", "RAISE_TO_SIDE"):
-        assert not CR.exceptions_for(route)
-        assert not judged("r_forearm", "table_top", P.APPROACH, pose="rest",
-                          route=route).allowed
+    route, and the lift route gets no exception for the arm at REST."""
+    assert not CR.exceptions_for("CRANE_LIFT")
+    assert not judged("r_forearm", "table_top", P.APPROACH, pose="rest",
+                      route="CRANE_LIFT").allowed
 
 
 def test_a_sample_is_judged_under_the_route_it_was_flown_on():
     """A leg flown inside another ability carries its own route, and that
     route's exceptions, not the ability's."""
-    on_place = judged("r_forearm", "table_top", P.APPROACH, pose="rest",
-                      route="CRANE_LIFT", sample_route="PLACE_ROUTE")
-    assert on_place.allowed
-    on_raise = judged("r_forearm", "table_top", P.APPROACH, pose="rest",
-                      route="CRANE_LIFT", sample_route="RAISE_TO_SIDE")
-    assert not on_raise.allowed
+    on_lift = judged("r_forearm", "table_top", P.APPROACH, pose="rest",
+                     route="CRANE_LIFT", sample_route="LIFT_TO_PRESENT")
+    assert on_lift.allowed
+    on_crane = judged("r_forearm", "table_top", P.APPROACH, pose="rest",
+                      route="CRANE_LIFT", sample_route="CRANE_LIFT")
+    assert not on_crane.allowed
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +194,7 @@ def test_the_crane_segments_map_onto_the_shared_phases(segment, phase):
 
 
 def test_every_measured_route_has_a_phase():
-    for route in ("PLACE_ROUTE", "STOW_ROUTE", "WAVE", "POINT"):
+    for route in ("LIFT_TO_PRESENT", "LOWER_TO_REST", "WAVE", "POINT"):
         assert route in CR.MEASURED_ROUTE_PHASES
 
 

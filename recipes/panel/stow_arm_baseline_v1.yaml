@@ -1,29 +1,26 @@
-# Stow into the rail pocket: the placement route run backwards, REST -> HOME.
+# Stow the arm: PRESENT -> REST.  HOME IS REST in the October layout (#192),
+# so the stow is LOWER_TO_REST, the same route as rest_forearm: the hand shuts
+# while raised, swings out past the board's edge, and comes onto the board's
+# right margin from outside the board.  The search varies segment durations
+# and may not touch the order, the poses, the tolerances or the guarded
+# joints.
 #
-# NOTHING MAY CUT ACROSS THIS.  A direct move from anywhere over the board to
-# HOME drives the upper arm through the board's near edge, so the corridor is
-# not a path among several — it is the only measured one.  The search varies
-# segment durations and may not touch the order, the poses, the tolerances or
-# the guarded joints.
-#
-# SWING_1 HAS NO CLEARANCE MARGIN IN FWDCenterLabSivaPool (#74).  A duration
-# search over this route in that scene is searching around a waypoint that is
-# already tight, and a clearance number derived in sim carries the ~1.5x object
-# oversize of #42 as well.  Both belong in the record of any study run here.
+# Version 2 (#192): the rail-pocket corridor (STOW_ROUTE, REST -> HOME) went
+# with the August mount.
 
 recipe_id: stow_arm_baseline_v1
-recipe_version: 1
+recipe_version: 2
 task_type: stow_arm
 arm: right
 source: baseline
 parent_recipe_id: ""
-route: STOW_ROUTE
-route_version: 2   # SWING_1 moved for margin (#74, docs/adr/0006)
-expected_start_posture: rest
+route: LOWER_TO_REST
+route_version: 3   # 2: SWING_1 moved (#74); 3: the October REST (#192)
+expected_start_posture: present
 
 bounded_parameters:
   # A multiplier on every waypoint's measured duration.  One knob
-  # rather than one per waypoint: the corridor is flown as a whole and
+  # rather than one per waypoint: the route is flown as a whole and
   # the tracking lag that a faster flight produces is a property of the
   # whole flight.  Below 1.0 is faster than measured, which is allowed
   # and is what the waypoint tolerances exist to catch.
@@ -56,67 +53,17 @@ effort_limits: {}
 primitive_sequence:
   - primitive: waypoint
     parameters:
-      name: REST_SHUT
-      seconds: 2.0
-      tol: 6.0
+      name: PRESENT_SHUT
+      seconds: 1.5
+      tol: 8.0
       guard:
         - r_shoulder_pitch
         - r_shoulder_roll
         - r_arm_yaw
         - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
   - primitive: waypoint
     parameters:
-      name: HOVER
-      seconds: 2.0
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: SWING_3
-      seconds: 2.5
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: SWING_2
-      seconds: 2.5
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: SWING_1
-      seconds: 2.0
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: TUCK
+      name: REST_OUT
       seconds: 3.0
       tol: 6.0
       guard:
@@ -124,35 +71,9 @@ primitive_sequence:
         - r_shoulder_roll
         - r_arm_yaw
         - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
   - primitive: waypoint
     parameters:
-      name: CURL_HIGH
-      seconds: 2.0
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: CURL
-      seconds: 2.0
-      tol: 6.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: BACK
+      name: REST
       seconds: 3.0
       tol: 6.0
       guard:
@@ -160,31 +81,3 @@ primitive_sequence:
         - r_shoulder_roll
         - r_arm_yaw
         - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: GRIP_SHUT
-      seconds: 3.0
-      tol: 25.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-  - primitive: waypoint
-    parameters:
-      name: HOME
-      seconds: 2.5
-      tol: 25.0
-      guard:
-        - r_shoulder_pitch
-        - r_shoulder_roll
-        - r_arm_yaw
-        - r_elbow_pitch
-        - r_wrist_pitch
-        - r_forearm_yaw
-
-# Ends at: home

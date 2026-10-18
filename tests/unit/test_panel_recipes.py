@@ -82,17 +82,18 @@ def an_identity(scene_revision="rev-1"):
                                working_tree_dirty=False)
 
 
-#: The version the panel's stow_arm ability asks for today (2 since SWING_1
-#: moved, #74).  A stored trial the planner is meant to reuse has to carry it.
+#: The version the panel's stow_arm ability asks for today (3 since HOME
+#: became REST, #192).  A stored trial the planner is meant to reuse has to
+#: carry it.
 def _stow_version():
     import panel_abilities
     return panel_abilities.REGISTRY["stow_arm"].route_version
 
 
-_STOW_V = 2
+_STOW_V = 3
 
 
-def write_trial(db, *, promoted=True, kind=KIND_ABILITY_ROUTE, route="STOW_ROUTE",
+def write_trial(db, *, promoted=True, kind=KIND_ABILITY_ROUTE, route="LOWER_TO_REST",
                 route_version=1, parameters=None, obstacles=("soda_can",),
                 live=False, arm="right", identity=None, start_posture="rest"):
     identity = identity or an_identity()
@@ -134,7 +135,7 @@ def library(db):
 
 
 def find(lib, **kw):
-    base = dict(task_type="stow_arm", arm="right", route="STOW_ROUTE",
+    base = dict(task_type="stow_arm", arm="right", route="LOWER_TO_REST",
                 route_version=1, start_posture="rest",
                 obstacles=["soda_can"], tunable=(), scene_revision="rev-1")
     base.update(kw)
@@ -179,7 +180,7 @@ def test_a_live_interactive_episode_is_not_retrieved(db):
                                              include_live_interactive=True)
     decision = check_reuse(ReuseCandidate.from_row(row), an_identity(),
                            ReuseRequest(task_type="stow_arm", arm="right",
-                                        route="STOW_ROUTE", route_version=1,
+                                        route="LOWER_TO_REST", route_version=1,
                                         start_posture="rest",
                                         obstacles=["soda_can"]))
     assert not decision.allowed
@@ -220,7 +221,7 @@ def test_a_broken_store_costs_the_default_route_and_not_the_plan(db, monkeypatch
         raise RuntimeError("the disk is on fire")
 
     monkeypatch.setattr(lib, "_find", explode)
-    assert lib.find(task_type="stow_arm", arm="right", route="STOW_ROUTE",
+    assert lib.find(task_type="stow_arm", arm="right", route="LOWER_TO_REST",
                     route_version=1, start_posture="rest",
                     obstacles=["soda_can"]) == (None, [])
 
@@ -271,7 +272,7 @@ def plan(scene, text, recipes=None):
 def test_with_nothing_promoted_the_plan_is_what_it_always_was(db):
     out = plan(make_scene(), "stow your arm", recipes=library(db))
     assert out.kind == "proposal"
-    assert out.proposal.route == "STOW_ROUTE"
+    assert out.proposal.route == "LOWER_TO_REST"
     assert out.proposal.recipe_trial_id == ""
     assert out.proposal.recipe_parameters == {}
     assert "recipe" not in out.proposal.summary
@@ -536,12 +537,12 @@ def test_the_policy_that_allowed_a_reuse_is_carried_and_recorded(db):
     assert meta["recipe_trial_id"] == out.proposal.recipe_trial_id
 
 
-def test_a_stow_trial_flown_before_swing_1_moved_is_not_reused(db):
-    """#74: the corridor changed under the same route name, so the version
-    moved with it.  A version-1 stow trial describes a SWING_1 that no longer
-    exists, and a version-2 request must not be offered it."""
-    assert _stow_version() == _STOW_V == 2
-    write_trial(db, route_version=1)
-    assert find(library(db), route_version=1)[0] is not None      # control
+def test_a_stow_trial_flown_before_the_october_rest_is_not_reused(db):
+    """#192: the stow changed under the same ability, so the version moved
+    with it.  A version-2 stow trial describes the rail-pocket corridor, and a
+    version-3 request must not be offered it."""
+    assert _stow_version() == _STOW_V == 3
+    write_trial(db, route_version=2)
+    assert find(library(db), route_version=2)[0] is not None      # control
     recipe, _reasons = find(library(db), route_version=_STOW_V)
     assert recipe is None

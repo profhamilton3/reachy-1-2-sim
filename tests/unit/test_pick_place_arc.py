@@ -240,13 +240,13 @@ def _execute(planned, monkeypatch, *, lag_streams=(), obstruct_correction=False,
 class TestOldFinalStepRegression:
     def test_the_old_raise_to_side_rejects_the_post_place_posture(
             self, planned, monkeypatch):
-        """Since eb64b83, `raise_to_side` requires HOME.  The arm is above the
-        place site when the retract ends, so the old last step could never
-        have worked."""
+        """Since eb64b83, `raise_to_side` requires its start posture (HOME then,
+        REST since #192).  The arm is above the place site when the retract
+        ends, so the old last step could never have worked."""
         plan = planned["plan"]
         robot = RecordingRobot()
         robot.r_arm.place_at(plan.segments[6].traj[-1])
-        with pytest.raises(RuntimeError, match="HOME"):
+        with pytest.raises(RuntimeError, match="starts at REST"):
             P.raise_to_side(robot.r_arm)
 
     def test_the_replacement_is_in_the_plan_and_arrives_where_the_stow_needs(

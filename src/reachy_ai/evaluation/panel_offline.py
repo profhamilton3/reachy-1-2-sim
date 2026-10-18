@@ -71,7 +71,7 @@ _ROBOT_CONTYPE = 2
 #:
 #: EMPTY, and no longer consulted for runs from this driver: since #172 every
 #: run carries phase-tagged contacts, judged by the shared rule table, where
-#: the forearm on the board at REST is a declared route exception
+#: the hand and forearm on the board at REST are declared route exceptions
 #: (`contact_rules.ROUTE_EXCEPTIONS`).  Kept for results recorded before that.
 REST_INTENDED_CONTACT: Tuple[str, ...] = ()
 
@@ -265,10 +265,10 @@ class OfflineRouteRunner:
         _native_on_path()
         from episode_runner import EpisodeRunner, StepCommand
 
-        # THE PLACEMENT AND THE COMMANDS ARE ONE THING.  Building from home
-        # while the arm sits at REST makes the first commanded target ~0
-        # degrees, driving it from over the board back toward the pocket
-        # outside the corridor — so the arm is placed FIRST, the resulting
+        # THE PLACEMENT AND THE COMMANDS ARE ONE THING.  Building from zero
+        # while the arm sits at a posture makes the first commanded target ~0
+        # degrees, driving it along a path nobody measured -- so the arm is
+        # placed FIRST, the resulting
         # pose is read back out of the model, and the commands are built from
         # that.  The runner resets and re-places deterministically, so what it
         # flies begins exactly where these commands assume it does.
@@ -327,8 +327,9 @@ class OfflineRouteRunner:
 
     def _start_pose(self, recipe: TrajectoryRecipe) -> Dict[str, float]:
         """The posture the route requires the arm to already be at, as joint
-        name -> MuJoCo radians.  Empty when the route starts from home and
-        there is nothing to place.
+        name -> MuJoCo radians.  Empty when the route starts from HOME, which
+        is REST and the model's start keyframe (#192), so there is nothing to
+        place.
 
         The live path REFUSES a route whose start posture the arm is not at,
         rather than driving it there: the connecting move is the one thing
@@ -378,7 +379,8 @@ class OfflineRouteRunner:
                   initial: Dict[str, List[float]]) -> PanelRouteTaskSpec:
         from reachy_ai.motion import rig_routes as R
 
-        ends = {"PLACE_ROUTE": R.POSTURE_REST, "STOW_ROUTE": R.POSTURE_HOME,
+        ends = {"LOWER_TO_REST": R.POSTURE_REST,
+                "LIFT_TO_PRESENT": R.POSTURE_PRESENT,
                 "WAVE": R.POSTURE_PRESENT}
         return PanelRouteTaskSpec(
             task_id=f"panel:{self.ability}",
@@ -502,8 +504,8 @@ def _success_sentence(ability: str) -> str:
         "rest_forearm": "reached the supported posture, touched only the "
                         "tabletop, and moved no object more than the drift "
                         "tolerance",
-        "stow_arm": "reached the rail pocket by walking the measured corridor, "
-                    "touching nothing and moving nothing",
+        "stow_arm": "reached REST, where the arm is stored, by the measured "
+                    "route, touching only the tabletop and moving nothing",
         "wave": "completed the cycles asked for within the tracking tolerance "
                 "and finished recognisably at the presentation pose",
         "point_cell": "reached the selected hover within half a grid cell, "

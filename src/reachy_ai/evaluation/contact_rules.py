@@ -155,16 +155,26 @@ class RouteException:
 #: rule table would call unintended and a route needs, and every entry is a
 #: claim somebody has to be able to defend.
 ROUTE_EXCEPTIONS: Tuple[RouteException, ...] = (
+    # The October REST (#192): the hand rests on the board's right margin on
+    # its palm and back (the r_gripper_thumb collision boxes), with the
+    # forearm along the margin.  LOWER_TO_REST ends with those contacts and
+    # LIFT_TO_PRESENT starts with them; offline, they are on table_top only
+    # while the arm stands at REST (docs/reviews/2026-10-17-october-layout-192).
     RouteException(
-        "PLACE_ROUTE", "r_forearm", Role.SUPPORT, "rest",
-        "REST is the forearm laid on the board: rest_forearm ends with that "
-        "contact, it is the posture (#91; offline, the forearm is on table_top "
-        "only while the arm stands at REST)"),
+        "LOWER_TO_REST", "r_forearm", Role.SUPPORT, "rest",
+        "REST lays the forearm along the board's right margin: rest_forearm "
+        "and stow_arm end with that contact, it is the posture (#192)"),
     RouteException(
-        "STOW_ROUTE", "r_forearm", Role.SUPPORT, "rest",
-        "stow_arm starts at REST with the forearm on the board and lifts it "
-        "off on the first waypoint (#91; offline, the contact ends as the arm "
-        "leaves REST)"),
+        "LOWER_TO_REST", "r_gripper_thumb", Role.SUPPORT, "rest",
+        "REST rests the hand on its palm and back on the margin, outside the "
+        "grid (#192)"),
+    RouteException(
+        "LIFT_TO_PRESENT", "r_forearm", Role.SUPPORT, "rest",
+        "the lift starts at REST with the forearm on the margin and lifts it "
+        "off on the first waypoint (#192)"),
+    RouteException(
+        "LIFT_TO_PRESENT", "r_gripper_thumb", Role.SUPPORT, "rest",
+        "the lift starts at REST with the hand on the margin (#192)"),
 )
 
 
@@ -196,7 +206,7 @@ class ContactSample:
     in a replay); ``pose`` is the named posture the arm stood at, when it
     stood at one (`rig_routes.posture_of`).  ``route`` is the measured route
     being flown when that is not the ability's own — an ability's approach
-    to its start posture (the lift's RAISE_TO_SIDE from HOME) is judged under
+    to its start posture (the lift's LIFT_TO_PRESENT from REST) is judged under
     that route's exceptions, not the ability's.  Aggregate by (bodies, phase,
     pose, route) — the rules do not care how often, only when.
     """
@@ -361,8 +371,8 @@ def crane_phase(segment: str) -> Optional[Phase]:
 #: routes handles an object, so no rule in the table turns on their phase; the
 #: arm-on-board exception turns on the POSE, which is tagged per sample.
 MEASURED_ROUTE_PHASES: Dict[str, Phase] = {
-    "PLACE_ROUTE": Phase.APPROACH,
-    "STOW_ROUTE": Phase.WITHDRAW,
+    "LIFT_TO_PRESENT": Phase.APPROACH,
+    "LOWER_TO_REST": Phase.WITHDRAW,
     "WAVE": Phase.APPROACH,
     "POINT": Phase.APPROACH,
 }

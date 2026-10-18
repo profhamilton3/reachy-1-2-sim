@@ -9,9 +9,8 @@ could drift.
 WHAT THIS CHECK COVERS, EXACTLY -- and nothing more is claimed for it:
 
   * Only the legs listed in ``rig_routes.FOOTPRINT_LEGS`` for each route:
-    RAISE_TO_SIDE is HOVER -> REST_SHUT -> REST and STOW_FROM_SIDE is
-    PRESENT -> REST_SHUT -> HOVER.  The rest of each measured route is covered
-    by that route's own rig validation, not by this live-object check.
+    since the October layout (#192), the whole of LIFT_TO_PRESENT and
+    LOWER_TO_REST, every waypoint.
   * Manipulable objects only: ``path_clearances`` with its default ids, so no
     rig fixtures.
   * The wider commanded aperture of each leg's two ends, judged by the

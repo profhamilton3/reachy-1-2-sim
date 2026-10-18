@@ -60,8 +60,8 @@ def _conn(sdk_class=_FakeRobot):
 
 
 def _job(**kw):
-    base = dict(kind="ability", task_type="stow_arm", route="STOW_ROUTE",
-                expected_start_posture="rest", scene="TestScene")
+    base = dict(kind="ability", task_type="stow_arm", route="LOWER_TO_REST",
+                expected_start_posture="present", scene="TestScene")
     base.update(kw)
     return base
 
@@ -131,33 +131,34 @@ def test_an_arm_at_no_named_posture_reports_recovery_rather_than_guessing(
     segment nobody measured."""
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.SWING_2))
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.REST_OUT))
 
     out = W.run_ability(_job(), _conn())
     assert out["status"] == "failed"
     assert out["evidence"]["recovery_needed"] is True
-    assert "SWING_2" in out["detail"]
+    assert "REST_OUT" in out["detail"]
     assert "will not guess" in out["detail"]
 
 
 def test_the_arm_is_taken_to_the_start_rather_than_refused(monkeypatch, validated):
     """Getting there is part of doing it.
 
-    An arm stored in the rail pocket cannot wave from where it is, and that is
-    a fact about the rig rather than something the operator should have to
-    know and type.
+    An arm stored at REST cannot wave from where it is, and that is a fact
+    about the rig rather than something the operator should have to know and
+    type.
     """
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.REST))
     went = []
     monkeypatch.setattr(M, "travel",
                         lambda arm, to, **kw: went.append(to) or [f"to {to}"])
+    monkeypatch.setattr(M, "wave", lambda arm, **kw: 3)
 
-    out = W.run_ability(_job(), _conn())          # stow starts at rest; arm is home
-    assert went[0] == "rest"                      # the approach
-    assert went[1] == R.POSTURE_HOME              # then the ability itself
+    out = W.run_ability(_job(task_type="wave", route="WAVE"), _conn())
+    assert went == ["present"]                    # the approach, then the wave
     assert out["status"] == "moved"
+    assert out["flown"] == ["to present", "wave x3"]
 
 
 def test_an_unbridgeable_posture_says_so_rather_than_inventing_a_path(
@@ -178,11 +179,11 @@ def test_an_approach_leg_unvalidated_in_this_scene_names_the_leg(monkeypatch):
     it, and says which leg."""
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.REST))
     monkeypatch.setattr(R, "check_route",
                         lambda route, scene: (False, "it has never been flown"))
 
-    out = W.run_ability(_job(), _conn())
+    out = W.run_ability(_job(task_type="wave", route="WAVE"), _conn())
     assert out["status"] == "failed"
     assert "never been flown" in out["detail"]
     assert out["evidence"]["blocked_on"]
@@ -191,41 +192,41 @@ def test_an_approach_leg_unvalidated_in_this_scene_names_the_leg(monkeypatch):
 def test_arriving_reports_the_waypoints_and_the_posture(monkeypatch, validated):
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
     monkeypatch.setattr(M, "travel",
-                        lambda arm, to, **kw: [w.name for w in R.STOW_ROUTE])
+                        lambda arm, to, **kw: [w.name for w in R.LOWER_TO_REST])
 
-    out = W.run_ability(_job(expected_start_posture="home"), _conn())
+    out = W.run_ability(_job(), _conn())
     assert out["status"] == "moved"
-    assert out["final_posture"] == "home"
-    assert out["flown"] == [w.name for w in R.STOW_ROUTE]
+    assert out["final_posture"] == "present"      # present_pose is stubbed
+    assert out["flown"] == [w.name for w in R.LOWER_TO_REST]
 
 
 def test_a_route_stopped_part_way_reports_where_it_stopped(monkeypatch, validated):
     """It reports the posture and lets the panel judge it — the arm being
-    three waypoints short of HOME is not something to correct from here."""
+    a waypoint short of REST is not something to correct from here."""
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
-    poses = {"at": dict(R.HOME)}
+    poses = {"at": dict(R.PRESENT)}
     monkeypatch.setattr(M, "present_pose", lambda _arm: poses["at"])
 
     def half(arm, to, **kw):
-        poses["at"] = dict(R.SWING_2)             # stopped in the corridor
-        return [w.name for w in R.STOW_ROUTE][:4]
+        poses["at"] = dict(R.REST_OUT)            # stopped part way
+        return [w.name for w in R.LOWER_TO_REST][:2]
 
     monkeypatch.setattr(M, "travel", half)
 
-    out = W.run_ability(_job(expected_start_posture="home"), _conn())
+    out = W.run_ability(_job(), _conn())
     assert out["status"] == "moved"
     assert out["final_posture"] is None
 
 
 def test_the_cancel_check_reaches_the_route_runner(monkeypatch, validated):
     """A Stop has to be visible between waypoints, which is the only place a
-    corridor can be left."""
+    route can be left."""
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
     seen = {}
 
     def capture(arm, to, **kw):
@@ -234,27 +235,26 @@ def test_the_cancel_check_reaches_the_route_runner(monkeypatch, validated):
 
     monkeypatch.setattr(M, "travel", capture)
 
-    W.run_ability(_job(expected_start_posture="home"), _conn(),
-                  should_abort=lambda: True)
+    W.run_ability(_job(), _conn(), should_abort=lambda: True)
     assert seen["abort"] is not None
     assert seen["abort"]() is True
 
 
-def test_a_route_that_stops_mid_corridor_is_reported_not_corrected(
+def test_a_route_that_stops_part_way_is_reported_not_corrected(
         monkeypatch, validated):
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
 
     def stops(arm, to, **kw):
-        raise M.RouteError("SWING_2 did not track")
+        raise M.RouteError("REST_OUT did not track")
 
     monkeypatch.setattr(M, "travel", stops)
 
-    out = W.run_ability(_job(expected_start_posture="home"), _conn())
+    out = W.run_ability(_job(), _conn())
     assert out["status"] == "failed"
     assert out["evidence"]["stopped_mid_route"] is True
-    assert "SWING_2" in out["detail"]
+    assert "REST_OUT" in out["detail"]
 
 
 def test_motors_that_never_come_on_refuse_the_move(monkeypatch, validated):
@@ -262,35 +262,12 @@ def test_motors_that_never_come_on_refuse_the_move(monkeypatch, validated):
     shoulder before the controller has taken hold moved nothing at all."""
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
     monkeypatch.setattr(W, "wait_for_motors", lambda arm, **kw: False)
 
-    out = W.run_ability(_job(expected_start_posture="home"), _conn())
+    out = W.run_ability(_job(), _conn())
     assert out["status"] == "failed"
     assert out["evidence"]["motors_off"] is True
-
-
-def test_an_interrupted_pocket_entry_is_finished_rather_than_refused(
-        monkeypatch, validated):
-    """Left at BACK — out of the pocket, roll home, nothing in front of it —
-    every later request refused for want of a posture to start from.  That is
-    correct and useless: BACK has two measured moves left in it."""
-    from reachy_ai.motion import rig_routes as R
-    from reachy_ai.tasks import rig_motion as M
-    poses = {"at": dict(R.BACK)}
-    monkeypatch.setattr(M, "present_pose", lambda _arm: poses["at"])
-    monkeypatch.setattr(M, "stranded_at", lambda _arm: ("BACK", 3.0))
-
-    def resume(arm, **kw):
-        poses["at"] = dict(R.HOME)
-        return ["GRIP_SHUT", "HOME"]
-
-    monkeypatch.setattr(M, "resume_to_home", resume)
-    monkeypatch.setattr(M, "travel", lambda arm, to, **kw: ["done"])
-
-    out = W.run_ability(_job(expected_start_posture="home"), _conn())
-    assert out["status"] == "moved"
-    assert out["flown"][:2] == ["GRIP_SHUT", "HOME"]
 
 
 # -- the gate and the job table -------------------------------------------
@@ -321,10 +298,9 @@ def test_an_unwired_ability_is_named_rather_than_crashed(monkeypatch, validated)
     gap between the two halves, so it needs a name that is still in it."""
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.tasks import rig_motion as M
-    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.HOME))
+    monkeypatch.setattr(M, "present_pose", lambda _arm: dict(R.PRESENT))
 
-    out = W.run_ability(_job(task_type="shake_hands",
-                             expected_start_posture="home"), _conn())
+    out = W.run_ability(_job(task_type="shake_hands"), _conn())
     assert out["status"] == "failed"
     assert "shake_hands" in out["detail"]
 

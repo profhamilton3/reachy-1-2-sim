@@ -206,11 +206,11 @@ class TestRecordingIncludesTheAperture:
             assert sample["joints"][name] == pytest.approx(R.REST[name])
 
     def test_recorded_values_are_degrees_not_radians(self, mrc):
-        """R.REST's own r_gripper (-45.0) is a degree value in the MJCF's
-        commanded range; a radian reading of the same physical angle would
-        be off by a factor of ~57 and fail the aperture range check below.
-        Confirms record_joint_log applies no unit conversion."""
-        arm = _StubArm(R.REST)
+        """R.PRESENT's own r_gripper (-45.0, open) is a degree value in the
+        MJCF's commanded range; a radian reading of the same physical angle
+        would be off by a factor of ~57 and fail the aperture range check
+        below.  Confirms record_joint_log applies no unit conversion."""
+        arm = _StubArm(R.PRESENT)
         [sample] = mrc.record_joint_log(arm, duration_s=0.05, hz=20.0)[:1]
         assert sample["joints"]["r_gripper"] == pytest.approx(-45.0)
         # and it passes the same validation a real recorded log must pass
@@ -915,106 +915,21 @@ _B1_SCENE_PATH = os.path.join(
 
 
 class TestB2S2FingerClearanceRootCause:
-    """Pins the corrected numbers from the root-cause analysis, and
-    independently reproduces the old (wrong) numbers they replace, so a
-    future change to either policy has to look at both."""
-
-    def test_lower_to_rest_finger_old_endpoint_policy_was_9_41cm(self, mrc):
-        """Reproduces the BUG: holding shells' aperture at LOWER_TO_REST's
-        worst-hand_radius ENDPOINT (OPEN, -45deg) on every leg never
-        evaluates the SHUT pose the arm actually reaches at REST_SHUT,
-        understating how close `finger` gets to `foam_block`. Computed
-        independently of `planned_clearance_by_link` (not a call into
-        current, fixed code) -- this pins the historical wrong answer,
-        not today's behaviour."""
-        route = "LOWER_TO_REST"
-        scene = SceneModel.from_yaml(_B2_SCENE_PATH)
-        waypoints = R.FOOTPRINT_LEGS[route]
-        best = None
-        for a, b in zip(waypoints, waypoints[1:]):
-            qa = [a[j] for j in R.ARM7]
-            qb = [b[j] for j in R.ARM7]
-            worst_gripper = max(a["r_gripper"], b["r_gripper"], key=hand_radius)
-            for q in joint_path(qa, qb, steps=200):
-                for c in link_capsules(q, "right", worst_gripper, hand="shells"):
-                    if c[0] != "finger":
-                        continue
-                    d = scene.clearances([c])["foam_block"].distance
-                    if best is None or d < best:
-                        best = d
-        assert best * 100 == pytest.approx(9.41, abs=0.01)
-
-    def test_lower_to_rest_finger_corrected_planned_is_3_37cm(self, mrc):
-        """The fix: `planned_clearance_by_link` interpolates shells'
-        aperture per sample, so it does evaluate the SHUT pose at
-        REST_SHUT -- the actual worst point, 3.37 cm, not 9.41."""
-        scene = SceneModel.from_yaml(_B2_SCENE_PATH)
-        result = mrc.planned_clearance_by_link(
-            "LOWER_TO_REST", 200, scene, "finger", hand="shells")
-        assert result["foam_block"] * 100 == pytest.approx(3.37, abs=0.01)
-
-    def test_lower_to_rest_finger_corrected_is_close_to_the_realised_worst(
-            self, mrc):
-        """The whole point of the fix: the corrected planned value should
-        sit close to (and, per the analysis, just under) the realised
-        worst sample of 3.543/3.545 cm actually flown -- not 5.87 cm away
-        from it, which is what the old, wrong 9.41 cm produced."""
-        scene = SceneModel.from_yaml(_B2_SCENE_PATH)
-        result = mrc.planned_clearance_by_link(
-            "LOWER_TO_REST", 200, scene, "finger", hand="shells")
-        realised_worst_cm = 3.543
-        delta = result["foam_block"] * 100 - realised_worst_cm
-        assert delta == pytest.approx(-0.17, abs=0.02)
-
-    def test_place_route_footprint_scope_understates_setup_role_by_route_truncation(
-            self, mrc):
-        """Reproduces the SECOND bug: FOOTPRINT_LEGS["PLACE_ROUTE"] is only
-        (HOVER, REST_SHUT, REST) -- a "setup" recording that flies the
-        WHOLE named route from HOME passes through SWING_2, far closer to
-        `soda_can` than anything in that scoped-down subset, so comparing
-        it against the footprint-only planned value is comparing two
-        different arcs. This pins the historical, route-truncated wrong
-        answer (43.28), not today's full-route behaviour."""
-        scene = SceneModel.from_yaml(_B1_SCENE_PATH)
-        footprint_only = mrc.planned_clearance_by_link(
-            "PLACE_ROUTE", 200, scene, "finger", hand="shells")
-        assert footprint_only["soda_can"] * 100 == pytest.approx(43.28, abs=0.01)
-
-    def test_place_route_full_route_finger_corrected_is_31_61cm(self, mrc):
-        """The fix: comparing against `full_route_poses("PLACE_ROUTE")`
-        (the whole flown route, HOME included) rather than
-        `FOOTPRINT_LEGS`'s scoped-down subset gives 31.61 cm, matching the
-        realised worst sample (31.38 cm, near SWING_2) to within 0.3 cm --
-        not the footprint-only 43.28 cm, an 11.89 cm route-scope
-        artefact.
-
-        31.61 cm is for the 12.2 cm soda can after #151 (can centre z
-        0.7975 -> 0.8010 in B1_evidence.yaml). The analysis of 2026-09-22
-        measured 31.66 cm at the old can height; #151 alone accounts for
-        the change."""
-        scene = SceneModel.from_yaml(_B1_SCENE_PATH)
-        # The B2 s2 recording flew the notebook's SWING_1; it moved on
-        # 2026-10-09 (docs/adr/0006), so the comparison uses the route as flown.
-        full = (mrc.R.HOME,) + tuple(
-            w.pose for w in mrc.R.with_notebook_swing_1(mrc.R.PLACE_ROUTE))
-        assert full[1:] != mrc.full_route_poses("PLACE_ROUTE")[1:]
-        result = mrc.planned_clearance_by_link(
-            "PLACE_ROUTE", 200, scene, "finger", hand="shells", waypoints=full)
-        assert result["soda_can"] * 100 == pytest.approx(31.61, abs=0.01)
+    """The two fixes from the root-cause analysis, as properties of the
+    recorder.  The analysis's own numbers (9.41 -> 3.37 cm on LOWER_TO_REST,
+    43.28 -> 31.61 cm on PLACE_ROUTE, against flights at the August mount)
+    went with the August mount (#192); they are in the analysis and in git
+    history."""
 
     def test_full_route_poses_starts_with_the_departed_posture(self, mrc):
-        """PLACE_ROUTE and RAISE_TO_SIDE leave the rail pocket (HOME);
-        LOWER_TO_REST and STOW_FROM_SIDE start already at the side pose
-        (PRESENT); STOW_ROUTE and LIFT_TO_PRESENT start at the tabletop
-        rest pose (REST) -- the posture each route's own first named
-        waypoint is actually flown from, per rig_routes.py's own
-        documentation of what `fly_route` commands."""
-        assert mrc.full_route_poses("PLACE_ROUTE")[0] == R.HOME
-        assert mrc.full_route_poses("RAISE_TO_SIDE")[0] == R.HOME
-        assert mrc.full_route_poses("STOW_ROUTE")[0] == R.REST
-        assert mrc.full_route_poses("STOW_FROM_SIDE")[0] == R.PRESENT
+        """LOWER_TO_REST starts at the side pose (PRESENT) and
+        LIFT_TO_PRESENT at REST -- the posture each route's own first named
+        waypoint is actually flown from.  (The rail-pocket routes, which
+        left HOME, went with the August mount, #192.)"""
         assert mrc.full_route_poses("LOWER_TO_REST")[0] == R.PRESENT
         assert mrc.full_route_poses("LIFT_TO_PRESENT")[0] == R.REST
+        with pytest.raises(KeyError):
+            mrc.full_route_poses("PLACE_ROUTE")
 
     def test_full_route_poses_for_lower_to_rest_matches_footprint_legs(
             self, mrc):
@@ -1031,14 +946,18 @@ class TestB2S2FingerClearanceRootCause:
             waypoints=mrc.full_route_poses("LOWER_TO_REST"))
         assert via_full_route == via_footprint
 
-    def test_report_full_route_flag_selects_full_route_poses(self, mrc):
+    def test_report_full_route_flag_selects_full_route_poses(self, mrc, monkeypatch):
         """report(full_route=True) must actually thread through to
         `planned_clearance`'s `waypoints` argument, not just accept and
         ignore the flag -- and must say so in `planned_route_scope`."""
-        log = _synthetic_log(R.HOME, n=2)
-        footprint_result = mrc.report(log, "PLACE_ROUTE", _B1_SCENE_PATH)
+        # LOWER_TO_REST's full sequence IS its footprint (see above), so the
+        # flag is made visible by giving it a different full sequence.
+        monkeypatch.setattr(mrc, "full_route_poses",
+                            lambda route: (R.PRESENT, R.REST_OUT))
+        log = _synthetic_log(R.PRESENT, n=2)
+        footprint_result = mrc.report(log, "LOWER_TO_REST", _B1_SCENE_PATH)
         full_route_result = mrc.report(
-            log, "PLACE_ROUTE", _B1_SCENE_PATH, full_route=True)
+            log, "LOWER_TO_REST", _B1_SCENE_PATH, full_route=True)
         assert footprint_result["planned"] != full_route_result["planned"]
         assert "FOOTPRINT_LEGS" in footprint_result["planned_route_scope"]
         assert "full_route_poses" in full_route_result["planned_route_scope"]

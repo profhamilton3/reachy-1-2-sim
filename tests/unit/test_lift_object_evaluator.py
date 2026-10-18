@@ -217,18 +217,20 @@ def test_an_unrecorded_contact_record_is_invalid():
 
 
 def test_the_approach_leg_is_judged_under_its_own_route_and_reported():
-    """RAISE_TO_SIDE from HOME lays the forearm on the board at REST.  That
-    is not the lift: it is reported under its own route, outside the verdict."""
-    leg = ("r_forearm", "table_top", P.APPROACH, "rest", "RAISE_TO_SIDE", 0.0004)
+    """LIFT_TO_PRESENT from REST leaves the board.  A contact on it is not
+    the lift: it is judged under its own route and reported outside the
+    verdict -- unintended if no exception covers it, clean if one does (the
+    forearm on the board at REST, #192)."""
+    leg = ("r_upper_arm", "table_top", P.APPROACH, "rest", "LIFT_TO_PRESENT", 0.0004)
     v = lift(a_lift(contacts=samples(extra=[leg])))
     assert v.is_successful and v.reported["full_cycle"]
-    found = v.reported["approach"]["RAISE_TO_SIDE"]
-    assert len(found) == 1 and "r_forearm" in found[0]
-    assert "APPROACH (RAISE_TO_SIDE" in v.explanation
+    found = v.reported["approach"]["LIFT_TO_PRESENT"]
+    assert len(found) == 1 and "r_upper_arm" in found[0]
+    assert "APPROACH (LIFT_TO_PRESENT" in v.explanation
 
-    clean_leg = ("r_forearm", "table_top", P.APPROACH, "rest", "PLACE_ROUTE")
+    clean_leg = ("r_forearm", "table_top", P.APPROACH, "rest", "LIFT_TO_PRESENT")
     v = lift(a_lift(contacts=samples(extra=[clean_leg])))
-    assert v.reported["approach"] == {"PLACE_ROUTE": []}
+    assert v.reported["approach"] == {"LIFT_TO_PRESENT": []}
 
 
 def test_a_refused_withdrawal_is_a_lift_pass_and_not_a_full_cycle():

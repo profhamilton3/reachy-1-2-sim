@@ -20,6 +20,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
+from reachy_ai.motion.kinematics import _BASE as K_BASE  # noqa: E402
 from reachy_ai.motion.kinematics import (  # noqa: E402
     CartesianPlanner,
     R_ARM_JOINTS,
@@ -55,6 +56,17 @@ def q(**kw):
 OLD_PRESENT = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
 PRESENT = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
 
+# A pose whose FOREARM is inside red_cube (FWDCenterLabMCC, r1c3).  At the
+# August mount that was OLD_PRESENT itself; at the October mount (#192) the
+# torso is 0.206 m forward and 0.15 m up, OLD_PRESENT clears the cube by
+# 5.1 cm, and this pose takes its place: forearm 0.9 cm into the cube, and
+# the move from PRESENT clips at 88% with a 3 cm margin.
+INTO_CUBE = q(r_shoulder_pitch=0.0, r_shoulder_roll=0.0, r_elbow_pitch=-65.0)
+
+# Where the arm is mounted (#192): the FK reference values below were read in
+# the arm's base frame, so they are checked relative to it.
+_BASE = tuple(K_BASE)
+
 
 @pytest.fixture
 def scene():
@@ -81,17 +93,22 @@ class TestLinkFrames:
     ever drifts, these numbers catch it.
     """
 
+    def _at(self, rel):
+        return tuple(b + r for b, r in zip(_BASE, rel))
+
     def test_zero_pose_hangs_straight_down(self):
         shoulder, elbow, wrist, _ = link_frames(q())
-        assert shoulder == pytest.approx((0.0, -0.19, 1.0))
-        assert elbow == pytest.approx((0.0, -0.19, 1.0 - _UPPER_ARM_LEN))
+        assert shoulder == pytest.approx(self._at((0.0, -0.19, 0.0)))
+        assert elbow == pytest.approx(self._at((0.0, -0.19, -_UPPER_ARM_LEN)))
         assert wrist == pytest.approx(
-            (0.0, -0.19, 1.0 - _UPPER_ARM_LEN - _FOREARM_LEN))
+            self._at((0.0, -0.19, -_UPPER_ARM_LEN - _FOREARM_LEN)))
 
     def test_matches_sdk_forward_kinematics_at_present(self):
+        # Read off the SDK at the August mount, torso at (0, 0, 1.0); the arm's
+        # own geometry is the same at any mount.
         _, elbow, wrist, _ = link_frames(OLD_PRESENT)
-        assert wrist == pytest.approx((0.3921, -0.2013, 0.8935), abs=5e-4)
-        assert elbow == pytest.approx((0.1703, -0.1998, 0.7780), abs=5e-4)
+        assert wrist == pytest.approx(self._at((0.3921, -0.2013, -0.1065)), abs=5e-4)
+        assert elbow == pytest.approx(self._at((0.1703, -0.1998, -0.2220)), abs=5e-4)
 
     def test_link_lengths_are_invariant_under_joint_angles(self):
         for pose in (q(), OLD_PRESENT, PRESENT,
@@ -137,10 +154,12 @@ class TestLinkCapsules:
         assert _dist(hand[1], hand[2]) == pytest.approx(_HAND_LEN)
 
     def test_the_elbow_sits_far_below_the_pad_at_the_old_present(self, planner):
-        """The reason the pad-height check was worthless."""
+        """The reason the pad-height check was worthless: at the August mount
+        the elbow was 5 cm above a 0.740 tabletop (0.778) while the hand
+        pointed up and away."""
         _, elbow, wrist, _ = link_frames(OLD_PRESENT)
-        assert elbow[2] < 0.79            # 5 cm above a 0.740 tabletop
-        assert wrist[2] > elbow[2]        # while the hand points up and away
+        assert elbow[2] - _BASE[2] == pytest.approx(0.778 - 1.0, abs=5e-4)
+        assert wrist[2] > elbow[2]
 
 
 class TestHandRadius:
@@ -302,8 +321,8 @@ class TestSceneClearance:
         assert "red_cube" in scene.obstacle_ids()
         assert "red_cube" not in [o.id for o in scene.static_obstacles()]
 
-    def test_old_present_pose_overlapped_the_red_cube(self, scene):
-        c = scene.clearance(link_capsules(OLD_PRESENT))
+    def test_a_pose_into_the_cube_overlaps_the_red_cube(self, scene):
+        c = scene.clearance(link_capsules(INTO_CUBE))
         assert c.object_id == "red_cube"
         assert c.link == "forearm"
         assert c.distance < 0
@@ -317,8 +336,8 @@ class TestSceneClearance:
         assert set(per) == set(scene.manipulable_ids())
 
     def test_worst_matches_the_per_object_minimum(self, scene):
-        per = scene.clearances(link_capsules(OLD_PRESENT))
-        assert scene.clearance(link_capsules(OLD_PRESENT)).distance == pytest.approx(
+        per = scene.clearances(link_capsules(INTO_CUBE))
+        assert scene.clearance(link_capsules(INTO_CUBE)).distance == pytest.approx(
             min(c.distance for c in per.values()))
 
     def test_including_statics_can_only_lower_the_clearance(self, scene):
@@ -336,75 +355,27 @@ class TestSceneClearance:
     def test_the_tabletop_is_a_support_surface_not_an_obstacle(self, scene):
         """Why it takes a separate opt-in.
 
-        REST is a waypoint from the notebook's verified placement route, and
-        the arm is resting ON the board there — so a guard that counts the
-        tabletop rejects the route the rig was measured against.  It rejected
-        all nine grid cells in section 4.7 before this was separated out.
+        REST is the hand resting ON the board's right margin (#192), so a
+        guard that counts the tabletop rejects the route it ends.  It
+        rejected all nine grid cells in section 4.7 before this was
+        separated out.  Measured at REST's own aperture (shut), as the
+        footprint guard does.
         """
-        rest = q(r_shoulder_pitch=-40.0, r_shoulder_roll=-10.0,
-                 r_elbow_pitch=-45.0, r_wrist_pitch=-10.0, r_wrist_roll=30.0)
-        caps = link_capsules(rest)
+        from reachy_ai.motion import rig_routes as R
+        rest = [R.REST[j] for j in R.ARM7]
+        caps = link_capsules(rest, gripper_deg=R.SHUT)
         assert scene.clearance(caps, ids=["table_top"]).distance < 0
         # the rig fixtures alone (what include_static adds, minus the objects)
         fixtures = [i for i in scene.obstacle_ids(include_static=True)
                     if i not in scene.obstacle_ids()]
         assert "table_top" not in fixtures and fixtures
         assert scene.clearance(caps, ids=fixtures).distance > 0.02
-        # The manipulable objects are a separate question.  At this pose,
-        # hand wide open (the default) and rolled 30 deg, the corrected tube
-        # passes 1.6 cm from red_cube's YAML position -- the legacy tube read
-        # 3.5 cm, limited by the forearm, because it was too small for the
-        # finger to be the nearest link.  Positive, so not a refusal; recorded
-        # here because it is the one place the correction moved a number in
-        # this file's scene (docs/adr/0003, "Correcting the tube").
+        # The manipulable objects are a separate question.  This scene's
+        # red_cube stands on r1c3, beside REST's forearm: 1.9 cm, positive.
+        # (August REST, hand open: 1.6 cm, the hand.)
         near = scene.clearance(caps)
-        assert near.link == "hand" and near.distance == pytest.approx(0.016, abs=0.003)
-
-    # The placement route, with the gripper angle each waypoint actually
-    # commands.  PLACE_ROUTE holds the hand SHUT for the whole trip through the
-    # rig and only opens it at REST, which turns out to be load-bearing — see
-    # the test below.
-    ROUTE = [
-        (q(), 20.0),                                                # HOME
-        (q(r_shoulder_pitch=40.0), 20.0),                           # BACK
-        (q(r_shoulder_pitch=40.0, r_elbow_pitch=-125.0,
-           r_wrist_pitch=45.0), 20.0),                              # CURL
-        (q(r_shoulder_pitch=70.0, r_elbow_pitch=-120.0,
-           r_wrist_pitch=-45.0), 20.0),                             # TUCK
-        (q(r_shoulder_pitch=37.5, r_shoulder_roll=-32.5,
-           r_elbow_pitch=-120.0, r_wrist_pitch=-45.0), 20.0),       # SWING_1
-        (q(r_shoulder_pitch=-17.5, r_shoulder_roll=-37.5,
-           r_elbow_pitch=-120.0, r_wrist_pitch=-45.0), 20.0),       # SWING_3
-        (q(r_shoulder_pitch=-40.0, r_shoulder_roll=-10.0,
-           r_elbow_pitch=-60.0, r_wrist_pitch=-15.0), 20.0),        # HOVER
-    ]
-
-    def test_every_verified_waypoint_clears_the_rig_rails(self, scene):
-        """The other half: the rails ARE a real no-go volume.
-
-        Nothing on the placement route touches a rail, so unlike the tabletop
-        they can be guarded without rejecting known-good poses.
-        """
-        rails = [o.id for o in scene.static_obstacles() if "rig-frame" in o.tags]
-        for pose, grip in self.ROUTE:
-            c = scene.clearance(link_capsules(pose, gripper_deg=grip), ids=rails)
-            assert c.distance > 0.005, str(c)
-
-    def test_the_swing_only_clears_the_rail_because_the_hand_is_shut(self, scene):
-        """Why PLACE_ROUTE carries r_gripper=SHUT through the whole rig.
-
-        It reads like tidiness and is not: at SWING_1 the shut hand passes the
-        outer-right rail with 6 mm to spare, and an open one fouls it by 16 mm.
-        The margin is the gripper's own width.
-        """
-        rails = [o.id for o in scene.static_obstacles() if "rig-frame" in o.tags]
-        swing1 = q(r_shoulder_pitch=37.5, r_shoulder_roll=-32.5,
-                   r_elbow_pitch=-120.0, r_wrist_pitch=-45.0)
-        shut = scene.clearance(link_capsules(swing1, gripper_deg=20.0), ids=rails)
-        opened = scene.clearance(link_capsules(swing1, gripper_deg=-45.0), ids=rails)
-        assert shut.distance > 0
-        assert opened.distance < 0
-        assert shut.link == opened.link == "hand"
+        assert near.link == "forearm" and near.object_id == "red_cube"
+        assert near.distance == pytest.approx(0.019, abs=0.003)
 
     def test_no_obstacles_reports_nothing(self, scene):
         assert scene.clearance(link_capsules(PRESENT), ids=[]) is None
@@ -444,7 +415,9 @@ class TestUpdatePoses:
         """
         caps = link_capsules(PRESENT)
         assert scene.clearance(caps, ids=["red_cube"]).distance > 0.10
-        scene.update_poses({"red_cube": (0.29, -0.24, 0.90)})
+        # Under PRESENT's elbow (the August test used (0.29, -0.24, 0.90); the
+        # arm is 0.206 m forward and 0.15 m up since #192).
+        scene.update_poses({"red_cube": (0.496, -0.24, 1.05)})
         assert scene.clearance(caps, ids=["red_cube"]).distance < 0.10
 
 
@@ -462,13 +435,13 @@ class TestPathClearance:
 
     def test_a_move_into_an_object_is_caught(self, planner):
         stationary = planner.clearance(PRESENT).distance
-        into = planner.path_clearance(PRESENT, OLD_PRESENT).distance
+        into = planner.path_clearance(PRESENT, INTO_CUBE).distance
         assert stationary > 0.10
         assert into < 0
 
     def test_more_steps_never_report_a_larger_clearance(self, planner):
-        coarse = planner.path_clearance(PRESENT, OLD_PRESENT, steps=3).distance
-        fine = planner.path_clearance(PRESENT, OLD_PRESENT, steps=41).distance
+        coarse = planner.path_clearance(PRESENT, INTO_CUBE, steps=3).distance
+        fine = planner.path_clearance(PRESENT, INTO_CUBE, steps=41).distance
         assert fine <= coarse + 1e-9
 
 
@@ -481,25 +454,25 @@ class TestSafeFraction:
         assert frac == 1.0
 
     def test_a_move_into_the_cube_is_clipped_short(self, planner):
-        frac, c = planner.safe_fraction(PRESENT, OLD_PRESENT, margin=0.03)
+        frac, c = planner.safe_fraction(PRESENT, INTO_CUBE, margin=0.03)
         assert 0.0 < frac < 1.0
         assert c.object_id == "red_cube"
 
     def test_the_clipped_pose_actually_clears_the_margin(self, planner):
-        clipped, frac, _ = planner.clip(PRESENT, OLD_PRESENT, margin=0.03)
+        clipped, frac, _ = planner.clip(PRESENT, INTO_CUBE, margin=0.03)
         assert planner.path_clearance(PRESENT, clipped).distance >= 0.03 - 1e-3
         assert frac < 1.0
 
     def test_a_tighter_margin_allows_more_of_the_move(self, planner):
-        loose, _ = planner.safe_fraction(PRESENT, OLD_PRESENT, margin=0.01)
-        tight, _ = planner.safe_fraction(PRESENT, OLD_PRESENT, margin=0.08)
+        loose, _ = planner.safe_fraction(PRESENT, INTO_CUBE, margin=0.01)
+        tight, _ = planner.safe_fraction(PRESENT, INTO_CUBE, margin=0.08)
         assert loose > tight
 
     def test_starting_inside_the_margin_yields_nothing_safe(self, planner):
-        target = dict(zip(R_ARM_JOINTS, OLD_PRESENT))
+        target = dict(zip(R_ARM_JOINTS, INTO_CUBE))
         target["r_wrist_roll"] = 45.0
         frac, _ = planner.safe_fraction(
-            OLD_PRESENT, [target[j] for j in R_ARM_JOINTS], margin=0.03)
+            INTO_CUBE, [target[j] for j in R_ARM_JOINTS], margin=0.03)
         assert frac == 0.0
 
     def test_clip_of_a_clear_move_returns_the_target_unchanged(self, planner):
@@ -513,7 +486,7 @@ class TestSafeFraction:
     def test_without_a_scene_there_is_nothing_to_clip(self):
         bare = CartesianPlanner(arm=None, scene=None, side="right")
         assert bare.clearance(PRESENT) is None
-        assert bare.safe_fraction(PRESENT, OLD_PRESENT)[0] == 1.0
+        assert bare.safe_fraction(PRESENT, INTO_CUBE)[0] == 1.0
 
 
 class TestRoutineTwoSweepsAreSafe:
@@ -558,16 +531,14 @@ class TestRoutineTwoSweepsAreSafe:
             c = planner.path_clearance(PRESENT, target, include_static=True)
             assert c.distance > 0.05, f"{label}: {c}"
 
-    def test_the_old_base_pose_could_not_have_been_saved_by_clipping(self, planner):
-        """Why PRESENT had to move rather than the sweeps merely being clipped.
-
-        red_cube's nearest surface is 0.320 m from the shoulder and the upper
-        arm's own surface reaches 0.315 m, so the near-right cell sits inside
-        the elbow's arc.  From the old pose the arm is already inside the
-        margin, and no fraction of any sweep is safe.
+    def test_a_base_pose_inside_the_margin_cannot_be_saved_by_clipping(self, planner):
+        """Why PRESENT had to move rather than the sweeps merely being clipped
+        (August: OLD_PRESENT, with red_cube inside the elbow's arc).  From a
+        base pose already inside the margin -- INTO_CUBE at the October
+        mount -- no fraction of any sweep is safe.
         """
-        for _, target in self._targets(OLD_PRESENT):
-            frac, _ = planner.safe_fraction(OLD_PRESENT, target, margin=0.03)
+        for _, target in self._targets(INTO_CUBE):
+            frac, _ = planner.safe_fraction(INTO_CUBE, target, margin=0.03)
             assert frac == 0.0
 
 
@@ -657,7 +628,7 @@ class TestClearanceMaximisingIK:
         return p, arm
 
     def test_it_picks_the_roomier_of_two_reaching_solutions(self, scene):
-        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        low = INTO_CUBE
         high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
         assert scene.clearance(link_capsules(low)).distance < 0
         assert scene.clearance(link_capsules(high)).distance > 0.10
@@ -667,14 +638,14 @@ class TestClearanceMaximisingIK:
         assert chosen == pytest.approx(high)
 
     def test_order_does_not_matter(self, scene):
-        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        low = INTO_CUBE
         high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
         p, _ = self._planner_returning(scene, [high, low])
         assert p.solve((0.4, 0.0, 0.95), maximise_clearance=True) == pytest.approx(high)
 
     def test_it_tries_every_orientation_rather_than_stopping_at_the_first(self, scene):
         """The default solver breaks out at 1 mm of pad error; this must not."""
-        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        low = INTO_CUBE
         high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
         p, arm = self._planner_returning(scene, [low, high])
         p.solve((0.4, 0.0, 0.95), maximise_clearance=True)
@@ -682,7 +653,7 @@ class TestClearanceMaximisingIK:
 
     def test_scoring_the_path_can_beat_scoring_the_endpoint(self, scene):
         """from_joints scores the whole move, which is the honest question."""
-        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        low = INTO_CUBE
         high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
         p, _ = self._planner_returning(scene, [low, high])
         chosen = p.solve((0.4, 0.0, 0.95), maximise_clearance=True,
@@ -691,7 +662,7 @@ class TestClearanceMaximisingIK:
 
     def test_without_a_scene_it_falls_back_to_the_pad_error_rule(self):
         """Nothing to score against, so the flag is inert rather than fatal."""
-        low = q(r_shoulder_pitch=-37.5, r_shoulder_roll=-2.0, r_elbow_pitch=-80.0)
+        low = INTO_CUBE
         high = q(r_shoulder_pitch=-70.0, r_shoulder_roll=-25.0, r_elbow_pitch=-80.0)
         arm = self._StubArm([low, high])
         p = CartesianPlanner(arm, scene=None, side="right", yaw_samples=2,
@@ -779,10 +750,13 @@ class TestJointLimits:
         from reachy_ai.motion.kinematics import joint_limits
         right = dict(zip(R_ARM_JOINTS, joint_limits("right")))
         left = dict(zip(R_ARM_JOINTS, joint_limits("left")))
-        # shoulder_roll is -179.9..+9.97 on the right, so -9.97..+179.9 on the left
+        # shoulder_roll is -179.9..+20.3 on the right (the +20.3 stop is a
+        # documented deviation, ADR-0010), so -20.3..+179.9 mirrored.  The
+        # left arm is a phantom (#192): its MJCF keeps the URDF's -10 stop,
+        # and nothing plans for it.
         lo, hi = right["r_shoulder_roll"]
         assert left["r_shoulder_roll"] == (-hi, -lo)
-        assert right["r_shoulder_roll"] == pytest.approx((math.degrees(-3.14), math.degrees(0.174)))
+        assert right["r_shoulder_roll"] == pytest.approx((math.degrees(-3.14), math.degrees(0.354)))
         # symmetric joints are unchanged by mirroring
         assert left["r_arm_yaw"] == right["r_arm_yaw"]
         assert right["r_arm_yaw"] == pytest.approx((math.degrees(-1.57), math.degrees(1.57)))
@@ -793,7 +767,7 @@ class TestJointLimits:
         """If a verified route needed an out-of-range pose, the limits would be
         wrong — this pins that they are not."""
         from reachy_ai.motion.kinematics import within_limits
-        for pose in (PRESENT, OLD_PRESENT):
+        for pose in (PRESENT, OLD_PRESENT, INTO_CUBE):
             assert within_limits(pose)
 
 

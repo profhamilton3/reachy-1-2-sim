@@ -1,3 +1,12 @@
+> **Retired with the August mount (#192, owner decision 2026-10-18).** The
+> E1 Stage 1 campaign flew the rail-pocket cycle (HOME -> REST -> PRESENT ->
+> HOME), which does not exist at the October mount. Its scripts were removed:
+> `plan.py`, `leg.sh`, `parked.sh`, `make_cycle_notebook.py`,
+> `start_variant.py`, `gating.py`, `provenance.py` and `scripts/e1_tail_check.py`
+> (see git history before #192). What remains here is the reset client,
+> `reset.sh` and `reset_verify.py`, which `reset_watcher.py` and its tests use.
+> The rest of this README is the campaign's historical description.
+
 # E1 Stage 1 execution notebook tooling
 
 Generates the marker-gated Stage 1 cycle notebooks (`S1a`, `S1b`, `S1c`)

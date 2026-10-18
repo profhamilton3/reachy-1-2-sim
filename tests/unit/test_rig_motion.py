@@ -75,58 +75,55 @@ def _inject_exact_mover(monkeypatch):
 # Flying a route
 # ---------------------------------------------------------------------------
 
-def test_the_stow_route_walks_every_waypoint_in_order():
-    arm = StubArm(R.REST_SHUT)
+def test_the_lowering_walks_every_waypoint_in_order():
+    arm = StubArm(R.PRESENT)
     phases = []
-    flown = M.stow_to_home(arm, on_phase=phases.append)
-    assert flown == [w.name for w in R.STOW_ROUTE]
+    flown = M.from_present(arm, on_phase=phases.append)
+    assert flown == [w.name for w in R.LOWER_TO_REST]
     assert phases == flown
-    assert arm.at(R.HOME)
-
-
-def test_the_placement_route_ends_with_the_forearm_rested():
-    arm = StubArm(R.HOME)
-    flown = M.deploy_to_rest(arm)
-    assert flown[-1] == "REST"
     assert arm.at(R.REST)
+
+
+def test_the_lift_ends_at_the_presentation_pose():
+    arm = StubArm(R.REST)
+    flown = M.to_present(arm)
+    assert flown == [w.name for w in R.LIFT_TO_PRESENT]
+    assert arm.at(R.PRESENT)
 
 
 def test_a_waypoint_the_arm_did_not_reach_stops_the_route():
     """The next waypoint's clearance was measured FROM this one."""
-    arm = StubArm(R.REST_SHUT)
+    arm = StubArm(R.PRESENT)
     arm.lag_joint("r_shoulder_pitch", 30.0)
     with pytest.raises(M.RouteError) as exc:
-        M.stow_to_home(arm)
+        M.from_present(arm)
     assert "did not reach" in str(exc.value)
     assert "r_shoulder_pitch" in str(exc.value)
     assert "flying the next segment" in str(exc.value)
 
 
 def test_the_stop_lands_between_waypoints_not_inside_one():
-    """Mid-corridor the arm is between rails; it finishes the waypoint it is
-    flying and holds."""
-    arm = StubArm(R.REST_SHUT)
+    """A Stop finishes the waypoint it is flying and holds."""
+    arm = StubArm(R.PRESENT)
     seen = []
 
     def abort():
-        return len(seen) >= 3
+        return len(seen) >= 2
 
     def phase(name):
         seen.append(name)
 
-    flown = M.stow_to_home(arm, should_abort=abort, on_phase=phase)
-    assert flown == [w.name for w in R.STOW_ROUTE][:3]
-    assert arm.at(R.STOW_ROUTE[2].pose)      # the last one completed
+    flown = M.from_present(arm, should_abort=abort, on_phase=phase)
+    assert flown == [w.name for w in R.LOWER_TO_REST][:2]
+    assert arm.at(R.LOWER_TO_REST[1].pose)      # the last one completed
 
 
 def test_an_unsupported_start_is_a_recovery_question_not_a_correction():
-    """A direct move from over the board to HOME drives the upper arm through
-    the board's near edge, so there is nothing to correct on the way."""
-    arm = StubArm(R.SWING_1)
-    with pytest.raises(M.RecoveryNeeded) as exc:
-        M.stow_to_home(arm)
-    assert "nearest waypoint" in str(exc.value)
-    assert "SWING_1" in str(exc.value)
+    arm = StubArm(R.REST_OUT)
+    with pytest.raises(M.RecoveryNeeded):
+        M.from_present(arm)
+    with pytest.raises(M.RecoveryNeeded):
+        M.to_present(arm)
 
 
 def test_recovery_needed_is_not_a_tracking_failure():
@@ -135,24 +132,20 @@ def test_recovery_needed_is_not_a_tracking_failure():
     assert M.RecoveryNeeded is not M.RouteError
 
 
-def test_already_home_is_a_verified_no_op():
-    arm = StubArm(R.HOME)
+def test_already_raised_is_a_verified_no_op():
+    arm = StubArm(R.PRESENT)
     phases = []
-    assert M.stow_to_home(arm, on_phase=phases.append) == []
-    assert phases == ["already stowed"]
+    assert M.to_present(arm, on_phase=phases.append) == []
+    assert phases == ["already at the presentation pose"]
 
 
-def test_already_rested_is_a_verified_no_op():
-    arm = StubArm(R.REST)
-    assert M.deploy_to_rest(arm) == []
-
-
-def test_the_no_op_is_judged_on_the_gross_joints_only():
-    """On a freshly reset sim the gripper falls open and wrist_roll drifts to
-    ~40 deg while the motors are off.  Judging "is the arm home?" on those
-    reports a clean reset as a fault."""
-    arm = StubArm(dict(R.HOME, r_wrist_roll=40.0, r_gripper=R.OPEN))
-    assert M.stow_to_home(arm) == []
+def test_the_lift_start_is_judged_on_the_gross_joints_only():
+    """On a freshly reset sim the gripper falls open and the wrists drift
+    while the motors are off.  Judging "is the arm at rest?" on those reports
+    a clean reset as a fault."""
+    arm = StubArm(dict(R.REST, r_wrist_roll=R.REST["r_wrist_roll"] - 20.0,
+                       r_gripper=R.OPEN))
+    assert M.to_present(arm) == [w.name for w in R.LIFT_TO_PRESENT]
 
 
 # ---------------------------------------------------------------------------
@@ -168,8 +161,8 @@ def test_the_wave_runs_the_measured_number_of_cycles():
 
 
 def test_the_wave_ends_where_it_started():
-    """Returning to rest or the pocket is a separate validated transition, not
-    something appended so the arm looks tidy."""
+    """Returning to rest is a separate validated transition, not something
+    appended so the arm looks tidy."""
     arm = StubArm(R.PRESENT)
     M.wave(arm)
     assert arm.at(R.PRESENT)
@@ -186,7 +179,7 @@ def test_a_caller_can_ask_for_fewer():
 
 
 def test_waving_from_the_wrong_posture_is_refused():
-    arm = StubArm(R.HOME)
+    arm = StubArm(R.REST)
     with pytest.raises(M.RecoveryNeeded):
         M.wave(arm)
 
@@ -385,28 +378,28 @@ def test_a_stop_before_the_approach_returns_without_flying(monkeypatch):
 
 
 def test_the_start_check_ignores_wrist_and_gripper_drift():
-    """An arm sitting correctly at REST, with the wrist drift GROSS_JOINTS
-    exists to ignore, was refused — with a message that contradicted itself:
-    "the arm is not at REST_SHUT; the nearest waypoint is REST_SHUT"."""
-    arm = StubArm(dict(R.REST, r_wrist_roll=R.REST["r_wrist_roll"] + 8.0))
-    ok, why = M.check_start(arm, R.STOW_ROUTE)
+    """An arm sitting correctly at its start, with the wrist drift
+    GROSS_JOINTS exists to ignore, was refused — with a message that
+    contradicted itself."""
+    arm = StubArm(dict(R.PRESENT, r_wrist_roll=8.0))
+    ok, why = M.check_start(arm, (R.LOWER_TO_REST[0],))
     assert ok, why
 
 
 def test_the_start_check_still_refuses_a_genuinely_wrong_posture():
-    arm = StubArm(R.SWING_1)
-    ok, why = M.check_start(arm, R.STOW_ROUTE)
+    arm = StubArm(R.REST_OUT)
+    ok, why = M.check_start(arm, R.LOWER_TO_REST)
     assert not ok
-    assert "SWING_1" in why
+    assert "REST_OUT" in why
 
 
-def test_a_rested_arm_can_be_stowed_straight_afterwards():
-    """The two routes have to compose: deploy ends at REST, and stow starts
-    from there."""
-    arm = StubArm(R.HOME)
-    M.deploy_to_rest(arm)
-    assert M.stow_to_home(arm) == [w.name for w in R.STOW_ROUTE]
-    assert arm.at(R.HOME)
+def test_a_rested_arm_can_be_raised_straight_afterwards():
+    """The two routes have to compose: the lowering ends at REST, and the
+    lift starts from there."""
+    arm = StubArm(R.PRESENT)
+    M.from_present(arm)
+    assert M.to_present(arm) == [w.name for w in R.LIFT_TO_PRESENT]
+    assert arm.at(R.PRESENT)
 
 
 # ---------------------------------------------------------------------------
@@ -415,8 +408,8 @@ def test_a_rested_arm_can_be_stowed_straight_afterwards():
 # The first version of fly_route commanded each waypoint once.  Under
 # mujoco-remote the arm only moves WHILE setpoints are streaming, so a fast
 # segment finishes short and holding the goal does not close the gap.  A live
-# run in FWDCenterLabSivaPool stopped at CURL with the elbow 77 deg off; a
-# direct write to goal_position afterwards read back unchanged.
+# run in FWDCenterLabSivaPool (August) stopped at CURL with the elbow 77 deg
+# off; a direct write to goal_position afterwards read back unchanged.
 #
 # The stub above tracks perfectly, which is exactly why the suite was green
 # while the real arm was not.  This one does not.
@@ -456,12 +449,12 @@ def lagging(monkeypatch):
 
 def test_one_pass_is_not_enough_and_the_runner_knows_it(lagging):
     """A single command leaves 40% of the error; TRACK_TOL is 6 degrees."""
-    arm = LaggingArm(R.REST_SHUT)
-    flown = M.stow_to_home(arm)
-    assert flown == [w.name for w in R.STOW_ROUTE]
+    arm = LaggingArm(R.PRESENT)
+    flown = M.from_present(arm)
+    assert flown == [w.name for w in R.LOWER_TO_REST]
     # More commands than waypoints: every waypoint needed re-streaming.
-    assert arm.commands > len(R.STOW_ROUTE)
-    for name, value in R.HOME.items():
+    assert arm.commands > len(R.LOWER_TO_REST)
+    for name, value in R.REST.items():
         if name == "r_gripper":
             continue
         assert abs(getattr(arm, name).present_position - value) <= R.TRACK_TOL
@@ -470,27 +463,28 @@ def test_one_pass_is_not_enough_and_the_runner_knows_it(lagging):
 def test_a_joint_that_never_converges_still_stops_the_route(lagging):
     """Re-streaming is not a way to fly through a jam.  A joint that does not
     move is still a stop — that is what the waypoint tolerance is for."""
-    arm = LaggingArm(R.REST_SHUT)
+    arm = LaggingArm(R.PRESENT)
     arm.closes = 0.0                      # commanded, never moves
     with pytest.raises(M.RouteError) as exc:
-        M.stow_to_home(arm)
+        M.from_present(arm)
     assert "re-streamed passes" in str(exc.value)
 
 
 def test_re_streaming_stops_once_the_waypoint_is_reached(lagging):
     """Not a fixed number of passes: a waypoint the arm reaches first time
     costs one command, so a well-behaved arm is not slowed down."""
-    arm = LaggingArm(R.REST_SHUT)
+    arm = LaggingArm(R.PRESENT)
     arm.closes = 1.0                      # perfect tracking
-    M.stow_to_home(arm)
-    assert arm.commands == len(R.STOW_ROUTE)
+    M.from_present(arm)
+    assert arm.commands == len(R.LOWER_TO_REST)
 
 
 def test_the_module_defaults_to_the_sdk_trajectory_generator():
     """The mover is part of what "validated" means.
 
     `primitives.smooth_move` is a 25 Hz interpolator; the notebook flies these
-    routes with the SDK's `goto`/MINIMUM_JERK, and measured live at CURL the
+    routes with the SDK's `goto`/MINIMUM_JERK, and measured live (August, at
+    CURL) the
     two behave differently in kind — smooth_move oscillates around 10 deg short
     and never converges, goto closes monotonically.  Substituting one for the
     other is not an implementation detail.
@@ -512,85 +506,23 @@ def test_the_module_defaults_to_the_sdk_trajectory_generator():
     assert "smooth_move" not in names
 
     import inspect
-    for f in (M.fly_route, M.deploy_to_rest, M.stow_to_home, M.wave):
+    for f in (M.fly_route, M.to_present, M.from_present, M.wave):
         assert "move" in inspect.signature(f).parameters
 
 
 # ---------------------------------------------------------------------------
-# Resuming from a stranded pose (bounded)
+# Travelling the posture graph
 # ---------------------------------------------------------------------------
 
-def test_an_arm_left_at_back_is_recognised_as_on_the_pocket_sequence():
-    """The case this exists for: something stopped part way, left the arm at
-    BACK — out of the pocket, roll home, nothing in front of it — and every
-    later request refused for want of a posture. Correct, and useless."""
-    arm = StubArm(R.BACK)
-    where = M.stranded_at(arm)
-    assert where is not None
-    assert where[0] == "BACK"
-    assert where[1] == pytest.approx(0.0, abs=0.5)
+def test_travel_raises_a_rested_arm_and_brings_it_back():
+    arm = StubArm(R.REST)
+    assert M.travel(arm, R.POSTURE_PRESENT) == [w.name for w in R.LIFT_TO_PRESENT]
+    assert M.travel(arm, R.POSTURE_HOME) == [w.name for w in R.LOWER_TO_REST]
+    assert R.posture_of(M.present_pose(arm)) == R.POSTURE_REST
 
 
-def test_resuming_finishes_the_pocket_entry():
-    arm = StubArm(R.BACK)
-    flown = M.resume_to_home(arm, move=exact_move)
-    assert flown == ["BACK", "GRIP_SHUT", "HOME"]
-    assert R.posture_of(M.present_pose(arm)) == R.POSTURE_HOME
-
-
-def test_an_arm_out_over_the_board_is_not_on_the_pocket_sequence():
-    """Same shoulder pitch, roll swung out: a different situation with a
-    different answer, and guessing between them is what this must not do."""
-    arm = StubArm(dict(R.BACK, r_shoulder_roll=-45.0))
-    assert M.stranded_at(arm) is None
-
-
-def test_a_pose_far_from_every_waypoint_is_not_resumable():
-    """The notebook warns that the connecting move is the one unverified
-    segment.  The answer is to keep it small, not to allow any gap."""
-    arm = StubArm(dict(R.HOME, r_elbow_pitch=-60.0))
-    assert M.stranded_at(arm) is None
-    with pytest.raises(M.RecoveryNeeded):
-        M.resume_to_home(arm, move=exact_move)
-
-
-def test_travel_resumes_rather_than_refusing_from_the_pocket_sequence():
-    arm = StubArm(R.BACK)
-    assert R.posture_of(M.present_pose(arm)) is None          # not a named posture
-    flown = M.travel(arm, R.POSTURE_HOME, robot=None)
-    assert R.posture_of(M.present_pose(arm)) == R.POSTURE_HOME
-    assert "HOME" in flown
-
-
-def test_travel_still_refuses_from_somewhere_it_does_not_recognise():
-    arm = StubArm(dict(R.SWING_2))
+def test_travel_refuses_from_somewhere_it_does_not_recognise():
+    arm = StubArm(dict(R.REST_OUT))
     with pytest.raises(M.RecoveryNeeded) as exc:
         M.travel(arm, R.POSTURE_HOME, robot=None)
     assert "not guess" in str(exc.value)
-
-
-# -- #74: no corridor entry with the forearm yaw off (docs/adr/0006 §5) --------
-
-def test_fly_route_refuses_the_corridor_with_the_forearm_yaw_off_and_commands_nothing():
-    arm = StubArm(dict(R.HOME, r_forearm_yaw=-24.0))
-    moves = []
-    with pytest.raises(M.RouteError) as exc:
-        M.fly_route(arm, R.PLACE_ROUTE, move=lambda a, p, s: moves.append(p))
-    assert "forearm yaw is 24 deg off" in str(exc.value)
-    assert moves == []
-
-
-def test_primitives_fly_refuses_the_corridor_with_the_forearm_yaw_off_and_commands_nothing(monkeypatch):
-    from reachy_ai.motion import primitives as P
-    arm = StubArm(dict(R.HOME, r_forearm_yaw=-24.0))
-    calls = []
-    monkeypatch.setattr(P, "converge", lambda *a, **k: calls.append(a) or True)
-    with pytest.raises(RuntimeError) as exc:
-        P.fly(arm, R.RAISE_TO_SIDE, label="the route out of the pocket")
-    assert "forearm yaw is 24 deg off" in str(exc.value)
-    assert calls == []
-
-
-def test_a_healthy_start_flies_the_corridor():
-    arm = StubArm(R.HOME)
-    assert M.fly_route(arm, R.PLACE_ROUTE, move=exact_move) == [w.name for w in R.PLACE_ROUTE]

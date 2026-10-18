@@ -209,16 +209,8 @@ run, default included) and passes `report_scope == "full"` as `report()`'s
 plainly: `planned_route_scope` in the JSON result, echoed as a
 `Report scope: ...` line above it.
 
-`scripts/e1_stage1/leg.sh` (the E1 campaign) does not pass
-`--report-scope`, so it still gets `footprint` by default -- its
-whole-route legs (PLACE_ROUTE, RAISE_TO_SIDE, both starting at HOME,
-recorded through `main()`) still print a `FOOTPRINT_LEGS`-scoped report,
-the same mis-scoping issue #137 root-caused, where the realised worst can
-fall on a waypoint the footprint omits. Wiring `leg.sh`/`plan.py` to pass
-`--report-scope full` for those legs is its own decision, out of issue
-#139's scope. Until then, re-score a saved log OFFLINE with
-`report(..., full_route=True)` from the Python API (issue #137, priority
-2), or re-run `main()` by hand with `--report-scope full`.
+The E1 campaign that drove this through `leg.sh` (PLACE_ROUTE and
+RAISE_TO_SIDE legs from HOME) was retired with the August mount (#192).
 
 Usage (operator flies the route by hand during --duration):
     export REACHY_SIM_RECORD_CLEARANCE=1
@@ -661,15 +653,10 @@ def realised_clearance(
 #: named route from its own departure posture), as distinct from
 #: `FOOTPRINT_LEGS`'s scoped-down subset (the live guard's own footprint,
 #: `panel_executor._footprint_refusal` -- never widened here). Each route's
-#: start pose is the posture the notebook and `rig_routes` already document
-#: it departing from: HOME for the two routes that leave the rail pocket,
-#: REST/PRESENT for the ones that start already on the board or at the side
-#: pose. See `full_route_poses`.
+#: start pose is the posture `rig_routes` documents it departing from. The
+#: rail-pocket routes went with the August mount (#192). See
+#: `full_route_poses`.
 _FULL_ROUTE_START_POSE: Dict[str, Dict[str, float]] = {
-    "PLACE_ROUTE": R.HOME,
-    "RAISE_TO_SIDE": R.HOME,
-    "STOW_ROUTE": R.REST,
-    "STOW_FROM_SIDE": R.PRESENT,
     "LOWER_TO_REST": R.PRESENT,
     "LIFT_TO_PRESENT": R.REST,
 }
@@ -678,10 +665,6 @@ _FULL_ROUTE_START_POSE: Dict[str, Dict[str, float]] = {
 #: start pose (`_FULL_ROUTE_START_POSE`) -- the full sequence, not
 #: `FOOTPRINT_LEGS`'s subset.
 _FULL_ROUTE_WAYPOINTS: Dict[str, Tuple] = {
-    "PLACE_ROUTE": R.PLACE_ROUTE,
-    "RAISE_TO_SIDE": R.RAISE_TO_SIDE,
-    "STOW_ROUTE": R.STOW_ROUTE,
-    "STOW_FROM_SIDE": R.STOW_FROM_SIDE,
     "LOWER_TO_REST": R.LOWER_TO_REST,
     "LIFT_TO_PRESENT": R.LIFT_TO_PRESENT,
 }

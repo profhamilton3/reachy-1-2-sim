@@ -1,0 +1,8 @@
+| FWDCenterLabMCC.yaml | 0.6 deg | rest | (0.35, -0.40, 0.75) |
+| FWDCenterLabSiva.yaml | 0.6 deg | rest | (0.35, -0.40, 0.75) |
+| FWDCenterLabSivaPool.yaml | 0.6 deg | rest | (0.35, -0.40, 0.75) |
+| calibration_defaults.yaml | 81.0 deg | None | (0.20, -0.18, 0.50) |
+| calibration_measured_2026_08_27.yaml | 81.0 deg | None | (0.20, -0.18, 0.50) |
+| control_panel.yaml | 81.0 deg | None | (0.20, -0.18, 0.50) |
+| tabletop.example.yaml | 2.2 deg | rest | (0.32, -0.38, 0.69) |
+| tabletop_demo.yaml | 2.2 deg | rest | (0.32, -0.38, 0.69) |

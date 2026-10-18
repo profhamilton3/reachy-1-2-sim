@@ -323,7 +323,7 @@ def test_a_route_unvalidated_in_this_scene_names_the_scene(fake_sdk):
     ex = SimulatorExecutor(StubLink(), live_scene, "scene.yaml")
     ok, why = ex.available(
         a_proposal(task_type="stow_arm", target_id=None, destination=None,
-                   destination_kind="", route="STOW_ROUTE"))
+                   destination_kind="", route="LOWER_TO_REST"))
     assert ok is False
     assert "TestScene" in why
     assert "arm is unavailable" not in why
@@ -777,9 +777,9 @@ def test_a_confirmation_is_still_consumed_once_when_executing():
 def _ability(**kw):
     base = dict(plan_id="plan-a", plan_version=0, task_type="stow_arm",
                 target_id=None, destination=None, destination_kind="",
-                brief_reason="STOW_ROUTE with my right arm", arm="right",
-                route="STOW_ROUTE", route_version=1,
-                expected_start_posture="rest", summary="stow the arm")
+                brief_reason="LOWER_TO_REST with my right arm", arm="right",
+                route="LOWER_TO_REST", route_version=1,
+                expected_start_posture="present", summary="stow the arm")
     base.update(kw)
     return Proposal(**base)
 
@@ -810,7 +810,7 @@ class StubWorker:
 
     def __init__(self, *results):
         self.results = list(results) or [{"status": "moved", "flown": [],
-                                          "final_posture": "home"}]
+                                          "final_posture": "rest"}]
         self.jobs = []
         self.phases_to_emit = []
         self.cancelled = False
@@ -861,7 +861,7 @@ def _lifting(worker):
 
 def _lift(**kw):
     return _ability(task_type="lift_object", object_id="soda_can",
-                    route="CRANE_LIFT", expected_start_posture="home", **kw)
+                    route="CRANE_LIFT", expected_start_posture="present", **kw)
 
 
 def test_the_next_job_after_a_lift_gets_a_fresh_worker(monkeypatch, fake_sdk):
@@ -882,7 +882,7 @@ def test_other_jobs_and_a_disabled_backstop_keep_the_worker(monkeypatch, fake_sd
     _validated(monkeypatch)
     monkeypatch.setattr(PE, "RESTART_WORKER_AFTER_LIFT", True)
     worker = _LiftWorker()
-    _with(worker).execute(_ability(expected_start_posture="home"))
+    _with(worker).execute(_ability(expected_start_posture="present"))
     assert len(worker.jobs) == 1 and worker.closed == 0
     monkeypatch.setattr(PE, "RESTART_WORKER_AFTER_LIFT", False)
     worker = _LiftWorker({"status": "failed", "detail": "halted", "evidence": {}})
@@ -897,13 +897,13 @@ def test_the_job_names_the_ability_the_scene_and_where_it_must_start(
     come across with the job."""
     _validated(monkeypatch)
     worker = StubWorker()
-    _with(worker).execute(_ability(expected_start_posture="home"))
+    _with(worker).execute(_ability(expected_start_posture="present"))
 
     job, = worker.jobs
     assert job["kind"] == "ability"
     assert job["task_type"] == "stow_arm"
-    assert job["route"] == "STOW_ROUTE"
-    assert job["expected_start_posture"] == "home"
+    assert job["route"] == "LOWER_TO_REST"
+    assert job["expected_start_posture"] == "present"
     assert job["scene"] == "TestScene"
     assert job["sdk"]["port"] == 50051
 
@@ -916,12 +916,12 @@ def test_a_refusal_from_the_motion_process_is_passed_through_as_it_stands(
     worker = StubWorker({
         "status": "failed",
         "detail": ("my arm is not at a posture I have a measured route out "
-                   "of — the nearest waypoint is SWING_2, 22 degrees away."),
-        "evidence": {"recovery_needed": True, "nearest": "SWING_2"}})
+                   "of — the nearest waypoint is REST_OUT, 22 degrees away."),
+        "evidence": {"recovery_needed": True, "nearest": "REST_OUT"}})
 
-    out = _with(worker).execute(_ability(expected_start_posture="home"))
+    out = _with(worker).execute(_ability(expected_start_posture="present"))
     assert out.status == "failed"
-    assert "SWING_2" in out.detail
+    assert "REST_OUT" in out.detail
     assert out.evidence["recovery_needed"] is True
 
 
@@ -930,7 +930,7 @@ def test_progress_from_the_motion_process_reaches_the_page(monkeypatch, fake_sdk
     worker = StubWorker()
     worker.phases_to_emit = ["connecting to the arm", "leaving home"]
     seen = []
-    _with(worker).execute(_ability(expected_start_posture="home"),
+    _with(worker).execute(_ability(expected_start_posture="present"),
                           on_phase=seen.append)
     assert seen == ["connecting to the arm", "leaving home"]
 
@@ -940,7 +940,7 @@ def test_a_stop_reaches_the_motion_process(monkeypatch, fake_sdk):
     corridor can be left."""
     _validated(monkeypatch)
     worker = StubWorker()
-    _with(worker).execute(_ability(expected_start_posture="home"),
+    _with(worker).execute(_ability(expected_start_posture="present"),
                           should_cancel=lambda: True)
     assert worker.cancelled is True
 
@@ -965,15 +965,15 @@ def test_the_board_is_read_before_the_approach_flies(monkeypatch, fake_sdk):
             scene = provider()
             x, y, z = on_cell(scene, "r1c1")
             where["soda_can"] = (x, y + 0.25, z)
-            return {"status": "moved", "flown": [], "final_posture": "home"}
+            return {"status": "moved", "flown": [], "final_posture": "rest"}
 
-    out = _with(Sweeps(), provider).execute(_ability(expected_start_posture="home"))
+    out = _with(Sweeps(), provider).execute(_ability(expected_start_posture="present"))
     assert out.status == "failed"
     assert "moved something on the way" in out.detail
 
 
 def test_arriving_with_the_board_disturbed_is_a_failure(monkeypatch, fake_sdk):
-    """The two fail independently: the arm can reach HOME having swept
+    """The two fail independently: the arm can reach REST having swept
     something off the table on the way, and it can leave the board untouched
     while stopping three waypoints short."""
     _validated(monkeypatch)
@@ -987,10 +987,10 @@ def test_arriving_with_the_board_disturbed_is_a_failure(monkeypatch, fake_sdk):
             scene.objects["soda_can"].position = (x, y + 0.25, z)
         return scene
 
-    worker = StubWorker({"status": "moved", "flown": ["HOME"],
-                         "final_posture": "home"})
+    worker = StubWorker({"status": "moved", "flown": ["REST"],
+                         "final_posture": "rest"})
     out = _with(worker, provider).execute(
-        _ability(expected_start_posture="home", route="STOW_ROUTE"))
+        _ability(expected_start_posture="present", route="LOWER_TO_REST"))
     assert out.status == "failed"
     assert "moved something on the way" in out.detail
     assert out.evidence["object_drift"]["soda_can"] > 0.02
@@ -1000,13 +1000,13 @@ def test_arriving_cleanly_reports_the_posture_and_the_waypoints(
         monkeypatch, fake_sdk):
     from reachy_ai.motion import rig_routes as R
     _validated(monkeypatch)
-    flown = [w.name for w in R.STOW_ROUTE]
+    flown = [w.name for w in R.LOWER_TO_REST]
     worker = StubWorker({"status": "moved", "flown": flown,
-                         "final_posture": "home"})
+                         "final_posture": "rest"})
 
-    out = _with(worker).execute(_ability(expected_start_posture="home"))
+    out = _with(worker).execute(_ability(expected_start_posture="present"))
     assert out.status == "completed"
-    assert out.evidence["final_posture"] == "home"
+    assert out.evidence["final_posture"] == "rest"
     assert out.evidence["waypoints_flown"] == flown
     assert out.evidence["object_drift"] == {}
     assert "board is as it was" in out.detail
@@ -1015,12 +1015,12 @@ def test_arriving_cleanly_reports_the_posture_and_the_waypoints(
 def test_a_route_stopped_part_way_is_not_reported_as_arrival(
         monkeypatch, fake_sdk):
     _validated(monkeypatch)
-    worker = StubWorker({"status": "moved", "flown": ["TUCK"],
+    worker = StubWorker({"status": "moved", "flown": ["REST_OUT"],
                          "final_posture": None})
 
-    out = _with(worker).execute(_ability(expected_start_posture="home"))
+    out = _with(worker).execute(_ability(expected_start_posture="present"))
     assert out.status == "failed"
-    assert "stopped before home" in out.detail
+    assert "stopped before rest" in out.detail
     assert out.evidence["final_posture"] is None
 
 
@@ -1098,7 +1098,7 @@ for line in sys.stdin:
         continue
     print(json.dumps({"phase": "working"}), flush=True)
     print(json.dumps({"result": {"status": "moved", "flown": ["A"],
-                                 "final_posture": "home"}}), flush=True)
+                                 "final_posture": "rest"}}), flush=True)
 """
 
 CHILD_WEDGES = """
@@ -1149,7 +1149,7 @@ def test_a_job_gets_its_phases_and_its_result(child):
     seen = []
     out = worker.run({"kind": "ability"}, on_phase=seen.append)
     assert seen == ["working"]
-    assert out == {"status": "moved", "flown": ["A"], "final_posture": "home"}
+    assert out == {"status": "moved", "flown": ["A"], "final_posture": "rest"}
 
 
 def test_the_process_outlives_one_job(child):
@@ -1401,45 +1401,37 @@ def _rest_hand_point():
     return tuple((a + b) / 2.0 for a, b in zip(p0, p1))
 
 
-def _rest_hand_point_offset(offset):
-    """`_rest_hand_point`, displaced sideways by `offset` metres.
+def _present_hand_point_offset(offset):
+    """The hand capsule's centre at PRESENT, displaced sideways (+y) by
+    `offset` metres.
 
     Used to place an object between the closed-hand and open-hand capsule
-    radius at REST — a distance the guard only reaches if it uses the WIDER
-    of a leg's two commanded gripper endpoints, converted through
-    `hand_radius`'s actual (nonlinear, sign-inverted) aperture, rather than
-    the numerically larger raw degree value.
+    radius — a distance the guard only reaches if it uses the WIDER of a leg's
+    two commanded gripper endpoints, converted through `hand_radius`'s actual
+    (nonlinear, sign-inverted) aperture, rather than the numerically larger
+    raw degree value.  In the October layout (#192) the hand opens and shuts
+    only at PRESENT (PRESENT <-> PRESENT_SHUT), so that is the leg.
     """
     from reachy_ai.motion import rig_routes as RR
     from reachy_ai.motion.kinematics import link_capsules
-    q = [RR.REST[j] for j in RR.ARM7]
+    q = [RR.PRESENT[j] for j in RR.ARM7]
     _name, p0, p1, _radius = next(
         c for c in link_capsules(q, side="right") if c[0] == "hand")
     x, y, z = ((a + b) / 2.0 for a, b in zip(p0, p1))
     return (x, y + offset, z)
 
 
-def _descent_hand_point():
-    """A world point the hand capsule occupies partway down the actual
-    PRESENT -> REST_SHUT descent that `stow_arm` flies when leaving PRESENT
-    (STOW_FROM_SIDE, #82) — off the REST/REST_SHUT/HOVER corridor entirely,
-    so only a footprint check that starts this leg at PRESENT (not REST) can
-    see it.  Computed from the real kinematics for the same reason
-    `_rest_hand_point` is: it moves with the poses instead of quietly testing
-    a leg that no longer matches what is actually flown.
+def _swing_out_hand_point():
+    """A world point the hand capsule occupies halfway along PRESENT_SHUT ->
+    REST_OUT, the lowering's swing out to the side — nowhere near REST, so
+    only a footprint check that covers the whole route sees it.  Computed
+    from the real kinematics so it moves with the poses.
     """
     from reachy_ai.motion import rig_routes as RR
     from reachy_ai.motion.kinematics import link_capsules, joint_path
-    # Sample 1 of 13 (close to the PRESENT end): the REST_SHUT/HOVER end of
-    # this same descent sits within a few cm of the REST->REST_SHUT->HOVER
-    # corridor once the object's own size is folded in, which would make a
-    # midpoint an unreliable discriminator between the buggy and fixed leg
-    # tables.  Verified offline: with FOOTPRINT_LEGS["STOW_FROM_SIDE"] wrongly
-    # starting at REST, this point clears by +18.2 cm; started at PRESENT (the
-    # fix), the same point reads -11.3 cm.
-    q_present = [RR.PRESENT[j] for j in RR.ARM7]
-    q_rest_shut = [RR.REST_SHUT[j] for j in RR.ARM7]
-    sample = joint_path(q_present, q_rest_shut, steps=13)[1]
+    a = [RR.PRESENT_SHUT[j] for j in RR.ARM7]
+    b = [RR.REST_OUT[j] for j in RR.ARM7]
+    sample = joint_path(a, b, steps=13)[6]
     _name, p0, p1, _radius = next(
         c for c in link_capsules(sample, side="right") if c[0] == "hand")
     return tuple((a + b) / 2.0 for a, b in zip(p0, p1))
@@ -1469,35 +1461,26 @@ class TestFootprintCheck:
     it, where `_ability_available` already has a fresh scene under the lease.
     """
 
-    def test_an_object_in_the_rest_footprint_refuses(self, monkeypatch, fake_sdk):
+    _REST = dict(task_type="rest_forearm", route="LOWER_TO_REST",
+                 end_posture="rest", expected_start_posture="present")
+
+    def _available(self, monkeypatch, point, cell="r2c3", **ability):
         _validated(monkeypatch)
-        point = _rest_hand_point()
         from reachy_ai.scene.awareness import SceneModel
         monkeypatch.setattr(SceneModel, "from_yaml",
                             staticmethod(lambda path: _scene_model_with(point)))
-        scene = _scene_with_object_at(point)
+        scene = _scene_with_object_at(point, cell=cell)
         ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
+        return ex.available(_ability(**ability))
 
-        ok, why = ex.available(_ability(
-            task_type="rest_forearm", route="PLACE_ROUTE",
-            end_posture="rest", expected_start_posture="home"))
-
+    def test_an_object_in_the_rest_footprint_refuses(self, monkeypatch, fake_sdk):
+        ok, why = self._available(monkeypatch, _rest_hand_point(), **self._REST)
         assert ok is False
         assert "soda_can" in why and "r2c3" in why
 
     def test_an_object_one_cell_away_does_not_refuse(self, monkeypatch, fake_sdk):
-        _validated(monkeypatch)
-        far_away = (5.0, 5.0, 5.0)
-        from reachy_ai.scene.awareness import SceneModel
-        monkeypatch.setattr(SceneModel, "from_yaml",
-                            staticmethod(lambda path: _scene_model_with(far_away)))
-        scene = _scene_with_object_at(far_away, cell="r1c1")
-        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="rest_forearm", route="PLACE_ROUTE",
-            end_posture="rest", expected_start_posture="home"))
-
+        ok, why = self._available(monkeypatch, (5.0, 5.0, 5.0), cell="r1c1",
+                                  **self._REST)
         assert ok is True, why
 
     def test_a_cleared_footprint_behaves_exactly_as_before(self, monkeypatch,
@@ -1507,11 +1490,7 @@ class TestFootprintCheck:
         _validated(monkeypatch)
         scene = live_scene()
         ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="rest_forearm", route="PLACE_ROUTE",
-            end_posture="rest", expected_start_posture="home"))
-
+        ok, why = ex.available(_ability(**self._REST))
         assert ok is True, why
 
     def test_the_refusal_uses_live_poses_not_the_scene_files_own(
@@ -1529,223 +1508,49 @@ class TestFootprintCheck:
             staticmethod(lambda path: _scene_model_with(rest_point)))
         scene = _scene_with_object_at((5.0, 5.0, 5.0), cell="r1c1")
         ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="rest_forearm", route="PLACE_ROUTE",
-            end_posture="rest", expected_start_posture="home"))
-
+        ok, why = ex.available(_ability(**self._REST))
         assert ok is True, why
 
     def test_uses_the_wider_by_radius_endpoint_not_the_larger_raw_degree(
             self, monkeypatch, fake_sdk):
-        """#82/A2: REST_SHUT -> REST commands the gripper from SHUT (+20) to
-        OPEN (-45) — numerically SMALLER, but `hand_radius` (nonlinear, and
-        the sign is inverted) makes OPEN the WIDER hand.  An object placed
-        0.12 m out from the REST hand centre overlaps the open-hand capsule
-        on that leg (0.5 cm) but clears both the shut-hand reading of the
-        same leg and the tail's other leg (HOVER -> REST_SHUT, genuinely SHUT
-        the whole way).  A guard that compared raw commanded degrees would
-        pick SHUT (20 > -45) for the REST_SHUT -> REST leg and clear
-        everywhere; using the wider radius must refuse."""
-        _validated(monkeypatch)
-        point = _rest_hand_point_offset(0.12)
-        from reachy_ai.scene.awareness import SceneModel
-        monkeypatch.setattr(SceneModel, "from_yaml",
-                            staticmethod(lambda path: _scene_model_with(point)))
-        scene = _scene_with_object_at(point)
-        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="rest_forearm", route="PLACE_ROUTE",
-            end_posture="rest", expected_start_posture="home"))
-
+        """#82/A2: PRESENT -> PRESENT_SHUT commands the gripper from OPEN (-45)
+        to SHUT (+20) -- OPEN numerically SMALLER, but `hand_radius`
+        (nonlinear, sign inverted) makes it the WIDER hand.  An object 11 cm
+        beside the PRESENT hand overlaps the open-hand capsule on that leg
+        (-2.1 cm) and clears the shut one (+2.5 cm).  A guard that compared
+        raw commanded degrees would pick SHUT and clear; the wider radius must
+        refuse."""
+        ok, why = self._available(monkeypatch, _present_hand_point_offset(0.11),
+                                  **self._REST)
         assert ok is False
         assert "soda_can" in why
 
-    def test_it_also_gates_wave_from_the_pocket(self, monkeypatch, fake_sdk):
-        """RAISE_TO_SIDE reaches PRESENT by way of REST, so a wave requested
-        from the pocket crosses the identical footprint PLACE_ROUTE does —
-        the decision #82 asks for, recorded in rig_routes.FOOTPRINT_LEGS."""
-        _validated(monkeypatch)
-        point = _rest_hand_point()
-        from reachy_ai.scene.awareness import SceneModel
-        monkeypatch.setattr(SceneModel, "from_yaml",
-                            staticmethod(lambda path: _scene_model_with(point)))
-        scene = _scene_with_object_at(point)
-        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="wave", route="WAVE",
-            end_posture="present", expected_start_posture="present"))
-
+    def test_it_also_gates_wave_from_rest(self, monkeypatch, fake_sdk):
+        """A wave requested from REST is raised by LIFT_TO_PRESENT, which
+        leaves through the same footprint LOWER_TO_REST lands in."""
+        ok, why = self._available(monkeypatch, _rest_hand_point(),
+                                  task_type="wave", route="WAVE",
+                                  end_posture="present",
+                                  expected_start_posture="present")
         assert ok is False
         assert "soda_can" in why
 
     def test_stow_arm_is_gated_the_same_way(self, monkeypatch, fake_sdk):
-        _validated(monkeypatch)
-        point = _rest_hand_point()
-        from reachy_ai.scene.awareness import SceneModel
-        monkeypatch.setattr(SceneModel, "from_yaml",
-                            staticmethod(lambda path: _scene_model_with(point)))
-        scene = _scene_with_object_at(point)
-        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="stow_arm", route="STOW_ROUTE",
-            end_posture="home", expected_start_posture="rest"))
-
+        ok, why = self._available(monkeypatch, _rest_hand_point(),
+                                  task_type="stow_arm", route="LOWER_TO_REST",
+                                  end_posture="rest",
+                                  expected_start_posture="present")
         assert ok is False
         assert "soda_can" in why
 
-    def test_stow_from_present_refuses_for_the_descent_not_only_the_tail(
+    def test_the_whole_route_is_checked_not_only_its_ends(
             self, monkeypatch, fake_sdk):
-        """#82/A1: `stow_arm` requested from PRESENT flies STOW_FROM_SIDE,
-        whose real first leg is the PRESENT -> REST_SHUT descent onto the
-        board — not the REST -> REST_SHUT gripper change STOW_ROUTE departs
-        from.  An object standing only in that descent's path (not at the
-        REST/REST_SHUT/HOVER tail every other footprint test uses) must still
-        refuse; before FOOTPRINT_LEGS["STOW_FROM_SIDE"] started at PRESENT
-        this object was invisible to the guard."""
-        _validated(monkeypatch)
-        point = _descent_hand_point()
-        from reachy_ai.scene.awareness import SceneModel
-        monkeypatch.setattr(SceneModel, "from_yaml",
-                            staticmethod(lambda path: _scene_model_with(point)))
-        scene = _scene_with_object_at(point)
-        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="stow_arm", route="STOW_FROM_SIDE",
-            end_posture="home", expected_start_posture="present"))
-
-        assert ok is False
-        assert "soda_can" in why
-
-
-def _board_height_fixture():
-    """A 6x6x12 cm box standing on the REAL FWDCenterLabSivaPool table, at
-    (0.23, -0.32) -- the near-right corner strip #82/A3's own sweep (review
-    2026-09-12, R1) reads worst on: lift/descent -2.8 cm, the already-checked
-    STOW_ROUTE/PLACE_ROUTE rail tail +1.0 cm, in both the capsule and MJCF
-    shell models.
-
-    Built by loading the real scene (real table height, grid, static
-    obstacles) via `SceneModel.from_yaml` and substituting `soda_can`'s shape
-    for the probe box, rather than the minimal `_scene_model_with` stub every
-    other footprint test here uses -- this fixture exercises the guard
-    against the scene the panel actually flies against.
-    """
-    from dataclasses import replace
-    from reachy_ai.scene.awareness import SceneModel
-    real = SceneModel.from_yaml("scenes/FWDCenterLabSivaPool.yaml")
-    table_z = real.table_surface_z
-    point = (0.23, -0.32, table_z + 0.061)
-    objects = []
-    for oid, obj in real.objects.items():
-        if oid == "soda_can":
-            obj = replace(obj, kind="box", center=point, size=(0.06, 0.06, 0.12))
-        objects.append(obj)
-    model = SceneModel(real.frame_id, objects, real._table_id)
-    return model, point
-
-
-class TestLiftToPresentFootprint:
-    """#82/A3 (review 2026-09-12, R1): LIFT_TO_PRESENT (REST -> PRESENT) flies
-    the identical joint-space line as LOWER_TO_REST's PRESENT -> REST_SHUT
-    descent, reversed -- REST and REST_SHUT differ only in `r_gripper`.  A
-    wave or point_* requested from REST resolves this route
-    (`web/motion_worker.py`) through the SAME footprint-guard superset check
-    every other ability in this file exercises, so leaving it out of
-    `FOOTPRINT_LEGS` left that lift unguarded on a live path.
-    """
-
-    def test_wave_from_rest_is_refused(self, monkeypatch):
-        """Fails on the parent commit (61fc1be): with LIFT_TO_PRESENT absent
-        from FOOTPRINT_LEGS, `available()`'s end_posture="present" superset
-        checks only RAISE_TO_SIDE and WAVE, both of which clear this point
-        (+1.0 cm / positive), so the pre-fix guard allows it.
-
-        Builds the real-scene fixture (a genuine `SceneModel.from_yaml` call)
-        before applying any of `fake_sdk`'s patches -- `fake_sdk` stubs
-        `SceneModel.from_yaml` to an object-free model, and doing that first
-        would make `_board_height_fixture()` load nothing."""
-        model, point = _board_height_fixture()
-        _validated(monkeypatch)
-        monkeypatch.setitem(sys.modules, "reachy_sdk",
-                            types.SimpleNamespace(ReachySDK=object))
-        monkeypatch.setenv("REACHY_SIM_BACKEND", "mujoco-remote")
-        from reachy_ai.scene.awareness import SceneModel
-        monkeypatch.setattr(SceneModel, "from_yaml",
-                            staticmethod(lambda path: model))
-        scene = _scene_with_object_at(point)
-        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="wave", route="WAVE", end_posture="present",
-            expected_start_posture="rest"))
-
-        assert ok is False
-        assert "soda_can" in why
-
-    def test_stow_arm_from_present_is_refused(self, monkeypatch):
-        """Unaffected by A3 (STOW_FROM_SIDE already starts at PRESENT since
-        A1), pinned here on the same fixture as the wave case above so both
-        abilities are checked against the identical board."""
-        model, point = _board_height_fixture()
-        _validated(monkeypatch)
-        monkeypatch.setitem(sys.modules, "reachy_sdk",
-                            types.SimpleNamespace(ReachySDK=object))
-        monkeypatch.setenv("REACHY_SIM_BACKEND", "mujoco-remote")
-        from reachy_ai.scene.awareness import SceneModel
-        monkeypatch.setattr(SceneModel, "from_yaml",
-                            staticmethod(lambda path: model))
-        scene = _scene_with_object_at(point)
-        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="stow_arm", route="STOW_FROM_SIDE",
-            end_posture="home", expected_start_posture="present"))
-
-        assert ok is False
-        assert "soda_can" in why
-
-    def test_rest_forearm_from_home_is_also_refused_via_lower_to_rest(
-            self, monkeypatch):
-        """DISCREPANCY from the 2026-09-12 assignment (Part 1c), reported for
-        Opus rather than forced to pass: the assignment expected rest_forearm
-        from HOME to be ALLOWED at this point, reasoning that the "checked
-        tail" (the already-guarded STOW_ROUTE/PLACE_ROUTE REST_SHUT<->HOVER
-        corridor) reads +1.0 cm here.  That tail does clear.  But
-        `rest_forearm`'s ability always sets `end_posture=POSTURE_REST`
-        (panel_abilities.py), so `available()` takes the union branch over
-        *every* route reaching "rest" -- PLACE_ROUTE **and** LOWER_TO_REST --
-        not just the one PLACE_ROUTE flies from HOME.  LOWER_TO_REST's own
-        FOOTPRINT_LEGS entry, (PRESENT, REST_SHUT, REST), already contains the
-        PRESENT -> REST_SHUT descent leg -- the same arm-joint line
-        LIFT_TO_PRESENT reverses, since REST and REST_SHUT share every ARM7
-        joint but r_gripper.  That descent leg was fixed under A1, is
-        unrelated to A3, and already reads negative at this exact point,
-        independent of whether LIFT_TO_PRESENT is in FOOTPRINT_LEGS at all
-        (verified against the parent commit 61fc1be: also refused there).
-        So no point exists where LIFT_TO_PRESENT's reversed-descent leg reads
-        negative (needed for the wave-from-rest case above) while
-        rest_forearm-from-HOME's union check reads clear -- the two legs are
-        the same measurement.  This test pins the actual, current behaviour
-        (refused) rather than the assignment's expected one (allowed)."""
-        model, point = _board_height_fixture()
-        _validated(monkeypatch)
-        monkeypatch.setitem(sys.modules, "reachy_sdk",
-                            types.SimpleNamespace(ReachySDK=object))
-        monkeypatch.setenv("REACHY_SIM_BACKEND", "mujoco-remote")
-        from reachy_ai.scene.awareness import SceneModel
-        monkeypatch.setattr(SceneModel, "from_yaml",
-                            staticmethod(lambda path: model))
-        scene = _scene_with_object_at(point)
-        ex = SimulatorExecutor(StubLink(), lambda: scene, "scene.yaml")
-
-        ok, why = ex.available(_ability(
-            task_type="rest_forearm", route="PLACE_ROUTE",
-            end_posture="rest", expected_start_posture="home"))
-
+        """#82/A1, October form: an object standing only where the hand
+        swings out to the side (PRESENT_SHUT -> REST_OUT), nowhere near REST,
+        must still refuse."""
+        ok, why = self._available(monkeypatch, _swing_out_hand_point(),
+                                  task_type="stow_arm", route="LOWER_TO_REST",
+                                  end_posture="rest",
+                                  expected_start_posture="present")
         assert ok is False
         assert "soda_can" in why

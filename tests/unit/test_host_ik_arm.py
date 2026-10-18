@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 import host_ik_arm  # noqa: E402
-from reachy_ai.motion.kinematics import link_frames  # noqa: E402
+from reachy_ai.motion.kinematics import _BASE, link_frames  # noqa: E402
 
 
 def test_the_mirror_still_matches_the_fake_servers_kinematics_source():
@@ -37,7 +37,9 @@ def test_mirror_fk_equals_link_frames_at_random_poses():
         q = rng.uniform(lim[:, 0], lim[:, 1])
         T = host_ik_arm.HostIKArm().forward_kinematics(q)
         _s, _e, wrist, R = link_frames(list(q))
-        assert np.allclose(T[:3, 3] + np.array([0.0, 0.0, 1.0]), wrist, atol=1e-9)
+        # The mirror works in the arm's base frame; link_frames in the scene's
+        # (the torso at the October mount since #192, (0, 0, 1.0) before).
+        assert np.allclose(T[:3, 3] + np.asarray(_BASE), wrist, atol=1e-9)
         assert np.allclose(T[:3, :3], R, atol=1e-9)
 
 

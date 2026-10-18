@@ -207,7 +207,7 @@ class Proposal:
     #: unsupported start rather than discover it in flight.
     expected_start_posture: str = ""
     #: Where the ability leaves the arm.  This, not `route`, is what the
-    #: ability is FOR: "store your arm" means end in the pocket, and which
+    #: ability is FOR: "store your arm" means end at REST, and which
     #: measured routes get there depends on where the arm is standing.
     end_posture: str = ""
     requires_confirmation: bool = True

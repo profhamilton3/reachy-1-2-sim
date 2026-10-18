@@ -54,7 +54,7 @@ def at(posture):
     return dict(R.POSTURES[posture])
 
 
-def a_result(posture="home", *, objects=None, touched=None, metrics=None,
+def a_result(posture="rest", *, objects=None, touched=None, metrics=None,
              status=EpisodeStatus.SUCCEEDED):
     return EpisodeResult(
         episode_id="ep", trial_id="tr", status=status,
@@ -156,11 +156,11 @@ def test_the_recipe_file_still_matches_rig_routes(ability, route):
 # ---------------------------------------------------------------------------
 
 def _reorder(r):
-    r.primitive_sequence.insert(0, r.primitive_sequence.pop(3))
+    r.primitive_sequence.insert(0, r.primitive_sequence.pop(2))
 
 
 def _drop(r):
-    r.primitive_sequence.pop(4)
+    r.primitive_sequence.pop(1)
 
 
 def _loosen(r):
@@ -182,20 +182,20 @@ def _no_guard_at_all(r):
     (_ungurad, "stops guarding"),
     (_no_guard_at_all, "stops guarding"),
 ])
-def test_a_recipe_that_mutates_the_corridor_is_rejected(mutate, expect):
-    violations = check_route_integrity(mutated("stow_arm", mutate), "STOW_ROUTE")
-    assert violations, "the corridor geometry is the safety argument, not a knob"
+def test_a_recipe_that_mutates_the_route_is_rejected(mutate, expect):
+    violations = check_route_integrity(mutated("stow_arm", mutate), "LOWER_TO_REST")
+    assert violations, "the route geometry is the safety argument, not a knob"
     assert any(expect in v.description for v in violations)
     assert all(v.severity == "hard" for v in violations)
 
 
 def test_a_mutated_recipe_makes_the_episode_invalid_not_merely_unsuccessful():
-    """A result from a recipe that reordered the corridor is not a measurement
-    of that corridor, so reporting its accuracy would report some other
+    """A result from a recipe that reordered the route is not a measurement
+    of that route, so reporting its accuracy would report some other
     motion's."""
     verdict = evaluate(
         "stow_arm",
-        a_result("home", objects={}),
+        a_result("rest", objects={}),
         a_spec("stow_arm", initial={}),
         mutated("stow_arm", _reorder))
     assert not verdict.is_valid
@@ -208,14 +208,14 @@ def test_a_tighter_tolerance_is_allowed():
     """The rule is one-way: a search may make a check stricter."""
     def tighten(r):
         r.primitive_sequence[2].parameters["tol"] = 3.0
-    assert check_route_integrity(mutated("stow_arm", tighten), "STOW_ROUTE") == []
+    assert check_route_integrity(mutated("stow_arm", tighten), "LOWER_TO_REST") == []
 
 
 def test_an_extra_guarded_joint_is_allowed():
     def add(r):
-        canonical = canonical_steps("STOW_ROUTE")[2].guard
+        canonical = canonical_steps("LOWER_TO_REST")[2].guard
         r.primitive_sequence[2].parameters["guard"] = list(canonical) + ["r_gripper"]
-    assert check_route_integrity(mutated("stow_arm", add), "STOW_ROUTE") == []
+    assert check_route_integrity(mutated("stow_arm", add), "LOWER_TO_REST") == []
 
 
 def test_a_guard_the_recipe_does_not_mention_inherits_the_route_s():
@@ -223,7 +223,7 @@ def test_a_guard_the_recipe_does_not_mention_inherits_the_route_s():
     the measured guard; [] is "guard nothing", which is a dropped check."""
     def silent(r):
         r.primitive_sequence[2].parameters.pop("guard", None)
-    assert check_route_integrity(mutated("stow_arm", silent), "STOW_ROUTE") == []
+    assert check_route_integrity(mutated("stow_arm", silent), "LOWER_TO_REST") == []
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +304,7 @@ def test_fewer_approach_legs_measures_the_arm_in_fewer_places():
 
 def test_aligning_to_parameters_cannot_smuggle_a_mutation_through():
     """`align_to_parameters` regenerates the step list FROM the measured route,
-    so a recipe that reordered the corridor does not survive alignment."""
+    so a recipe that reordered the route does not survive alignment."""
     aligned = align_to_parameters(mutated("wave", _reorder))
     assert check_route_integrity(aligned, "WAVE") == []
     assert [s.parameters["name"] for s in aligned.primitive_sequence] == [
@@ -365,8 +365,9 @@ def test_an_unrecorded_contact_is_not_an_intended_one():
     assert "cannot be told from" in v.explanation
 
 
-def test_stow_fails_when_it_ends_anywhere_but_the_pocket():
-    v = evaluate("stow_arm", a_result("rest", objects={}),
+def test_stow_fails_when_it_ends_anywhere_but_rest():
+    """HOME IS REST (#192): the stow ends on the board's right margin."""
+    v = evaluate("stow_arm", a_result("present", objects={}),
                  a_spec("stow_arm", initial={}), load("stow_arm"))
     assert not v.is_successful
     assert "DID NOT ARRIVE" in v.explanation
@@ -374,7 +375,7 @@ def test_stow_fails_when_it_ends_anywhere_but_the_pocket():
 
 def test_a_disturbed_board_fails_however_well_the_route_flew():
     v = evaluate("stow_arm",
-                 a_result("home", objects={"can": (0.30, 0.19, 0.8)}),
+                 a_result("rest", objects={"can": (0.30, 0.19, 0.8)}),
                  a_spec("stow_arm", initial={"can": (0.30, 0.0, 0.8)}),
                  load("stow_arm"))
     assert not v.is_safe
@@ -394,7 +395,7 @@ def test_the_drift_threshold_is_the_rig_s_one_number():
 def test_an_episode_with_no_starting_positions_cannot_say_the_board_was_clean():
     """"Nothing moved" is a comparison, and the result records only where
     things ended."""
-    v = evaluate("stow_arm", a_result("home", objects={"can": (0.3, 0, 0.8)}),
+    v = evaluate("stow_arm", a_result("rest", objects={"can": (0.3, 0, 0.8)}),
                  a_spec("stow_arm", initial=None), load("stow_arm"))
     assert not v.is_valid
     assert "cannot be told" in v.explanation

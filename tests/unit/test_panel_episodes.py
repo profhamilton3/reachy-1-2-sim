@@ -91,8 +91,8 @@ class StubLink:
 class StubWorker:
     def __init__(self, result=None, phases=()):
         self.result = result or {"status": "moved", "flown": ["a", "b"],
-                                 "start_posture": "rest",
-                                 "final_posture": "home"}
+                                 "start_posture": "present",
+                                 "final_posture": "rest"}
         self.phases = list(phases)
 
     def run(self, job, *, on_phase=None, should_cancel=None):
@@ -110,9 +110,9 @@ class StubWorker:
 def _ability(**kw):
     base = dict(plan_id="plan-a", plan_version=3, task_type="stow_arm",
                 target_id=None, destination=None, arm="right",
-                route="STOW_ROUTE", route_version=1,
-                expected_start_posture="rest", end_posture="home",
-                brief_reason="STOW_ROUTE with my right arm",
+                route="LOWER_TO_REST", route_version=1,
+                expected_start_posture="present", end_posture="rest",
+                brief_reason="LOWER_TO_REST with my right arm",
                 summary="stow the arm")
     base.update(kw)
     return Proposal(**base)
@@ -163,7 +163,7 @@ def rows(db, study=STUDY_ID):
 # ---------------------------------------------------------------------------
 
 def test_a_completed_ability_leaves_one_record(db, fake_sdk, validated):
-    out = executor(db, StubWorker(phases=["leaving rest", "flying STOW_ROUTE"])
+    out = executor(db, StubWorker(phases=["leaving present", "flying LOWER_TO_REST"])
                    ).execute(_ability())
     assert out.status == "completed", out.detail
 
@@ -177,13 +177,13 @@ def test_a_completed_ability_leaves_one_record(db, fake_sdk, validated):
     assert meta["live_interactive"] is True
     assert meta["plan_id"] == "plan-a"
     assert meta["plan_version"] == 3
-    # Measured, not assumed: the proposal said the route starts at rest, and
-    # the arm reported where it actually was.
-    assert meta["expected_start_posture"] == "rest"
-    assert meta["start_posture"] == "rest"
-    assert meta["final_posture"] == "home"
-    assert [p["name"] for p in meta["phases"]] == ["leaving rest",
-                                                   "flying STOW_ROUTE"]
+    # Measured, not assumed: the proposal said the route starts at the
+    # raised pose, and the arm reported where it actually was.
+    assert meta["expected_start_posture"] == "present"
+    assert meta["start_posture"] == "present"
+    assert meta["final_posture"] == "rest"
+    assert [p["name"] for p in meta["phases"]] == ["leaving present",
+                                                   "flying LOWER_TO_REST"]
     assert all(p["at_s"] >= 0 for p in meta["phases"])
 
 
@@ -242,7 +242,7 @@ def test_a_refusal_taken_after_the_lease_is_still_an_episode(db, fake_sdk,
 
 
 def test_object_drift_is_recorded_as_a_violation(db, fake_sdk, validated):
-    """The arm reached HOME having knocked the can across the board on the
+    """The arm reached REST having knocked the can across the board on the
     way.  The operator is told; the record says so too."""
     scene = live_scene()
 
@@ -554,8 +554,8 @@ def test_an_episode_this_panel_recorded_is_refused_by_the_reuse_gate(
         {**row, "identity_json": identity.to_json()})
 
     decision = check_reuse(candidate, identity, ReuseRequest(
-        task_type="stow_arm", arm="right", route="STOW_ROUTE",
-        route_version=1, start_posture="rest",
+        task_type="stow_arm", arm="right", route="LOWER_TO_REST",
+        route_version=1, start_posture="present",
         obstacles=frozenset({"soda_can"})))
     assert not decision.allowed
     assert "a person was driving" in decision.reason
@@ -568,7 +568,7 @@ def test_the_route_is_recorded_as_a_route_and_not_as_a_recipe(db, fake_sdk,
     executor(db).execute(_ability())
     recipe = json.loads(rows(db)[0]["recipe_json"])
     assert recipe["kind"] == "ability_route"
-    assert recipe["route"] == "STOW_ROUTE"
+    assert recipe["route"] == "LOWER_TO_REST"
     assert recipe["route_version"] == 1
 
 
@@ -749,7 +749,7 @@ def test_an_old_evidence_shape_still_records(db):
     falls back to the drift and to 0, as before."""
     result = types.SimpleNamespace(
         status="completed", detail="",
-        evidence={"route": "STOW_ROUTE", "object_drift": {"soda_can": 0.03}})
+        evidence={"route": "LOWER_TO_REST", "object_drift": {"soda_can": 0.03}})
     EpisodeRecorder("scene.yaml", db_path=db).record(_ability(), result)
     out = json.loads(rows(db)[0]["result_json"])
     assert out["metrics"]["max_object_drift_m"] == pytest.approx(0.03)

@@ -13,7 +13,8 @@ actually asked of the motion:
 
   * **Rest** reaches the supported posture, touches only what it meant to
     touch, and leaves the board undisturbed.
-  * **Stow** reaches the pocket by walking the corridor, and touches nothing.
+  * **Stow** reaches REST (HOME is REST, #192) by the measured route, and
+    touches nothing it was not meant to.
   * **Wave** completes the cycles it was asked for and finishes recognisably
     at the presentation pose.
 
@@ -105,8 +106,9 @@ from reachy_ai.motion.recipe import PrimitiveStep, TrajectoryRecipe
 #: from `web/panel_abilities.py`, which is where an ability's route is decided;
 #: a copy that disagreed with it would evaluate a motion nobody flies.
 ABILITY_ROUTES: Dict[str, str] = {
-    "rest_forearm": "PLACE_ROUTE",
-    "stow_arm": "STOW_ROUTE",
+    # HOME IS REST (#192): resting and stowing are the same route.
+    "rest_forearm": "LOWER_TO_REST",
+    "stow_arm": "LOWER_TO_REST",
     "wave": "WAVE",
     "point_cell": "POINT",
     "point_object": "POINT",
@@ -129,8 +131,8 @@ class RouteType(str, enum.Enum):
 #: Every route an ability flies has a type.  A route missing here is one
 #: nobody has said how to check, and `route_type` raises for it.
 ROUTE_TYPES: Dict[str, RouteType] = {
-    "PLACE_ROUTE": RouteType.MEASURED,
-    "STOW_ROUTE": RouteType.MEASURED,
+    "LOWER_TO_REST": RouteType.MEASURED,
+    "LIFT_TO_PRESENT": RouteType.MEASURED,
     "WAVE": RouteType.MEASURED,
     "POINT": RouteType.MEASURED,
     "CRANE_LIFT": RouteType.PLANNED,
@@ -226,11 +228,10 @@ def canonical_steps(route: str, *, wave_cycles: int = R.WAVE_CYCLES,
     """The route as `rig_routes` defines it, in the recipe's own vocabulary.
 
     Generated from the module the arm actually flies, never transcribed.  The
-    two corridor routes are their waypoint tuples; the wave and the point are
+    measured routes are their waypoint tuples; the wave and the point are
     built the way `rig_motion.wave` and `rig_motion.point_at` build them.
     """
-    if route in ("PLACE_ROUTE", "STOW_ROUTE", "LIFT_TO_PRESENT",
-                 "LOWER_TO_REST", "RAISE_TO_SIDE", "STOW_FROM_SIDE"):
+    if route in ("LIFT_TO_PRESENT", "LOWER_TO_REST"):
         return tuple(
             RouteStep("waypoint", wp.name, wp.seconds, wp.tol,
                       tuple(wp.guard or R.CRITICAL_JOINTS))
@@ -920,7 +921,7 @@ def evaluate_rest_forearm(
     """
     policy = policy or PanelRoutePolicy()
     lines = [f"=== Rest Verdict: {spec.task_id or spec.ability} ==="]
-    violations = _common(result, policy, recipe, "PLACE_ROUTE", lines)
+    violations = _common(result, policy, recipe, "LOWER_TO_REST", lines)
 
     arrived = _arrived(result, R.POSTURE_REST, policy, violations, lines)
     clean = _only_intended_contact(result, spec, policy, violations, lines)
@@ -939,18 +940,17 @@ def evaluate_stow_arm(
     recipe: Optional[TrajectoryRecipe] = None,
     policy: Optional[PanelRoutePolicy] = None,
 ) -> EpisodeVerdict:
-    """Stow succeeded when it reached the rail pocket by walking the corridor
-    and touched nothing on the way.
+    """Stow succeeded when it reached REST by the measured route and touched
+    nothing on the way.
 
-    The corridor is the whole of the safety argument: nothing may cut across
-    it, because a direct move from anywhere over the board to HOME drives the
-    upper arm through the board's near edge.  So "it ended at HOME" is not
-    enough on its own — `check_route_integrity` is what says it got there the
-    measured way, and it is not optional for this ability.
+    HOME IS REST in the October layout (#192), so the stow is LOWER_TO_REST,
+    the same route as rest_forearm.  "It ended at REST" is not enough on its
+    own -- `check_route_integrity` is what says it got there the measured way,
+    and it is not optional for this ability.
     """
     policy = policy or PanelRoutePolicy()
     lines = [f"=== Stow Verdict: {spec.task_id or spec.ability} ==="]
-    violations = _common(result, policy, recipe, "STOW_ROUTE", lines)
+    violations = _common(result, policy, recipe, "LOWER_TO_REST", lines)
     if recipe is None:
         lines.append("NOTE: no recipe was supplied, so the corridor was not "
                      "checked — only where the arm ended up.")
@@ -1158,7 +1158,7 @@ def evaluate_lift_object(
       * the arm ended at PRESENT — judged unless the withdrawal was refused.
 
     WHAT THE CONTACT CLAUSE COVERS (owner ruling, 2026-10-10):
-      * the approach to the start posture (from HOME: RAISE_TO_SIDE) is a
+      * the approach to the start posture (from REST: LIFT_TO_PRESENT) is a
         measured route of its own.  Its contacts are judged under THAT route's
         rules and exceptions and reported (`reported["approach"]`), not in
         the lift verdict, and the lift route is given no exception for them;

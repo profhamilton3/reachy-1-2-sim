@@ -1,7 +1,7 @@
 """#172: rebuilding a recorded lift from its states and panel task, offline.
 
-A synthetic recording, constructed here: HOME -> REST -> PRESENT on
-RAISE_TO_SIDE, then the crane's lift of red_cube, with the crane's events
+A synthetic recording, constructed here: REST -> PRESENT on
+LIFT_TO_PRESENT (HOME is REST since #192), then the crane's lift of red_cube, with the crane's events
 stamped on a clock 50 ms ahead of the states' (as the recorded ones are).
 """
 
@@ -52,8 +52,7 @@ def _state(i, t, posture, cube):
 
 #: (start s, end s, posture, cube z offset, cube x offset)
 TIMELINE = [
-    (0, 2, "home", 0.0, 0.0),
-    (2, 4, "rest", 0.0, 0.0),           # RAISE_TO_SIDE passes REST
+    (0, 4, "rest", 0.0, 0.0),           # stored at REST, then LIFT_TO_PRESENT
     (4, 10, "present", 0.0, 0.0),       # at PRESENT: the crane starts, approaches
     (10, 14, "present", 0.0, 0.0),      # grasp: close + lift-off
     (14, 16, "present", 0.05, 0.0),     # hold, 5 cm up
@@ -110,7 +109,7 @@ def task(*, phase_events=False, clean=True):
         "proposal": {"object_id": "red_cube", "route": "CRANE_LIFT",
                      "route_version": 1, "expected_start_posture": "present"},
         "execution_evidence": {
-            "start_posture": "home", "final_posture": "present",
+            "start_posture": "rest", "final_posture": "present",
             "crane": {"events": events,
                       "lifted_and_held": {"rise_end_mm": 50.0,
                                           "in_hand_slip_mm": 0.0},
@@ -119,12 +118,14 @@ def task(*, phase_events=False, clean=True):
 
 
 def contacts(state):
-    """Forearm on the board at REST; pads on the cube while it is up."""
+    """Forearm and hand on the board at REST; pads on the cube while it is
+    up."""
     pose = R.posture_of(LR.joints_deg(state))
     z = LR.object_pos(state, "red_cube")[2]
     out = []
     if pose == "rest":
         out.append(("r_forearm", "table_top", -0.0004))
+        out.append(("r_gripper_thumb", "table_top", -0.0006))
     if z > Z0 + 0.01:
         out.append(("r_gripper_thumb", "red_cube", -0.0001))
     else:
@@ -140,9 +141,9 @@ def test_the_two_clocks_are_aligned_on_the_objects_measured_position():
 
 def test_the_approach_leg_and_the_attempt_start_are_read_from_the_arm():
     job = recording()
-    legs, leg_of, arrived = LR.approach_legs(job, "home", "present")
-    assert legs == ["RAISE_TO_SIDE"]
-    assert set(leg_of) == {"RAISE_TO_SIDE"}
+    legs, leg_of, arrived = LR.approach_legs(job, "rest", "present")
+    assert legs == ["LIFT_TO_PRESENT"]
+    assert set(leg_of) == {"LIFT_TO_PRESENT"}
     assert arrived == pytest.approx(T0 + 4.0)
     assert LR.approach_legs(job, "present", "present")[0] == []
 
@@ -157,7 +158,7 @@ def test_the_phase_windows(phase_events):
     assert got == [(P.APPROACH, start, 10.0), (P.GRASP, 10.0, 14.0),
                    (P.HOLD, 14.0, 16.0), (P.SET_DOWN, 16.0, 20.0),
                    (P.RELEASE, 20.0, 22.0), (P.WITHDRAW, 22.0, 29.9)]
-    assert rep.approach_legs == ["RAISE_TO_SIDE"]
+    assert rep.approach_legs == ["LIFT_TO_PRESENT"]
 
 
 def test_the_lift_is_re_measured_from_the_states():
@@ -177,7 +178,7 @@ def test_contacts_carry_their_phase_and_the_approach_its_route():
     rep = LR.replay_lift(task(), recording(), contacts_at=contacts)
     got = {(c.body1, c.body2, c.phase, c.pose, c.route)
            for c in contact_samples(rep.result)}
-    assert ("r_forearm", "table_top", P.APPROACH, "rest", "RAISE_TO_SIDE") in got
+    assert ("r_forearm", "table_top", P.APPROACH, "rest", "LIFT_TO_PRESENT") in got
     assert ("r_gripper_thumb", "red_cube", P.HOLD, "present", "") in got
     assert not any(c[2] is P.HOLD and c[1] == "table_top" for c in got)
 
@@ -186,8 +187,11 @@ def test_a_replayed_full_cycle_and_a_replayed_refusal():
     rep = LR.replay_lift(task(), recording(), contacts_at=contacts)
     v = evaluate("lift_object", rep.result, rep.spec, plan=rep.plan)
     assert v.is_successful and v.reported["full_cycle"], v.explanation
-    assert v.reported["approach"]["RAISE_TO_SIDE"], \
-        "the forearm at REST on RAISE_TO_SIDE is reported, under that route"
+    # Judged under the approach's own route: LIFT_TO_PRESENT declares the
+    # forearm and hand on the board at REST (contact_rules, #192), so the
+    # approach is reported, and clean.
+    assert v.reported["approach"] == {"LIFT_TO_PRESENT": []}
+    assert "APPROACH (LIFT_TO_PRESENT" in v.explanation
 
     rep = LR.replay_lift(task(clean=False), recording(), contacts_at=contacts)
     v = evaluate("lift_object", rep.result, rep.spec, plan=rep.plan)

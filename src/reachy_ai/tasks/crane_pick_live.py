@@ -101,6 +101,7 @@ from reachy_ai.motion import grasp_alignment as G
 from reachy_ai.motion import primitives as P
 from reachy_ai.motion.kinematics import (
     _BASE,
+    _SHOULDER_Y,
     ArmClearanceError,
     R_ARM_JOINTS,
     TargetContact,
@@ -117,8 +118,10 @@ from reachy_ai.tasks.pick_place_live import present_joints
 
 log = logging.getLogger("reachy12.tasks.crane_pick_live")
 
-#: The right shoulder in world (kinematics._SHOULDER_Y, torso at z = 1.0).
-_SHOULDER_XY = (0.0, -0.19)
+#: The right shoulder in world, x and y: the torso origin (``kinematics._BASE``)
+#: plus ``kinematics._SHOULDER_Y``.  Derived since #192 moved the torso to
+#: x = 0.206; it was the literal (0.0, -0.19).
+_SHOULDER_XY = (float(_BASE[0]), float(_BASE[1] + _SHOULDER_Y["right"]))
 
 
 # ── Parameters ────────────────────────────────────────────────────────────────
@@ -1865,9 +1868,9 @@ def _end(outcome, ev, observe):
 def _finish(arm, robot, observe, outcome, ev, stow: bool = True):
     ok, joint, off_deg = P.stow_entry_ok(arm)
     if ok and stow:
-        ev("phase", name="stow_from_side (documented PRESENT -> HOME route)")
+        ev("phase", name="stow_from_side (documented PRESENT -> REST route)")
         P.stow_from_side(robot, arm)
-        outcome["final"] = "HOME"
+        outcome["final"] = "REST"
     elif ok:
         outcome["final"] = "PRESENT"
     else:

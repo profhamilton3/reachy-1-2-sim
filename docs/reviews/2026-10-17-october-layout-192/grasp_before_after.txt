@@ -1,0 +1,6 @@
+| cube | gripper open | hand boxes | contacts at placement | robot geoms touching the cube | grasp held | grip force at close (N) | at lift (N) | cube rise (mm) |
+|---|---|---|---|---|---|---|---|---|
+| 20 mm | -34 deg | without | 0 | r_finger_col, r_thumb_col | True | 28.003 | 30.433 | 142.7 |
+| 20 mm | -34 deg | with | 0 | r_finger_col, r_thumb_col | True | 28.003 | 30.433 | 142.7 |
+| 40 mm | -45 deg | without | 0 | r_finger_col, r_thumb_col | True | 53.628 | 85.790 | 141.2 |
+| 40 mm | -45 deg | with | 0 | r_finger_col, r_thumb_col | True | 53.628 | 85.790 | 141.2 |

@@ -5,18 +5,20 @@ Focused checks only:
   * the pad boxes ``grasp_alignment.hand_frames`` builds are the compiled
     MJCF's ``r_thumb_col`` / ``r_finger_col`` (so a clearance in mm means
     something);
-  * the misalignment behind both recorded misses (2026-10-06) is DETECTED
-    from the measured hover alone: the plan had ~2.3 mm per side, the
-    measured hand predicts the pad that actually landed on the top edge;
   * an obstructed or misaligned insertion cannot reach the close: a pad
     force reading, or a hand that drifts out of line below the insertion
     checkpoint, halts the descent and the gripper is never closed.
+
+The replays of the two recorded 2026-10-06 misses went with the August mount
+(#192): their joint angles put the hand somewhere else now.  The executor
+checks below fly a plan made at the October mount instead, red_cube on
+cell_r3c2 (the cell the crane plans from there; the crane is not yet re-tuned
+for the October mount, which is a follow-up to #192).
 
 Offline: no simulator, no server; MuJoCo (when installed) only compiles the
 model and runs mj_forward.
 """
 
-import json
 import math
 import os
 import sys
@@ -35,25 +37,6 @@ from reachy_ai.scene.awareness import SceneModel  # noqa: E402
 from reachy_ai.tasks import crane_pick_live as C  # noqa: E402
 
 _SCENE = os.path.join(_HERE, "../../scenes/FWDCenterLabSivaPool.yaml")
-with open(os.path.join(_HERE, "../fixtures/crane/recorded_crane_attempts_2026_10_06.json")) as f:
-    REC = json.load(f)
-
-
-def _scene(cube):
-    s = SceneModel.from_yaml(_SCENE)
-    s.update_poses({"red_cube": cube})
-    return s
-
-
-def _cube_box(cube=None):
-    s = _scene(REC["cube"]["center"] if cube is None else cube)
-    c = REC["cube"]["center"] if cube is None else cube
-    return G.object_box(s.get("red_cube"), c, REC["cube"]["quat_wxyz"])
-
-
-def _rungs(run):
-    r = REC[run]["commanded_rungs"]
-    return [r[str(k)] for k in range(9, -1, -1)]          # hover -> grasp
 
 
 # ── the pads are the MJCF's pads ──────────────────────────────────────────────
@@ -71,9 +54,10 @@ class TestPadBoxesMatchMJCF:
         return m, self.mujoco.MjData(m)
 
     @pytest.mark.parametrize("q, grip", [
-        (REC["x_face"]["hover_measured_q"], REC["x_face"]["hover_measured_gripper"]),
-        (REC["y_face"]["hover_measured_q"], -65.0),
-        (REC["offline_plan"]["rungs"][0], -65.0),
+        # three crane hovers (2026-10-06; hand-frame geometry, any mount)
+        ([-83.21, -18.49, 90.17, -83.91, -48.05, 45.04, 39.18], -64.96),
+        ([-82.61, -24.14, 90.25, -76.11, 28.93, -31.1, 45.04], -65.0),
+        ([-70.09, -16.21, 90.09, -76.51, -37.05, 40.86, 36.79], -65.0),
         ([-40.0, -10.0, 20.0, -70.0, 10.0, 20.0, -10.0], -20.0),
         ([-70.0, -25.0, 0.0, -80.0, 0.0, 0.0, 0.0], 15.0),
     ])
@@ -91,51 +75,6 @@ class TestPadBoxesMatchMJCF:
             assert np.allclose(box.center, d.geom_xpos[g], atol=1e-4), geom
             assert np.allclose(box.axes, d.geom_xmat[g].reshape(3, 3), atol=1e-4), geom
             assert np.allclose(box.half, m.geom_size[g], atol=1e-9), geom
-
-
-# ── the recorded misalignment is detected ─────────────────────────────────────
-
-class TestRecordedMisalignmentDetected:
-    """The two crane attempts of 2026-10-06, re-read from the hover gate."""
-
-    @pytest.mark.parametrize("run", ["x_face", "y_face"])
-    def test_measured_hover_predicts_the_pad_that_hit(self, run):
-        box = _cube_box()
-        rec = REC[run]
-        rungs = _rungs(run)
-        off = G.joint_offset(rec["hover_measured_q"], rungs[0])
-        planned = G.route_clearance(rungs, -65.0, box)
-        predicted = G.route_clearance(rungs, rec["hover_measured_gripper"], box, offset=off)
-        tol = C.prediction_tolerance(0.09)
-        # As commanded, the hit pad cleared the cube on its way down ...
-        hit_planned = planned.thumb_m if rec["hit"] == "thumb" else planned.finger_m
-        assert hit_planned > 0.0
-        # ... as measured, the same pad's route falls below what the
-        # prediction is good for, and it is the worse of the two.
-        hit_pred = predicted.thumb_m if rec["hit"] == "thumb" else predicted.finger_m
-        other_pred = predicted.finger_m if rec["hit"] == "thumb" else predicted.thumb_m
-        assert hit_pred < tol
-        assert hit_pred < other_pred
-
-    def test_x_face_plan_had_the_reported_slack_and_lost_it(self):
-        box = _cube_box()
-        rungs = _rungs("x_face")
-        off = G.joint_offset(REC["x_face"]["hover_measured_q"], rungs[0])
-        planned = G.route_clearance(rungs, -65.0, box)
-        predicted = G.route_clearance(rungs, REC["x_face"]["hover_measured_gripper"], box,
-                                      offset=off)
-        assert 0.002 < planned.thumb_m < 0.003 and 0.002 < planned.finger_m < 0.003
-        assert predicted.finger_m < -0.003            # 3.5 mm into the top +x edge
-
-    def test_first_contact_pose_is_not_a_straddle(self):
-        """The measured x-face hand at grasp depth (finger on the top edge)
-        must never be judged ready to close."""
-        box = _cube_box()
-        hand = G.hand_frames(REC["x_face"]["first_contact_grasp_rung_measured_q"],
-                             REC["x_face"]["hover_measured_gripper"])
-        st = G.straddle_check(hand, box, 0.74, 0.0, C.jaw_face_limit_deg(0.0023))
-        assert not st.ok
-        assert "finger_not_outside_face" in st.failed
 
 
 # ── an obstructed insertion cannot proceed to closure ─────────────────────────
@@ -169,47 +108,18 @@ class _Robot:
         self.r_arm = arm
 
 
-def _recorded_offline_plan(scene):
-    """The recorded offline plan exactly as recorded (2026-10-06).  It predates
-    the exact joint travel: its grasp rung commands r_arm_yaw past the stop."""
-    rungs = REC["offline_plan"]["rungs"]
-    spec = C.CraneSpec(pause_s=0.2, hold_s=0.2)
-    obj = G.object_box(scene.get("red_cube"), REC["offline_plan"]["cube"], (1, 0, 0, 0))
-    targets = [G.hand_frames(q, spec.opening_deg).gap_mid for q in rungs]
-    plan = C.CranePlan("red_cube", spec, C.CraneLimits(), obj,
-                       G.hand_rotation(rungs[0]), targets, rungs, C.present_joints())
-    plan.insertion_rung = C._insertion_rung(plan)
-    return plan
-
-
-def _offline_plan(scene):
-    """The recorded plan with each rung re-solved INSIDE the joint travel to
-    the same jaw-gap target, by the planner's own re-solve with the attitude
-    soft (as the ladder solves it); check_crane_plan then judges the result.  The recorded data are unchanged; only rungs past a stop
-    move, by as much as the stops require."""
-    rec = _recorded_offline_plan(scene)
-    spec, tol = rec.spec, rec.limits.ik_position_tol_m
-    rungs = []
-    for q, tgt in zip(rec.rungs, rec.gap_targets):
-        if not within_limits(q):
-            q, err = C._gap_resolve(G.hand_rotation(q), tgt, spec.opening_deg, q, tol,
-                                    C._RESOLVE_ROT_WEIGHT_RELAX_M)   # as the ladder does
-            assert err < tol and within_limits(q)
-        rungs.append(list(q))
-    plan = C.CranePlan("red_cube", spec, rec.limits, rec.obj, G.hand_rotation(rungs[0]),
-                       rec.gap_targets, rungs, C.present_joints())
-    plan.insertion_rung = C._insertion_rung(plan)
-    return plan
-
-
-def test_the_recorded_plan_past_a_stop_is_refused(monkeypatch):
-    """#55: the recorded rungs command r_arm_yaw past its 89.954 deg stop.  The
-    plan check refuses that instead of letting the simulator clip it."""
-    scene = _scene(REC["offline_plan"]["cube"])
-    planner = CartesianPlanner(_Arm(C.present_joints(), -45.0), scene=scene)
-    with pytest.raises(C.CraneRefused) as info:
-        C.check_crane_plan(planner, scene, _recorded_offline_plan(scene))
-    assert info.value.stage == "joint_limits"
+def _october_plan():
+    """The crane's own plan for red_cube standing on cell_r3c2, made with the
+    simulator's IK (host mirror) and checked, as the panel's preflight does."""
+    pytest.importorskip("scipy")
+    scene = SceneModel.from_yaml(_SCENE)
+    x, y, z = scene.cell_center("cell_r3c2")
+    cube = (x, y, z + scene.get("red_cube").size[2] / 2.0)
+    scene.update_poses({"red_cube": cube})
+    obs = C.Observation(cube, (1.0, 0.0, 0.0, 0.0), 0.0, False, 0.0)
+    plan = C.plan_crane_pick(_ik_planner(scene), scene, "red_cube", obs,
+                             spec=C.CraneSpec(pause_s=0.2, hold_s=0.2))
+    return scene, plan
 
 
 @pytest.fixture
@@ -218,7 +128,7 @@ def rig(monkeypatch):
     monkeypatch.setattr(P.time, "sleep", lambda *_a: None)
     monkeypatch.setattr(P, "look_at", lambda *a, **k: None)
     monkeypatch.setattr(P, "stow_from_side", lambda *a, **k: None)
-    scene = _scene(REC["offline_plan"]["cube"])
+    scene, plan = _october_plan()
     arm = _Arm(C.present_joints(), -45.0)
     orig = P.smooth_move
 
@@ -228,7 +138,6 @@ def rig(monkeypatch):
         return orig(a, pose, duration)
     monkeypatch.setattr(P, "smooth_move", smooth)
     planner = CartesianPlanner(arm, scene=scene)
-    plan = _offline_plan(scene)
     C.check_crane_plan(planner, scene, plan)          # the plan is clean as planned
     return scene, arm, planner, plan
 
@@ -267,7 +176,7 @@ def test_pad_force_during_insertion_halts_before_closure(rig):
     assert "grip force" in out["halt"]
     assert plan.spec.close_deg not in arm.gripper_goals
     assert any(k == "HALT" for k, _ in events)
-    assert out["final"] == "HOME"                     # retreated by the checked route
+    assert out["final"] == "REST"                     # retreated by the checked route
 
 
 def test_hand_drifting_out_of_line_below_insertion_halts_before_closure(rig, monkeypatch):

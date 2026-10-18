@@ -179,6 +179,7 @@ Camera coordinate conversions require tests. ROS optical frames use +x right, +y
 - Treat current hand-entered arm geometry as approximate.
 - Prefer backend/URDF model transforms for FK when MuJoCo is active.
 - Do not silently change current SDK-visible limit or compliance semantics; document deliberate deviations.
+  Current deliberate deviation: `r_shoulder_roll` upper stop +20.3 deg (URDF +10), the October layout (#192, docs/adr/0010-october-layout.md).
 - Keep physical calibration separate from synthetic defaults.
 
 ## Docker and Mac rules

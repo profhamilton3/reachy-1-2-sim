@@ -176,7 +176,7 @@ def test_resetting_the_simulation_is_a_different_request(text):
 
 
 def test_bare_reset_is_the_stow_route():
-    assert match("reset").ability.route == "STOW_ROUTE"
+    assert match("reset").ability.route == "LOWER_TO_REST"
 
 
 def test_no_ability_routes_to_a_simulator_message():
@@ -232,10 +232,12 @@ def test_a_left_arm_request_is_recorded_as_left_not_silently_mirrored():
 
 @pytest.mark.parametrize("text", ["rest", "rest your arm", "relax your arm",
                                   "return to rest position"])
-def test_bare_rest_is_ambiguous_between_the_two_postures(text):
+def test_bare_rest_is_the_stow_now_that_there_is_one_rest(text):
+    """HOME IS REST (#192): "rest" no longer names two places, so it is not
+    a question any more."""
     m = match(text)
-    assert m.name == ""
-    assert m.ambiguous_between == ("rest_forearm", "stow_arm")
+    assert m.name == "stow_arm"
+    assert m.ambiguous_between == ()
 
 
 def test_naming_the_destination_removes_the_ambiguity():
@@ -283,7 +285,7 @@ def test_put_your_arm_away_is_an_ability_not_a_move():
     out = plan(make_scene(), "put your arm away")
     assert out.kind == "proposal"
     assert out.proposal.task_type == "stow_arm"
-    assert out.proposal.route == "STOW_ROUTE"
+    assert out.proposal.route == "LOWER_TO_REST"
     assert "object called" not in (out.message or "")
 
 
@@ -305,8 +307,7 @@ def test_pointing_at_a_cell_asks_which_one_and_offers_reachable_cells():
     out = plan(make_scene(), "point to a cell")
     assert out.kind == "clarification"
     assert out.slot == abilities.SLOT_CELL
-    assert "r2c2" in out.choices
-    assert "r3c1" not in out.choices        # measured out of reach
+    assert "r3c1" not in out.choices        # unreachable in this test scene
 
 
 def test_the_cell_answer_fills_the_cell_slot():
@@ -317,25 +318,11 @@ def test_the_cell_answer_fills_the_cell_slot():
     assert out.proposal.destination is None      # pointing places nothing
 
 
-def test_bare_rest_asks_which_posture_then_resolves():
-    first = plan(make_scene(), "rest your arm")
-    assert first.kind == "clarification"
-    assert first.slot == abilities.SLOT_POSTURE
-    assert "eleven waypoints apart" in first.message
-
-    table = plan(make_scene(), "rest your arm", answers=["on the table"])
-    assert table.proposal.task_type == "rest_forearm"
-    assert table.proposal.route == "PLACE_ROUTE"
-
-    pocket = plan(make_scene(), "rest your arm", answers=["in the rail pocket"])
-    assert pocket.proposal.task_type == "stow_arm"
-    assert pocket.proposal.route == "STOW_ROUTE"
-
-
-def test_an_answer_naming_neither_posture_asks_again():
-    out = plan(make_scene(), "rest your arm", answers=["whichever"])
-    assert out.kind == "clarification"
-    assert out.slot == abilities.SLOT_POSTURE
+def test_bare_rest_is_proposed_without_a_question():
+    out = plan(make_scene(), "rest your arm")
+    assert out.kind == "proposal"
+    assert out.proposal.task_type == "stow_arm"
+    assert out.proposal.route == "LOWER_TO_REST"
 
 
 def test_a_left_arm_request_is_refused_with_the_reason():
@@ -644,8 +631,8 @@ def test_an_ability_proposal_needs_neither():
 
 @pytest.mark.parametrize("text,action,route", [
     ("wave", "wave", "WAVE"),
-    ("store your arm", "stow_arm", "STOW_ROUTE"),
-    ("place your forearm on the table", "rest_forearm", "PLACE_ROUTE"),
+    ("store your arm", "stow_arm", "LOWER_TO_REST"),
+    ("place your forearm on the table", "rest_forearm", "LOWER_TO_REST"),
     ("point to r2c2", "point_cell", "POINT"),
     ("point to the soda can", "point_object", "POINT"),
 ])
@@ -654,16 +641,15 @@ def test_each_ability_carries_its_route_identity(text, action, route):
     assert out.kind == "proposal", out.message
     assert out.proposal.task_type == action
     assert out.proposal.route == route
-    # The corridor routes moved with SWING_1 (#74, docs/adr/0006).
-    assert out.proposal.route_version == (2 if route in ("STOW_ROUTE", "PLACE_ROUTE") else 1)
+    # 3: the October REST (#192); 2: WAVE and POINT re-flown there.
+    assert out.proposal.route_version == (3 if route == "LOWER_TO_REST" else 2)
 
 
 def test_the_reason_names_the_route_because_the_route_is_the_claim():
-    """"Store your arm" means the rail-pocket corridor, not `P.go_home()` —
-    which routes through `stow_from_side()` and is a different motion also
-    fairly called going home."""
+    """"Store your arm" names the measured route it flies, LOWER_TO_REST
+    since HOME became REST (#192)."""
     out = plan(make_scene(), "store your arm")
-    assert "STOW_ROUTE" in out.proposal.brief_reason
+    assert "LOWER_TO_REST" in out.proposal.brief_reason
     assert "right arm" in out.proposal.brief_reason
 
 

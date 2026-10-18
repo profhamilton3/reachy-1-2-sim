@@ -27,16 +27,18 @@ from reachy_ai.scene.awareness import SceneModel  # noqa: E402
 _OUT_DIR = os.path.join(_HERE, "../../scenes/e1_boards")
 _ROBOT_MODEL = os.path.join(_HERE, "../../native_mujoco/model/reachy_1_2.xml")
 
-#: {board_id: (object_id, expected_tube_cm, expected_shells_cm)} -- from the
-#: assignment's fixture table (== TestNamedBoards's parametrize in
-#: test_footprint_boards.py).
+#: {board_id: (object_id, expected_tube_cm, expected_shells_cm)} --
+#: TestNamedBoards's parametrize in test_footprint_boards.py.  At the October
+#: mount and REST (#192); the assignment's August table read tube / shells
+#: B4 -3.719 / 6.258, B5 -3.079 / 5.936, B3 -4.379 / 4.535,
+#: B1 -5.699 / 4.479, B2 -9.369 / 2.106, B6 -11.944 / -2.414.
 _FIXTURE_TABLE = {
-    "B4_pool_box_1_r2c3": ("pool_box_1", -3.719, 6.258),
-    "B5_pool_cyl_1_r2c3": ("pool_cyl_1", -3.079, 5.936),
-    "B3_soda_can_r2c3": ("soda_can", -4.379, 4.535),
-    "B1_evidence": ("foam_block", -5.699, 4.479),
-    "B2_foam_r3c3": ("foam_block", -9.369, 2.106),
-    "B6_incident": ("foam_block", -11.944, -2.414),
+    "B4_pool_box_1_r2c3": ("pool_box_1", 14.170, 15.215),
+    "B5_pool_cyl_1_r2c3": ("pool_cyl_1", 14.999, 16.000),
+    "B3_soda_can_r2c3": ("soda_can", 12.837, 12.837),
+    "B1_evidence": ("foam_block", 12.049, 13.100),
+    "B2_foam_r3c3": ("foam_block", 23.753, 23.753),
+    "B6_incident": ("foam_block", 7.737, 8.483),
 }
 
 

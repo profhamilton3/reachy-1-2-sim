@@ -23,14 +23,15 @@ from scipy.optimize import minimize
 
 #: sha256 of the whitespace-stripped source of the server's arm-kinematics
 #: definitions (see `source_digest`), recorded 2026-10-06 at origin/main
-#: 7094ab0.
-SOURCE_SHA256 = "640d1d1ade3f0be30f9de92c6864b486604aae76f3804495a3466b2d16b33732"
+#: 7094ab0; re-recorded 2026-10-17 for #192, whose only change to them is
+#: r_shoulder_roll's upper bound, 0.17 -> 0.354 (docs/adr/0010).
+SOURCE_SHA256 = "0c7312069f39c02bef00e7c0b544c47ec3afd4af7eb9979de355e4bf3c6e29b6"
 
 _R_SHOULDER_Y = -0.19
 _UPPER_ARM = 0.28
 _FOREARM = 0.25
 _R_ARM_LIMITS = [
-    (-3.14, 1.57), (-1.57, 0.17), (-2.09, 2.09),
+    (-3.14, 1.57), (-1.57, 0.354), (-2.09, 2.09),
     (-2.35, 0.0), (-2.62, 2.62), (-0.79, 0.79), (-0.79, 0.79),
 ]
 
