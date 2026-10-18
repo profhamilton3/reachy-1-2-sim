@@ -144,24 +144,42 @@ class _MujocoRemoteCameraAdapter:
     def __init__(self) -> None:
         self._seqs: dict = {LEFT: 0, RIGHT: 0}
         self._last: dict = {LEFT: None, RIGHT: None}
+        self._keys: dict = {LEFT: None, RIGHT: None}
+        # Every StreamImage call polls this from its own server thread.
+        self._lock = threading.Lock()
 
     def latest_frame(self, cam_id: int) -> Optional[CameraFrame]:
+        """The newest frame; a new sequence only when the bridge wrote a new file.
+
+        The bridge replaces the file atomically (write + rename), so a new render
+        is a new inode/mtime. Re-reading an unchanged file used to count as a new
+        frame, and StreamImage, which sends on each new sequence, resent the same
+        image: clients saw 14.9 fps from 9.7 renders/s. fstat on the open file
+        ties the key to the bytes actually read.
+        """
         path = _MUJOCO_LEFT_JPG if cam_id == LEFT else _MUJOCO_RIGHT_JPG
-        try:
-            data = path.read_bytes()
-        except OSError:
-            return self._last[cam_id]
-        self._seqs[cam_id] += 1
-        frame = CameraFrame(
-            camera_id=cam_id,
-            sequence=self._seqs[cam_id],
-            wall_time_ns=time.time_ns(),
-            width=0,
-            height=0,
-            jpeg_bytes=data,
-        )
-        self._last[cam_id] = frame
-        return frame
+        with self._lock:
+            try:
+                with path.open("rb") as f:
+                    st = os.fstat(f.fileno())
+                    key = (st.st_ino, st.st_mtime_ns, st.st_size)
+                    if key == self._keys[cam_id] and self._last[cam_id] is not None:
+                        return self._last[cam_id]
+                    data = f.read()
+            except OSError:
+                return self._last[cam_id]
+            self._seqs[cam_id] += 1
+            frame = CameraFrame(
+                camera_id=cam_id,
+                sequence=self._seqs[cam_id],
+                wall_time_ns=time.time_ns(),
+                width=0,
+                height=0,
+                jpeg_bytes=data,
+            )
+            self._keys[cam_id] = key
+            self._last[cam_id] = frame
+            return frame
 
     def render_single_frame(self, cam_id: int) -> CameraFrame:
         frame = self.latest_frame(cam_id)
@@ -530,6 +548,16 @@ class FakeFanService(fan_pb2_grpc.FanControllerServiceServicer):
 
 _STREAM_FRAME_HZ = 15.0  # max frame rate for StreamImage
 
+# Each reachy-sdk 0.7.0 client holds 5 streaming RPCs, one server thread each,
+# for as long as it is connected: StreamJointsState, StreamSensorStates,
+# StreamJointsCommands and one StreamImage per camera. With 10 threads, two
+# clients (the panel's motion worker and the workstation stereo viewer) took
+# all of them, and every further call — a notebook connecting, a GetImage —
+# waited forever. The robot does not hit this at two clients: it serves joints
+# (50055) and cameras (50057) from separate servers. 32 fits six clients plus
+# unary calls.
+_GRPC_MAX_WORKERS = 32
+
 
 class FakeCameraService(camera_reachy_pb2_grpc.CameraServiceServicer):
     """gRPC adapter over CameraFixture.
@@ -694,7 +722,7 @@ def serve() -> None:
         target=state_file_writer, args=(joint_backend,), daemon=True, name="state-writer"
     ).start()
 
-    server = grpc.server(ThreadPoolExecutor(max_workers=10))
+    server = grpc.server(ThreadPoolExecutor(max_workers=_GRPC_MAX_WORKERS))
     joint_pb2_grpc.add_JointServiceServicer_to_server(FakeJointService(joint_backend), server)
     sensor_pb2_grpc.add_SensorServiceServicer_to_server(FakeSensorService(sensor_backend), server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(FakeFanService(), server)
