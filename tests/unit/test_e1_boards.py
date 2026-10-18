@@ -33,12 +33,12 @@ _ROBOT_MODEL = os.path.join(_HERE, "../../native_mujoco/model/reachy_1_2.xml")
 #: B4 -3.719 / 6.258, B5 -3.079 / 5.936, B3 -4.379 / 4.535,
 #: B1 -5.699 / 4.479, B2 -9.369 / 2.106, B6 -11.944 / -2.414.
 _FIXTURE_TABLE = {
-    "B4_pool_box_1_r2c3": ("pool_box_1", 9.221, 16.160),
-    "B5_pool_cyl_1_r2c3": ("pool_cyl_1", 9.644, 16.262),
-    "B3_soda_can_r2c3": ("soda_can", 8.344, 12.837),
-    "B1_evidence": ("foam_block", 7.403, 14.067),
-    "B2_foam_r3c3": ("foam_block", 13.176, 21.320),
-    "B6_incident": ("foam_block", 0.610, 8.044),
+    "B4_pool_box_1_r2c3": ("pool_box_1", 14.170, 15.215),
+    "B5_pool_cyl_1_r2c3": ("pool_cyl_1", 14.999, 16.000),
+    "B3_soda_can_r2c3": ("soda_can", 12.837, 12.837),
+    "B1_evidence": ("foam_block", 12.049, 13.100),
+    "B2_foam_r3c3": ("foam_block", 23.753, 23.753),
+    "B6_incident": ("foam_block", 7.737, 8.483),
 }
 
 

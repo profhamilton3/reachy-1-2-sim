@@ -177,9 +177,11 @@ def test_the_panel_routes_make_no_unintended_contact(ability):
                                             if not j.allowed]
     made = {(j.sample.body1, j.sample.body2, j.sample.pose) for j in judged}
     if ability in ("rest_forearm", "stow_arm"):
+        # The forearm lands on the margin; the hand settles onto its palm
+        # only once the motors are off, which a flown route does not do.
         assert made <= {("r_forearm", "table_top", "rest"),
                         ("r_gripper_thumb", "table_top", "rest")}
-        assert ("r_gripper_thumb", "table_top", "rest") in made
+        assert ("r_forearm", "table_top", "rest") in made
     else:
         assert made == set()
 

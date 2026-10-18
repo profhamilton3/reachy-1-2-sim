@@ -1,16 +1,16 @@
-motors-off 10 s from REST: drift [-0.7, 0.5, -1.2, -0.0, 0.2, -0.1, 1.2, -3.0] tip [0.368, -0.368, 0.763] speed 0.0002
-motors-on 5 s at REST: error [0.0, 0.0, -0.0, -0.0, -0.1, -0.1, 0.1, -0.0] contacts [('r_forearm_col', 'table_top'), ('r_hand_back_col', 'table_top'), ('r_palm_col', 'table_top')]
+motors-off 10 s from REST: drift [-0.4, 0.2, -0.7, -0.1, 0.1, -0.6, 0.9, 0.2] tip [0.347, -0.396, 0.752] speed 0.0002
+motors-on 5 s at REST: error [0.0, 0.0, -0.0, -0.0, 0.0, 0.0, 0.1, 0.0] contacts [('r_forearm_col', 'table_top')]
 layout {'soda_can': 'cell_r1c3', 'blue_cylinder': 'cell_r2c3', 'red_cube': 'cell_r3c3'}
  LOWER_TO_REST
-  worst MJCF distance (cm): {'soda_can': 3.1, 'blue_cylinder': 13.6, 'red_cube': 3.0} moved mm: {'soda_can': 0.0, 'blue_cylinder': 0.0, 'red_cube': 0.0} final gross err: {'r_shoulder_pitch': -0.2, 'r_shoulder_roll': -0.2, 'r_arm_yaw': -0.1, 'r_elbow_pitch': 0.1}
+  worst MJCF distance (cm): {'soda_can': 2.3, 'blue_cylinder': 13.6, 'red_cube': 3.0} moved mm: {'soda_can': 0.0, 'blue_cylinder': 0.0, 'red_cube': 0.0} final gross err: {'r_shoulder_pitch': -0.1, 'r_shoulder_roll': -0.3, 'r_arm_yaw': -0.1, 'r_elbow_pitch': 0.1}
   robot contacts: []
  LIFT_TO_PRESENT
-  worst MJCF distance (cm): {'soda_can': 2.9, 'blue_cylinder': 13.6, 'red_cube': 3.0} moved mm: {'soda_can': 0.0, 'blue_cylinder': 0.0, 'red_cube': 0.0} final gross err: {'r_shoulder_pitch': 1.0, 'r_shoulder_roll': 0.2, 'r_arm_yaw': 0.1, 'r_elbow_pitch': 0.3}
-  robot contacts: [('r_forearm_col', 'table_top'), ('r_hand_back_col', 'table_top'), ('r_palm_col', 'table_top')]
+  worst MJCF distance (cm): {'soda_can': 2.0, 'blue_cylinder': 13.6, 'red_cube': 3.0} moved mm: {'soda_can': 0.0, 'blue_cylinder': 0.0, 'red_cube': 0.0} final gross err: {'r_shoulder_pitch': 1.0, 'r_shoulder_roll': 0.2, 'r_arm_yaw': 0.1, 'r_elbow_pitch': 0.3}
+  robot contacts: [('r_forearm_col', 'table_top')]
 layout {'blue_cylinder': 'cell_r1c3', 'soda_can': 'cell_r2c3', 'foam_block': 'cell_r3c3'}
  LOWER_TO_REST
-  worst MJCF distance (cm): {'blue_cylinder': 2.9, 'soda_can': 12.6, 'foam_block': 3.0} moved mm: {'blue_cylinder': 0.0, 'soda_can': 0.0, 'foam_block': 0.0} final gross err: {'r_shoulder_pitch': -0.2, 'r_shoulder_roll': -0.2, 'r_arm_yaw': -0.1, 'r_elbow_pitch': 0.1}
+  worst MJCF distance (cm): {'blue_cylinder': 2.1, 'soda_can': 12.6, 'foam_block': 3.0} moved mm: {'blue_cylinder': 0.0, 'soda_can': 0.0, 'foam_block': 0.0} final gross err: {'r_shoulder_pitch': -0.1, 'r_shoulder_roll': -0.3, 'r_arm_yaw': -0.1, 'r_elbow_pitch': 0.1}
   robot contacts: []
  LIFT_TO_PRESENT
-  worst MJCF distance (cm): {'blue_cylinder': 2.7, 'soda_can': 12.6, 'foam_block': 3.0} moved mm: {'blue_cylinder': 0.0, 'soda_can': 0.0, 'foam_block': 0.0} final gross err: {'r_shoulder_pitch': 1.0, 'r_shoulder_roll': 0.2, 'r_arm_yaw': 0.1, 'r_elbow_pitch': 0.3}
-  robot contacts: [('r_forearm_col', 'table_top'), ('r_hand_back_col', 'table_top'), ('r_palm_col', 'table_top')]
+  worst MJCF distance (cm): {'blue_cylinder': 1.8, 'soda_can': 12.6, 'foam_block': 3.0} moved mm: {'blue_cylinder': 0.0, 'soda_can': 0.0, 'foam_block': 0.0} final gross err: {'r_shoulder_pitch': 1.0, 'r_shoulder_roll': 0.2, 'r_arm_yaw': 0.1, 'r_elbow_pitch': 0.3}
+  robot contacts: [('r_forearm_col', 'table_top')]

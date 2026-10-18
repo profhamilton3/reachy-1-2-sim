@@ -1,20 +1,20 @@
 | cell | object (height) | before: clearance, link | after: clearance, link |
 |---|---|---|---|
-| r1c3 | pool_box_3 (4.0 cm) | +4.4 cm, hand | +4.9 cm, forearm |
-| r1c3 | foam_block (5.0 cm) | +2.3 cm, hand | +2.6 cm, forearm |
-| r1c3 | red_cube (6.0 cm) | +3.0 cm, hand | +2.7 cm, forearm |
-| r1c3 | pool_cyl_1 (8.0 cm) | +4.5 cm, forearm | +4.3 cm, forearm |
-| r1c3 | blue_cylinder (10.0 cm) | +3.0 cm, forearm | +2.7 cm, forearm |
-| r1c3 | soda_can (12.2 cm) | +3.2 cm, forearm | +2.9 cm, forearm |
-| r2c3 | pool_box_3 (4.0 cm) | -3.7 cm, hand **refused** | +9.2 cm, hand |
-| r2c3 | foam_block (5.0 cm) | -5.7 cm, hand **refused** | +7.4 cm, hand |
-| r2c3 | red_cube (6.0 cm) | -5.0 cm, hand **refused** | +8.0 cm, hand |
-| r2c3 | pool_cyl_1 (8.0 cm) | -3.1 cm, hand **refused** | +9.6 cm, hand |
-| r2c3 | blue_cylinder (10.0 cm) | -4.6 cm, hand **refused** | +8.1 cm, hand |
-| r2c3 | soda_can (12.2 cm) | -4.4 cm, hand **refused** | +8.3 cm, hand |
-| r3c3 | pool_box_3 (4.0 cm) | -7.9 cm, hand **refused** | +15.3 cm, hand |
-| r3c3 | foam_block (5.0 cm) | -9.4 cm, hand **refused** | +13.2 cm, hand |
-| r3c3 | red_cube (6.0 cm) | -8.9 cm, hand **refused** | +13.9 cm, hand |
-| r3c3 | pool_cyl_1 (8.0 cm) | -7.4 cm, hand **refused** | +16.1 cm, hand |
-| r3c3 | blue_cylinder (10.0 cm) | -8.9 cm, hand **refused** | +14.6 cm, hand |
-| r3c3 | soda_can (12.2 cm) | -8.7 cm, hand **refused** | +14.8 cm, hand |
+| r1c3 | pool_box_3 (4.0 cm) | +4.4 cm, hand | +4.2 cm, forearm |
+| r1c3 | foam_block (5.0 cm) | +2.3 cm, hand | +1.9 cm, forearm |
+| r1c3 | red_cube (6.0 cm) | +3.0 cm, hand | +1.9 cm, forearm |
+| r1c3 | pool_cyl_1 (8.0 cm) | +4.5 cm, forearm | +3.4 cm, forearm |
+| r1c3 | blue_cylinder (10.0 cm) | +3.0 cm, forearm | +1.8 cm, forearm |
+| r1c3 | soda_can (12.2 cm) | +3.2 cm, forearm | +2.0 cm, forearm |
+| r2c3 | pool_box_3 (4.0 cm) | -3.7 cm, hand **refused** | +14.2 cm, hand |
+| r2c3 | foam_block (5.0 cm) | -5.7 cm, hand **refused** | +12.0 cm, hand |
+| r2c3 | red_cube (6.0 cm) | -5.0 cm, hand **refused** | +12.8 cm, hand |
+| r2c3 | pool_cyl_1 (8.0 cm) | -3.1 cm, hand **refused** | +15.0 cm, hand |
+| r2c3 | blue_cylinder (10.0 cm) | -4.6 cm, hand **refused** | +13.5 cm, hand |
+| r2c3 | soda_can (12.2 cm) | -4.4 cm, hand **refused** | +12.8 cm, upper_arm |
+| r3c3 | pool_box_3 (4.0 cm) | -7.9 cm, hand **refused** | +26.0 cm, upper_arm |
+| r3c3 | foam_block (5.0 cm) | -9.4 cm, hand **refused** | +23.8 cm, upper_arm |
+| r3c3 | red_cube (6.0 cm) | -8.9 cm, hand **refused** | +23.6 cm, upper_arm |
+| r3c3 | pool_cyl_1 (8.0 cm) | -7.4 cm, hand **refused** | +24.2 cm, upper_arm |
+| r3c3 | blue_cylinder (10.0 cm) | -8.9 cm, hand **refused** | +21.8 cm, upper_arm |
+| r3c3 | soda_can (12.2 cm) | -8.7 cm, hand **refused** | +20.8 cm, upper_arm |

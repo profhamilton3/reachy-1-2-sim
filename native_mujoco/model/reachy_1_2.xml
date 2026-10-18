@@ -227,7 +227,7 @@
                            is unchanged (docs/reviews/2026-10-17-october-layout-192/
                            grasp_before_after.py).  Both live in r_gripper_thumb,
                            not r_wrist2hand, so they turn with wrist roll as the
-                           shell does (44 deg at REST). -->
+                           shell does (-17.5 deg at REST). -->
                       <geom name="r_hand_back_col" class="collision" type="box"
                             size="0.025 0.028 0.019" pos="0 -0.018 -0.003"/>
                       <geom name="r_palm_col" class="collision" type="box"
@@ -527,8 +527,8 @@
        simulator starts.  The phantom left arm stays at zero. -->
   <keyframe>
     <key name="home"
-         qpos="0.2094 0.2443 -0.9512 -1.4137 -0.0960 -0.3752 0.7679 0.3491  0 0 0 0 0 0 0 0  0 0.45 0  0 0"
-         ctrl="0.2094 0.2443 -0.9512 -1.4137 -0.0960 -0.3752 0.7679 0.3491  0 0 0 0 0 0 0 0  0 0.45 0  0 0"/>
+         qpos="0.1833 0.2618 -0.9599 -1.4137 1.4748 -0.0785 -0.3054 0.3491  0 0 0 0 0 0 0 0  0 0.45 0  0 0"
+         ctrl="0.1833 0.2618 -0.9599 -1.4137 1.4748 -0.0785 -0.3054 0.3491  0 0 0 0 0 0 0 0  0 0.45 0  0 0"/>
   </keyframe>
 
 </mujoco>

@@ -303,10 +303,10 @@ class TestTubeCoversMJCFHand:
     def test_the_tube_is_the_pose_own_roll_not_the_worst(self):
         """link_capsules sizes the tube for the pose's actual wrist roll."""
         present = [R.PRESENT[j] for j in R.ARM7]   # roll 0
-        rest = [R.REST[j] for j in R.ARM7]         # roll 44 (#192)
+        rest = [R.REST[j] for j in R.ARM7]         # roll -17.5 (#192)
         assert _tube(present, -45.0)[2] == pytest.approx(hand_radius(-45.0, 0.0))
-        assert _tube(rest, -45.0)[2] == pytest.approx(hand_radius(-45.0, 44.0))
-        assert _tube(rest, -45.0)[2] > _tube(present, -45.0)[2]
+        assert _tube(rest, -45.0)[2] == pytest.approx(hand_radius(-45.0, -17.5))
+        assert _tube(rest, -45.0)[2] != pytest.approx(_tube(present, -45.0)[2])
 
 
 class TestDemonstratedMisses:
@@ -319,7 +319,7 @@ class TestDemonstratedMisses:
     what was being flown through is not lost, and is not asserted.  The
     misses depend on the wrist roll, not the mount: the roll-0 rows were
     measured at HOVER (August, retired with #192) and hold for PRESENT, which
-    has the same roll; the October REST (roll 44) was never in the old tube's
+    has the same roll; the October REST (roll -17.5) was never in the old tube's
     era, so its rows carry None.
     """
 
@@ -466,15 +466,15 @@ class TestTubeVsShellsCapsules:
     which capsule is widest at any of these poses.
     """
 
-    # #192: the October REST has wrist roll 44 (August's had 30: -1.1946,
+    # #192: the October REST has wrist roll -17.5 (August's had 30: -1.1946,
     # -0.8424, -0.4704, -0.4704); the roll-0 rows were HOVER's and are
     # PRESENT's, unchanged.
     @pytest.mark.parametrize("posture,gripper_deg,expected_surface_cm", [
-        ("REST", -68.8, -1.1972),
-        ("REST", -45.0, -0.8457),
-        ("REST", 0.0, -0.5122),
-        ("REST", 20.0, -0.5122),
-        ("REST_OUT", -68.8, -1.1972),
+        ("REST", -68.8, -1.1803),
+        ("REST", -45.0, -0.8239),
+        ("REST", 0.0, -0.1748),
+        ("REST", 20.0, -0.1748),
+        ("REST_OUT", -68.8, -1.1803),
         ("PRESENT", -68.8, -1.1864),
         ("PRESENT", -45.0, -0.8320),
         ("PRESENT", 0.0, -0.3182),

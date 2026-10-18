@@ -1,6 +1,6 @@
 # Issue #174 offline feasibility sweep — placement (2026-10-18)
 
-reachy-1-2-sim at `feat/192`.  Preflight only (`crane_place_live.plan_crane_place`): no motion, no simulator.  IK: the host mirror of the simulator's service.  Scene FWDCenterLabSivaPool, the object upright at the origin cell's centre, nothing else on the board.  Reachable cells: the seven without the `no-right-arm` tag.
+reachy-1-2-sim at `feat/192-october-layout`.  Preflight only (`crane_place_live.plan_crane_place`): no motion, no simulator.  IK: the host mirror of the simulator's service.  Scene FWDCenterLabSivaPool, the object upright at the origin cell's centre, nothing else on the board.  Reachable cells: the nine without the `no-right-arm` tag.
 
 ## red_cube
 

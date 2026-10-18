@@ -7,6 +7,6 @@
 | August | LIFT_TO_PRESENT | +3.0 (red_cube) | +6.7 (rig_rail_outer_right) | -8.6 (hand) | +3.5 (red_cube) | +6.7 (rig_rail_outer_right) | -0.3 (thumb) |
 | August | LOWER_TO_REST | +3.0 (red_cube) | +6.7 (rig_rail_outer_right) | -8.6 (hand) | +3.5 (red_cube) | +6.7 (rig_rail_outer_right) | -0.3 (thumb) |
 | August | WAVE | +13.4 (red_cube) | +18.1 (rig_rail_outer_right) | +13.8 (upper_arm) | +13.4 (red_cube) | +18.1 (rig_rail_outer_right) | +13.8 (upper_arm) |
-| October | LIFT_TO_PRESENT | +2.7 (red_cube) | +5.9 (rig_rail_outer_right) | -4.9 (hand) | +2.7 (red_cube) | +9.0 (rig_rail_outer_right) | -1.3 (thumb) |
-| October | LOWER_TO_REST | +2.7 (red_cube) | +5.9 (rig_rail_outer_right) | -4.9 (hand) | +2.7 (red_cube) | +9.0 (rig_rail_outer_right) | -1.3 (thumb) |
+| October | LIFT_TO_PRESENT | +1.9 (red_cube) | +9.5 (rig_rail_outer_right) | -2.4 (hand) | +1.9 (red_cube) | +10.4 (rig_rail_outer_right) | -1.0 (thumb) |
+| October | LOWER_TO_REST | +1.9 (red_cube) | +9.5 (rig_rail_outer_right) | -2.4 (hand) | +1.9 (red_cube) | +10.4 (rig_rail_outer_right) | -1.0 (thumb) |
 | October | WAVE | +27.5 (red_cube) | +39.7 (rig_rail_outer_right) | +28.8 (upper_arm) | +27.5 (red_cube) | +39.7 (rig_rail_outer_right) | +28.8 (upper_arm) |

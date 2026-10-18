@@ -64,13 +64,16 @@ Siva confirms the arm rests on the table, as in the lab photos. So REST is where
 **REST is a pose the arm stays in with the motors off.** That matters because the sim starts with the motors off, exactly like the robot.
 - An IK pose on the margin with the elbow swung out slid off the board's edge within two seconds.
 - So REST was found by letting go: the arm was dropped motors-off in MuJoCo from many starts on the margin.
-- Only fixed points were kept: poses that a second drop moved by less than 2°, with the gripper still shut (at least 15°).
+- Only fixed points were kept: poses that a second drop moved by less than 2°, and then only those whose gripper was still on its shut stop after a 120 s drop.
 - They were then scored against six objects, up to the 12.2 cm soda can, standing on each column-3 cell, by the footprint guard's own number.
-- The chosen pose: joints (12, 14, −54.5, −81, −5.5, −21.5, 44), gripper shut. The hand rests on its palm and back on the board's right margin, fingers at the board's edge (tip at about (0.37, −0.37); the grid's outer border is at y = −0.2286, the board's edge at −0.349), with the forearm along the margin.
-- Motors off for 10 s from there: at most 1.2° of drift on any arm joint, the gripper 3° off shut, and the arm is still.
-- The wrist roll rests on its stop (44°). The shoulder roll does not lean on the new +20.3° stop: the search's best scores did, and were passed over so REST does not depend on that deviation.
+- The chosen pose: joints (10.5, 15, −55, −81, 84.5, −4.5, −17.5), gripper shut. The hand rests on its palm and back on the board's right margin, fingertips just over the board's edge (tip at about (0.35, −0.40); the grid's outer border is at y = −0.2286, the board's edge at −0.349), with the forearm along the margin.
+- Motors off for 10 minutes from there: the gross joints drift at most 1.3°, the gripper stays on its shut stop, and the arm is still. The forearm yaw (84.5°) is what holds the hand shut: it turns the hand so gravity closes the finger.
+- The shoulder roll does not lean on the new +20.3° stop: the search's best scores did, and were passed over so REST does not depend on that deviation.
 
-**REST was searched twice.** The first October REST (13.5, 13.5, −55, −81, −74, 44, 44) rested on the finger pad, because the hand had no collision geometry but the two pads, and its visual shell sank 38 mm into the board. With the hand boxes (section 6) the hand rests on them instead; that pose no longer stayed put (the wrist roll fell 35°, the gripper fell open), so REST was searched again.
+**REST was searched three times.**
+1. The first October REST (13.5, 13.5, −55, −81, −74, 44, 44) rested on the finger pad, because the hand had no collision geometry but the two pads, and its visual shell sank 38 mm into the board.
+2. With the hand boxes (section 6) the hand rests on them instead. That pose no longer stayed put, so REST was searched again: (12, 14, −54.5, −81, −5.5, −21.5, 44). It held for the 10 s the search checked, but on the live panel the gripper was found at its open stop after 11 minutes (offline: +18° at 5 s, −15° at 120 s). Its finger hangs open, and the motors are off.
+3. The third search added the 120 s gripper check. An open hand on the margin is the wide hand the footprint guard assumes away, so a REST whose gripper creeps open is wrong even though the arm stays put.
 
 **The gripper is shut at REST.** The footprint guard sizes the hand to its aperture. An open hand's tube (8–11.5 cm radius) on a 10.8 cm margin reaches column 3 whatever the arm does; shut, it is 3.9–6.7 cm. `FOOTPRINT_MARGIN` is unchanged: the arm lands somewhere else; the rule did not move.
 
@@ -81,9 +84,11 @@ Siva confirms the arm rests on the table, as in the lab photos. So REST is where
 
 **Validation, offline physics** (the simulator's MuJoCo model and contact settings, the arm streamed with the motors on, no server, SDK or bridge). Flown with tall objects on r1c3, r2c3 and r3c3, and as the approach and return of every WAVE and POINT flight (section 7):
 - no object moved;
-- the worst MJCF distance was 2.7 cm;
+- the worst MJCF distance was 1.8 cm (blue_cylinder on r1c3);
 - the arm arrived within 1°;
 - the only robot contacts were the forearm and the hand's palm and back on the board, at REST.
+
+The footprint guard's own number, the worst of six objects on each column-3 cell: r1c3 +1.8, r2c3 +12.0, r3c3 +20.8 cm (August: +2.3, −5.7, −9.4).
 
 Route records carry the mount they were flown at, and `check_route` accepts only the current one.
 
@@ -116,7 +121,7 @@ What an SDK client sees differently:
 
 ### 6. The hand's collision model
 
-Two boxes fill the hand's visual shell (`r_thumb_body`) in `r_gripper_thumb`: `r_hand_back_col` (the wrist side) and `r_palm_col`, whose underside stays 5 mm above the pads' tops. They are in `r_gripper_thumb`, not `r_wrist2hand`, so they turn with wrist roll as the shell does (44° at REST). The R12-502 pads are unchanged.
+Two boxes fill the hand's visual shell (`r_thumb_body`) in `r_gripper_thumb`: `r_hand_back_col` (the wrist side) and `r_palm_col`, whose underside stays 5 mm above the pads' tops. They are in `r_gripper_thumb`, not `r_wrist2hand`, so they turn with wrist roll as the shell does (−17.5° at REST). The R12-502 pads are unchanged.
 
 **The pinch is unchanged** (`grasp_before_after.py`, the R12-502 fixture with and without the boxes): a 20 mm cube and a 40 mm cube (the gripper open at −45°), each centred at the pad height. Only the two pads touched the cube, the grasp held through the lift, and the grip force was identical with and without the boxes: 28.0 N at the close and 30.4 N at the lift for the 20 mm cube, 53.6 N and 85.8 N for the 40 mm cube.
 
@@ -129,7 +134,7 @@ At REST the visual shells now sit at the board (−0.6 mm and −3.2 mm, contact
 Flown offline from REST through the panel's own code (`rig_motion.travel`, `rig_motion.wave`, the motion worker's `_point_at_target`), with only the SDK's `goto` replaced by a minimum-jerk streamer (`fly_wave_point.py`).
 - **WAVE**, three layouts (tall objects on column 3 twice; a can on the centre cell with cylinders on r1c1 and r3c1): all three cycles every time, back at PRESENT within 1°, nothing moved, no contact during the wave, worst MJCF distance 3.6 cm.
 - **POINT, empty board:** all nine cells, miss 0.4–1.4 cm, nothing touched. August managed 8 of 9 (r3c1 out of reach), miss 2.2–8.8 cm.
-- **POINT, one object at a time on the centre cell** (six types), every cell and then the object: 57 of 60 cells pointed; r1c2 was refused three times by the guard (once mid-flight, twice before moving). Pointing at the object worked for the three boxes. The escort stopped the three cylinders after its last leg: the tube hand read 0.1–0.6 cm inside them while the MJCF hand was 3 cm clear. **Nothing moved in any of the 69 pointings.**
+- **POINT, one object at a time on the centre cell** (six types), every cell and then the object: 57 of 60 cells pointed; r1c2 was refused three times by the guard (once mid-flight, twice before moving). Pointing at the object worked for the three boxes and blue_cylinder. The escort stopped pool_cyl_1 and soda_can after its last leg: the tube hand read 0.1–0.3 cm inside them while the MJCF hand was 3 cm clear. **Nothing moved in any of the 69 pointings.**
 - Two or more objects on the board are still not covered, and `_ability_available` still refuses them.
 
 The rows are in `ROUTE_COMPATIBILITY`, for FWDCenterLabSivaPool and FWDCenterLabMCC. The panel's `wave`, `point_cell` and `point_object` abilities are available again, at `route_version` 2.
@@ -151,14 +156,14 @@ Removed from the code, with the mount they belong to:
 - **Reach.** All nine cells are reachable; `no-right-arm` was removed from r3c1 and r3c2.
 - **REST footprint.** Objects on column 3 no longer trigger REST refusals:
   - before, every object on r2c3 and r3c3 was refused (−3.1 to −9.4 cm), including #192's pool_box_3 on r2c3 at −3.7 cm;
-  - now the worst case is +2.6 cm (foam_block on r1c3, beside the forearm).
+  - now the worst case is +1.8 cm (blue_cylinder on r1c3, beside the forearm).
 - **The pocket is gone** from the code (section 8), not only from the posture graph.
 - **WAVE and POINT are validated again** at the October mount (section 7).
 - **The crane is not re-tuned.** `place_sweep` plans placements only from r3c2 now (it was r2c2), and the offline red_cube pick halts at the hover: the lateral correction it needs is past the 6 mm cap, and a wider cap does not make the placement clean. #192 lands without the red_cube live check; the re-tune is a follow-up issue.
 - **Other scenes.** The move is global. Measured by dropping the start keyframe, motors off, for 5 s (`other_scenes.py`):
-  - the three FWDCenterLab scenes: 1.2° of drift, recognised as REST.
-  - `tabletop_demo.yaml` and `tabletop.example.yaml`: their table is narrower (edge at y = ±0.33) and the hand slips off its edge; 8.2° of drift, just outside `posture_of`'s 8°, so the panel would not recognise a posture there. `primitives.raise_to_side` accepts it (12°), so `scripts/demo_pick_place.py` still starts.
-  - `control_panel.yaml` and the two calibration scenes: there is no table under REST, so the arm falls to a hang (tip at z 0.51), which is no named posture. `scripts/demo_control_panel.py` flies its own poses.
+  - the three FWDCenterLab scenes: 0.6° of drift, recognised as REST.
+  - `tabletop_demo.yaml` and `tabletop.example.yaml`: their table is narrower (edge at y = ±0.33), and the hand settles over its edge; 2.2° of drift, still recognised as REST.
+  - `control_panel.yaml` and the two calibration scenes: there is no table under REST, so the arm falls to a hang (tip at z 0.50), which is no named posture. `scripts/demo_control_panel.py` flies its own poses.
   - None of these scenes was re-tuned. The joint poses in `primitives.py` (OVER_RED, …) are the August tabletop_demo tuning.
 - **The kinematic backend** still starts at zero. It has no physics or panel, and its start pose is unchanged.
 

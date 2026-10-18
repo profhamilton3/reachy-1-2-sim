@@ -371,11 +371,11 @@ class TestSceneClearance:
         assert "table_top" not in fixtures and fixtures
         assert scene.clearance(caps, ids=fixtures).distance > 0.02
         # The manipulable objects are a separate question.  This scene's
-        # red_cube stands on r1c3, beside REST's forearm: 2.7 cm, positive.
+        # red_cube stands on r1c3, beside REST's forearm: 1.9 cm, positive.
         # (August REST, hand open: 1.6 cm, the hand.)
         near = scene.clearance(caps)
         assert near.link == "forearm" and near.object_id == "red_cube"
-        assert near.distance == pytest.approx(0.027, abs=0.003)
+        assert near.distance == pytest.approx(0.019, abs=0.003)
 
     def test_no_obstacles_reports_nothing(self, scene):
         assert scene.clearance(link_capsules(PRESENT), ids=[]) is None

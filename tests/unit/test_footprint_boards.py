@@ -135,22 +135,22 @@ class TestNamedBoards:
     @pytest.mark.parametrize("objects,oid,expected_tube_cm,expected_shells_cm", [
         pytest.param(
             {"soda_can": _cell_xy("cell_r1c1"), "foam_block": _cell_xy("cell_r2c3")},
-            "foam_block", +7.403, +14.067, id="evidence_board"),
+            "foam_block", +12.049, +13.100, id="evidence_board"),
         pytest.param(
             {"foam_block": (_cell_xy("cell_r2c3")[0], _cell_xy("cell_r2c3")[1] - 0.07)},
-            "foam_block", +0.610, +8.044, id="incident_board"),
+            "foam_block", +7.737, +8.483, id="incident_board"),
         pytest.param(
             {"foam_block": _cell_xy("cell_r3c3")},
-            "foam_block", +13.176, +21.320, id="foam_on_r3c3"),
+            "foam_block", +23.753, +23.753, id="foam_on_r3c3"),
         pytest.param(
             {"soda_can": _cell_xy("cell_r2c3")},
-            "soda_can", +8.344, +12.837, id="soda_can_on_r2c3"),
+            "soda_can", +12.837, +12.837, id="soda_can_on_r2c3"),
         pytest.param(
             {"pool_box_1": _cell_xy("cell_r2c3")},
-            "pool_box_1", +9.221, +16.160, id="pool_box_1_on_r2c3"),
+            "pool_box_1", +14.170, +15.215, id="pool_box_1_on_r2c3"),
         pytest.param(
             {"pool_cyl_1": _cell_xy("cell_r2c3")},
-            "pool_cyl_1", +9.644, +16.262, id="pool_cyl_1_on_r2c3"),
+            "pool_cyl_1", +14.999, +16.000, id="pool_cyl_1_on_r2c3"),
     ])
     def test_worst_clearance_under_the_corrected_tube(
             self, objects, oid, expected_tube_cm, expected_shells_cm):
@@ -461,5 +461,5 @@ class TestSweepOrdering:
         # most ~0.05 cm here, well under the 1 cm threshold.
         # On the October lowering (#192; August's PLACE_ROUTE tail read 189
         # and 12.96 cm).
-        assert sum(1 for g in ts_gaps if g < -0.01) == 123
-        assert max(-g for g in tr_gaps) == pytest.approx(0.0943, abs=0.003)
+        assert sum(1 for g in ts_gaps if g < -0.01) == 18
+        assert max(-g for g in tr_gaps) == pytest.approx(0.0335, abs=0.003)

@@ -54,14 +54,14 @@ def sweep_one(oid: str, origin: str, dest: str):
     return row
 
 
-def report(rows, sha):
+def report(rows, sha, n_cells=None):
     today = datetime.date.today().isoformat()
     out = [f"# Issue #174 offline feasibility sweep — placement ({today})", "",
            f"reachy-1-2-sim at `{sha or 'worktree'}`.  Preflight only "
            "(`crane_place_live.plan_crane_place`): no motion, no simulator.  IK: the host "
            "mirror of the simulator's service.  Scene FWDCenterLabSivaPool, the object upright "
-           "at the origin cell's centre, nothing else on the board.  Reachable cells: the seven "
-           "without the `no-right-arm` tag.", ""]
+           "at the origin cell's centre, nothing else on the board.  Reachable cells: the "
+           f"{n_cells if n_cells is not None else 'ones'} without the `no-right-arm` tag.", ""]
     for oid in sorted({r["object"] for r in rows}, key=lambda o: OBJECTS.index(o)):
         mine = [r for r in rows if r["object"] == oid]
         ok = [r for r in mine if r["feasible"]]
@@ -101,7 +101,7 @@ def main(argv=None) -> int:
                 print(f"{oid} {r['from']}->{r['to']}: "
                       f"{'FEASIBLE' if r['feasible'] else r['at'] + ' ' + r['stage'] + ': ' + r['reason']}"
                       f" ({r['seconds']} s)", flush=True)
-    pathlib.Path(a.out).write_text(report(rows, a.sha))
+    pathlib.Path(a.out).write_text(report(rows, a.sha, len(cells)))
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(rows, indent=1, default=str))
     return 0

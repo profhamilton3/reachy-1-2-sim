@@ -118,23 +118,28 @@ def pose(**kw) -> Dict[str, float]:
 # ── REST, October layout (#192) ──────────────────────────────────────────────
 #
 # The hand rests on the board's RIGHT MARGIN, outside the taped grid, as the
-# lab photos show the real gripper doing: on its palm and back, fingers at the
-# board's edge (tip at about (0.37, -0.37) in the scene; the outer tape border
-# is at y = -0.2286, the board's edge at -0.349), with the forearm along the
-# margin.
+# lab photos show the real gripper doing: on its palm and back, fingertips just
+# over the board's edge (tip at about (0.34, -0.40) in the scene; the outer
+# tape border is at y = -0.2286, the board's edge at -0.349), with the forearm
+# along the margin.
 #
 # FOUND BY LETTING GO OF THE ARM, NOT BY CHOOSING A POSE.  The arm is stored
 # here and the simulator starts here with the motors off, exactly like the
 # robot, so REST has to be a pose the arm STAYS in when nothing holds it.  An IK
 # pose on the margin with the elbow swung out slid off the board's edge in two
 # seconds.  This one is a settled pose: dropped motors-off in MuJoCo from many
-# starts on the margin, kept only where a second drop moved it by under 2 deg
-# and the gripper stayed shut, then scored against a soda can, blue cylinder,
-# red cube, pool cylinder, foam block and pool box standing on each column-3
-# cell.  Motors off for 10 s from here: under 1.3 deg of drift on any arm
-# joint, the gripper 3 deg off shut, and still.  The wrist roll rests on its
-# stop (44 deg, 1 deg inside); the shoulder roll does NOT lean on the +20.3 deg
-# stop (docs/adr/0010), so REST does not depend on that deviation.
+# starts on the margin, kept only where a second drop moved it by under 2 deg,
+# then dropped again for 120 s and kept only where the GRIPPER STAYED SHUT,
+# then scored against a soda can, blue cylinder, red cube, pool cylinder, foam
+# block and pool box standing on each column-3 cell.  Motors off for 10
+# minutes from here: the gross joints drift at most 1.3 deg, the gripper stays
+# on its shut stop, and the arm is still.  The forearm yaw (84.5 deg) is what
+# holds the hand shut: it turns the hand so gravity closes the finger.  A
+# REST whose finger hangs open creeps open over minutes (one did: +18 deg at
+# 5 s, -15 at 120 s, the open stop by 11 minutes), and an open hand on the
+# margin is the wide hand the footprint guard below assumes away.  The
+# shoulder roll does NOT lean on the +20.3 deg stop (docs/adr/0010), so REST
+# does not depend on that deviation.
 #
 # WITH THE HAND'S COLLISION BOXES (#192).  The first October REST rested on
 # the finger pad, and the hand's visual shell sank 38 mm into the board,
@@ -149,15 +154,15 @@ def pose(**kw) -> Dict[str, float]:
 #
 #     the footprint guard's own number (`footprint.route_footprint_clearances`,
 #     every leg of LOWER_TO_REST and LIFT_TO_PRESENT), one object on the cell:
-#         r1c3 +2.6 cm   r2c3 +7.4 cm   r3c3 +13.2 cm   (worst of six objects)
+#         r1c3 +1.8 cm   r2c3 +12.0 cm   r3c3 +20.8 cm   (worst of six objects)
 #     the August REST and its routes, at the August mount, same objects:
 #         r1c3 +2.3 cm   r2c3 -5.7 cm   r3c3 -9.4 cm    (every r2c3/r3c3 refused;
 #                                                      pool_box_3 on r2c3: -3.7)
 #
 # Numbers and the search: docs/reviews/2026-10-17-october-layout-192/.
-REST = pose(r_gripper=SHUT, r_shoulder_pitch=12.0, r_shoulder_roll=14.0,
-            r_arm_yaw=-54.5, r_elbow_pitch=-81.0, r_forearm_yaw=-5.5,
-            r_wrist_pitch=-21.5, r_wrist_roll=44.0)
+REST = pose(r_gripper=SHUT, r_shoulder_pitch=10.5, r_shoulder_roll=15.0,
+            r_arm_yaw=-55.0, r_elbow_pitch=-81.0, r_forearm_yaw=84.5,
+            r_wrist_pitch=-4.5, r_wrist_roll=-17.5)
 #: REST already has the hand shut.  The name is kept for callers that mean
 #: "rest, closed", and it is the same pose.
 REST_SHUT = REST
@@ -401,7 +406,7 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
         "red_cube or blue_cylinder / soda_can / foam_block standing on r1c3 / "
         "r2c3 / r3c3, and as the approach of every WAVE and POINT flight "
         "below (12 flights). Arrived within 1.0 deg on the gross joints; no "
-        "object moved (0.0 mm); worst MJCF distance to any of them 2.7 cm "
+        "object moved (0.0 mm); worst MJCF distance to any of them 1.8 cm "
         "(blue_cylinder on r1c3). Only robot contacts: the forearm and the "
         "hand's palm and back on table_top, leaving REST.",
         mount=MOUNT_OCTOBER,
@@ -410,9 +415,10 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
         "LOWER_TO_REST", "FWDCenterLabSivaPool",
         "2026-10-18 (#192, offline physics): PRESENT -> PRESENT_SHUT -> "
         "REST_OUT -> REST, the same layouts as LIFT_TO_PRESENT and the return "
-        "of every WAVE and POINT flight (12 flights). Arrived within 0.2 deg; "
-        "no object moved (0.0 mm); worst MJCF distance 2.7 cm. Only robot "
-        "contacts: the forearm and palm coming to rest on table_top.",
+        "of every WAVE and POINT flight (12 flights). Arrived within 0.3 deg; "
+        "no object moved (0.0 mm); worst MJCF distance 1.9 cm (blue_cylinder "
+        "on r1c3). Only robot contact: the forearm coming to rest on "
+        "table_top.",
         mount=MOUNT_OCTOBER,
     ),
     RouteValidation(
@@ -441,10 +447,12 @@ ROUTE_COMPATIBILITY: Tuple[RouteValidation, ...] = (
         "r1c1, r1c2 and r2c2); cell_r1c2 refused three times by the guard "
         "(foam_block: 4.8 cm on leg 5 of 6 under the 5 cm margin; "
         "blue_cylinder and soda_can before any motion). The object itself: "
-        "3 of 6 (the boxes, miss 0.6 cm); the three cylinders were stopped "
-        "by the escort's realised check on leg 6, the tube hand reading 0.1 "
-        "to 0.6 cm inside the object while the MJCF hand was 2.9 to 3.1 cm "
-        "clear, then flown back to PRESENT. NOTHING MOVED in any of the 69 "
+        "4 of 6 (the boxes and blue_cylinder, miss 0.6 cm); pool_cyl_1 and "
+        "soda_can were stopped by the escort's realised check on leg 6, the "
+        "tube hand reading 0.1 and 0.3 cm inside the object while the MJCF "
+        "hand was 3.0 to 3.1 cm clear, then flown back to PRESENT (an earlier "
+        "flight from the previous REST stopped blue_cylinder the same way, at "
+        "0.6 cm). NOTHING MOVED in any of the 69 "
         "pointings (0.0 mm), and the arm touched nothing but table_top at "
         "REST. TWO OR MORE OBJECTS IS NOT COVERED, and `_ability_available` "
         "still enforces that. August, for comparison: 8 of 9 empty-board "

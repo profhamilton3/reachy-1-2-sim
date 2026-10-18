@@ -8,7 +8,8 @@ Run everything from the repo root with `PYTHONPATH=src` (the physics scripts add
 |---|---|
 | `reach_cells.py` → `reach_cells.txt` | The per-cell reach table in `scenes/FWDCenterLabMCC.yaml`. `august` = torso (0, 0, 1.0) and the +10° roll stop. No argument = the MJCF as it is. |
 | `settle.py` | Motors-off settling of the right arm in the FWDCenterLabSivaPool world (used by the next two). |
-| `rest_search.py` | The REST search: random starts on the margin, dropped motors-off, fixed points kept (the gripper still shut), scored against tall objects on column 3. `rig_routes.REST` is the rounded member of a family it and a local search around its best off-stop points found (seeds 41-44 and 51-54). |
+| `rest_search.py` | The REST search: random starts on the margin, dropped motors-off, fixed points kept (the gripper still shut), scored against tall objects on column 3 (seeds 41-44, and a local search around its best off-stop points, 51-54).  Every fixed point was then dropped for 120 s, and only those whose gripper stayed on its shut stop were kept; `rig_routes.REST` is the rounded best of those, checked over a 10-minute drop. |
+| `rest_hold.py` → `rest_hold.txt` | REST held motors-off for 10 s, 120 s and 10 minutes: the arm and the shut gripper. |
 | `fly_rest.py` → `fly_rest.txt` | REST motors-off (10 s) and motors-on (5 s), then LOWER_TO_REST and LIFT_TO_PRESENT flown with tall objects standing on column 3. |
 | `fly_wave_point.py` → `fly_wave.jsonl`, `fly_point/*.jsonl`, `fly_point.txt` | WAVE and POINT through the panel's own code, from REST and back (`fly_point_summary.py` prints `fly_point.txt`). |
 | `grasp_before_after.py` → `.txt` | The R12-502 pinch with and without the hand's collision boxes: robot geoms touching the cube, grip force. |
@@ -30,15 +31,15 @@ Run everything from the repo root with `PYTHONPATH=src` (the physics scripts add
   | | r1c3 | r2c3 | r3c3 |
   |---|---|---|---|
   | August | +2.3 | −5.7 | −9.4 |
-  | October | +2.6 | +7.4 | +13.2 |
+  | October | +1.8 | +12.0 | +20.8 |
 
   Every r2c3 and r3c3 case was refused in August; #192's pool_box_3 on r2c3 reproduces at −3.7 cm.
 - **REST in physics.**
-  - Motors off for 10 s: at most 1.2° of drift on an arm joint, the gripper 3° off shut, and still.
-  - Lower and lift with tall objects on column 3: 0.0 mm moved, worst MJCF distance 2.7 cm.
+  - Motors off for 10 minutes: at most 1.3° of drift on a gross joint, the gripper on its shut stop, and still.  (The second REST held for 10 s but its gripper crept open over minutes; found on the live panel.)
+  - Lower and lift with tall objects on column 3: 0.0 mm moved, worst MJCF distance 1.8 cm.
 - **The hand's collision boxes.** Pads-only contact on a 20 mm and a 40 mm cube, grip force identical with and without them (28.0 / 53.6 N at the close). The visual shells at REST: −0.6 and −3.2 mm (contact depth), from −38.6 and −24.6 mm.
 - **WAVE:** three layouts, three cycles each, nothing moved, no contact, worst 3.6 cm.
-- **POINT:** empty board 9/9 cells (miss 0.4–1.4 cm); one object on the centre cell, 57/60 cells and 3/6 objects (the rest refused or stopped by the guard); nothing moved in any of the 69.
+- **POINT:** empty board 9/9 cells (miss 0.4–1.4 cm); one object on the centre cell, 57/60 cells and 4/6 objects (the rest refused or stopped by the guard); nothing moved in any of the 69.
 - **Board view.**
   - Neck (0, 64.0, 0): all nine cells inside both frames, with a 66 px worst margin (pinhole).
   - The chest box hides the near tape border and about the bottom quarter of the near row.

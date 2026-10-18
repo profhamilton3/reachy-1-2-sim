@@ -51,9 +51,9 @@ def _rest_hand_xy():
 
 
 #: A place on the board's right margin, beside the grid, that the lowering to
-#: REST passes through (-4.7 cm, the hand): a placement there leaves the stow
+#: REST passes through (-2.7 cm, the hand): a placement there leaves the stow
 #: nowhere to go.
-_IN_THE_STOW = (0.38, -0.27)
+_IN_THE_STOW = (0.35, -0.30)
 
 
 # ── the three places a job can be refused ───────────────────────────────────

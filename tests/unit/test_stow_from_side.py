@@ -185,7 +185,7 @@ def test_every_pose_it_commands_is_a_whole_route_pose():
 #: measured, so a change to it is visible.  August, out of the rail pocket:
 #: 2.57 cm (the upper arm on SWING_3 -> HOVER).  October (#192): the rails are
 #: behind the arm.
-_ROUTE_RIG_CM = 5.85
+_ROUTE_RIG_CM = 9.45
 
 
 def _rig_ids(model):
