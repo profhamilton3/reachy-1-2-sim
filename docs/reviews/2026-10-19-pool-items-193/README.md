@@ -14,3 +14,11 @@ Raw output: `measure_pool_items.json`.
 are about 3 px (about 5 mm) soft. A single view cannot separate a piece's height from its top-face foreshortening at this blur: the
 heights spread over 4-10 cm and the width over 4-5.5 cm, and the cube width sits below the issue's rough 6 cm reading. The results are
 therefore not used to size any scene object; per the issue, no value has been guessed.
+
+## Decision (owner, 2026-10-19)
+
+All pool boxes are one size and all pool cylinders are one size. `pool_box_4/5` and `pool_cyl_4/5` therefore copy the existing
+six (box 4 cm, cylinder radius 2 cm x 8 cm); the fits above (cube 4.1-5.5 cm, cylinder 4.6-6.4 cm across) neither contradict nor
+improve on them. Siva measures the real pieces next, and that value replaces all ten sizes together. `validate_pool_scene.py`
+checks the scene (schema, 14 placeable, unique ids), the parked slots settling, one placement of each new item and the render
+`default_scene_pool.png`.
