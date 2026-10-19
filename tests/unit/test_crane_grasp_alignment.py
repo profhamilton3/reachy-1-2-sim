@@ -3,8 +3,8 @@
 Focused checks only:
 
   * the pad boxes ``grasp_alignment.hand_frames`` builds are the compiled
-    MJCF's ``r_thumb_col`` / ``r_finger_col`` (so a clearance in mm means
-    something);
+    MJCF's ``r_thumb_col`` / ``r_finger_col``, and its palm is ``r_palm_col``
+    (#195) (so a clearance in mm means something);
   * an obstructed or misaligned insertion cannot reach the close: a pad
     force reading, or a hand that drifts out of line below the insertion
     checkpoint, halts the descent and the gripper is never closed.
@@ -12,8 +12,8 @@ Focused checks only:
 The replays of the two recorded 2026-10-06 misses went with the August mount
 (#192): their joint angles put the hand somewhere else now.  The executor
 checks below fly a plan made at the October mount instead, red_cube on
-cell_r3c2 (the cell the crane plans from there; the crane is not yet re-tuned
-for the October mount, which is a follow-up to #192).
+cell_r3c2 (the cell the crane plans from there; the crane is re-tuned for the
+October mount in #195).
 
 Offline: no simulator, no server; MuJoCo (when installed) only compiles the
 model and runs mj_forward.
@@ -70,7 +70,8 @@ class TestPadBoxesMatchMJCF:
         d.qpos[m.jnt_qposadr[mj.mj_name2id(m, mj.mjtObj.mjOBJ_JOINT, "r_gripper")]] = math.radians(grip)
         mj.mj_forward(m, d)
         hand = G.hand_frames(q, grip)
-        for box, geom in ((hand.thumb, "r_thumb_col"), (hand.finger, "r_finger_col")):
+        for box, geom in ((hand.thumb, "r_thumb_col"), (hand.finger, "r_finger_col"),
+                          (hand.palm, "r_palm_col")):
             g = mj.mj_name2id(m, mj.mjtObj.mjOBJ_GEOM, geom)
             assert np.allclose(box.center, d.geom_xpos[g], atol=1e-4), geom
             assert np.allclose(box.axes, d.geom_xmat[g].reshape(3, 3), atol=1e-4), geom
@@ -199,7 +200,11 @@ def test_hand_drifting_out_of_line_below_insertion_halts_before_closure(rig, mon
     out, events, arm = _run(rig, _observer(arm, plan))
     assert out["closed"] is False
     assert out["halt"] is not None and f"rung +{k_bad}" in out["halt"]
-    assert "pad_route" in out["halt"]
+    # Both are per-rung re-checks of the predicted hand: with the palm in the
+    # model (#195) the same 1 deg sideways drift can trip the pad-route
+    # clearance or the straddle check first, depending on which margin it
+    # crosses at that rung.  Either way it halts with no correction.
+    assert "pad_route" in out["halt"] or "straddle" in out["halt"]
     assert not any(k == "CORRECTION" for k, _ in events)
     assert plan.spec.close_deg not in arm.gripper_goals
 

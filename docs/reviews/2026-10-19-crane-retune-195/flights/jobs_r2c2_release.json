@@ -1,0 +1,92 @@
+[
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.0,
+  "backoff": 0.0,
+  "tag": "r2c2/retreat0/backoff0"
+ },
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.0,
+  "backoff": 0.005,
+  "tag": "r2c2/retreat0/backoff5"
+ },
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.005,
+  "backoff": 0.0,
+  "tag": "r2c2/retreat5/backoff0"
+ },
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.005,
+  "backoff": 0.005,
+  "tag": "r2c2/retreat5/backoff5"
+ },
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.009,
+  "backoff": 0.0,
+  "tag": "r2c2/retreat9/backoff0"
+ },
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.009,
+  "backoff": 0.005,
+  "tag": "r2c2/retreat9/backoff5"
+ },
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.012,
+  "backoff": 0.0,
+  "tag": "r2c2/retreat12/backoff0"
+ },
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.012,
+  "backoff": 0.005,
+  "tag": "r2c2/retreat12/backoff5"
+ },
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.015,
+  "backoff": 0.0,
+  "tag": "r2c2/retreat15/backoff0"
+ },
+ {
+  "origin": "r3c2",
+  "dest": "r2c2",
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "retreat": 0.015,
+  "backoff": 0.005,
+  "tag": "r2c2/retreat15/backoff5"
+ }
+]

@@ -1,0 +1,146 @@
+[
+ {
+  "origin": "r3c2",
+  "tilt": 20.0,
+  "lean": 85.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t20.0/l85.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 20.0,
+  "lean": 87.5,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t20.0/l87.5"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 20.0,
+  "lean": 90.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t20.0/l90.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 21.25,
+  "lean": 85.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t21.25/l85.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 21.25,
+  "lean": 87.5,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t21.25/l87.5"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 21.25,
+  "lean": 90.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t21.25/l90.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 22.5,
+  "lean": 85.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t22.5/l85.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 22.5,
+  "lean": 87.5,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t22.5/l87.5"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 22.5,
+  "lean": 90.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t22.5/l90.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 23.75,
+  "lean": 85.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t23.75/l85.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 23.75,
+  "lean": 87.5,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t23.75/l87.5"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 23.75,
+  "lean": 90.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t23.75/l90.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 25.0,
+  "lean": 85.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t25.0/l85.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 25.0,
+  "lean": 87.5,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t25.0/l87.5"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 25.0,
+  "lean": 90.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t25.0/l90.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 26.25,
+  "lean": 85.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t26.25/l85.0"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 26.25,
+  "lean": 87.5,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t26.25/l87.5"
+ },
+ {
+  "origin": "r3c2",
+  "tilt": 26.25,
+  "lean": 90.0,
+  "cap_lat": 20,
+  "cap_vert": 30,
+  "tag": "lift/t26.25/l90.0"
+ }
+]

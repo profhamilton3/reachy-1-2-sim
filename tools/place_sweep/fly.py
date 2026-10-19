@@ -89,7 +89,13 @@ class OfflineRobot:
         pass
 
 
-def start_world(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, origin: str = "cell_r2c2"):
+#: Where the crane picks the 6 cm cube up at the October mount, and where it
+#: sets it down (#195: the one origin, and its clean destination).
+ORIGIN = "cell_r3c2"
+DEST = "r3c3"
+
+
+def start_world(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, origin: str = ORIGIN):
     """The offline world with the arm stiff at PRESENT, the cube upright on
     ``origin`` (moved by ``cube_xy_offset``, turned ``yaw_deg``)."""
     import mujoco
@@ -162,18 +168,19 @@ def as_task(run: Dict[str, Any], dest: Optional[str]) -> Dict[str, Any]:
                           plan={"preflight_passed": True, "plan_sha256": "0" * 64})}}
 
 
-def fly(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, dest: Optional[str] = "r2c1",
+def fly(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, dest: Optional[str] = DEST,
         place_spec=None, crane_spec=None, abort_when=None,
-        record: bool = False) -> Dict[str, Any]:
-    """One offline placement -- or, with ``dest=None``, the lift (pick, hold,
-    put back), flown the same way.  ``abort_when(events)`` (optional) makes
-    the caller's should_abort say yes -- to exercise the abort path."""
+        record: bool = False, origin: str = ORIGIN, limits=None) -> Dict[str, Any]:
+    """One offline placement from ``origin`` -- or, with ``dest=None``, the
+    lift (pick, hold, put back), flown the same way.  ``abort_when(events)``
+    (optional) makes the caller's should_abort say yes -- to exercise the
+    abort path.  ``limits`` replaces the default `CraneLimits`."""
     from reachy_ai.motion import primitives as P
     from reachy_ai.motion.kinematics import CartesianPlanner
     from reachy_ai.tasks import crane_pick_live as CP
     from reachy_ai.tasks import crane_place_live as PL
 
-    w, scene = start_world(cube_xy_offset, yaw_deg)
+    w, scene = start_world(cube_xy_offset, yaw_deg, origin=origin)
     events: List[Tuple[str, Dict[str, Any]]] = []
     contact = {"after_release_mm": 0.0, "released": False, "samples": 0}
 
@@ -222,10 +229,12 @@ def fly(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, dest: Optional[str] = "
             kw["place"] = place_spec
         if crane_spec is not None:
             kw["spec"] = crane_spec
+        if limits is not None:
+            kw["limits"] = limits
         try:
             if dest is None:
                 lift = CP.plan_crane_pick(planner, scene, OID, observe(),
-                                          **({"spec": crane_spec} if crane_spec else {}))
+                                          **{k: v for k, v in kw.items() if k != "place"})
                 plan = None
             else:
                 plan = PL.plan_crane_place(planner, scene, OID, dest, observe(), **kw)

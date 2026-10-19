@@ -1,0 +1,12 @@
+r2c1 centre             ok  set-down margin  0.000 (r_wrist_pitch), shoulder roll   5.71, lowest 4 rungs  0.000
+r2c1 1 mm to (0,0)      ok  set-down margin  0.000 (r_wrist_pitch), shoulder roll   5.83, lowest 4 rungs  0.000
+r2c1 1 mm to the base   ok  set-down margin  0.000 (r_wrist_pitch), shoulder roll   5.87, lowest 4 rungs  0.000
+r2c1 2 mm to the base   ok  set-down margin  0.000 (r_wrist_pitch), shoulder roll   6.03, lowest 4 rungs  0.000
+r2c2 centre             ok  set-down margin  0.000 (r_wrist_pitch), shoulder roll  36.92, lowest 4 rungs  0.000
+r2c2 1 mm to (0,0)      ok  set-down margin  0.000 (r_wrist_pitch), shoulder roll  36.96, lowest 4 rungs  0.000
+r2c2 1 mm to the base   ok  set-down margin  0.000 (r_wrist_pitch), shoulder roll  36.96, lowest 4 rungs  0.000
+r2c2 2 mm to the base   ok  set-down margin  0.000 (r_wrist_pitch), shoulder roll  37.01, lowest 4 rungs  0.000
+r3c3 centre             ok  set-down margin  0.380 (r_wrist_pitch), shoulder roll  53.16, lowest 4 rungs  0.000
+r3c3 1 mm to (0,0)      ok  set-down margin  0.297 (r_wrist_pitch), shoulder roll  53.25, lowest 4 rungs  0.000
+r3c3 1 mm to the base   ok  set-down margin  0.299 (r_wrist_pitch), shoulder roll  53.23, lowest 4 rungs  0.000
+r3c3 2 mm to the base   ok  set-down margin  0.220 (r_wrist_pitch), shoulder roll  53.29, lowest 4 rungs  0.000

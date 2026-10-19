@@ -1,7 +1,8 @@
-"""Search for a grasp attitude for the PLACE ability only (#174, step 2).
+"""Search for a grasp attitude for the PLACE ability (#174, step 2).
 
-The lift keeps its validated attitude (`CraneSpec`: x faces, tilt 30 deg,
-lean 59.52 deg off the shoulder bearing).  For a placement, the attitude is
+Written when the lift and the place had different attitudes; since #195 they
+share `CraneSpec()` (docs/reviews/2026-10-19-crane-retune-195/ holds the
+October search, which drives `one` below).  For a placement, the attitude is
 held from the pick to the set-down (turned only about the vertical, so the
 object stays upright), so it must suit both cells.  Every candidate on a grid
 of (face, tilt, lean) is run through the whole placement preflight,

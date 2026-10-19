@@ -1,0 +1,2165 @@
+[
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +1",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +1",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +1",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +1",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +1",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +1",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +1",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +1",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "IK found no pose that sets the object down on the target with the grasp's attitude",
+  "at": "destination",
+  "seconds": 31.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "IK found no pose that sets the object down on the target with the grasp's attitude",
+  "at": "destination",
+  "seconds": 36.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "destination",
+  "seconds": 22.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r2c1",
+  "feasible": true,
+  "carry_rung": 9,
+  "psi_deg": -45.08,
+  "stage": "",
+  "reason": "",
+  "seconds": 17.7
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r2c2",
+  "feasible": true,
+  "carry_rung": 9,
+  "psi_deg": -46.6,
+  "stage": "",
+  "reason": "",
+  "seconds": 20.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "IK found no pose that sets the object down on the target with the grasp's attitude",
+  "at": "destination",
+  "seconds": 26.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "IK found no pose that sets the object down on the target with the grasp's attitude",
+  "at": "destination",
+  "seconds": 19.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r3c3",
+  "feasible": true,
+  "carry_rung": 9,
+  "psi_deg": -21.0,
+  "stage": "",
+  "reason": "",
+  "seconds": 2.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "straddle",
+  "reason": "predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "straddle",
+  "reason": "predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "straddle",
+  "reason": "predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "straddle",
+  "reason": "predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "straddle",
+  "reason": "predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "straddle",
+  "reason": "predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "straddle",
+  "reason": "predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "straddle",
+  "reason": "predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c1",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c1",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c1",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c1",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c1",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c1",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c1",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c1",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c2",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c2",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c2",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c2",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c2",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c2",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c2",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c2",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c3",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c3",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c3",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c3",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c3",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c3",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c3",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c3",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c1",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c1",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c1",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c1",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c1",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c1",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c1",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c1",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c2",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c2",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c2",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c2",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c2",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c2",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c2",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c2",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c3",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c3",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c3",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c3",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c3",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c3",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c3",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c3",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c1",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c1",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c1",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c1",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c1",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c1",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c1",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c1",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c2",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "pad_route",
+  "reason": "finger pad route clearance -2.50 mm < 0.494 mm from rung +9",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c2",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "pad_route",
+  "reason": "finger pad route clearance -2.50 mm < 0.494 mm from rung +9",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c2",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "pad_route",
+  "reason": "finger pad route clearance -2.50 mm < 0.494 mm from rung +9",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c2",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "pad_route",
+  "reason": "finger pad route clearance -2.50 mm < 0.494 mm from rung +9",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c2",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "pad_route",
+  "reason": "finger pad route clearance -2.50 mm < 0.494 mm from rung +9",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c2",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "pad_route",
+  "reason": "finger pad route clearance -2.50 mm < 0.494 mm from rung +9",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c2",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "pad_route",
+  "reason": "finger pad route clearance -2.50 mm < 0.494 mm from rung +9",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c2",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "pad_route",
+  "reason": "finger pad route clearance -2.50 mm < 0.494 mm from rung +9",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c3",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c3",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c3",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c3",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c3",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c3",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c3",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c3",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +4",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +4",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +4",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +4",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +4",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +4",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +4",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +4",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +12",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +12",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +12",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +12",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +12",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +12",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +12",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +12",
+  "at": "pick",
+  "seconds": 0.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "table",
+  "reason": "finger_pad -4.4 mm into the table on 'lift grasp->+lift' (commanded)",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "table",
+  "reason": "finger_pad -4.4 mm into the table on 'lift grasp->+lift' (commanded)",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "table",
+  "reason": "finger_pad -4.4 mm into the table on 'lift grasp->+lift' (commanded)",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "table",
+  "reason": "finger_pad -4.4 mm into the table on 'lift grasp->+lift' (commanded)",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "table",
+  "reason": "finger_pad -4.4 mm into the table on 'lift grasp->+lift' (commanded)",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "table",
+  "reason": "finger_pad -4.4 mm into the table on 'lift grasp->+lift' (commanded)",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "table",
+  "reason": "finger_pad -4.4 mm into the table on 'lift grasp->+lift' (commanded)",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "r3c3",
+  "feasible": false,
+  "stage": "table",
+  "reason": "finger_pad -4.4 mm into the table on 'lift grasp->+lift' (commanded)",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "r1c1",
+  "feasible": false,
+  "stage": "table",
+  "reason": "thumb_pad -1.9 mm into the table on 'descent hover->grasp' (commanded)",
+  "at": "pick",
+  "seconds": 0.9
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "r1c2",
+  "feasible": false,
+  "stage": "table",
+  "reason": "thumb_pad -1.9 mm into the table on 'descent hover->grasp' (commanded)",
+  "at": "pick",
+  "seconds": 0.9
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "r1c3",
+  "feasible": false,
+  "stage": "table",
+  "reason": "thumb_pad -1.9 mm into the table on 'descent hover->grasp' (commanded)",
+  "at": "pick",
+  "seconds": 0.9
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "r2c1",
+  "feasible": false,
+  "stage": "table",
+  "reason": "thumb_pad -1.9 mm into the table on 'descent hover->grasp' (commanded)",
+  "at": "pick",
+  "seconds": 0.9
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "r2c2",
+  "feasible": false,
+  "stage": "table",
+  "reason": "thumb_pad -1.9 mm into the table on 'descent hover->grasp' (commanded)",
+  "at": "pick",
+  "seconds": 0.9
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "r2c3",
+  "feasible": false,
+  "stage": "table",
+  "reason": "thumb_pad -1.9 mm into the table on 'descent hover->grasp' (commanded)",
+  "at": "pick",
+  "seconds": 0.9
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "r3c1",
+  "feasible": false,
+  "stage": "table",
+  "reason": "thumb_pad -1.9 mm into the table on 'descent hover->grasp' (commanded)",
+  "at": "pick",
+  "seconds": 0.9
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "r3c2",
+  "feasible": false,
+  "stage": "table",
+  "reason": "thumb_pad -1.9 mm into the table on 'descent hover->grasp' (commanded)",
+  "at": "pick",
+  "seconds": 0.9
+ }
+]

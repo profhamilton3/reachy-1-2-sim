@@ -222,7 +222,7 @@ _register(Ability(
 _register(Ability(
     name="lift_object",
     summary=("pick up an object, hold it about 5 cm up, and put it back "
-             "(evaluated in simulation for the 60 mm red cube at r2c2 only; "
+             "(evaluated in simulation for the 60 mm red cube at r3c2 only; "
              "anything else is planned and checked first, and refused if a "
              "check fails)"),
     patterns=(
@@ -244,7 +244,7 @@ _register(Ability(
 _register(Ability(
     name="place_on_cell",
     summary=("pick an object up and set it down on another grid cell "
-             "(evaluated in simulation for the 60 mm red cube, r2c2 to r2c1; "
+             "(evaluated in simulation for the 60 mm red cube, r3c2 to r3c3; "
              "anything else is planned and checked first, and refused if a "
              "check fails)"),
     patterns=(
@@ -257,7 +257,7 @@ _register(Ability(
         rf"(?:the\s+)?(?:cell\s+)?(?P<cell>r[1-9]c[1-9])(?:\s+cell)?{_TRAIL}",
     ),
     slots=(SLOT_OBJECT, SLOT_CELL, SLOT_ARM),
-    # The crane pick of #55 at the placement's own attitude, a checked carry
+    # The crane pick of #55 at the placement's attitude, a checked carry
     # with the object in the hand, a measured set-down on the cell and #173's
     # withdrawal (tasks/crane_place_live).  Starts and ends at the raised pose.
     route="CRANE_PLACE",
