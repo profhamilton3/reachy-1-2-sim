@@ -64,6 +64,13 @@ nominal and the cube 3 mm off in x or y).
 
 Every after flight: the only robot geoms that touched the cube were the two pads; nothing else on the board moved.
 
+## Live check (panel, 2026-10-19)
+
+One run, "move the red cube to r3c3" with red_cube placed on r3c2: **completed, every criterion true**, 4.7 mm
+from the centre, tilt 0.0 deg, nothing else moved, slip 0.02 mm, hover correction 7.55 / 8.99 mm; then "put your
+arm away" to REST.  Image not rebuilt (src/, web/, tools/ are mounted).  Record: Reachy-Lab
+`outputs/sim/working/trial-2026-10-19-issue195-live/`.
+
 ## Limitations
 
 - **One origin, one clean destination.**  The crane takes the 6 cm cube from r3c2 only, and sets it down cleanly
