@@ -422,11 +422,23 @@ class FakeHeadKinematicsService(head_kinematics_pb2_grpc.HeadKinematicsServicer)
 
 # ── Arm kinematics ────────────────────────────────────────────────────────────
 # Approximate Reachy 1.2 geometry.  At q=0 the arm hangs straight down (-Z).
+#
+# ComputeArmFK / ComputeArmIK speak in the GRIPPER TIP frame, URDF right_tip /
+# left_tip, as the real robot's SDK does (#187).  `_wrist_fk` is the chain to
+# the wrist-pitch centre with the roll applied there -- the frame the sim's
+# planner measures its pad point from (src/reachy_ai/motion/kinematics.py,
+# `_TOOL_LEN`), so it stays as it was and pads for given joints do not move.
+# The tip shares that frame's rotation R.  The URDF puts the roll axis 0.0325
+# below the pitch centre, so the tip's offset from the wrist turns with the
+# roll: tip = wrist + R_pitch @ _WRIST_ROLL_ORIGIN + R @ tip, R_pitch = R @ rx(-roll).
 
 _R_SHOULDER_Y = -0.19
 _L_SHOULDER_Y =  0.19
 _UPPER_ARM    =  0.28
 _FOREARM      =  0.25
+_WRIST_ROLL_ORIGIN = (0.0, 0.0, -0.0325)   # URDF [rl]_wrist_roll origin
+_R_TIP = (0.0, -0.012, -0.085)              # URDF r_tip origin, in r_gripper_thumb
+_L_TIP = (0.0,  0.012, -0.085)              # URDF l_tip origin, in l_gripper_thumb
 
 # r_shoulder_roll's upper bound is +0.354 rad (+20.3 deg), past the URDF's
 # 0.174: a documented, SDK-visible deviation (#192, docs/adr/0010).  The
@@ -458,7 +470,7 @@ def _tx(x, y, z):
     T = np.eye(4); T[0,3], T[1,3], T[2,3] = x, y, z; return T
 
 
-def _arm_fk(q: np.ndarray, side: str) -> np.ndarray:
+def _wrist_fk(q: np.ndarray, side: str) -> np.ndarray:
     shoulder_y = _R_SHOULDER_Y if side == "right" else _L_SHOULDER_Y
     roll_sign  = 1.0 if side == "right" else -1.0
     T = _tx(0.0, shoulder_y, 0.0)
@@ -470,15 +482,103 @@ def _arm_fk(q: np.ndarray, side: str) -> np.ndarray:
     return T
 
 
-def _arm_ik(target: np.ndarray, side: str, q0=None):
+def _tip_offset(R: np.ndarray, roll: float, side: str) -> np.ndarray:
+    """tip - wrist, in the arm frame, for hand rotation R at wrist roll `roll`."""
+    tip = _R_TIP if side == "right" else _L_TIP
+    return R @ _rx(-roll)[:3, :3] @ np.array(_WRIST_ROLL_ORIGIN) + R @ np.array(tip)
+
+
+def _arm_fk(q: np.ndarray, side: str) -> np.ndarray:
+    T = _wrist_fk(q, side)
+    T[:3, 3] += _tip_offset(T[:3, :3], q[6], side)
+    return T
+
+
+def _wrist_ik(target: np.ndarray, side: str, q0=None):
     bounds = _R_ARM_LIMITS if side == "right" else _L_ARM_LIMITS
     q_init = np.zeros(7) if q0 is None else np.asarray(q0, dtype=float)[:7]
     def cost(q):
-        T = _arm_fk(q, side)
+        T = _wrist_fk(q, side)
         return np.sum((T[:3,3] - target[:3,3])**2) + 0.1*np.sum((T[:3,:3] - target[:3,:3])**2)
     res = minimize(cost, q_init, method="L-BFGS-B", bounds=bounds,
                    options={"maxiter": 1000, "ftol": 1e-10, "gtol": 1e-6})
     return res.x, bool(res.fun < 0.01)
+
+
+# A pose "lands" a target when the IK cost (position m^2 + 0.1 * rotation
+# Frobenius^2) is below this: about 0.01 mm, or 0.002 deg of attitude.
+_IK_LANDED = 1e-10
+
+
+def _wrist_residual(q, target, side):
+    T = _wrist_fk(q, side)
+    return np.concatenate([T[:3, 3] - target[:3, 3],
+                           math.sqrt(0.1) * (T[:3, :3] - target[:3, :3]).ravel()])
+
+
+def _resolve_above_roll(target: np.ndarray, side: str, q, iters=100, damping=1e-6):
+    """The six joints above the wrist roll re-solved for a wrist target, the
+    roll held: damped least squares on `_wrist_ik`'s cost, inside its bounds."""
+    lims = np.array(_R_ARM_LIMITS if side == "right" else _L_ARM_LIMITS)[:6]
+    lo, hi = lims[:, 0], lims[:, 1]
+    q = np.array(q, dtype=float)
+    q[:6] = np.clip(q[:6], lo, hi)
+    r = _wrist_residual(q, target, side)
+    for _ in range(iters):
+        J = np.zeros((len(r), 6))
+        for i in range(6):
+            dq = q.copy()
+            dq[i] += 1e-7
+            J[:, i] = (_wrist_residual(dq, target, side) - r) / 1e-7
+        free = np.ones(6, dtype=bool)
+        for _k in range(3):
+            Jf = J[:, free]
+            step = np.zeros(6)
+            step[free] = np.linalg.solve(Jf.T @ Jf + damping * np.eye(int(free.sum())), -Jf.T @ r)
+            push = ((q[:6] <= lo + 1e-12) & (step < 0)) | ((q[:6] >= hi - 1e-12) & (step > 0))
+            if not push.any():
+                break
+            free &= ~push
+        alpha, moved = 1.0, False
+        while alpha > 1e-4:
+            qn = q.copy()
+            qn[:6] = np.clip(q[:6] + alpha * step, lo, hi)
+            rn = _wrist_residual(qn, target, side)
+            if rn @ rn < r @ r - 1e-14:
+                q, r, moved = qn, rn, True
+                break
+            alpha *= 0.5
+        if not moved:
+            break
+    return q, float(r @ r)
+
+
+def _arm_ik(target: np.ndarray, side: str, q0=None):
+    """IK for a tip target (`_arm_fk`'s frame).
+
+    1. The wrist is solved by `_wrist_ik`, with the wrist target taken at the
+       seed's roll (q0's, else 0).  This is the solve the service made before
+       #187, unchanged: the planner's `kinematics.ik_wrist` asks for the tip
+       at its seed's roll, so its wrist target is exactly the old one.
+    2. If that lands the tip it is the answer.  Otherwise the six joints above
+       the roll are re-solved at the roll it found, and that is the answer if
+       it lands.
+    3. If neither lands (the tip is out of reach, or the roll it found leaves
+       the other joints on a stop), the answer is step 1's, with its success.
+    """
+    R = target[:3, :3]
+    roll0 = 0.0 if q0 is None else float(np.asarray(q0, dtype=float)[6])
+    wrist = target.copy()
+    wrist[:3, 3] = target[:3, 3] - _tip_offset(R, roll0, side)
+    q, success = _wrist_ik(wrist, side, q0)
+    wrist[:3, 3] = target[:3, 3] - _tip_offset(R, q[6], side)
+    r = _wrist_residual(q, wrist, side)
+    if float(r @ r) < _IK_LANDED:
+        return q, True
+    q2, cost = _resolve_above_roll(wrist, side, q)
+    if cost < _IK_LANDED:
+        return q2, True
+    return q, success
 
 
 class FakeArmKinematicsService(arm_kinematics_pb2_grpc.ArmKinematicsServicer):

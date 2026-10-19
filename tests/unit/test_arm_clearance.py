@@ -88,8 +88,10 @@ class TestLinkFrames:
     """link_frames must reproduce the SDK's own FK, not approximate it.
 
     The reference values were read off the running simulator by calling
-    reachy.r_arm.forward_kinematics() and comparing element by element; the
-    agreement was exact to float precision.  If a link length or an axis order
+    reachy.r_arm.forward_kinematics() BEFORE #187, when its FK frame was the
+    wrist, and comparing element by element; the agreement was exact to float
+    precision.  Since #187 the SDK reports the gripper tip (`tip_pose`); these
+    numbers remain link_frames' wrist.  If a link length or an axis order
     ever drifts, these numbers catch it.
     """
 
@@ -105,7 +107,8 @@ class TestLinkFrames:
 
     def test_matches_sdk_forward_kinematics_at_present(self):
         # Read off the SDK at the August mount, torso at (0, 0, 1.0); the arm's
-        # own geometry is the same at any mount.
+        # own geometry is the same at any mount.  Pre-#187, when the SDK's FK
+        # frame was the wrist (it is the tip now); still link_frames' wrist.
         _, elbow, wrist, _ = link_frames(OLD_PRESENT)
         assert wrist == pytest.approx(self._at((0.3921, -0.2013, -0.1065)), abs=5e-4)
         assert elbow == pytest.approx(self._at((0.1703, -0.1998, -0.2220)), abs=5e-4)
@@ -612,13 +615,8 @@ class TestClearanceMaximisingIK:
             return list(sol)
 
         def forward_kinematics(self, q):
-            import numpy as np
-            from reachy_ai.motion.kinematics import _BASE, _TOOL, link_frames
-            _, _, wrist, R = link_frames(q)
-            F = np.eye(4)
-            F[:3, :3] = R
-            F[:3, 3] = np.asarray(wrist) - _BASE
-            return F
+            from reachy_ai.motion.kinematics import tip_pose
+            return tip_pose(q)
 
     def _planner_returning(self, scene, solutions):
         arm = self._StubArm(solutions)

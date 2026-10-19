@@ -225,8 +225,9 @@ def hand_frames(joints: Sequence[float], gripper_deg: float) -> HandFrames:
 
 
 def hand_rotation(joints: Sequence[float]) -> np.ndarray:
-    """The IK/FK frame's rotation (r_wrist2hand) -- what inverse_kinematics
-    takes as its target orientation."""
+    """The hand rotation at ``joints``: the wrist frame's and the SDK tip's
+    (URDF right_tip, #187) -- what ``kinematics.ik_wrist`` and the SDK's
+    inverse_kinematics take as the target orientation."""
     return K.link_frames(joints, "right")[3]
 
 

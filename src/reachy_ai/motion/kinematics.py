@@ -82,12 +82,19 @@ def _r0_for(side: str) -> np.ndarray:
         return _R0
     raise ValueError(f"side must be 'left' or 'right', got '{side!r}'")
 
-# The reachy_sdk FK/IK frame is the wrist (r_wrist2hand).  The gripper contact
-# pads sit ~0.12 m along the wrist's local -Z (measured from the model).  We
-# plan in *pad* (contact) space: pad_world = wrist_world + R_wrist @ (0,0,-TOOL),
-# so wrist_world = pad_world + R_wrist @ (0,0,+TOOL).  A true top-down grasp is
-# unreachable for this arm, so we accept whatever tilt IK finds and correct for
-# the pad offset at that orientation — the pads still land on the object.
+# We plan in *pad* (contact) space from the WRIST frame: the wrist-pitch
+# centre with the roll applied there (`link_frames`'s wrist and R).  The
+# gripper contact pads sit ~0.12 m along its local -Z (measured from the
+# model): pad_world = wrist_world + R_wrist @ (0,0,-TOOL), so wrist_world =
+# pad_world + R_wrist @ (0,0,+TOOL).  A true top-down grasp is unreachable for
+# this arm, so we accept whatever tilt IK finds and correct for the pad offset
+# at that orientation — the pads still land on the object.
+#
+# The reachy_sdk FK/IK frame is NOT the wrist: it is the gripper tip, URDF
+# right_tip / left_tip, on the real robot and in the sim (#187).  The tip
+# shares the wrist's rotation, but its offset from the wrist turns with the
+# wrist roll (`tip_offset`), so every FK answer is converted with the joints
+# it came from (`fk_wrist`) and every IK request goes through `ik_wrist`.
 _TOOL_LEN = 0.12
 _TOOL = np.array([0.0, 0.0, _TOOL_LEN])
 
@@ -266,8 +273,8 @@ def link_frames(joints: Sequence[float], side: str = "right"):
     Reproduces the arm's kinematic chain rather than calling the SDK, so this
     works on the host with no simulator running — and so a whole path can be
     checked without a round trip per pose.  It is the same chain the FK service
-    itself evaluates (fake_reachy_server._arm_fk), which
-    test_arm_clearance.py asserts by comparing the wrist frame joint-for-joint.
+    evaluates to the wrist (fake_reachy_server._wrist_fk; the SDK's answer is
+    the tip, ``tip_pose``), which test_host_ik_arm.py asserts joint-for-joint.
     """
     q = np.radians(np.asarray(list(joints)[:7], dtype=float))
     sign = 1.0 if side == "right" else -1.0
@@ -421,6 +428,127 @@ def _rotvec(R: np.ndarray) -> np.ndarray:
         return np.zeros(3)
     w = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
     return a * w / (2.0 * math.sin(a))
+
+
+# ── The SDK's tip frame ───────────────────────────────────────────────────────
+#
+# URDF [rl]_tip, in [rl]_gripper_thumb: the thumb hangs at
+# _THUMB_ORIGIN_OFFSET below the wrist-pitch centre and the roll turns it.
+_TIP_OFFSET = {"right": np.array([0.0, -0.012, -0.085]),
+               "left": np.array([0.0, 0.012, -0.085])}
+
+#: The simulator's IK service bounds (radians, joint order): fake_reachy_server
+#: `_R_ARM_LIMITS` / `_L_ARM_LIMITS`, which are not the MJCF travel above.
+#: `ik_wrist`'s re-solve keeps to them, as the service does.
+_IK_LIMITS_RAD = {
+    "right": ((-3.14, 1.57), (-1.57, 0.354), (-2.09, 2.09),
+              (-2.35, 0.0), (-2.62, 2.62), (-0.79, 0.79), (-0.79, 0.79)),
+    "left": ((-3.14, 1.57), (-0.17, 1.57), (-2.09, 2.09),
+             (-2.35, 0.0), (-2.62, 2.62), (-0.79, 0.79), (-0.79, 0.79)),
+}
+
+#: A pose "lands" a target when the IK cost (position m^2 + 0.1 * rotation
+#: Frobenius^2) is below this: fake_reachy_server `_IK_LANDED`.
+_IK_LANDED = 1e-10
+
+
+def tip_offset(R: np.ndarray, roll_deg: float, side: str = "right") -> np.ndarray:
+    """tip - wrist (m, world axes) for hand rotation R at wrist roll ``roll_deg``."""
+    R = np.asarray(R, dtype=float)
+    return (R @ _rotx(-math.radians(float(roll_deg))) @ _THUMB_ORIGIN_OFFSET
+            + R @ _TIP_OFFSET[side])
+
+
+def tip_pose(joints: Sequence[float], side: str = "right") -> np.ndarray:
+    """What the SDK's ``forward_kinematics(joints)`` returns: the tip's 4x4
+    pose in the arm (torso) frame, from the local chain."""
+    _s, _e, wrist, R = link_frames(joints, side)
+    F = np.eye(4)
+    F[:3, :3] = R
+    F[:3, 3] = wrist - _BASE + tip_offset(R, list(joints)[6], side)
+    return F
+
+
+def fk_wrist(arm, joints: Sequence[float], side: str = "right") -> np.ndarray:
+    """The SDK's FK at ``joints``, moved from the tip to the wrist: 4x4, arm frame."""
+    F = np.array(arm.forward_kinematics(list(joints)), dtype=float)
+    F[:3, 3] -= tip_offset(F[:3, :3], list(joints)[6], side)
+    return F
+
+
+def _wrist_residual(q_rad: np.ndarray, M: np.ndarray, side: str) -> np.ndarray:
+    _s, _e, wrist, R = link_frames(np.degrees(q_rad), side)
+    return np.concatenate([wrist - _BASE - M[:3, 3],
+                           math.sqrt(0.1) * (R - M[:3, :3]).ravel()])
+
+
+def _resolve_above_roll(M: np.ndarray, q_rad: np.ndarray, side: str,
+                        iters: int = 100, damping: float = 1e-6):
+    """fake_reachy_server `_resolve_above_roll`, on the local chain: the six
+    joints above the wrist roll re-solved for wrist pose M, the roll held."""
+    lims = np.array(_IK_LIMITS_RAD[side])[:6]
+    lo, hi = lims[:, 0], lims[:, 1]
+    q = np.array(q_rad, dtype=float)
+    q[:6] = np.clip(q[:6], lo, hi)
+    r = _wrist_residual(q, M, side)
+    for _ in range(iters):
+        J = np.zeros((len(r), 6))
+        for i in range(6):
+            dq = q.copy()
+            dq[i] += 1e-7
+            J[:, i] = (_wrist_residual(dq, M, side) - r) / 1e-7
+        free = np.ones(6, dtype=bool)
+        for _k in range(3):
+            Jf = J[:, free]
+            step = np.zeros(6)
+            step[free] = np.linalg.solve(
+                Jf.T @ Jf + damping * np.eye(int(free.sum())), -Jf.T @ r)
+            push = ((q[:6] <= lo + 1e-12) & (step < 0)) | ((q[:6] >= hi - 1e-12) & (step > 0))
+            if not push.any():
+                break
+            free &= ~push
+        alpha, moved = 1.0, False
+        while alpha > 1e-4:
+            qn = q.copy()
+            qn[:6] = np.clip(q[:6] + alpha * step, lo, hi)
+            rn = _wrist_residual(qn, M, side)
+            if rn @ rn < r @ r - 1e-14:
+                q, r, moved = qn, rn, True
+                break
+            alpha *= 0.5
+        if not moved:
+            break
+    return q, float(r @ r)
+
+
+def ik_wrist(arm, M, q0: Optional[Sequence[float]] = None,
+             side: str = "right") -> List[float]:
+    """The SDK's IK for a WRIST pose M (4x4, arm frame): joints in degrees.
+
+    The SDK solves for the tip, whose offset from the wrist depends on the
+    roll the answer will have.  So the tip is asked for at the seed's roll
+    (``q0``'s, else 0), and if the answer lands that tip, the six joints above
+    the roll are re-solved on the local chain at the answer's roll, for M
+    itself.  An answer that does not land the tip (out of reach, or an arm
+    that ignores the target) is returned as it came.
+
+    Against the simulator this is the service's pre-#187 wrist solve: its
+    first step solves exactly this wrist target from this seed (see
+    fake_reachy_server `_arm_ik`), and the re-solve undoes the tip correction
+    it then makes.  Raises what ``arm.inverse_kinematics`` raises.
+    """
+    M = np.asarray(M, dtype=float)
+    roll0 = 0.0 if q0 is None else float(list(q0)[6])
+    T = M.copy()
+    T[:3, 3] = M[:3, 3] + tip_offset(M[:3, :3], roll0, side)
+    q = [float(v) for v in arm.inverse_kinematics(T, q0=q0)]
+    F = tip_pose(q, side)
+    landed = (float(np.sum((F[:3, 3] - T[:3, 3]) ** 2))
+              + 0.1 * float(np.sum((F[:3, :3] - T[:3, :3]) ** 2))) < _IK_LANDED
+    if not landed:
+        return q
+    q2, cost = _resolve_above_roll(M, np.radians(q), side)
+    return [float(v) for v in np.degrees(q2)] if cost < _IK_LANDED else q
 
 
 def pad_point(joints: Sequence[float], side: str = "right") -> np.ndarray:
@@ -766,7 +894,7 @@ class CartesianPlanner:
 
     def fk_world(self, joints: Sequence[float]) -> XYZ:
         """Forward kinematics: joint angles (deg) → gripper *pad* world point."""
-        F = self._arm.forward_kinematics(list(joints))
+        F = fk_wrist(self._arm, joints, self.side)
         pad = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
         return (float(pad[0]), float(pad[1]), float(pad[2]))
 
@@ -855,7 +983,7 @@ class CartesianPlanner:
             M[:3, :3] = R
             M[:3, 3] = wrist - _BASE
             try:
-                q = self._arm.inverse_kinematics(M, q0=q0)
+                q = ik_wrist(self._arm, M, q0, self.side)
             except Exception:
                 continue
             # A pose outside the joint travel is not a solution.  The arm
@@ -867,7 +995,7 @@ class CartesianPlanner:
                 q = self._resolve_inside(R, pad, q)
                 if q is None:
                     continue
-            F = self._arm.forward_kinematics(q)
+            F = fk_wrist(self._arm, q, self.side)
             pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
             err = float(np.linalg.norm(pad_fk - pad))
             if err < best_err:
@@ -905,14 +1033,14 @@ class CartesianPlanner:
             M[:3, :3] = R
             M[:3, 3] = wrist - _BASE
             try:
-                q = self._arm.inverse_kinematics(M, q0=q0)
+                q = ik_wrist(self._arm, M, q0, self.side)
             except Exception:
                 continue
             if not within_limits(q, self.side):
                 q = self._resolve_inside(R, pad, q)
                 if q is None:
                     continue
-            F = self._arm.forward_kinematics(q)
+            F = fk_wrist(self._arm, q, self.side)
             pad_fk = F[:3, 3] + _BASE - F[:3, :3] @ _TOOL
             err = float(np.linalg.norm(pad_fk - pad))
             best_err = min(best_err, err)

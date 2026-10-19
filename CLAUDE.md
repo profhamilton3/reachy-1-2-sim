@@ -180,6 +180,8 @@ Camera coordinate conversions require tests. ROS optical frames use +x right, +y
 - Prefer backend/URDF model transforms for FK when MuJoCo is active.
 - Do not silently change current SDK-visible limit or compliance semantics; document deliberate deviations.
   Current deliberate deviation: `r_shoulder_roll` upper stop +20.3 deg (URDF +10), the October layout (#192, docs/adr/0010-october-layout.md).
+- The SDK arm FK/IK frame is the gripper tip, URDF `right_tip` / `left_tip`, in the torso frame, as on the real robot (#187; `docs/sdk-capability-matrix.md`). The sim's planner still plans from the wrist (pitch centre, roll applied there) and its pad point 0.12 m below it; convert with `kinematics.fk_wrist` / `kinematics.ik_wrist` / `kinematics.tip_pose`, never with a fixed tool length: the tip's offset from the wrist turns with the wrist roll.
+  Migration note: printed `forward_kinematics()` numbers changed by about 12 cm at #187 (they were the wrist); code that subtracted its own hand length from them must stop doing so.
 - Keep physical calibration separate from synthetic defaults.
 
 ## Docker and Mac rules
