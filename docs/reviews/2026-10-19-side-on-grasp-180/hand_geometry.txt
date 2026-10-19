@@ -1,0 +1,31 @@
+level hand, approach +x; thumb-frame x = up
+gripper_deg  free_gap_mm  finger_face_vs_thumb_deg  gap_mid_from_wrist_mm(x,y,z)
+   -68.0       69.0        68.0   [109. -44.   0.]
+   -65.0       67.8        65.0   [110.2 -43.2   0. ]
+   -60.0       65.5        60.0   [112.2 -41.8   0. ]
+   -55.0       63.0        55.0   [114.  -40.2   0. ]
+   -50.0       60.3        50.0   [115.7 -38.5   0. ]
+   -45.0       57.3        45.0   [117.3 -36.6   0. ]
+   -40.0       54.2        40.0   [118.6 -34.6   0. ]
+   -35.0       51.0        35.0   [119.8 -32.5   0. ]
+   -30.0       47.6        30.0   [120.8 -30.3   0. ]
+   -25.0       44.1        25.0   [121.6 -28.    0. ]
+   -20.0       40.5        20.0   [122.2 -25.6   0. ]
+   -15.0       36.9        15.0   [122.6 -23.3   0. ]
+   -10.0       33.2        10.0   [122.8 -20.8   0. ]
+    -5.0       29.6         5.0   [122.7 -18.4   0. ]
+     0.0       26.0         0.0   [122.5 -16.    0. ]
+
+heights relative to the pad centres (level hand, any opening):
+  thumb  lowest  -14.0 mm, highest   14.0 mm
+  finger lowest  -14.0 mm, highest   14.0 mm
+  palm   lowest  -25.0 mm, highest   25.0 mm
+  back   lowest  -25.0 mm, highest   25.0 mm
+  forearm capsule (radius 30 mm, ends at the wrist): lowest  -30.0 mm
+
+along the approach (+x), relative to the jaw-gap centre at -65 deg:
+  thumb  x from  -14.7 to   29.3 mm
+  finger x from  -27.7 to   -1.3 mm
+  palm   x from  -55.7 to  -19.7 mm
+  back   x from  -93.7 to  -55.7 mm
+  wrist at -110.2 mm

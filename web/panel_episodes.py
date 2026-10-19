@@ -320,11 +320,15 @@ def _step(value) -> int:
 #: leaving the field blank.
 PLANNER_SEED = {
     "CRANE_LIFT": "deterministic: the crane planner's fixed IK start set "
-                  "(crane_pick_live.GRASP_STARTS); no random seed",
+                  "(crane_pick_live.GRASP_STARTS) and the side-on planner's "
+                  "(side_grasp_live.TAUGHT_SEEDS, then GRASP_STARTS), approach "
+                  "directions in a fixed order (#180); no random seed",
     "CRANE_PLACE": "deterministic: the crane planner's fixed IK start set "
                    "(crane_pick_live.GRASP_STARTS) at the place attitude "
-                   "(crane_place_live.PLACE_GRASP), headings tried in a fixed "
-                   "order; no random seed",
+                   "(crane_place_live.PLACE_GRASP) and the side-on planner's "
+                   "(side_grasp_live.TAUGHT_SEEDS, then GRASP_STARTS), "
+                   "approach directions and headings tried in a fixed order "
+                   "(#180); no random seed",
 }
 MEASURED_SEED = "none: a measured route; nothing is sampled"
 

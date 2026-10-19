@@ -221,10 +221,11 @@ _register(Ability(
 
 _register(Ability(
     name="lift_object",
-    summary=("pick up an object, hold it about 5 cm up, and put it back "
-             "(evaluated in simulation for the 60 mm red cube at r3c2 only; "
-             "anything else is planned and checked first, and refused if a "
-             "check fails)"),
+    summary=("pick up an object, hold it about 5 cm up, and put it back, "
+             "side-on or with the crane, whichever plans with the larger margin "
+             "(evaluated in simulation for the red cube, the pool boxes and the "
+             "pool cylinders on every cell but r3c1; anything else is planned and "
+             "checked first, and refused if a check fails)"),
     patterns=(
         rf"{_POLITE}(?:pick\s+up|lift(?:\s+up)?)\s+(?:the\s+)?(?P<object>.+?)"
         rf"\s+and\s+(?:put|set|place)\s+it\s+(?:back(?:\s+down)?|down(?:\s+again)?)"
@@ -232,10 +233,11 @@ _register(Ability(
         rf"{_POLITE}lift\s+(?:up\s+)?(?:the\s+)?(?P<object>.+?){_TRAIL}",
     ),
     slots=(SLOT_OBJECT, SLOT_ARM),
-    # The elevated, jaws-down grasp of #55 (tasks/crane_pick_live): planned
-    # and checked before the arm moves, aligned from the MEASURED hand, and
-    # put back where it was picked from.  It starts and ends at the raised
-    # pose, like the point abilities, and says so.
+    # The elevated, jaws-down grasp of #55 (tasks/crane_pick_live) or the
+    # side-on grasp of #180 (tasks/side_grasp_live), whichever passes every
+    # check with the larger margin: planned and checked before the arm moves,
+    # aligned from the MEASURED hand, and put back where it was picked from.
+    # It starts and ends at the raised pose, like the point abilities.
     route="CRANE_LIFT",
     start_postures=("present",),
     end_posture="present",
@@ -243,10 +245,11 @@ _register(Ability(
 
 _register(Ability(
     name="place_on_cell",
-    summary=("pick an object up and set it down on another grid cell "
-             "(evaluated in simulation for the 60 mm red cube, r3c2 to r3c3; "
-             "anything else is planned and checked first, and refused if a "
-             "check fails)"),
+    summary=("pick an object up and set it down on another grid cell, "
+             "side-on or with the crane, whichever plans with the larger margin "
+             "(evaluated in simulation for the red cube, the pool boxes and the "
+             "pool cylinders between the cells other than r3c1; anything else is "
+             "planned and checked first, and refused if a check fails)"),
     patterns=(
         # "pick and place X at Y" and "move X to Y" (#174, owner decision):
         # the placement, with the cell it goes to.
@@ -257,9 +260,11 @@ _register(Ability(
         rf"(?:the\s+)?(?:cell\s+)?(?P<cell>r[1-9]c[1-9])(?:\s+cell)?{_TRAIL}",
     ),
     slots=(SLOT_OBJECT, SLOT_CELL, SLOT_ARM),
-    # The crane pick of #55 at the placement's attitude, a checked carry
-    # with the object in the hand, a measured set-down on the cell and #173's
-    # withdrawal (tasks/crane_place_live).  Starts and ends at the raised pose.
+    # The crane pick of #55 at the placement's attitude (tasks/crane_place_live)
+    # or the side-on pick of #180 (tasks/side_grasp_live), whichever has the
+    # larger margin; a checked carry with the object in the hand, a measured
+    # set-down on the cell and #173's withdrawal.  Starts and ends at the
+    # raised pose.
     route="CRANE_PLACE",
     start_postures=("present",),
     end_posture="present",

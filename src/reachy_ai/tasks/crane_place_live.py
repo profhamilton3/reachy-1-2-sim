@@ -149,17 +149,18 @@ class PlacePlan:
         return self.target_cell.replace("cell_", "")
 
     def climb(self) -> List[List[float]]:
-        """The pickup ladder from the lift's top rung up to the carry height."""
+        """The pickup ladder from the lift's top rung up to the carry height
+        (a side-on plan's vertical ladder, #180: `CranePlan.up`)."""
         s = self.pick.spec
-        return [self.pick.rungs[k] for k in range(s.lift_rungs, self.carry_rung + 1)]
+        return [self.pick.up(k) for k in range(s.lift_rungs, self.carry_rung + 1)]
 
     def carry(self) -> List[List[float]]:
-        return [self.pick.rungs[self.carry_rung], self.dest.rungs[self.carry_rung]]
+        return [self.pick.up(self.carry_rung), self.dest.up(self.carry_rung)]
 
     def setdown(self, frm: Optional[int] = None) -> List[List[float]]:
         """Down the destination ladder to its floor (`CranePlan.floor_rung`)."""
         top = self.carry_rung if frm is None else frm
-        return [self.dest.rungs[k] for k in range(top, self.dest.floor_rung - 1, -1)]
+        return [self.dest.up(k) for k in range(top, self.dest.floor_rung - 1, -1)]
 
     def summary(self) -> Dict[str, object]:
         return {"object_id": self.object_id, "target_cell": self.target_cell,
@@ -528,8 +529,8 @@ def support_rung(dest: CP.CranePlan, rel: Tuple[np.ndarray, np.ndarray], obj: G.
     meets the table: where the set-down's lowering will stop.  0 if none."""
     off = np.asarray(offset, dtype=float)
     g = dest.spec.close_deg
-    for j in range(len(dest.rungs) - 1, -1, -1):
-        b = G.carried_box(G.hand_frames(np.asarray(dest.rungs[j]) + off, g), obj, rel)
+    for j in range(dest.up_count - 1, -1, -1):
+        b = G.carried_box(G.hand_frames(np.asarray(dest.up(j)) + off, g), obj, rel)
         if b.lowest_z <= table_z:
             return j
     return 0
@@ -549,7 +550,7 @@ def replan_setdown(planner, scene: SceneModel, place: PlacePlan, dest: CP.CraneP
     last: Optional[CP.CraneRefused] = None
     for low in tries:
         try:
-            return CP.replan(planner, scene, dest, shift, at_rung, lowest=low)
+            return CP.replan(planner, scene, dest, shift, at_rung, lowest=low, on="lift")
         except CP.CraneRefused as exc:
             last = exc
     assert last is not None
@@ -584,10 +585,17 @@ def replan_from_hold(planner, scene: SceneModel, place: PlacePlan,
                      rel: Tuple[np.ndarray, np.ndarray],
                      offset: Optional[np.ndarray] = None) -> PlacePlan:
     """The destination re-solved for the MEASURED hold, and re-checked
-    (with the measured joint offset).  Raises CraneRefused."""
-    dest, target = plan_destination(planner, scene, place.pick, rel,
-                                     place.target[:2], place.psi_deg, place.spec,
-                                     seeds=[place.dest.rungs[0]])
+    (with the measured joint offset).  Raises CraneRefused.  A side-on
+    placement's destination is solved by `side_grasp_live` (#180)."""
+    if place.pick.kind == "side":
+        from reachy_ai.tasks import side_grasp_live as SG
+        dest, target = SG.plan_side_destination(planner, scene, place.pick, rel,
+                                                place.target[:2], place.psi_deg, place.spec,
+                                                seeds=[place.dest.rungs[0]])
+    else:
+        dest, target = plan_destination(planner, scene, place.pick, rel,
+                                         place.target[:2], place.psi_deg, place.spec,
+                                         seeds=[place.dest.rungs[0]])
     pp = replace(place, dest=dest, target=target, rel=rel, hold_source="measured",
                  checks={})
     check_place(planner, scene, pp, offset=offset)

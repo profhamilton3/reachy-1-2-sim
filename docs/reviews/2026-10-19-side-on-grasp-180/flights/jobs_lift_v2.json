@@ -1,0 +1,86 @@
+[
+ {
+  "oid": "red_cube",
+  "origin": "r1c1",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r1c2",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r1c3",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c2",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c3",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r3c2",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r3c3",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r1c2",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r2c2",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r3c3",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r1c2",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r2c2",
+  "dest": null,
+  "grasp": "side"
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r3c3",
+  "dest": null,
+  "grasp": "side"
+ }
+]

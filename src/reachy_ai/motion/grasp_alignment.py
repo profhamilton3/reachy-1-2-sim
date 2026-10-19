@@ -144,15 +144,28 @@ def _quat_to_rot(q: Sequence[float]) -> np.ndarray:
 
 
 def object_box(obj: SceneObject, center: Optional[Sequence[float]] = None,
-               quat: Optional[Sequence[float]] = None) -> Box:
+               quat: Optional[Sequence[float]] = None,
+               align: Optional[Sequence[float]] = None) -> Box:
     """The scene object as an oriented box.
 
     A box is itself.  A cylinder/sphere/capsule is its bounding box (size is
     already (2r, 2r, h) in the scene model), which can only under-report air.
     ``center``/``quat`` override the scene pose with a live one.
+
+    ``align`` (a world direction) turns a CYLINDER's bounding box about the
+    cylinder's own axis so that its x axis lies along ``align`` (#180): a
+    cylinder's yaw is no property of its shape, and the box taken across the
+    jaw is then exact across the jaw (its faces touch the cylinder there)
+    instead of up to sqrt(2) too wide.  Ignored for every other kind.
     """
     c = np.asarray(obj.center if center is None else center, dtype=float)
     R = _quat_to_rot(obj.quat if quat is None else quat)
+    if align is not None and obj.kind == "cylinder":
+        ax = R[:, 2]
+        x = np.asarray(align, dtype=float) - float(np.asarray(align, dtype=float) @ ax) * ax
+        if np.linalg.norm(x) > 1e-9:
+            x = x / np.linalg.norm(x)
+            R = np.column_stack([x, np.cross(ax, x), ax])
     return Box(obj.id, c, R, np.asarray(obj.size, dtype=float) / 2.0)
 
 
@@ -178,6 +191,17 @@ class HandFrames:
     def jaw(self) -> np.ndarray:
         """Unit vector from the thumb's inner face to the finger's."""
         v = self.finger_face - self.thumb_face
+        return v / np.linalg.norm(v)
+
+    @property
+    def closing(self) -> np.ndarray:
+        """The jaw with its component along the hand removed: the direction
+        the finger closes in (#180).  The open finger pad sits ~22 mm nearer
+        the wrist than the thumb pad, so `jaw` leans along the hand by ~18
+        deg; for a level (side-on) hand that lean is horizontal and is no
+        misalignment with the faces."""
+        z = self.thumb_rot[:, 2]
+        v = self.jaw - float(self.jaw @ z) * z
         return v / np.linalg.norm(v)
 
     @property
@@ -289,14 +313,17 @@ def face_axes(obj: Box, jaw: np.ndarray) -> Tuple[np.ndarray, np.ndarray, int]:
     return n, obj.axes[:, j], i
 
 
-def pad_clearance(hand: HandFrames, obj: Box) -> PadClearance:
-    n, m, i = face_axes(obj, hand.jaw)
+def pad_clearance(hand: HandFrames, obj: Box, closing: bool = False) -> PadClearance:
+    """``closing`` judges the jaw-face angle by `HandFrames.closing` (a
+    side-on hand, #180) instead of `HandFrames.jaw`."""
+    jaw = hand.closing if closing else hand.jaw
+    n, m, i = face_axes(obj, jaw)
     h_n = float(obj.half[i])
     c = obj.center
     thumb_proj = (hand.thumb.corners() - c) @ n
     finger_proj = (hand.finger.corners() - c) @ n
     top = float(c[2] + np.abs(obj.axes[2]) @ obj.half)
-    jh = hand.jaw - hand.jaw[2] * np.array([0.0, 0.0, 1.0])
+    jh = jaw - jaw[2] * np.array([0.0, 0.0, 1.0])
     jh = jh / (np.linalg.norm(jh) or 1.0)
     ang = math.degrees(math.acos(max(-1.0, min(1.0, abs(float(jh @ n))))))
     g = hand.gap_mid - c
@@ -402,18 +429,26 @@ def route_clearance(route: Sequence[Sequence[float]], gripper_deg: float,
 
 
 def centring_shift(end: PadClearance, route: RouteReport,
-                   target_gap_above_center_m: float) -> np.ndarray:
+                   target_gap_above_center_m: float,
+                   target_gap_along_m: Optional[float] = None,
+                   target_thumb_m: Optional[float] = None) -> np.ndarray:
     """World shift to apply to the commanded jaw-gap target.
 
     Along the face normal: equalise the two pads' worst ROUTE clearances
     (moving +n gives the finger more room and the thumb less, one for one).
-    Along the face: put the gap centre on the object's centre line.
+    Along the face: put the gap centre on the object's centre line, or at
+    ``target_gap_along_m`` from it (a side-on grasp's planned insertion
+    depth, #180, along ``end.face_along``).
     Vertically: bring the realised gap centre to the planned grasp height.
+    ``target_thumb_m`` (a side-on grasp, #180) puts the thumb pad's worst
+    route clearance at that value instead of equalising the two.
     """
     n = np.asarray(end.face_normal)
     m = np.asarray(end.face_along)
-    s_n = 0.5 * (route.thumb_m - route.finger_m)
-    s_m = -end.gap_offset_along_m
+    s_n = (0.5 * (route.thumb_m - route.finger_m) if target_thumb_m is None
+           else route.thumb_m - target_thumb_m)
+    s_m = (-end.gap_offset_along_m if target_gap_along_m is None
+           else target_gap_along_m - end.gap_offset_along_m)
     s_z = target_gap_above_center_m - end.gap_above_center_m
     return s_n * n + s_m * m + np.array([0.0, 0.0, s_z])
 
@@ -432,7 +467,8 @@ class StraddleCheck:
 
 
 def straddle_check(hand: HandFrames, obj: Box, table_z: float,
-                   min_side_m: float, max_jaw_face_deg: float) -> StraddleCheck:
+                   min_side_m: float, max_jaw_face_deg: float,
+                   closing: bool = False) -> StraddleCheck:
     """Do the open pads straddle the object, ready to close on two faces?
 
     Every condition is geometric, evaluated on the MEASURED hand:
@@ -443,8 +479,10 @@ def straddle_check(hand: HandFrames, obj: Box, table_z: float,
         on face rather than pad on edge;
       * the jaw is within ``max_jaw_face_deg`` of the face normal;
       * neither pad is in the table.
+
+    ``closing``: the jaw-face angle by the closing direction (side-on, #180).
     """
-    pc = pad_clearance(hand, obj)
+    pc = pad_clearance(hand, obj, closing)
     failed = []
     if pc.thumb_side_m < min_side_m or pc.thumb_m <= 0.0:
         failed.append("thumb_not_outside_face")

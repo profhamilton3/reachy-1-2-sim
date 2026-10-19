@@ -338,7 +338,7 @@ def _observer(object_id: str):
 #: hold, the placement and the withdrawal).  Phases are live lines AND kept
 #: (#172): the contact rules judge by phase, and the crane's own segment names
 #: are its phases (`evaluation.contact_rules.CRANE_PHASES`).
-KEPT_CRANE_EVENTS = ("phase", "CORRECTION", "CORRECTION_COMMANDED", "ALIGNED", "ALIGN_REFUSED",
+KEPT_CRANE_EVENTS = ("phase", "GRASP_CHOSEN", "CORRECTION", "CORRECTION_COMMANDED", "ALIGNED", "ALIGN_REFUSED",
                      "DESCENT_CHECK_FAILED", "STRADDLE", "CLOSED", "HELD", "SUPPORTED",
                      "RELEASED", "WITHDRAWAL_PRECHECK", "WITHDRAWAL_JUDGED",
                      "WITHDRAWAL_CORRECTION",
@@ -362,6 +362,15 @@ def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
                                               default=str)))
         if kind == "phase":
             phase(f"lift: {kw.get('name')}")
+        elif kind == "GRASP_CHOSEN" and kw.get("used"):
+            # #180: both grasps were planned; the one with the larger margin flies.
+            def why(g):
+                m = (kw.get("margins") or {}).get(g)
+                if m:
+                    return f"{g} margin {m['margin_mm']:.1f} mm ({m['limit']})"
+                return f"{g} refused ({(kw.get('refusals') or {}).get(g)})"
+            phase(f"lift: grasp {kw['used']} -- " + "; ".join(why(g) for g in
+                                                             (kw.get("margins") or {})))
         elif kind == "MEASURE" and kw.get("label") in ("hover after pause", "grasp depth"):
             phase(f"lift: {kw['label']} -- measured jaw-gap error {mm(kw['gap_error_mm'])}, "
                   f"pads {kw['pads']['thumb_side_mm']:.1f} / {kw['pads']['finger_side_mm']:.1f} mm "
@@ -438,29 +447,37 @@ def _crane_preflight(job, arm, phase, crane: Dict[str, Any]) -> Optional[Dict[st
     o = observe()
     model.update_poses({oid: o.position})
     planner = CartesianPlanner(arm, scene=model)
+    # #180: the side-on grasp and the crane are both planned and checked; the
+    # one that passes every check with the larger margin flies, and the
+    # record says which (`side_grasp_live.plan_*_choice`).  A side-on plan
+    # is checked and flown with the box-hand whole-arm preflight.
+    from reachy_ai.tasks import side_grasp_live as SG
     if job.get("task_type") == "place_on_cell":
-        from reachy_ai.tasks import crane_place_live as PL
         cell = job.get("cell") or ""
         phase(f"lift: planning and checking the whole placement of {oid} on "
-              f"{cell.replace('cell_', '')} before moving")
+              f"{cell.replace('cell_', '')} before moving (side-on and crane)")
         try:
-            place = PL.plan_crane_place(planner, model, oid, cell, o,
-                                        on_event=_crane_phases(phase))
+            ch = SG.plan_place_choice(planner, model, oid, cell, o,
+                                      on_event=_crane_phases(phase))
         except CP.CraneRefused as exc:
             return _fail(f"I will not move {oid} to {cell.replace('cell_', '')}: "
                          f"{exc.stage}: {exc.reason}",
                          refused_before_motion=True, stage=exc.stage)
-        crane.update(plan=place.pick, place=place, planner=planner, model=model,
-                     observe=observe, plan_record=plan_record(place))
+        place = ch.plan
+        crane.update(plan=place.pick, place=place, planner=SG.planner_for(place.pick, planner),
+                     model=model, observe=observe, choice=ch.record(),
+                     plan_record=plan_record(place))
         return None
-    phase(f"lift: planning and checking the whole lift of {oid} before moving")
+    phase(f"lift: planning and checking the whole lift of {oid} before moving "
+          "(side-on and crane)")
     try:
-        plan = CP.plan_crane_pick(planner, model, oid, o, on_event=_crane_phases(phase))
+        ch = SG.plan_lift_choice(planner, model, oid, o, on_event=_crane_phases(phase))
     except CP.CraneRefused as exc:
         return _fail(f"I will not lift {oid}: {exc.stage}: {exc.reason}",
                      refused_before_motion=True, stage=exc.stage)
-    crane.update(plan=plan, planner=planner, model=model, observe=observe,
-                 plan_record=plan_record(plan))
+    plan = ch.plan
+    crane.update(plan=plan, planner=SG.planner_for(plan, planner), model=model,
+                 observe=observe, choice=ch.record(), plan_record=plan_record(plan))
     return None
 
 
@@ -484,6 +501,9 @@ def plan_record(plan) -> Dict[str, Any]:
               "object_id": summary.get("object_id")}
     if summary.get("target_cell"):
         record["target_cell"] = summary["target_cell"]
+    # Which grasp the plan is (#180): a side-on plan's summary says so.
+    side = summary.get("kind") == "side" or (summary.get("pick") or {}).get("kind") == "side"
+    record["grasp"] = "side-on" if side else "crane"
     return record
 
 
@@ -512,7 +532,8 @@ def _crane_lift(robot, arm, phase, crane, *, should_abort=None, on_phase=None):
                                 should_abort=should_abort, stow=False,
                                 place=crane.get("place"))
     crane["outcome"] = json.loads(json.dumps(dict(out, events=kept, arm_state=_arm_state(arm),
-                                                  plan=crane.get("plan_record")),
+                                                  plan=crane.get("plan_record"),
+                                                  grasp=crane.get("choice")),
                                          default=_jsonable))
     held = out.get("lifted_and_held") or {}
     return [f"lift: {out.get('halt') or out.get('refusal') or 'completed the sequence'}",

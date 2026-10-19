@@ -421,6 +421,53 @@ class CranePlan:
     floor_rung: int = 0
     jaw_face_limit_deg: float = 0.0    # from the PLANNED pad slack (see jaw_face_limit_deg)
     checks: Dict[str, object] = field(default_factory=dict)
+    #: A side-on plan (#180, `side_grasp_live`) has two ladders.  ``rungs`` is
+    #: its APPROACH: rung 0 the grasp, rungs 1..hover the horizontal slide-in
+    #: line back to the standoff, the rest straight up from the standoff to
+    #: the via.  ``lift`` is the vertical ladder above the grasp (rung k is k
+    #: rungs up), which the lift, the carry and the set-down use.  None for
+    #: the crane, whose one ladder is both.
+    lift: Optional[List[List[float]]] = None
+    lift_targets: Optional[List[np.ndarray]] = None
+    #: The side-on approach (unit, world, horizontal); None for the crane.
+    approach: Optional[np.ndarray] = None
+    #: A cylinder's bounding box is taken with its x axis along this world
+    #: direction (the jaw), so the box is tight across the jaw whatever the
+    #: cylinder's own yaw (`grasp_alignment.object_box`); None otherwise.
+    align: Optional[np.ndarray] = None
+
+    @property
+    def kind(self) -> str:
+        return "crane" if self.lift is None else "side"
+
+    def up(self, k: int) -> List[float]:
+        """Rung ``k`` of the vertical ladder: the lift's, the carry's and the
+        set-down's (the crane's one ladder, or a side-on plan's ``lift``)."""
+        return self.rungs[k] if self.lift is None else self.lift[k]
+
+    @property
+    def up_count(self) -> int:
+        return len(self.rungs) if self.lift is None else len(self.lift)
+
+    def progress(self, q: Sequence[float], gripper_deg: float) -> float:
+        """How far out along the approach ladder the jaw-gap centre is at
+        ``q``: its height for the crane; for a side-on plan, its distance back
+        along the approach (the slide-in line is horizontal)."""
+        g = G.hand_frames(q, gripper_deg).gap_mid
+        if self.approach is None:
+            return float(g[2])
+        return -float(g[:2] @ np.asarray(self.approach)[:2])
+
+    @property
+    def face_half_m(self) -> float:
+        """The pad's half-extent along the gripped face, for
+        `jaw_face_limit_deg`: the finger pad's width (crane, hand down); the
+        thumb pad's length along the hand (side-on, the hand level)."""
+        return float(G.FINGER_PAD[2][0]) if self.lift is None else float(G.THUMB_PAD[2][2])
+
+    def object_box(self, scene: SceneModel, position, quat) -> G.Box:
+        """The planned-for object at a live pose, as the plan's checks see it."""
+        return G.object_box(scene.get(self.object_id), position, quat, align=self.align)
 
     @property
     def hover(self) -> List[float]:
@@ -435,12 +482,17 @@ class CranePlan:
         return [self.rungs[k] for k in range(top, -1, -1)]
 
     def summary(self) -> Dict[str, object]:
-        return {"object_id": self.object_id,
-                "shift_mm": [round(1000 * float(v), 2) for v in self.shift],
-                "insertion_rung": self.insertion_rung,
-                "grasp_gap_target": [round(float(v), 4) for v in self.gap_targets[0]],
-                "rungs": [[round(v, 3) for v in q] for q in self.rungs],
-                "checks": self.checks}
+        out = {"object_id": self.object_id,
+               "shift_mm": [round(1000 * float(v), 2) for v in self.shift],
+               "insertion_rung": self.insertion_rung,
+               "grasp_gap_target": [round(float(v), 4) for v in self.gap_targets[0]],
+               "rungs": [[round(v, 3) for v in q] for q in self.rungs],
+               "checks": self.checks}
+        if self.lift is not None:
+            out.update(kind="side",
+                       approach=[round(float(v), 4) for v in self.approach],
+                       lift=[[round(v, 3) for v in q] for q in self.lift])
+        return out
 
 
 def _solve_ladder(arm, plan_rot: np.ndarray, targets: Sequence[np.ndarray],
@@ -470,7 +522,7 @@ def _segments(plan: CranePlan) -> Dict[str, Tuple[List[List[float]], float, Targ
     r = plan.rungs
     hover, via = s.hover_rungs, s.via_rungs
     desc = [r[k] for k in range(hover, -1, -1)]
-    lift = [r[k] for k in range(0, s.lift_rungs + 1)]
+    lift = [plan.up(k) for k in range(0, s.lift_rungs + 1)]
     up = [r[k] for k in range(hover, via + 1)]
     return {
         "transit PRESENT->via": ([plan.present, r[via]], s.transit_opening_deg,
@@ -556,18 +608,21 @@ def check_crane_plan(planner, scene: SceneModel, plan: CranePlan,
                            f"{1000 * route.min_m:.2f} mm < {1000 * tol:.3f} mm "
                            f"from rung +{top}", route=route.as_dict())
     # The palm (#195): a lateral re-centring cannot help it, so it is its own
-    # stage and not `correctable`.
+    # stage and not `correctable` -- except side-on (#180), where the palm
+    # leads along the approach and the correction's shift along it (the
+    # planned insertion depth) is exactly what moves it.
     if route.palm_m < tol:
         raise CraneRefused("palm_route", f"palm route clearance {1000 * route.palm_m:.2f} mm "
-                           f"< {1000 * tol:.3f} mm from rung +{top}", route=route.as_dict())
+                           f"< {1000 * tol:.3f} mm from rung +{top}", route=route.as_dict(),
+                           correctable=plan.kind == "side")
 
     # 4. The straddle the descent should end in (predicted), before closing.
     hand0 = G.hand_frames(np.asarray(plan.rungs[0]) + off, g_open)
     if plan.jaw_face_limit_deg <= 0.0:
         # Set once, from the plan's own (commanded) pad slack.
-        plan.jaw_face_limit_deg = jaw_face_limit_deg(route.min_m)
+        plan.jaw_face_limit_deg = jaw_face_limit_deg(route.min_m, plan.face_half_m)
     st = G.straddle_check(hand0, plan.obj, scene.table_surface_z, 0.0,
-                          plan.jaw_face_limit_deg)
+                          plan.jaw_face_limit_deg, closing=plan.kind == "side")
     rep["straddle_predicted"] = {**st.as_dict(),
                                  "jaw_face_limit_deg": round(plan.jaw_face_limit_deg, 2)}
     if not st.ok:
@@ -577,7 +632,7 @@ def check_crane_plan(planner, scene: SceneModel, plan: CranePlan,
     # 5. The carried object: lift and replacement vs table, rails, others.
     rel = G.grasp_transform(G.hand_frames(plan.rungs[0], s.opening_deg), plan.obj)
     rest = plan.obj.lowest_z - scene.table_surface_z
-    lift = [plan.rungs[k] for k in range(0, s.lift_rungs + 1)]
+    lift = [plan.up(k) for k in range(0, s.lift_rungs + 1)]
     cr = G.carried_clearance(scene, plan.object_id, lift, s.close_deg, plan.obj, rel)
     rep["carried"] = {**cr.as_dict(), "resting_table_mm": round(1000 * rest, 2)}
     if cr.others_m < 0.0:
@@ -597,14 +652,16 @@ def correctable(exc: CraneRefused) -> bool:
     table -- all three are the tracking error showing up in a different
     check.  Everything else (whole-arm, carried object, IK) is not."""
     return (exc.stage in ("pad_route", "straddle")
-            or (exc.stage == "table" and bool(exc.detail.get("predicted"))))
+            or (exc.stage == "table" and bool(exc.detail.get("predicted")))
+            or (exc.stage == "palm_route" and bool(exc.detail.get("correctable"))))
 
 
-def jaw_face_limit_deg(slack_m: float) -> float:
+def jaw_face_limit_deg(slack_m: float, half_m: Optional[float] = None) -> float:
     """Jaw-vs-face angle at which rotating a pad about the vertical would by
     itself use up ``slack_m`` at the pad's outer corner (finger pad half-width
-    along the face, 14 mm, from the MJCF)."""
-    half = float(G.FINGER_PAD[2][0])
+    along the face, 14 mm, from the MJCF; ``half_m`` overrides it -- a level
+    side-on hand has the thumb pad's 22 mm length along the face, #180)."""
+    half = float(G.FINGER_PAD[2][0]) if half_m is None else float(half_m)
     return math.degrees(math.asin(max(0.0, min(1.0, slack_m / half))))
 
 
@@ -612,6 +669,17 @@ def _insertion_rung(plan: CranePlan) -> int:
     """Lowest rung at which every pad is at least one rung above the object's
     top, on the commanded poses: the last place a lateral correction may be
     made before a pad can meet a top edge."""
+    if plan.kind == "side":
+        # Side-on (#180): the pads and the palm slide in level, so the
+        # checkpoint is the lowest rung with all three a rung clear of the
+        # object (box clearance), commanded.
+        for k in range(0, plan.spec.hover_rungs + 1):
+            h = G.hand_frames(plan.rungs[k], plan.spec.opening_deg)
+            if min(G.obb_separation(b, plan.obj) for b in (h.thumb, h.finger, h.palm)) \
+                    >= plan.spec.rung_m:
+                return k
+        raise CraneRefused("plan", "a pad or the palm is within one rung of the "
+                           "object even at the standoff")
     top = plan.obj.highest_z
     for k in range(0, plan.spec.hover_rungs + 1):
         h = G.hand_frames(plan.rungs[k], plan.spec.opening_deg)
@@ -711,7 +779,7 @@ def plan_crane_pick(planner, scene: SceneModel, object_id: str,
 
 
 def replan(planner, scene: SceneModel, plan: CranePlan, shift: np.ndarray,
-           seed_rung: int, lowest: int = 0) -> CranePlan:
+           seed_rung: int, lowest: int = 0, on: str = "approach") -> CranePlan:
     """The same ladder with its gap targets moved by ``shift`` (world, m).
 
     Re-solved by IK from the existing rungs (each rung keeps its own
@@ -720,6 +788,11 @@ def replan(planner, scene: SceneModel, plan: CranePlan, shift: np.ndarray,
     ``lowest`` > 0 (a placement's set-down, #174) re-solves only the rungs
     from there up: the ones below are never commanded, keep the lowest
     solved pose, and the plan's ``floor_rung`` says so.
+
+    ``on`` names the ladder ``seed_rung`` and ``lowest`` count on, for a
+    side-on plan (#180): "approach" (the slide-in, where the hover and
+    descent corrections are made) or "lift" (the vertical ladder, where the
+    set-down's are).  The crane has one ladder and ignores it.
     """
     lim = plan.limits
     total = plan.shift + shift
@@ -732,6 +805,8 @@ def replan(planner, scene: SceneModel, plan: CranePlan, shift: np.ndarray,
         raise CraneRefused("correction", f"vertical correction {1000 * total[2]:.2f} mm "
                            f"exceeds the {1000 * lim.max_vertical_correction_m:.0f} mm cap",
                            shift_mm=(1000 * total).round(2).tolist())
+    if plan.lift is not None:
+        return _replan_side(planner, plan, shift, seed_rung, lowest, on)
     arm = planner._arm
     targets = [t + shift for t in plan.gap_targets]
     rots = [G.hand_rotation(q) for q in plan.rungs]
@@ -761,6 +836,94 @@ def replan(planner, scene: SceneModel, plan: CranePlan, shift: np.ndarray,
     except CraneRefused:
         if lowest == 0:
             raise
+        out.insertion_rung = plan.insertion_rung
+    return out
+
+
+def _solve_line(arm, plan: CranePlan, qs: Sequence[Sequence[float]],
+                targets: Sequence[np.ndarray], seed: int, lowest: int,
+                q_seed: Optional[Sequence[float]] = None) -> List[List[float]]:
+    """One ladder re-solved for ``targets`` outward from rung ``seed`` (warm
+    start ``q_seed``, else the rung itself), each rung keeping its own
+    orientation; rungs below ``lowest`` keep the lowest solved pose (never
+    commanded).  `replan`'s solve, for a side-on plan's two ladders."""
+    lim, g = plan.limits, plan.spec.opening_deg
+    rots = [G.hand_rotation(q) for q in qs]
+    new: Dict[int, List[float]] = {}
+    got = solve_gap(arm, rots[seed], targets[seed], g,
+                    qs[seed] if q_seed is None else q_seed,
+                    lim.ik_position_tol_m, iters=20, relax=True)
+    if got is None:
+        raise CraneRefused("correction", f"IK found no corrected pose at rung +{seed}")
+    new[seed] = got[0]
+    for k in list(range(seed - 1, lowest - 1, -1)) + list(range(seed + 1, len(targets))):
+        nb = new[k + 1] if k < seed else new[k - 1]
+        got = solve_gap(arm, rots[k], targets[k], g, nb, lim.ik_position_tol_m,
+                        iters=20, relax=True)
+        if got is None:
+            raise CraneRefused("correction", f"IK found no corrected pose at rung +{k}")
+        new[k] = got[0]
+    for k in range(lowest):
+        new[k] = list(new[lowest])
+    return [new[k] for k in range(len(targets))]
+
+
+def _replan_side(planner, plan: CranePlan, shift: np.ndarray, seed_rung: int,
+                 lowest: int, on: str) -> CranePlan:
+    """`replan` for a side-on plan (#180): the ladder the arm is on is
+    re-solved outward from ``seed_rung``; the other from the grasp they
+    share.  After a set-down correction (``on="lift"``) the approach is
+    solved whole, from the lowest re-solved lift rung: the withdrawal leaves
+    along it."""
+    arm = planner._arm
+    total = plan.shift + shift
+    a_t = [t + shift for t in plan.gap_targets]
+    l_t = [t + shift for t in plan.lift_targets]
+    lowest = max(0, int(lowest))
+    hov = plan.spec.hover_rungs
+    if on == "lift":
+        lowest = min(lowest, seed_rung)
+        lift = _solve_line(arm, plan, plan.lift, l_t, seed_rung, lowest)
+        rungs = _solve_line(arm, plan, plan.rungs[:hov + 1], a_t[:hov + 1], 0, 0,
+                            q_seed=lift[lowest])
+    else:
+        rungs = _solve_line(arm, plan, plan.rungs[:hov + 1], a_t[:hov + 1], seed_rung, 0)
+        # The lift ladder, as high as it re-solves, but never below the
+        # highest rung the plan will use (`lift_min_rungs`: the lift, or a
+        # placement's carry height).
+        lift = [list(rungs[0])]
+        for k in range(1, len(l_t)):
+            got = solve_gap(arm, G.hand_rotation(plan.lift[k]), l_t[k], plan.spec.opening_deg,
+                            lift[-1], plan.limits.ik_position_tol_m, iters=20, relax=True)
+            if got is None:
+                break
+            lift.append(got[0])
+        need = int(getattr(plan.spec, "lift_min_rungs", plan.spec.lift_rungs))
+        if len(lift) < need + 1:
+            raise CraneRefused("correction", f"IK found no corrected pose at lift rung +{len(lift)}")
+        l_t = l_t[:len(lift)]
+        lowest = 0
+    # Above the hover the approach is only the way up to the via: kept as
+    # high as it re-solves (at least one rung above the hover), and the
+    # plan's via moved down to match; the return from it is re-checked with
+    # the rest of the plan before anything is commanded.
+    q = rungs[-1]
+    for k in range(hov + 1, len(a_t)):
+        got = solve_gap(arm, G.hand_rotation(plan.rungs[k]), a_t[k], plan.spec.opening_deg,
+                        q, plan.limits.ik_position_tol_m, iters=20, relax=True)
+        if got is None:
+            break
+        q = got[0]
+        rungs.append(q)
+    if len(rungs) < hov + 2:
+        raise CraneRefused("correction", f"IK found no corrected pose at rung +{hov + 1}")
+    a_t = a_t[:len(rungs)]
+    spec = replace(plan.spec, via_rungs=len(rungs) - 1)
+    out = replace(plan, spec=spec, gap_targets=a_t, lift_targets=l_t, rungs=rungs, lift=lift,
+                  shift=total, checks={}, floor_rung=lowest)
+    try:
+        out.insertion_rung = _insertion_rung(out)
+    except CraneRefused:
         out.insertion_rung = plan.insertion_rung
     return out
 
@@ -810,9 +973,9 @@ def rungs_above(plan: CranePlan, cmd: Sequence[float], above: int) -> List[int]:
     (``above`` is the highest rung the hand is at or below)."""
     s = plan.spec
     k = min(max(above, 0), s.hover_rungs)
-    z_now = G.hand_frames(cmd, s.opening_deg).gap_mid[2]
+    z_now = plan.progress(cmd, s.opening_deg)
     while k < s.hover_rungs and \
-            G.hand_frames(plan.rungs[k], s.opening_deg).gap_mid[2] <= z_now + 1e-4:
+            plan.progress(plan.rungs[k], s.opening_deg) <= z_now + 1e-4:
         k += 1
     return list(range(k, s.hover_rungs + 1))
 
@@ -935,6 +1098,28 @@ def plan_way_out(planner, scene: SceneModel, plan: CranePlan, cmd, above: int,
     reports.append(rep)
     if ok:
         return WayOut("direct", path, plan, 0, rep), reports
+
+    if plan.kind == "side":
+        # Side-on (#180): the set-down stops where the object meets the
+        # table, so the hand is commanded ABOVE the planned grasp rung by the
+        # loaded arm's sag; going back along the planned rungs would command
+        # that sag away again, and with the hand level near the table that
+        # puts the predicted forearm into it.  So: the same level line, at
+        # the height the hand is commanded to now.
+        dz = float(G.hand_frames(cmd, gm).gap_mid[2]
+                   - G.hand_frames(plan.rungs[0], gm).gap_mid[2])
+        if dz > 1e-4:
+            moved = replace(plan, gap_targets=[t + np.array([0.0, 0.0, dz])
+                                               for t in plan.gap_targets],
+                            rungs=_shift_ladder(planner, plan, np.array([0.0, 0.0, dz])),
+                            shift=plan.shift + np.array([0.0, 0.0, dz]), checks={})
+            p = [cmd] + [moved.rungs[j] for j in rungs_above(moved, cmd, above)]
+            ok, rep = judge_way_out(planner, scene, moved, p, gm, live, off,
+                                    label=f"{label} level")
+            rep["raised_mm"] = round(1000 * dz, 2)
+            reports.append(rep)
+            if ok:
+                return WayOut("level", p, moved, 0, rep), reports
 
     def via(d: np.ndarray, kind: str, separating: bool):
         got, moved = _shifted(planner, plan, cmd, d)
@@ -1137,10 +1322,10 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         cmd = st["cmd"]
         off = G.joint_offset(qm, cmd)
         o = observe()
-        live = G.object_box(scene.get(plan_.object_id), o.position, o.quat_wxyz)
+        live = plan_.object_box(scene, o.position, o.quat_wxyz)
         hm = G.hand_frames(qm, gm)
         hc = G.hand_frames(cmd, gm)
-        pc = G.pad_clearance(hm, live)
+        pc = G.pad_clearance(hm, live, closing=plan_.kind == "side")
         ev("MEASURE", label=label, rung=rung,
            q_commanded=[round(v, 3) for v in cmd], q_measured=[round(v, 3) for v in qm],
            joint_offset_deg=[round(float(v), 3) for v in off],
@@ -1183,7 +1368,15 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
             end = G.pad_clearance(G.hand_frames(np.asarray(plan_.rungs[0]) + off, gm), live)
             planned_above = float(plan_.gap_targets[0][2] - plan_.shift[2]
                                   - plan_.obj.center[2])
-            d = G.centring_shift(end, route, planned_above)
+            if plan_.kind == "side":
+                # Along the approach, the planned insertion depth, not the
+                # object's centre line: that keeps the palm clear (#180).
+                planned_along = float((plan_.gap_targets[0] - plan_.shift - plan_.obj.center)
+                                      @ np.asarray(end.face_along))
+                d = G.centring_shift(end, route, planned_above, planned_along,
+                                     target_thumb_m=plan_.spec.thumb_side_m)
+            else:
+                d = G.centring_shift(end, route, planned_above)
             ev("CORRECTION", label=label, iteration=i + 1, because=why,
                predicted_route=route.as_dict(),
                shift_mm=[round(1000 * float(v), 2) for v in d],
@@ -1218,7 +1411,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         qm, gm = _read(arm)
         off = G.joint_offset(qm, st["cmd"])
         o = observe()
-        live = G.object_box(scene.get(plan_.object_id), o.position, o.quat_wxyz)
+        live = plan_.object_box(scene, o.position, o.quat_wxyz)
         return qm, gm, off, o, live
 
     def way_out(label: str, gripper_deg: Optional[float] = None,
@@ -1301,8 +1494,9 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     def back_to_present(opening: float) -> None:
         """Hover -> via -> PRESENT by the checked ladder; pad force still watched."""
         plan_ = P_()
+        sp = plan_.spec          # the plan's own via (a side-on one's is its own, #180)
         st["finishing"] = True
-        for j in range(max(st["above"], s.hover_rungs), s.via_rungs):
+        for j in range(max(st["above"], sp.hover_rungs), sp.via_rungs):
             stream(plan_.rungs[j + 1], CARRY_HZ, 2.0)
         P.smooth_move(arm, {"r_gripper": s.transit_opening_deg}, 0.5)
         stream(plan_.present, CARRY_HZ, 2.0)
@@ -1315,8 +1509,9 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         checked ladder is checked first, then the ladder is climbed."""
         st["monitor"] = False
         plan_ = P_()
+        sp = plan_.spec
         qm, gm = _read(arm)
-        k = min(st["above"], s.via_rungs)
+        k = min(st["above"], sp.via_rungs)
         link = [st["cmd"], plan_.rungs[k]]
         off = G.joint_offset(qm, st["cmd"])
         try:
@@ -1331,9 +1526,9 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
             return False
         P.smooth_move(arm, {"r_gripper": s.opening_deg}, 0.8)
         stream(plan_.rungs[k], STEP_HZ, 0.05, check=False)
-        for j in range(k, s.hover_rungs):
+        for j in range(k, sp.hover_rungs):
             stream(plan_.rungs[j + 1], STEP_HZ, 0.05, check=False)
-        st["above"] = max(k, s.hover_rungs)
+        st["above"] = max(k, sp.hover_rungs)
         back_to_present(s.opening_deg)
         return True
 
@@ -1345,7 +1540,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         qm, gm = _read(arm)
         off = G.joint_offset(qm, st["cmd"])
         floor_ = plan_.floor_rung
-        lower = [st["cmd"]] + [plan_.rungs[j] for j in range(k_ - 1, floor_ - 1, -1)] \
+        lower = [st["cmd"]] + [plan_.up(j) for j in range(k_ - 1, floor_ - 1, -1)] \
             if k_ > floor_ else [st["cmd"]]
         dense = G.densify(lower, 0.05)
         # Both pads stay out of the table on the way down, predicted from the
@@ -1384,9 +1579,9 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
            grip_force_n=o.grip_force_n, q_commanded=[round(v, 3) for v in st["cmd"]],
            joint_margin_deg=margin)
         # Height of the hand above the grasp rung: where `above` sits now.
-        z_cmd = G.hand_frames(st["cmd"], sp.close_deg).gap_mid[2]
+        z_cmd = plan_.progress(st["cmd"], sp.close_deg)
         st["above"] = max([j for j in range(0, sp.hover_rungs + 1)
-                           if G.hand_frames(plan_.rungs[j], sp.close_deg).gap_mid[2]
+                           if plan_.progress(plan_.rungs[j], sp.close_deg)
                            <= z_cmd + 1e-4] or [0])
         return reached, np.asarray(o.position, dtype=float)
 
@@ -1448,7 +1643,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         c = pl.carry_rung
         qm, gm = _read(arm)
         o = observe()
-        held = G.object_box(scene.get(pl.object_id), o.position, o.quat_wxyz)
+        held = pl.pick.object_box(scene, o.position, o.quat_wxyz)
         rel = PL.measured_hold(qm, gm, held)
         cur_pl = PL.replan_from_hold(planner, scene, pl, rel,
                                      offset=G.joint_offset(qm, st["cmd"]))
@@ -1489,7 +1684,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                 new = PL.replan_setdown(planner, scene, cur_pl, P_(), e, rung, off_)
                 cand = replace(cur_pl, dest=new)
                 PL.check_place(planner, scene, cand, offset=off_, from_rung=rung)
-                move = [st["cmd"], new.rungs[rung]]
+                move = [st["cmd"], new.up(rung)]
                 try:
                     planner.check_arm_path(move, segment=f"set-down correction ({label})",
                                            gripper_deg=new.spec.close_deg,
@@ -1513,8 +1708,8 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                    cumulative_mm=(1000 * new.shift).round(2).tolist())
                 cur["plan"] = new
                 cur_pl = cand
-                stream(new.rungs[rung], STEP_HZ, 0.05)
-                trail.append(list(new.rungs[rung]))
+                stream(new.up(rung), STEP_HZ, 0.05)
+                trail.append(list(new.up(rung)))
                 hold(1.0)
                 in_hand(f"{label}, after correction {i + 1}")
 
@@ -1524,15 +1719,15 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
             stream(q, STEP_HZ, 0.1)
             trail.append(list(q))
         st["above"] = c
-        stream(cur_pl.dest.rungs[c], STEP_HZ, 0.25)
-        trail.append(list(cur_pl.dest.rungs[c]))
+        stream(cur_pl.dest.up(c), STEP_HZ, 0.25)
+        trail.append(list(cur_pl.dest.up(c)))
         cur["plan"] = cur_pl.dest
         hold(1.0)
         in_hand(f"{pl.cell} +{c}")
         corrections(c, "carry height")
         for j in range(c - 1, sp_.check_rung - 1, -1):
-            stream(P_().rungs[j], STEP_HZ, 0.05)
-            trail.append(list(P_().rungs[j]))
+            stream(P_().up(j), STEP_HZ, 0.05)
+            trail.append(list(P_().up(j)))
             st["above"] = j
         hold(0.6)
         in_hand(f"{pl.cell} +{sp_.check_rung}")
@@ -1627,7 +1822,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         hold(1.0)
         qm, gm, off, live, hm, pc = measure(0, "grasp depth")
         sc = G.straddle_check(hm, live, scene.table_surface_z, 0.0,
-                              P_().jaw_face_limit_deg)
+                              P_().jaw_face_limit_deg, closing=P_().kind == "side")
         ev("STRADDLE", **sc.as_dict(), jaw_face_limit_deg=round(P_().jaw_face_limit_deg, 2))
         outcome["straddled_before_close"] = sc.ok
         if not sc.ok:
@@ -1665,7 +1860,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     lifted, k = True, 0
     for k in range(1, s.lift_rungs + 1):
         st["above"] = k
-        stream(plan.rungs[k], STEP_HZ, 0.05, check=False)
+        stream(plan.up(k), STEP_HZ, 0.05, check=False)
         hold(0.4, check=False)
         o = observe()
         rise = float(o.position[2]) - z0

@@ -1,0 +1,27 @@
+red_cube r1c1 -> None best | side-on all=True halt=None err=2.3 final=PRESENT
+red_cube r1c2 -> None best | side-on all=True halt=None err=2.41 final=PRESENT
+red_cube r1c3 -> None best | side-on all=True halt=None err=1.77 final=PRESENT
+red_cube r2c1 -> None best | side-on all=True halt=None err=4.92 final=PRESENT
+red_cube r2c2 -> None best | side-on all=True halt=None err=1.72 final=PRESENT
+red_cube r2c3 -> None best | side-on all=True halt=None err=1.9 final=PRESENT
+red_cube r3c1 -> None best | plan: side-on: plan: IK found no level grasp pose for this approach (best of 4 side-on approaches); crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c2 -> None best | side-on all=True halt=None err=1.9 final=PRESENT
+red_cube r3c3 -> None best | side-on all=True halt=None err=1.74 final=PRESENT
+pool_box_1 r1c1 -> None best | side-on all=True halt=None err=3.96 final=PRESENT
+pool_box_1 r1c2 -> None best | side-on all=True halt=None err=4.08 final=PRESENT
+pool_box_1 r1c3 -> None best | side-on all=True halt=None err=3.43 final=PRESENT
+pool_box_1 r2c1 -> None best | side-on all=True halt=None err=6.44 final=PRESENT
+pool_box_1 r2c2 -> None best | side-on all=True halt=None err=3.58 final=PRESENT
+pool_box_1 r2c3 -> None best | side-on all=True halt=None err=3.13 final=PRESENT
+pool_box_1 r3c1 -> None best | plan: side-on: plan: IK found no level grasp pose for this approach (best of 4 side-on approaches); crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c2 -> None best | side-on all=True halt=None err=3.82 final=PRESENT
+pool_box_1 r3c3 -> None best | side-on all=True halt=None err=3.2 final=PRESENT
+pool_cyl_1 r1c1 -> None best | side-on all=True halt=None err=3.93 final=PRESENT
+pool_cyl_1 r1c2 -> None best | side-on all=True halt=None err=5.21 final=PRESENT
+pool_cyl_1 r1c3 -> None best | side-on all=True halt=None err=4.56 final=PRESENT
+pool_cyl_1 r2c1 -> None best | side-on all=False halt=object moved 1.29 mm err=47.52 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r2c2 -> None best | side-on all=True halt=None err=7.48 final=PRESENT
+pool_cyl_1 r2c3 -> None best | side-on all=True halt=None err=5.62 final=PRESENT
+pool_cyl_1 r3c1 -> None best | plan: side-on: plan: IK found no level grasp pose for this approach (best of 24 side-on approaches); crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c2 -> None best | side-on all=False halt=object did not follow the lift: hand up 4 cm, object up -6.8 mm err=41.8 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r3c3 -> None best | side-on all=False halt=None err=8.21 final=PRESENT
