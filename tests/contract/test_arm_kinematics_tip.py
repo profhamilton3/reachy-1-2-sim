@@ -11,7 +11,9 @@ that has reachy-sdk installed.
     b2_safe_real_fk.json, with its provenance);
   * `inverse_kinematics(forward_kinematics(q))` reproduces the tip;
   * the planner's pads through the SDK are where they were before #187;
-  * the left arm's FK is the local chain's left tip.
+  * the left arm's FK is the local chain's left tip;
+  * an `inverse_kinematics(pose)` with no q0 is solved from the arm's present
+    joint positions, not from zero (#199); a seeded request is not changed.
 """
 
 from __future__ import annotations
@@ -61,14 +63,34 @@ def _rot_err_deg(a, b):
     return math.degrees(math.acos(max(-1.0, min(1.0, c))))
 
 
+class _Backend:
+    """Just the part of a joint backend the arm service reads: a snapshot."""
+
+    def __init__(self):
+        self.q = {}
+
+    def set_present_deg(self, side, q_deg):
+        for n, d in zip(F._ARM_CHAIN, q_deg):
+            self.q[f"{side[0]}_{n}"] = math.radians(d)
+
+    def latest_snapshot(self):
+        return types.SimpleNamespace(joints={
+            n: types.SimpleNamespace(present_position=v) for n, v in self.q.items()})
+
+
 @pytest.fixture(scope="module")
-def arms():
+def backend():
+    return _Backend()
+
+
+@pytest.fixture(scope="module")
+def arms(backend):
     from reachy_sdk.arm import LeftArm, RightArm
     from reachy_sdk_api import arm_kinematics_pb2_grpc
 
     server = grpc.server(ThreadPoolExecutor(max_workers=2))
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(
-        F.FakeArmKinematicsService(), server)
+        F.FakeArmKinematicsService(backend), server)
     port = server.add_insecure_port("127.0.0.1:0")
     server.start()
     channel = grpc.insecure_channel(f"127.0.0.1:{port}")
@@ -123,3 +145,58 @@ def test_the_left_arms_fk_is_the_left_tip(arms):
         q[3] = -abs(q[3])
         T = l_arm.forward_kinematics(q)
         assert np.allclose(T, K.tip_pose(q, side="left"), atol=1e-9)
+
+
+# ── No q0: seeded from the arm's present joints (#199) ────────────────────────
+
+#: Crane-ladder poses the tip IK stalls on from zero though the pre-#187 wrist
+#: IK solved them (#187 PR, "Known limitations").
+_STALLED_FROM_ZERO = ["crane_pick_rung_09", "crane_pick_rung_10", "crane_pick_rung_18",
+                      "crane_dest_rung_15", "crane_dest_rung_18"]
+
+
+def _solves(arm, T, **kw):
+    try:
+        back = arm.forward_kinematics(arm.inverse_kinematics(T, **kw))
+    except ValueError:
+        return False
+    return (np.linalg.norm(back[:3, 3] - T[:3, 3]) <= 1e-4
+            and _rot_err_deg(back[:3, :3], T[:3, :3]) <= 0.01)
+
+
+@pytest.mark.parametrize("name", _STALLED_FROM_ZERO)
+def test_unseeded_ik_starts_from_the_present_pose(arms, backend, name):
+    r_arm, _ = arms
+    poses = _load("pad_invariance_187.json")["poses"]
+    T = r_arm.forward_kinematics(poses[name]["joints_deg"])
+    backend.q.clear()
+    assert not _solves(r_arm, T), "stalls from zero (nothing present)"
+    backend.set_present_deg("right", poses["crane_pick_rung_12"]["joints_deg"])
+    assert _solves(r_arm, T)
+
+
+def test_a_seeded_request_ignores_the_present_pose(arms, backend):
+    r_arm, _ = arms
+    poses = _load("pad_invariance_187.json")["poses"]
+    T = r_arm.forward_kinematics(poses["crane_pick_rung_09"]["joints_deg"])
+    q0 = poses["b2_safe"]["joints_deg"]
+    backend.q.clear()
+    alone = r_arm.inverse_kinematics(T, q0=q0)
+    backend.set_present_deg("right", poses["crane_pick_rung_12"]["joints_deg"])
+    assert r_arm.inverse_kinematics(T, q0=q0) == alone
+
+
+def test_the_left_arm_is_seeded_from_the_left_joints(arms, backend):
+    _, l_arm = arms
+    q = [10.0, 5.0, 0.0, -50.0, 0.0, 0.0, 0.0]
+    T = l_arm.forward_kinematics(q)
+    backend.q.clear()
+    backend.set_present_deg("left", q)
+    # The right arm's joints are absent, so only the left ones can have seeded it.
+    assert _solves(l_arm, T)
+    assert l_arm.inverse_kinematics(T) == l_arm.inverse_kinematics(T, q0=q)
+
+
+def test_no_backend_is_the_old_zero_start():
+    svc = F.FakeArmKinematicsService()
+    assert svc._present_chain("right") is None
