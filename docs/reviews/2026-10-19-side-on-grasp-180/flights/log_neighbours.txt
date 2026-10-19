@@ -1,0 +1,10 @@
+red_cube r2c2 -> None side | side-on all=True halt=None err=1.72 final=PRESENT
+red_cube r2c2 -> None side | check_arm_path: via->hover: hand would come within -1.1 cm of pool_box_2 (boxes (pads, palm, back) hand model, margin 0.0 cm, gripper -45 deg) (best of 4 side-on approaches)
+red_cube r2c2 -> None side | side-on all=True halt=None err=2.77 final=PRESENT
+red_cube r2c2 -> r1c1 side | side-on all=True halt=None err=2.43 final=PRESENT
+red_cube r2c2 -> r1c1 side | check_arm_path: set-down: r1c1 +9 -> resting: forearm would come within -2.8 cm of pool_cyl_2 (boxes (pads, palm, back) hand model, margin 0.0 cm, gripper -35 deg)
+red_cube r2c2 -> None best | side-on all=True halt=None err=1.72 final=PRESENT
+red_cube r2c2 -> None best | check_arm_path: side-on: check_arm_path: via->hover: hand would come within -1.1 cm of pool_box_2 (boxes (pads, palm, back) hand model, margin 0.0 cm, gripper -45 deg) (best of 4 side-on approaches); crane: plan: IK found no grasp pose in the bounded start set
+red_cube r2c2 -> None best | side-on all=True halt=None err=2.77 final=PRESENT
+red_cube r2c2 -> r1c1 best | side-on all=True halt=None err=2.43 final=PRESENT
+red_cube r2c2 -> r1c1 best | check_arm_path: side-on: check_arm_path: set-down: r1c1 +9 -> resting: forearm would come within -2.8 cm of pool_cyl_2 (boxes (pads, palm, back) hand model, margin 0.0 cm, gripper -35 deg); crane: plan: IK found no grasp pose in the bounded start set

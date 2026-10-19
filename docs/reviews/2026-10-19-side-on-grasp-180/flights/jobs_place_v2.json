@@ -1,0 +1,20 @@
+[
+ {
+  "oid": "red_cube",
+  "origin": "r2c2",
+  "dest": "r1c1",
+  "grasp": "best"
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r2c2",
+  "dest": "r1c2",
+  "grasp": "side"
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r3c2",
+  "dest": "r3c3",
+  "grasp": "best"
+ }
+]

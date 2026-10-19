@@ -1,0 +1,1826 @@
+[
+ {
+  "cell": "cell_r1c1",
+  "az": -90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": -75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": -60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": -45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": -30.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": -15.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 0.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 15.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 30.0,
+  "ok": true,
+  "margin_deg": 0.0,
+  "joint": "r_shoulder_roll",
+  "q": [
+   20.09,
+   20.28,
+   58.56,
+   -47.91,
+   32.74,
+   -31.16,
+   -44.9
+  ]
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 45.0,
+  "ok": true,
+  "margin_deg": 8.11,
+  "joint": "r_wrist_roll",
+  "q": [
+   12.07,
+   11.09,
+   75.01,
+   -56.11,
+   16.11,
+   -25.42,
+   -36.87
+  ]
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 60.0,
+  "ok": true,
+  "margin_deg": 13.62,
+  "joint": "r_shoulder_roll",
+  "q": [
+   12.95,
+   6.66,
+   71.87,
+   -62.09,
+   15.87,
+   -24.83,
+   -18.2
+  ]
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 75.0,
+  "ok": true,
+  "margin_deg": 14.0,
+  "joint": "r_arm_yaw",
+  "q": [
+   8.2,
+   1.91,
+   75.95,
+   -66.55,
+   9.17,
+   -23.33,
+   -4.46
+  ]
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 90.0,
+  "ok": true,
+  "margin_deg": 16.56,
+  "joint": "r_shoulder_roll",
+  "q": [
+   16.16,
+   3.72,
+   58.85,
+   -68.84,
+   17.43,
+   -25.5,
+   24.72
+  ]
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 105.0,
+  "ok": true,
+  "margin_deg": 10.92,
+  "joint": "r_arm_yaw",
+  "q": [
+   -0.58,
+   -2.76,
+   79.03,
+   -69.93,
+   -1.18,
+   -22.67,
+   26.41
+  ]
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 120.0,
+  "ok": true,
+  "margin_deg": 3.4,
+  "joint": "r_wrist_roll",
+  "q": [
+   -5.76,
+   -2.9,
+   81.08,
+   -68.81,
+   -6.67,
+   -23.02,
+   41.58
+  ]
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 135.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 150.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 165.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c1",
+  "az": 180.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": -90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": -75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": -60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": -45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": -30.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": -15.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 0.0,
+  "ok": true,
+  "margin_deg": 0.53,
+  "joint": "r_wrist_roll",
+  "q": [
+   39.59,
+   17.03,
+   27.53,
+   -70.64,
+   42.37,
+   -42.76,
+   -44.44
+  ]
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 15.0,
+  "ok": true,
+  "margin_deg": 6.1,
+  "joint": "r_wrist_roll",
+  "q": [
+   35.5,
+   4.08,
+   40.89,
+   -75.26,
+   31.82,
+   -36.48,
+   -38.88
+  ]
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 30.0,
+  "ok": true,
+  "margin_deg": 10.69,
+  "joint": "r_wrist_pitch",
+  "q": [
+   32.61,
+   -4.4,
+   47.31,
+   -79.17,
+   25.24,
+   -34.29,
+   -28.62
+  ]
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 45.0,
+  "ok": true,
+  "margin_deg": 15.22,
+  "joint": "r_wrist_roll",
+  "q": [
+   18.83,
+   -17.49,
+   67.76,
+   -82.97,
+   12.69,
+   -29.53,
+   -29.76
+  ]
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 60.0,
+  "ok": true,
+  "margin_deg": 14.83,
+  "joint": "r_wrist_pitch",
+  "q": [
+   13.72,
+   -22.96,
+   72.73,
+   -85.43,
+   7.58,
+   -30.14,
+   -17.85
+  ]
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 75.0,
+  "ok": true,
+  "margin_deg": 13.67,
+  "joint": "r_wrist_pitch",
+  "q": [
+   10.34,
+   -26.69,
+   74.05,
+   -87.0,
+   3.43,
+   -31.3,
+   -2.55
+  ]
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 90.0,
+  "ok": true,
+  "margin_deg": 12.79,
+  "joint": "r_wrist_pitch",
+  "q": [
+   9.1,
+   -28.56,
+   71.34,
+   -87.67,
+   -0.09,
+   -32.18,
+   16.37
+  ]
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 105.0,
+  "ok": true,
+  "margin_deg": 11.64,
+  "joint": "r_wrist_roll",
+  "q": [
+   5.24,
+   -29.75,
+   71.72,
+   -87.46,
+   -4.64,
+   -32.39,
+   33.34
+  ]
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 120.0,
+  "ok": true,
+  "margin_deg": 2.18,
+  "joint": "r_wrist_roll",
+  "q": [
+   -6.46,
+   -31.05,
+   82.99,
+   -86.18,
+   -12.04,
+   -33.41,
+   42.79
+  ]
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 135.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 150.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 165.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c2",
+  "az": 180.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": -90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": -75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": -60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": -45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": -30.0,
+  "ok": true,
+  "margin_deg": 0.02,
+  "joint": "r_wrist_pitch",
+  "q": [
+   42.87,
+   13.66,
+   9.52,
+   -84.6,
+   23.6,
+   -44.95,
+   -44.93
+  ]
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": -15.0,
+  "ok": true,
+  "margin_deg": 0.0,
+  "joint": "r_wrist_roll",
+  "q": [
+   42.53,
+   -1.1,
+   21.65,
+   -86.38,
+   18.77,
+   -42.75,
+   -44.98
+  ]
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 0.0,
+  "ok": true,
+  "margin_deg": 1.42,
+  "joint": "r_wrist_pitch",
+  "q": [
+   42.33,
+   -10.21,
+   27.24,
+   -87.56,
+   15.34,
+   -43.56,
+   -37.63
+  ]
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 15.0,
+  "ok": true,
+  "margin_deg": 1.29,
+  "joint": "r_wrist_roll",
+  "q": [
+   33.52,
+   -27.46,
+   46.16,
+   -88.77,
+   10.31,
+   -42.49,
+   -43.69
+  ]
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 30.0,
+  "ok": true,
+  "margin_deg": 0.94,
+  "joint": "r_wrist_roll",
+  "q": [
+   22.58,
+   -38.46,
+   63.3,
+   -89.31,
+   6.78,
+   -43.96,
+   -44.04
+  ]
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 105.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 120.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 135.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 150.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 165.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r1c3",
+  "az": 180.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": -90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": -75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": -60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": -45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": -30.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": -15.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 0.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 15.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 30.0,
+  "ok": true,
+  "margin_deg": 1.03,
+  "joint": "r_shoulder_roll",
+  "q": [
+   -11.71,
+   19.25,
+   76.38,
+   -40.47,
+   -7.89,
+   -27.95,
+   -43.35
+  ]
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 45.0,
+  "ok": true,
+  "margin_deg": 7.61,
+  "joint": "r_shoulder_roll",
+  "q": [
+   -14.17,
+   12.67,
+   81.34,
+   -48.31,
+   -13.56,
+   -26.39,
+   -30.24
+  ]
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 60.0,
+  "ok": true,
+  "margin_deg": 10.85,
+  "joint": "r_shoulder_roll",
+  "q": [
+   -9.19,
+   9.43,
+   69.77,
+   -53.47,
+   -5.92,
+   -24.41,
+   -7.51
+  ]
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 75.0,
+  "ok": true,
+  "margin_deg": 14.77,
+  "joint": "r_shoulder_roll",
+  "q": [
+   -12.72,
+   5.52,
+   72.57,
+   -55.84,
+   -11.55,
+   -24.62,
+   7.52
+  ]
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 90.0,
+  "ok": true,
+  "margin_deg": 14.07,
+  "joint": "r_arm_yaw",
+  "q": [
+   -17.32,
+   3.1,
+   75.88,
+   -55.67,
+   -17.87,
+   -25.87,
+   22.68
+  ]
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 105.0,
+  "ok": true,
+  "margin_deg": 6.57,
+  "joint": "r_wrist_roll",
+  "q": [
+   -22.35,
+   2.5,
+   79.46,
+   -52.98,
+   -24.52,
+   -27.98,
+   38.41
+  ]
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 120.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 135.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 150.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 165.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c1",
+  "az": 180.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": -90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": -75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": -60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": -45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": -30.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": -15.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 0.0,
+  "ok": true,
+  "margin_deg": 3.94,
+  "joint": "r_shoulder_roll",
+  "q": [
+   14.19,
+   16.35,
+   28.95,
+   -65.41,
+   23.77,
+   -27.52,
+   -37.47
+  ]
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 15.0,
+  "ok": true,
+  "margin_deg": 12.54,
+  "joint": "r_wrist_roll",
+  "q": [
+   10.05,
+   3.29,
+   43.99,
+   -70.92,
+   10.18,
+   -23.77,
+   -32.44
+  ]
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 30.0,
+  "ok": true,
+  "margin_deg": 21.65,
+  "joint": "r_wrist_pitch",
+  "q": [
+   6.3,
+   -5.58,
+   52.31,
+   -74.92,
+   1.73,
+   -23.33,
+   -23.19
+  ]
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 45.0,
+  "ok": true,
+  "margin_deg": 20.98,
+  "joint": "r_wrist_pitch",
+  "q": [
+   6.56,
+   -9.53,
+   51.01,
+   -77.52,
+   -0.92,
+   -24.0,
+   -6.26
+  ]
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 60.0,
+  "ok": true,
+  "margin_deg": 20.55,
+  "joint": "r_wrist_pitch",
+  "q": [
+   9.4,
+   -9.3,
+   42.93,
+   -78.76,
+   -0.35,
+   -24.43,
+   16.41
+  ]
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 75.0,
+  "ok": true,
+  "margin_deg": 18.31,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -2.47,
+   -19.45,
+   59.21,
+   -78.33,
+   -13.41,
+   -26.67,
+   20.67
+  ]
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 90.0,
+  "ok": true,
+  "margin_deg": 14.45,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -13.14,
+   -24.04,
+   71.69,
+   -76.24,
+   -23.29,
+   -30.53,
+   30.1
+  ]
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 105.0,
+  "ok": true,
+  "margin_deg": 4.37,
+  "joint": "r_wrist_roll",
+  "q": [
+   -24.57,
+   -25.39,
+   85.41,
+   -72.69,
+   -33.29,
+   -35.72,
+   40.6
+  ]
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 120.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 135.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 150.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 165.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c2",
+  "az": 180.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": -90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": -75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": -60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": -45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": -30.0,
+  "ok": true,
+  "margin_deg": 2.7,
+  "joint": "r_wrist_roll",
+  "q": [
+   16.8,
+   13.53,
+   8.19,
+   -76.69,
+   17.24,
+   -27.49,
+   -42.28
+  ]
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": -15.0,
+  "ok": true,
+  "margin_deg": 13.31,
+  "joint": "r_shoulder_roll",
+  "q": [
+   19.96,
+   6.98,
+   12.89,
+   -80.37,
+   12.18,
+   -27.33,
+   -30.58
+  ]
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 0.0,
+  "ok": true,
+  "margin_deg": 17.12,
+  "joint": "r_wrist_pitch",
+  "q": [
+   22.21,
+   1.01,
+   15.29,
+   -83.21,
+   7.5,
+   -27.86,
+   -17.36
+  ]
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 15.0,
+  "ok": true,
+  "margin_deg": 16.38,
+  "joint": "r_wrist_pitch",
+  "q": [
+   22.78,
+   -6.83,
+   18.94,
+   -85.09,
+   1.44,
+   -28.6,
+   -5.74
+  ]
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 30.0,
+  "ok": true,
+  "margin_deg": 15.46,
+  "joint": "r_wrist_pitch",
+  "q": [
+   24.23,
+   -8.05,
+   14.78,
+   -85.91,
+   -1.24,
+   -29.52,
+   13.85
+  ]
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 45.0,
+  "ok": true,
+  "margin_deg": 14.51,
+  "joint": "r_wrist_pitch",
+  "q": [
+   22.44,
+   -15.61,
+   18.18,
+   -85.62,
+   -7.82,
+   -30.46,
+   26.11
+  ]
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 60.0,
+  "ok": true,
+  "margin_deg": 11.44,
+  "joint": "r_wrist_pitch",
+  "q": [
+   16.4,
+   -27.68,
+   29.65,
+   -83.97,
+   -17.28,
+   -33.54,
+   32.35
+  ]
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 75.0,
+  "ok": true,
+  "margin_deg": 5.35,
+  "joint": "r_wrist_pitch",
+  "q": [
+   4.31,
+   -39.14,
+   48.63,
+   -80.9,
+   -27.83,
+   -39.62,
+   36.93
+  ]
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 105.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 120.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 135.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 150.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 165.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r2c3",
+  "az": 180.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": -90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": -75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": -60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": -45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": -30.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": -15.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 0.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 15.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 30.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 105.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 120.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 135.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 150.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 165.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c1",
+  "az": 180.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": -90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": -75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": -60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": -45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": -30.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": -15.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 0.0,
+  "ok": true,
+  "margin_deg": 5.03,
+  "joint": "r_shoulder_roll",
+  "q": [
+   -20.87,
+   15.26,
+   38.09,
+   -34.75,
+   -1.73,
+   -29.63,
+   -39.72
+  ]
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 15.0,
+  "ok": true,
+  "margin_deg": 14.48,
+  "joint": "r_wrist_roll",
+  "q": [
+   -21.55,
+   5.75,
+   54.21,
+   -43.76,
+   -15.99,
+   -27.88,
+   -30.5
+  ]
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 30.0,
+  "ok": true,
+  "margin_deg": 18.31,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -19.55,
+   1.22,
+   52.72,
+   -49.29,
+   -16.52,
+   -26.67,
+   -13.65
+  ]
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 45.0,
+  "ok": true,
+  "margin_deg": 19.41,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -16.75,
+   -0.31,
+   45.07,
+   -52.04,
+   -13.31,
+   -25.56,
+   7.05
+  ]
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 60.0,
+  "ok": true,
+  "margin_deg": 18.06,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -19.67,
+   -4.6,
+   49.47,
+   -51.86,
+   -20.0,
+   -26.92,
+   22.21
+  ]
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 75.0,
+  "ok": true,
+  "margin_deg": 11.81,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -29.7,
+   -10.38,
+   69.57,
+   -48.44,
+   -38.31,
+   -33.17,
+   32.06
+  ]
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 105.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 120.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 135.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 150.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 165.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c2",
+  "az": 180.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": -90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": -75.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": -60.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": -45.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": -30.0,
+  "ok": true,
+  "margin_deg": 4.55,
+  "joint": "r_wrist_roll",
+  "q": [
+   -15.51,
+   15.34,
+   -2.0,
+   -45.76,
+   17.33,
+   -27.6,
+   -40.43
+  ]
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": -15.0,
+  "ok": true,
+  "margin_deg": 11.63,
+  "joint": "r_shoulder_roll",
+  "q": [
+   -10.38,
+   8.66,
+   8.77,
+   -53.65,
+   7.51,
+   -24.51,
+   -28.38
+  ]
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 0.0,
+  "ok": true,
+  "margin_deg": 21.08,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -10.1,
+   -4.72,
+   28.3,
+   -59.05,
+   -9.73,
+   -23.9,
+   -23.39
+  ]
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 15.0,
+  "ok": true,
+  "margin_deg": 21.67,
+  "joint": "r_shoulder_roll",
+  "q": [
+   -5.15,
+   -1.39,
+   15.14,
+   -62.47,
+   -2.91,
+   -22.88,
+   1.16
+  ]
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 30.0,
+  "ok": true,
+  "margin_deg": 21.92,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -4.53,
+   -4.94,
+   14.87,
+   -63.69,
+   -6.44,
+   -23.06,
+   18.02
+  ]
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 45.0,
+  "ok": true,
+  "margin_deg": 16.87,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -11.33,
+   -19.87,
+   37.55,
+   -62.26,
+   -25.8,
+   -28.11,
+   21.69
+  ]
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 60.0,
+  "ok": true,
+  "margin_deg": 9.8,
+  "joint": "r_wrist_roll",
+  "q": [
+   -17.25,
+   -25.44,
+   48.16,
+   -58.87,
+   -35.93,
+   -32.56,
+   35.18
+  ]
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 75.0,
+  "ok": true,
+  "margin_deg": 0.14,
+  "joint": "r_wrist_pitch",
+  "q": [
+   -33.56,
+   -31.07,
+   81.38,
+   -52.67,
+   -59.51,
+   -44.83,
+   44.47
+  ]
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 90.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 105.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 120.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 135.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 150.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 165.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ },
+ {
+  "cell": "cell_r3c3",
+  "az": 180.0,
+  "ok": false,
+  "margin_deg": null,
+  "joint": null,
+  "q": null
+ }
+]

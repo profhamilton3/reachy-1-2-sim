@@ -1,0 +1,6 @@
+crane_identity.py, 2026-10-19
+origin/main b4323b9 (git archive):
+{"lift_r3c2": {"sha": "0988a92b71d5048c", "criteria": {"retained_height": true, "slip_within_resolution": true, "clean_placement": true, "clean_withdrawal": true, "returned_to_present": true}, "error_mm": 4.050486, "n_events": 49}, "place_r3c2_r3c3": {"sha": "3cbdb7133ca1005e", "criteria": {"placed_on_target": true, "retained_height": true, "slip_within_resolution": true, "clean_placement": true, "clean_withdrawal": true, "returned_to_present": true}, "error_mm": 7.700057, "n_events": 62}}
+feat/180-side-on-grasp (after every executor change):
+{"lift_r3c2": {"sha": "0988a92b71d5048c", "criteria": {"retained_height": true, "slip_within_resolution": true, "clean_placement": true, "clean_withdrawal": true, "returned_to_present": true}, "error_mm": 4.050486, "n_events": 49}, "place_r3c2_r3c3": {"sha": "3cbdb7133ca1005e", "criteria": {"placed_on_target": true, "retained_height": true, "slip_within_resolution": true, "clean_placement": true, "clean_withdrawal": true, "returned_to_present": true}, "error_mm": 7.700057, "n_events": 62}}
+Identical: yes (same sha256 prefix, criteria, error and event count for both flights).

@@ -1,0 +1,94 @@
+[
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "crane"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "crane",
+"cube_xy_offset": [
+0.003,
+0
+]
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "crane",
+"cube_xy_offset": [
+-0.003,
+0
+]
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "crane",
+"cube_xy_offset": [
+0,
+0.003
+]
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "crane",
+"cube_xy_offset": [
+0,
+-0.003
+]
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "best",
+"cube_xy_offset": [
+0.003,
+0
+]
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "best",
+"cube_xy_offset": [
+-0.003,
+0
+]
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "best",
+"cube_xy_offset": [
+0,
+0.003
+]
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "best",
+"cube_xy_offset": [
+0,
+-0.003
+]
+}
+]

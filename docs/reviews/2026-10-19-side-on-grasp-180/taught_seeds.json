@@ -1,0 +1,149 @@
+{
+ "source": "docs/reviews/2026-10-14-taught-board-poses-185/taught_poses.json",
+ "squares": {
+  "A1": {
+   "cell": "r3c1",
+   "approach_azimuth_deg": 54.57,
+   "tilt_down_deg": 2.02,
+   "pos_err_mm": 0.0,
+   "rot_err_deg": 0.0,
+   "joints_deg": [
+    -30.55,
+    10.384,
+    74.072,
+    -33.657,
+    -28.951,
+    -31.018,
+    -0.618
+   ]
+  },
+  "A2": {
+   "cell": "r3c2",
+   "approach_azimuth_deg": 18.29,
+   "tilt_down_deg": -0.02,
+   "pos_err_mm": 0.0,
+   "rot_err_deg": 0.003,
+   "joints_deg": [
+    -8.312,
+    13.463,
+    23.062,
+    -51.43,
+    10.972,
+    -24.999,
+    -11.484
+   ]
+  },
+  "A3": {
+   "cell": "r3c3",
+   "approach_azimuth_deg": 6.57,
+   "tilt_down_deg": 0.95,
+   "pos_err_mm": 0.0,
+   "rot_err_deg": 0.003,
+   "joints_deg": [
+    -18.316,
+    -20.688,
+    58.918,
+    -63.78,
+    -29.287,
+    -28.23,
+    -34.824
+   ]
+  },
+  "B1": {
+   "cell": "r2c1",
+   "approach_azimuth_deg": 44.83,
+   "tilt_down_deg": -2.3,
+   "pos_err_mm": 0.0,
+   "rot_err_deg": 0.0,
+   "joints_deg": [
+    2.207,
+    20.113,
+    37.191,
+    -50.914,
+    17.402,
+    -29.387,
+    -1.706
+   ]
+  },
+  "B2": {
+   "cell": "r2c2",
+   "approach_azimuth_deg": 43.92,
+   "tilt_down_deg": 4.71,
+   "pos_err_mm": 0.0,
+   "rot_err_deg": 0.0,
+   "joints_deg": [
+    -21.365,
+    -18.797,
+    86.053,
+    -74.212,
+    -24.092,
+    -23.784,
+    -28.841
+   ]
+  },
+  "B3": {
+   "cell": "r2c3",
+   "approach_azimuth_deg": 2.77,
+   "tilt_down_deg": -5.49,
+   "pos_err_mm": 0.0,
+   "rot_err_deg": 0.002,
+   "joints_deg": [
+    4.174,
+    -26.422,
+    51.758,
+    -81.362,
+    -14.787,
+    -39.262,
+    -44.497
+   ]
+  },
+  "C1": {
+   "cell": "r1c1",
+   "approach_azimuth_deg": 76.32,
+   "tilt_down_deg": 1.51,
+   "pos_err_mm": 0.0,
+   "rot_err_deg": 0.0,
+   "joints_deg": [
+    -2.999,
+    0.243,
+    78.711,
+    -66.715,
+    -1.678,
+    -20.881,
+    -1.699
+   ]
+  },
+  "C2": {
+   "cell": "r1c2",
+   "approach_azimuth_deg": 82.36,
+   "tilt_down_deg": 4.54,
+   "pos_err_mm": 0.0,
+   "rot_err_deg": 0.0,
+   "joints_deg": [
+    -10.92,
+    -29.91,
+    89.481,
+    -86.251,
+    -8.613,
+    -28.241,
+    -2.089
+   ]
+  },
+  "C3": {
+   "cell": "r1c3",
+   "approach_azimuth_deg": 14.98,
+   "tilt_down_deg": 0.79,
+   "pos_err_mm": 0.0,
+   "rot_err_deg": 0.005,
+   "joints_deg": [
+    30.865,
+    -33.274,
+    46.534,
+    -89.365,
+    4.85,
+    -42.925,
+    -43.251
+   ]
+  }
+ }
+}

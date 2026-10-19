@@ -95,9 +95,16 @@ ORIGIN = "cell_r3c2"
 DEST = "r3c3"
 
 
-def start_world(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, origin: str = ORIGIN):
-    """The offline world with the arm stiff at PRESENT, the cube upright on
-    ``origin`` (moved by ``cube_xy_offset``, turned ``yaw_deg``)."""
+def _quat_yaw(yaw_deg: float):
+    return (math.cos(math.radians(yaw_deg) / 2), 0.0, 0.0, math.sin(math.radians(yaw_deg) / 2))
+
+
+def start_world(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, origin: str = ORIGIN,
+                oid: str = OID, others: Optional[Dict[str, Any]] = None):
+    """The offline world with the arm stiff at PRESENT, ``oid`` (the cube by
+    default) upright on ``origin`` (moved by ``cube_xy_offset``, turned
+    ``yaw_deg``).  ``others`` puts more objects upright on the board as
+    neighbours (#180): {object id: cell name, or (cell name, yaw deg)}."""
     import mujoco
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.scene.awareness import SceneModel
@@ -105,17 +112,23 @@ def start_world(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, origin: str = O
 
     w = World()
     w.core.reset()
+    w._cube = mujoco.mj_name2id(w.m, mujoco.mjtObj.mjOBJ_BODY, oid)
     scene = SceneModel.from_yaml(SCENE)
-    x, y, z = scene.cell_center(origin)
-    pos = (x + cube_xy_offset[0], y + cube_xy_offset[1], z + scene.get(OID).size[2] / 2.0)
+    x, y, z = scene.cell_center(origin if origin.startswith("cell_") else f"cell_{origin}")
+    pos = (x + cube_xy_offset[0], y + cube_xy_offset[1], z + scene.get(oid).size[2] / 2.0)
     d = w.d
     for n, v in R.PRESENT.items():
         if n in w.jadr:
             d.qpos[w.jadr[n][0]] = math.radians(v)
-    qa, _ = w.free[OID]
+    qa, _ = w.free[oid]
     d.qpos[qa:qa + 3] = pos
-    d.qpos[qa + 3:qa + 7] = (math.cos(math.radians(yaw_deg) / 2), 0.0, 0.0,
-                             math.sin(math.radians(yaw_deg) / 2))
+    d.qpos[qa + 3:qa + 7] = _quat_yaw(yaw_deg)
+    for other, where in (others or {}).items():
+        cell, yaw = (where, 0.0) if isinstance(where, str) else where
+        cx, cy, cz = scene.cell_center(cell if cell.startswith("cell_") else f"cell_{cell}")
+        qo, _ = w.free[other]
+        d.qpos[qo:qo + 3] = (cx, cy, cz + scene.get(other).size[2] / 2.0)
+        d.qpos[qo + 3:qo + 7] = _quat_yaw(yaw)
     d.qvel[:] = 0.0
     mujoco.mj_forward(w.m, d)
     w.core.controller.sync_targets_to_current(d)
@@ -149,7 +162,7 @@ def _state(w, step: int, t: float) -> Dict[str, Any]:
             "joints": joints, "objects": objects}
 
 
-def as_task(run: Dict[str, Any], dest: Optional[str]) -> Dict[str, Any]:
+def as_task(run: Dict[str, Any], dest: Optional[str], oid: str = OID) -> Dict[str, Any]:
     """A flown run as the panel's task record (`panel-task-final.json`):
     what `evaluation.lift_replay.replay_place` / `replay_lift` read."""
     out = run["outcome"]
@@ -160,7 +173,7 @@ def as_task(run: Dict[str, Any], dest: Optional[str]) -> Dict[str, Any]:
         "events": [{"role": "user", "text": "offline", "at": T0 - 1.0},
                    {"role": "reachy", "text": "Executing in simulation.", "at": T0},
                    {"role": "reachy", "text": "done", "at": t_end}],
-        "proposal": {"object_id": OID, "route": route, "route_version": 1,
+        "proposal": {"object_id": oid, "route": route, "route_version": 1,
                      "expected_start_posture": "present"},
         "execution_evidence": {
             "start_posture": "present", "final_posture": "present",
@@ -170,17 +183,25 @@ def as_task(run: Dict[str, Any], dest: Optional[str]) -> Dict[str, Any]:
 
 def fly(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, dest: Optional[str] = DEST,
         place_spec=None, crane_spec=None, abort_when=None,
-        record: bool = False, origin: str = ORIGIN, limits=None) -> Dict[str, Any]:
+        record: bool = False, origin: str = ORIGIN, limits=None,
+        oid: str = OID, grasp: str = "crane", others: Optional[Dict[str, Any]] = None,
+        side_spec=None) -> Dict[str, Any]:
     """One offline placement from ``origin`` -- or, with ``dest=None``, the
     lift (pick, hold, put back), flown the same way.  ``abort_when(events)``
     (optional) makes the caller's should_abort say yes -- to exercise the
-    abort path.  ``limits`` replaces the default `CraneLimits`."""
+    abort path.  ``limits`` replaces the default `CraneLimits`.
+
+    #180: ``oid`` is the object; ``grasp`` is "crane" (the default, as
+    before), "side" (`side_grasp_live`, with ``side_spec``) or "best" (the
+    planner choice: both planned, the larger margin flies); ``others`` puts
+    neighbours on the board (`start_world`)."""
     from reachy_ai.motion import primitives as P
     from reachy_ai.motion.kinematics import CartesianPlanner
     from reachy_ai.tasks import crane_pick_live as CP
     from reachy_ai.tasks import crane_place_live as PL
+    from reachy_ai.tasks import side_grasp_live as SG
 
-    w, scene = start_world(cube_xy_offset, yaw_deg, origin=origin)
+    w, scene = start_world(cube_xy_offset, yaw_deg, origin=origin, oid=oid, others=others)
     events: List[Tuple[str, Dict[str, Any]]] = []
     contact = {"after_release_mm": 0.0, "released": False, "samples": 0}
 
@@ -199,8 +220,12 @@ def fly(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, dest: Optional[str] = D
 
     clock = _Clock(w, tick)
 
+    def pose_of(o):
+        qa, _ = w.free[o]
+        return w.d.qpos[qa:qa + 3].copy(), w.d.qpos[qa + 3:qa + 7].copy()
+
     def observe():
-        p, q = w.cube()
+        p, q = pose_of(oid)
         f = w.grip_force()
         return CP.Observation(tuple(float(v) for v in p), tuple(float(v) for v in q),
                               float(f), f > 0.05, 0.0)
@@ -221,8 +246,9 @@ def fly(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, dest: Optional[str] = D
     P.stow_from_side = lambda *a, **k: None
     try:
         arm = OfflineArm(w)
-        p0, q0 = w.cube()
-        scene.update_poses({OID: tuple(float(v) for v in p0)})
+        p0, q0 = pose_of(oid)
+        scene.update_poses({o: tuple(float(v) for v in pose_of(o)[0])
+                            for o in [oid] + list(others or {})})
         planner = CartesianPlanner(arm, scene=scene)
         kw = {}
         if place_spec is not None:
@@ -231,30 +257,57 @@ def fly(cube_xy_offset=(0.0, 0.0), yaw_deg: float = 0.0, dest: Optional[str] = D
             kw["spec"] = crane_spec
         if limits is not None:
             kw["limits"] = limits
+        choice = None
         try:
-            if dest is None:
-                lift = CP.plan_crane_pick(planner, scene, OID, observe(),
+            if grasp == "best":
+                ch = (SG.plan_lift_choice(planner, scene, oid, observe(), on_event=on_event)
+                      if dest is None else
+                      SG.plan_place_choice(planner, scene, oid, dest, observe(),
+                                           on_event=on_event))
+                choice = ch.record()
+                plan = None if dest is None else ch.plan
+                lift = ch.plan if dest is None else ch.plan.pick
+            elif grasp == "side":
+                skw = {k: v for k, v in kw.items() if k in ("place", "limits")}
+                if side_spec is not None:
+                    skw["spec"] = side_spec
+                if dest is None:
+                    skw.pop("place", None)
+                    lift = SG.plan_side_pick(planner, scene, oid, observe(), on_event=on_event,
+                                             **skw)
+                    plan = None
+                else:
+                    plan = SG.plan_side_place(planner, scene, oid, dest, observe(),
+                                              on_event=on_event, **skw)
+                    lift = plan.pick
+            elif dest is None:
+                lift = CP.plan_crane_pick(planner, scene, oid, observe(),
                                           **{k: v for k, v in kw.items() if k != "place"})
                 plan = None
             else:
-                plan = PL.plan_crane_place(planner, scene, OID, dest, observe(), **kw)
+                plan = PL.plan_crane_place(planner, scene, oid, dest, observe(), **kw)
                 lift = plan.pick
         except CP.CraneRefused as exc:
-            return {"refused": f"{exc.stage}: {exc.reason}"}
-        start = {oid: w.d.qpos[w.free[oid][0]:w.free[oid][0] + 3].copy() for oid in w.free}
+            return {"refused": f"{exc.stage}: {exc.reason}", "grasp": grasp,
+                    "detail": {k: v for k, v in exc.detail.items() if k == "refusals"}}
+        start = {o: w.d.qpos[w.free[o][0]:w.free[o][0] + 3].copy() for o in w.free}
         out = CP.execute_crane_pick(
-            OfflineRobot(arm), planner, scene, lift, observe, on_event=on_event,
+            OfflineRobot(arm), SG.planner_for(lift, planner), scene, lift, observe,
+            on_event=on_event,
             should_abort=(lambda: abort_when(events)) if abort_when else None,
             stow=False, place=plan)
     finally:
         P.time.sleep, CP.time.monotonic, P.look_at, P.stow_from_side = saved
-    p, q = w.cube()
+    p, q = pose_of(oid)
     wq, xq, yq, zq = q
     tilt = math.degrees(math.acos(max(-1.0, min(1.0, 1 - 2 * (xq * xq + yq * yq)))))
-    others = {oid: float(np.linalg.norm(w.d.qpos[w.free[oid][0]:w.free[oid][0] + 3] - v))
-              for oid, v in start.items() if oid != OID}
+    others = {o: float(np.linalg.norm(w.d.qpos[w.free[o][0]:w.free[o][0] + 3] - v))
+              for o, v in start.items() if o != oid}
     rep = out.get("replaced") or {}
     return {
+        "grasp": ({"side": SG.GRASP_SIDE, "crane": SG.GRASP_CRANE}[lift.kind]
+                  if choice is None else choice["used"]), "choice": choice,
+        "object": oid, "origin": origin, "dest": dest,
         "outcome": out, "events": events,
         "final_object": [float(v) for v in p],
         "error_mm": (1000 * PL.placement_error(p, plan.centre) if plan is not None
