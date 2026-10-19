@@ -105,6 +105,7 @@ from reachy_ai.motion.kinematics import (
     ArmClearanceError,
     R_ARM_JOINTS,
     TargetContact,
+    ik_wrist,
     joint_path,
     link_frames,
     resolve_within_limits,
@@ -284,7 +285,7 @@ EventLog = Callable[..., None]
 # ── Geometry of the approach ──────────────────────────────────────────────────
 
 def grasp_rotation(obj: G.Box, spec: CraneSpec) -> np.ndarray:
-    """Target r_wrist2hand rotation: hand tilted ``tilt_deg`` from vertical,
+    """Target hand rotation (the wrist's and the SDK tip's): hand tilted ``tilt_deg`` from vertical,
     leaning at the spec's azimuth, jaw closing along the object's face axis."""
     bearing = math.degrees(math.atan2(obj.center[1] - _SHOULDER_XY[1],
                                       obj.center[0] - _SHOULDER_XY[0]))
@@ -313,7 +314,7 @@ def _ik_raw(arm, rot: np.ndarray, wrist: np.ndarray, q0) -> Optional[List[float]
     M[:3, :3] = rot
     M[:3, 3] = np.asarray(wrist) - _BASE
     try:
-        return list(arm.inverse_kinematics(M, q0=list(q0)))
+        return ik_wrist(arm, M, list(q0))
     except ValueError:
         return None
 
@@ -350,8 +351,8 @@ def solve_gap(arm, rot: np.ndarray, gap_target: np.ndarray, gripper_deg: float,
               relax: bool = False) -> Optional[Tuple[List[float], float]]:
     """IK for the jaw-gap centre (not the wrist) at ``gap_target``.
 
-    The IK service solves for the wrist frame; the gap centre's offset from
-    it depends on the wrist roll and the opening, so the wrist target is
+    ``_ik_raw`` solves for the wrist frame (``kinematics.ik_wrist``); the gap
+    centre's offset from it depends on the wrist roll and the opening, so the wrist target is
     corrected by the remaining gap error and re-solved, warm-started.
 
     The service minimises without the joints' stops, so near one it answers

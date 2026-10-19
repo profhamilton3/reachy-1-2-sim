@@ -71,11 +71,7 @@ class _ServiceArm:
         return list(self.answer)
 
     def forward_kinematics(self, q):
-        _s, _e, wrist, R = link_frames(q)
-        F = np.eye(4)
-        F[:3, :3] = R
-        F[:3, 3] = wrist - K._BASE
-        return F
+        return K.tip_pose(q)
 
 
 def test_the_planner_resolves_rather_than_skips_or_clips(monkeypatch):

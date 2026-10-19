@@ -5,8 +5,8 @@ can be exercised offline with real IK.  Two checks keep that honest:
 
   * a DRIFT PIN -- the server's kinematics source, extracted with `ast` and
     whitespace-stripped, hashes to the value recorded in the mirror;
-  * an FK CHECK -- the mirror's FK agrees with `link_frames` (the planner's own
-    pure-Python chain) at random poses.
+  * an FK CHECK -- the mirror's wrist agrees with `link_frames` (the planner's
+    own pure-Python chain) and its tip with `tip_pose`, at random poses.
 """
 
 import os
@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 import host_ik_arm  # noqa: E402
-from reachy_ai.motion.kinematics import _BASE, link_frames  # noqa: E402
+from reachy_ai.motion.kinematics import _BASE, link_frames, tip_pose  # noqa: E402
 
 
 def test_the_mirror_still_matches_the_fake_servers_kinematics_source():
@@ -35,12 +35,17 @@ def test_mirror_fk_equals_link_frames_at_random_poses():
     lim = np.degrees(np.array(host_ik_arm._R_ARM_LIMITS))
     for _ in range(50):
         q = rng.uniform(lim[:, 0], lim[:, 1])
-        T = host_ik_arm.HostIKArm().forward_kinematics(q)
+        T = host_ik_arm.wrist_fk(np.radians(q))
         _s, _e, wrist, R = link_frames(list(q))
         # The mirror works in the arm's base frame; link_frames in the scene's
         # (the torso at the October mount since #192, (0, 0, 1.0) before).
         assert np.allclose(T[:3, 3] + np.asarray(_BASE), wrist, atol=1e-9)
         assert np.allclose(T[:3, :3], R, atol=1e-9)
+        # The SDK's forward_kinematics reports the gripper tip, not the wrist.
+        tip = host_ik_arm.HostIKArm().forward_kinematics(q)
+        ref = tip_pose(list(q))
+        assert np.allclose(tip[:3, 3], ref[:3, 3], atol=1e-9)
+        assert np.allclose(tip[:3, :3], ref[:3, :3], atol=1e-9)
 
 
 def test_mirror_ik_round_trips_a_reachable_pose():

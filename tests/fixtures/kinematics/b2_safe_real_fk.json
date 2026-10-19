@@ -1,0 +1,63 @@
+{
+ "provenance": {
+  "source_repo": "profhamilton3/reachy-tabletop-ai",
+  "source_commit": "f207378",
+  "notebook": "tests/CalibrateBoard.ipynb",
+  "sha256": "dbd6ae66023b8c0328d1b602a138472c6632925401d395aa3d2785c3ac47bceb",
+  "board_poses_cell": 6,
+  "named_pose_cells": {
+   "B2_SAFE": 20,
+   "B2_PICK": 24
+  },
+  "b2_safe_joints_cell": 54,
+  "how_taught": "by hand on the real robot (the one lab), read back with r_arm.forward_kinematics()",
+  "frame": "robot torso frame, metres; 4x4 homogeneous poses of the right_tip frame",
+  "extracted_to": "docs/reviews/2026-10-14-taught-board-poses-185/taught_poses.json",
+  "pair": "B2_SAFE_JOINTS (cell 54) and BOARD_POSES['B2'] (cell 6) raised by SAFE_HEIGHT 0.15 m: the pose the real robot's r_arm.forward_kinematics() gave for those joints",
+  "used_by": "tests/contract/test_arm_kinematics_tip.py, tests/unit/test_tip_frame_187.py (#187)"
+ },
+ "joint_order": [
+  "r_shoulder_pitch",
+  "r_shoulder_roll",
+  "r_arm_yaw",
+  "r_elbow_pitch",
+  "r_forearm_yaw",
+  "r_wrist_pitch",
+  "r_wrist_roll"
+ ],
+ "joints_deg": [
+  23.4794,
+  20.2843,
+  19.9217,
+  -111.0259,
+  32.5216,
+  4.5934,
+  34.5556
+ ],
+ "right_tip_pose": [
+  [
+   -0.00017153,
+   -0.69616953,
+   -0.7178774,
+   0.24251293
+  ],
+  [
+   0.11818002,
+   0.71283254,
+   -0.69130547,
+   0.00612421
+  ],
+  [
+   0.99299217,
+   -0.08495735,
+   0.08215105,
+   -0.23243731
+  ],
+  [
+   0.0,
+   0.0,
+   0.0,
+   1.0
+  ]
+ ]
+}
