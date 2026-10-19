@@ -68,19 +68,14 @@ ROUTE = "CRANE_PLACE"
 D6_POSITION_M = 0.010
 D6_TILT_DEG = 5.0
 
-#: The place ability's grasp attitude (#174, step 2), used ONLY by the
-#: placement: the lift keeps `CraneSpec()`.  The lift's attitude (tilt 30,
-#: lean 59.52) cannot set an object down on r2c1 -- the nearest pose there is
-#: 20 mm off the centre.  Searched offline (Reachy-Lab
-#: issue174-exit-and-attitude-2026-10-12): every pick, carry, set-down and exit
-#: check for r2c2 -> r2c1 passes on x faces for tilt 54-66 / lean 65-70, and
-#: flown offline (`tools.place_sweep.fly`) the lean-65 band, tilt 60-66, placed
-#: every start 3.8-5.3 mm from the centre with no pad contact after the release.
-#: 63 is the middle of that band: 6.8 deg from a stop at the pick (arm yaw),
-#: 0.9 deg at the set-down (shoulder roll), no turn about the vertical.  The
-#: descent's prediction tolerances and the drag study were measured at tilt
-#: 30: the #174 live runs are this attitude's first validation.
-PLACE_GRASP = CP.CraneSpec(tilt_deg=63.0, lean_bearing_deg=65.0)
+#: The place ability's grasp attitude.  At the October mount (#195) it is the
+#: lift's own (`CraneSpec()`: tilt 22.5, lean 87.5): the #174 attitude (tilt 63,
+#: lean 65) puts the palm (#192's hand collision box) into the cube at grasp
+#: depth, and the search that set `CraneSpec` searched the placement with it
+#: (docs/reviews/2026-10-19-crane-retune-195/fine_grid.py: from r3c2 to r2c1,
+#: r2c2 and r3c3 from tilt 22.5).  Kept as its own name so
+#: the place can be re-tuned apart from the lift again.
+PLACE_GRASP = CP.CraneSpec()
 
 
 @dataclass(frozen=True)
@@ -116,12 +111,15 @@ class PlaceSpec:
     max_attempt_s: float = 480.0
     #: Where the set-down is AIMED, against the cell centre D6 measures from:
     #: ``aim_m`` toward the point ``aim_toward_xy`` (world, m).  0 aims at
-    #: the centre.  See `PLACE_AIM` for the placement's own.
-    #: #174 option 3: the set-down margin from the shoulder-roll stop is under
-    #: 2 deg, and the release drag also pushes toward the robot, so aiming
-    #: there costs ~0.8 mm of D6 error per mm.  1 mm toward the robot's base
-    #: kept the offline D6 error <= 5.7 mm (10 starts) for ~0.2 deg of margin.
-    aim_m: float = 0.001
+    #: the centre.
+    #: #174 aimed 1 mm toward the robot to buy shoulder-roll margin at r2c1.
+    #: At the October mount (#195) the set-down's least margin is the wrist
+    #: pitch, and the shoulder roll has 6-54 deg to spare; aiming toward the
+    #: robot only takes wrist-pitch margin away (docs/reviews/2026-10-19-
+    #: crane-retune-195/aim_check.txt: r3c3 0.38 -> 0.30 deg; at r2c1 and
+    #: r2c2 the set-down stands on the wrist-pitch stop either way), so it
+    #: aims at the centre.
+    aim_m: float = 0.0
     aim_toward_xy: Tuple[float, float] = (0.0, 0.0)
 
 

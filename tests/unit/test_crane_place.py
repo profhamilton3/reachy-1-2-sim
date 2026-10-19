@@ -50,26 +50,30 @@ def _on(scene, cell, oid):
     return (x, y, z + scene.get(oid).size[2] / 2.0)
 
 
-def test_r3c2_to_r2c1_is_planned_end_to_end_at_the_place_attitude():
+def test_r3c2_to_r3c3_is_planned_end_to_end_at_the_shared_attitude():
     scene, planner, seen = _world()
-    pp = PL.plan_crane_place(planner, scene, "red_cube", "r2c1", seen)
-    assert pp.pick.spec.tilt_deg == PL.PLACE_GRASP.tilt_deg == 63.0
+    pp = PL.plan_crane_place(planner, scene, "red_cube", "r3c3", seen)
+    # October mount (#195): the placement and the lift share one attitude
+    assert pp.pick.spec.tilt_deg == PL.PLACE_GRASP.tilt_deg == 22.5
+    assert pp.pick.spec.lean_bearing_deg == PL.PLACE_GRASP.lean_bearing_deg == 87.5
     assert pp.dest.spec.release_retreat_m == pytest.approx(0.009)
-    centre = np.asarray(scene.cell_center("cell_r2c1")[:2])
+    centre = np.asarray(scene.cell_center("cell_r3c3")[:2])
     assert np.hypot(*(pp.centre[:2] - centre)) < 1e-9          # D6 measures from here
-    assert np.hypot(*(pp.target[:2] - centre)) == pytest.approx(0.001)   # aimed 1 mm off
+    assert np.hypot(*(pp.target[:2] - centre)) == pytest.approx(0.0, abs=1e-9)   # no aim offset
     held = pp.checks["held"]
     assert set(held) == {f"carry: climb to +{pp.carry_rung} (pickup ladder)",
-                         f"carry: to r2c1 +{pp.carry_rung}",
-                         f"set-down: r2c1 +{pp.carry_rung} -> resting"}
+                         f"carry: to r3c3 +{pp.carry_rung}",
+                         f"set-down: r3c3 +{pp.carry_rung} -> resting"}
     for rep in held.values():                     # the held box, checked
         assert rep["arm_mm"] > 0 and rep["others_mm"] > 0
     assert all(e["open"] for e in pp.checks["exits"].values())
 
 
-def test_the_lift_keeps_its_own_attitude_and_release():
+def test_the_lift_shares_the_placement_attitude_but_has_no_release_retreat():
     spec = CP.CraneSpec()
-    assert (spec.tilt_deg, spec.lean_bearing_deg) == (30.0, 59.52)
+    assert (spec.tilt_deg, spec.lean_bearing_deg) == (22.5, 87.5)
+    assert (spec.tilt_deg, spec.lean_bearing_deg) == (PL.PLACE_GRASP.tilt_deg,
+                                                      PL.PLACE_GRASP.lean_bearing_deg)
     assert spec.release_retreat_m == 0.0 and spec.release_backoff_m == 0.0
 
 

@@ -1,0 +1,486 @@
+{"origin": "r3c2", "dest": null, "tilt": 20.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 20.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 20.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 21.25, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": null, "tilt": 20.0, "lean": 90.0, "ok": true, "route_mm": 2.62, "palm_mm": 2.03, "pick_margin": {"min_deg": 0.086, "joint": "r_arm_yaw", "shoulder_roll_deg": 29.864}, "finger_below_top_mm": 1.92, "thumb_below_top_mm": 7.57}
+{"origin": "r3c2", "dest": null, "tilt": 20.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 21.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 21.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 20.0, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": null, "tilt": 20.0, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": null, "tilt": 21.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 21.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 21.25, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": null, "tilt": 21.25, "lean": 85.0, "ok": true, "route_mm": 2.74, "palm_mm": 1.91, "pick_margin": {"min_deg": 1.191, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.548}, "finger_below_top_mm": 0.43, "thumb_below_top_mm": 7.67}
+{"origin": "r3c2", "dest": null, "tilt": 20.0, "lean": 85.0, "ok": true, "route_mm": 3.0, "palm_mm": 1.88, "pick_margin": {"min_deg": 0.677, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.226}, "finger_below_top_mm": 0.59, "thumb_below_top_mm": 8.82}
+{"origin": "r3c2", "dest": null, "tilt": 20.0, "lean": 87.5, "ok": true, "route_mm": 2.8, "palm_mm": 1.91, "pick_margin": {"min_deg": 0.611, "joint": "r_wrist_pitch", "shoulder_roll_deg": 30.049}, "finger_below_top_mm": 1.3, "thumb_below_top_mm": 8.22}
+{"origin": "r3c2", "dest": null, "tilt": 22.5, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 22.5, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 21.25, "lean": 87.5, "ok": true, "route_mm": 2.7, "palm_mm": 1.93, "pick_margin": {"min_deg": 0.731, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.357}, "finger_below_top_mm": 1.2, "thumb_below_top_mm": 7.05}
+{"origin": "r3c2", "dest": null, "tilt": 21.25, "lean": 90.0, "ok": true, "route_mm": 2.53, "palm_mm": 2.06, "pick_margin": {"min_deg": 0.149, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.168}, "finger_below_top_mm": 1.86, "thumb_below_top_mm": 6.36}
+{"origin": "r3c2", "dest": null, "tilt": 22.5, "lean": 90.0, "ok": true, "route_mm": 2.36, "palm_mm": 2.05, "pick_margin": {"min_deg": 0.182, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.451}, "finger_below_top_mm": 1.84, "thumb_below_top_mm": 5.17}
+{"origin": "r3c2", "dest": null, "tilt": 22.5, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 22.5, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 23.75, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": null, "tilt": 22.5, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": null, "tilt": 22.5, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": null, "tilt": 23.75, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 23.75, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 22.5, "lean": 85.0, "ok": true, "route_mm": 2.72, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.793, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.853}, "finger_below_top_mm": 0.36, "thumb_below_top_mm": 6.59}
+{"origin": "r3c2", "dest": null, "tilt": 22.5, "lean": 87.5, "ok": true, "route_mm": 2.51, "palm_mm": 1.88, "pick_margin": {"min_deg": 0.79, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.654}, "finger_below_top_mm": 1.17, "thumb_below_top_mm": 5.93}
+{"origin": "r3c2", "dest": null, "tilt": 23.75, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 23.75, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 25.0, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 25.0, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 23.75, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": null, "tilt": 23.75, "lean": 85.0, "ok": true, "route_mm": 2.59, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.845, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.148}, "finger_below_top_mm": 0.31, "thumb_below_top_mm": 5.51}
+{"origin": "r3c2", "dest": null, "tilt": 25.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 25.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 23.75, "lean": 87.5, "ok": true, "route_mm": 2.38, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.841, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.936}, "finger_below_top_mm": 1.17, "thumb_below_top_mm": 4.82}
+{"origin": "r3c2", "dest": null, "tilt": 23.75, "lean": 90.0, "ok": true, "route_mm": 2.31, "palm_mm": 2.03, "pick_margin": {"min_deg": 0.177, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.712}, "finger_below_top_mm": 1.87, "thumb_below_top_mm": 4.0}
+{"origin": "r3c2", "dest": null, "tilt": 25.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 26.25, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 26.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 26.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 25.0, "lean": 90.0, "ok": true, "route_mm": 2.03, "palm_mm": 1.99, "pick_margin": {"min_deg": 0.183, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.982}, "finger_below_top_mm": 1.96, "thumb_below_top_mm": 2.88}
+{"origin": "r3c2", "dest": null, "tilt": 25.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 26.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 26.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 26.25, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 26.25, "lean": 85.0, "ok": true, "route_mm": 2.22, "palm_mm": 1.86, "pick_margin": {"min_deg": 0.964, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.722}, "finger_below_top_mm": 0.26, "thumb_below_top_mm": 3.34}
+{"origin": "r3c2", "dest": null, "tilt": 25.0, "lean": 85.0, "ok": true, "route_mm": 2.47, "palm_mm": 1.86, "pick_margin": {"min_deg": 0.904, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.431}, "finger_below_top_mm": 0.28, "thumb_below_top_mm": 4.43}
+{"origin": "r3c2", "dest": null, "tilt": 25.0, "lean": 87.5, "ok": true, "route_mm": 2.2, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.904, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.212}, "finger_below_top_mm": 1.19, "thumb_below_top_mm": 3.7}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 20.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 20.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": null, "tilt": 26.25, "lean": 87.5, "ok": true, "route_mm": 1.91, "palm_mm": 1.99, "pick_margin": {"min_deg": 0.194, "joint": "r_wrist_roll", "shoulder_roll_deg": 31.483}, "finger_below_top_mm": 1.08, "thumb_below_top_mm": 2.43}
+{"origin": "r3c2", "dest": null, "tilt": 26.25, "lean": 90.0, "ok": true, "route_mm": 1.84, "palm_mm": 2.01, "pick_margin": {"min_deg": 0.24, "joint": "r_wrist_roll", "shoulder_roll_deg": 31.24}, "finger_below_top_mm": 2.01, "thumb_below_top_mm": 1.68}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 20.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 21.25, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 20.0, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 20.0, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 21.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 21.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 21.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 21.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 22.5, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 22.5, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 20.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 20.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 22.5, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 22.5, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 21.25, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 21.25, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 22.5, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 23.75, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 22.5, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 22.5, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 23.75, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 23.75, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 23.75, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 23.75, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 25.0, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 25.0, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 20.0, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 20.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 21.25, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 21.25, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 25.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 25.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 22.5, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 22.5, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 25.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 26.25, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 23.75, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 23.75, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 26.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 26.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 26.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 26.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 20.0, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 20.0, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 25.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 25.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 26.25, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 26.25, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 23.75, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 23.75, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 20.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 20.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 20.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 21.25, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 25.0, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 25.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 21.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 21.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 21.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 21.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 22.5, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 22.5, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 26.25, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c1", "tilt": 26.25, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 20.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 20.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 22.5, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 22.5, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 21.25, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 21.25, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 22.5, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 23.75, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 20.0, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 20.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 23.75, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 23.75, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 23.75, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 23.75, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 25.0, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 25.0, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 22.5, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 22.5, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 21.25, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 21.25, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 23.75, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 23.75, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 25.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 25.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 25.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 26.25, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 22.5, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 22.5, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 26.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 26.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 26.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 26.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 20.0, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 20.0, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 25.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 25.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 26.25, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 26.25, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 20.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 20.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 23.75, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 23.75, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 20.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 21.25, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 25.0, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 25.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 21.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 21.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 21.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 21.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 22.5, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 22.5, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 20.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 20.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 20.0, "lean": 85.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +2"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 20.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 21.25, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 21.25, "lean": 85.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +2"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 22.5, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 22.5, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 22.5, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 23.75, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 26.25, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c2", "tilt": 26.25, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 23.75, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 23.75, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 23.75, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 23.75, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 25.0, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 25.0, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 22.5, "lean": 90.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +2"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 22.5, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 21.25, "lean": 87.5, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +2"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 21.25, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 23.75, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 23.75, "lean": 85.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +2"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 25.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 25.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 25.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 26.25, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 22.5, "lean": 85.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +2"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 22.5, "lean": 87.5, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +2"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 26.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 26.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 25.0, "lean": 90.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +1"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 25.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 26.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 26.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 20.0, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 20.0, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 26.25, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 26.25, "lean": 85.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +1"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 23.75, "lean": 87.5, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +2"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 23.75, "lean": 90.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +1"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 20.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 20.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 25.0, "lean": 85.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +1"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 25.0, "lean": 87.5, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +1"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 20.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 21.25, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 21.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 21.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 21.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 21.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 22.5, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 22.5, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 26.25, "lean": 87.5, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +1"}
+{"origin": "r3c2", "dest": "r1c3", "tilt": 26.25, "lean": 90.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +1"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 20.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 20.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 22.5, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 22.5, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 22.5, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 23.75, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 21.25, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 21.25, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 22.5, "lean": 90.0, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 5.902}, "out_route_mm": 6.12, "out_route_finger_mm": 2.59, "out_route_palm_mm": 5.99, "ok": true, "route_mm": 2.36, "palm_mm": 2.05, "pick_margin": {"min_deg": 0.182, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.451}, "finger_below_top_mm": 1.84, "thumb_below_top_mm": 5.17}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 22.5, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 23.75, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 23.75, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 23.75, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 23.75, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 25.0, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 25.0, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 22.5, "lean": 85.0, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 5.736}, "out_route_mm": 5.52, "out_route_finger_mm": 3.01, "out_route_palm_mm": 5.42, "ok": true, "route_mm": 2.72, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.793, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.853}, "finger_below_top_mm": 0.36, "thumb_below_top_mm": 6.59}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 22.5, "lean": 87.5, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 5.827}, "out_route_mm": 5.84, "out_route_finger_mm": 2.79, "out_route_palm_mm": 5.75, "ok": true, "route_mm": 2.51, "palm_mm": 1.88, "pick_margin": {"min_deg": 0.79, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.654}, "finger_below_top_mm": 1.17, "thumb_below_top_mm": 5.93}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 23.75, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 23.75, "lean": 85.0, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.007, "joint": "r_wrist_pitch", "shoulder_roll_deg": 6.077}, "out_route_mm": 5.9, "out_route_finger_mm": 2.7, "out_route_palm_mm": 5.91, "ok": true, "route_mm": 2.59, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.845, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.148}, "finger_below_top_mm": 0.31, "thumb_below_top_mm": 5.51}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 25.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 25.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 21.25, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 21.25, "lean": 90.0, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 5.527}, "out_route_mm": 5.7, "out_route_finger_mm": 2.93, "out_route_palm_mm": 5.57, "ok": true, "route_mm": 2.53, "palm_mm": 2.06, "pick_margin": {"min_deg": 0.149, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.168}, "finger_below_top_mm": 1.86, "thumb_below_top_mm": 6.36}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 25.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 26.25, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 20.0, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 20.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 26.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 26.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 26.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 26.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 20.0, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 20.0, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 25.0, "lean": 90.0, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.132, "joint": "r_wrist_pitch", "shoulder_roll_deg": 6.566}, "out_route_mm": 6.64, "out_route_finger_mm": 2.2, "out_route_palm_mm": 6.6, "ok": true, "route_mm": 2.03, "palm_mm": 1.99, "pick_margin": {"min_deg": 0.183, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.982}, "finger_below_top_mm": 1.96, "thumb_below_top_mm": 2.88}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 25.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 23.75, "lean": 87.5, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.013, "joint": "r_wrist_pitch", "shoulder_roll_deg": 6.16}, "out_route_mm": 6.23, "out_route_finger_mm": 2.43, "out_route_palm_mm": 6.04, "ok": true, "route_mm": 2.38, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.841, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.936}, "finger_below_top_mm": 1.17, "thumb_below_top_mm": 4.82}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 23.75, "lean": 90.0, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.018, "joint": "r_wrist_pitch", "shoulder_roll_deg": 6.257}, "out_route_mm": 6.33, "out_route_finger_mm": 2.44, "out_route_palm_mm": 6.51, "ok": true, "route_mm": 2.31, "palm_mm": 2.03, "pick_margin": {"min_deg": 0.177, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.712}, "finger_below_top_mm": 1.87, "thumb_below_top_mm": 4.0}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 20.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 20.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 26.25, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 26.25, "lean": 85.0, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.284, "joint": "r_wrist_pitch", "shoulder_roll_deg": 6.665}, "out_route_mm": 6.42, "out_route_finger_mm": 2.29, "out_route_palm_mm": 6.49, "ok": true, "route_mm": 2.22, "palm_mm": 1.86, "pick_margin": {"min_deg": 0.964, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.722}, "finger_below_top_mm": 0.26, "thumb_below_top_mm": 3.34}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 20.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 21.25, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 25.0, "lean": 85.0, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.096, "joint": "r_wrist_pitch", "shoulder_roll_deg": 6.385}, "out_route_mm": 6.12, "out_route_finger_mm": 2.5, "out_route_palm_mm": 6.41, "ok": true, "route_mm": 2.47, "palm_mm": 1.86, "pick_margin": {"min_deg": 0.904, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.431}, "finger_below_top_mm": 0.28, "thumb_below_top_mm": 4.43}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 25.0, "lean": 87.5, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.118, "joint": "r_wrist_pitch", "shoulder_roll_deg": 6.471}, "out_route_mm": 6.42, "out_route_finger_mm": 2.29, "out_route_palm_mm": 6.46, "ok": true, "route_mm": 2.2, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.904, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.212}, "finger_below_top_mm": 1.19, "thumb_below_top_mm": 3.7}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 21.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 21.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 21.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 21.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 22.5, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 22.5, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 26.25, "lean": 87.5, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.285, "joint": "r_wrist_pitch", "shoulder_roll_deg": 6.76}, "out_route_mm": 6.8, "out_route_finger_mm": 2.06, "out_route_palm_mm": 6.63, "ok": true, "route_mm": 1.91, "palm_mm": 1.99, "pick_margin": {"min_deg": 0.194, "joint": "r_wrist_roll", "shoulder_roll_deg": 31.483}, "finger_below_top_mm": 1.08, "thumb_below_top_mm": 2.43}
+{"origin": "r3c2", "dest": "r2c1", "tilt": 26.25, "lean": 90.0, "carry": 9, "psi": -45.0, "dest_margin": {"min_deg": 0.356, "joint": "r_wrist_pitch", "shoulder_roll_deg": 6.881}, "out_route_mm": 6.8, "out_route_finger_mm": 2.16, "out_route_palm_mm": 6.35, "ok": true, "route_mm": 1.84, "palm_mm": 2.01, "pick_margin": {"min_deg": 0.24, "joint": "r_wrist_roll", "shoulder_roll_deg": 31.24}, "finger_below_top_mm": 2.01, "thumb_below_top_mm": 1.68}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 20.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 20.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 22.5, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 22.5, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 22.5, "lean": 90.0, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.037}, "out_route_mm": 6.03, "out_route_finger_mm": 2.71, "out_route_palm_mm": 5.85, "ok": true, "route_mm": 2.36, "palm_mm": 2.05, "pick_margin": {"min_deg": 0.182, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.451}, "finger_below_top_mm": 1.84, "thumb_below_top_mm": 5.17}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 22.5, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 22.5, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 23.75, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 21.25, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 21.25, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 23.75, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 23.75, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 23.75, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 23.75, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 25.0, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 25.0, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 23.75, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 23.75, "lean": 85.0, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.002, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.143}, "out_route_mm": 5.83, "out_route_finger_mm": 2.79, "out_route_palm_mm": 5.8, "ok": true, "route_mm": 2.59, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.845, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.148}, "finger_below_top_mm": 0.31, "thumb_below_top_mm": 5.51}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 20.0, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 20.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 25.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 25.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 25.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 26.25, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 22.5, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 22.5, "lean": 87.5, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 36.963}, "out_route_mm": 5.73, "out_route_finger_mm": 2.92, "out_route_palm_mm": 5.63, "ok": true, "route_mm": 2.51, "palm_mm": 1.88, "pick_margin": {"min_deg": 0.79, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.654}, "finger_below_top_mm": 1.17, "thumb_below_top_mm": 5.93}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 25.0, "lean": 90.0, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.123, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.561}, "out_route_mm": 6.66, "out_route_finger_mm": 2.13, "out_route_palm_mm": 6.54, "ok": true, "route_mm": 2.03, "palm_mm": 1.99, "pick_margin": {"min_deg": 0.183, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.982}, "finger_below_top_mm": 1.96, "thumb_below_top_mm": 2.88}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 25.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 26.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 26.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 26.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 26.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 23.75, "lean": 87.5, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.006, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.223}, "out_route_mm": 6.15, "out_route_finger_mm": 2.53, "out_route_palm_mm": 5.86, "ok": true, "route_mm": 2.38, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.841, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.936}, "finger_below_top_mm": 1.17, "thumb_below_top_mm": 4.82}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 23.75, "lean": 90.0, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.008, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.317}, "out_route_mm": 6.35, "out_route_finger_mm": 2.45, "out_route_palm_mm": 6.24, "ok": true, "route_mm": 2.31, "palm_mm": 2.03, "pick_margin": {"min_deg": 0.177, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.712}, "finger_below_top_mm": 1.87, "thumb_below_top_mm": 4.0}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 21.25, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 21.25, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 25.0, "lean": 85.0, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.077, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.381}, "out_route_mm": 6.15, "out_route_finger_mm": 2.47, "out_route_palm_mm": 6.22, "ok": true, "route_mm": 2.47, "palm_mm": 1.86, "pick_margin": {"min_deg": 0.904, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.431}, "finger_below_top_mm": 0.28, "thumb_below_top_mm": 4.43}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 25.0, "lean": 87.5, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.093, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.464}, "out_route_mm": 6.44, "out_route_finger_mm": 2.21, "out_route_palm_mm": 6.39, "ok": true, "route_mm": 2.2, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.904, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.212}, "finger_below_top_mm": 1.19, "thumb_below_top_mm": 3.7}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 20.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 20.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 20.0, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 20.0, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 20.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 21.25, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 26.25, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 26.25, "lean": 85.0, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.129, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.573}, "out_route_mm": 6.43, "out_route_finger_mm": 2.19, "out_route_palm_mm": 6.37, "ok": true, "route_mm": 2.22, "palm_mm": 1.86, "pick_margin": {"min_deg": 0.964, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.722}, "finger_below_top_mm": 0.26, "thumb_below_top_mm": 3.34}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 21.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 21.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 21.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 21.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 22.5, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 22.5, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 26.25, "lean": 87.5, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.123, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.667}, "out_route_mm": 6.8, "out_route_finger_mm": 1.96, "out_route_palm_mm": 6.51, "ok": true, "route_mm": 1.91, "palm_mm": 1.99, "pick_margin": {"min_deg": 0.194, "joint": "r_wrist_roll", "shoulder_roll_deg": 31.483}, "finger_below_top_mm": 1.08, "thumb_below_top_mm": 2.43}
+{"origin": "r3c2", "dest": "r2c2", "tilt": 26.25, "lean": 90.0, "carry": 9, "psi": -46.5, "dest_margin": {"min_deg": 0.14, "joint": "r_wrist_pitch", "shoulder_roll_deg": 37.777}, "out_route_mm": 6.92, "out_route_finger_mm": 1.97, "out_route_palm_mm": 6.54, "ok": true, "route_mm": 1.84, "palm_mm": 2.01, "pick_margin": {"min_deg": 0.24, "joint": "r_wrist_roll", "shoulder_roll_deg": 31.24}, "finger_below_top_mm": 2.01, "thumb_below_top_mm": 1.68}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 20.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 20.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 22.5, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 22.5, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 22.5, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 23.75, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 21.25, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 21.25, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 22.5, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 22.5, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 23.75, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 23.75, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 23.75, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 23.75, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 25.0, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 25.0, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 21.25, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 21.25, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 20.0, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 20.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 25.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 25.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 23.75, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 23.75, "lean": 85.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +11"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 25.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 26.25, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 22.5, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 22.5, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 26.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 26.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 26.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 26.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 20.0, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 20.0, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 25.0, "lean": 90.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +11"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 25.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 23.75, "lean": 87.5, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +11"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 23.75, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 26.25, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 26.25, "lean": 85.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +11"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 20.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 20.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 20.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 21.25, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 20.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 20.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 25.0, "lean": 85.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +11"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 25.0, "lean": 87.5, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +11"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 21.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 21.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 21.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 21.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 21.25, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 21.25, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 26.25, "lean": 87.5, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +11"}
+{"origin": "r3c2", "dest": "r2c3", "tilt": 26.25, "lean": 90.0, "ok": false, "stage": "plan", "reason": "IK found no pose for rung +11"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 22.5, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 22.5, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 22.5, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 22.5, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 22.5, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 23.75, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 20.0, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 20.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 23.75, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 23.75, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 23.75, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 23.75, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 25.0, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 25.0, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 21.25, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 21.25, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 22.5, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 22.5, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 25.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 25.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 25.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 26.25, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 23.75, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 23.75, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 22.5, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 22.5, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 26.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 26.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 26.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 26.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 23.75, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 23.75, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 20.0, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 20.0, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 25.0, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 25.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 20.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 20.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 20.0, "lean": 90.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 52.933}, "out_route_mm": 5.79, "out_route_finger_mm": 2.62, "out_route_palm_mm": 6.12, "ok": true, "route_mm": 2.62, "palm_mm": 2.03, "pick_margin": {"min_deg": 0.086, "joint": "r_arm_yaw", "shoulder_roll_deg": 29.864}, "finger_below_top_mm": 1.92, "thumb_below_top_mm": 7.57}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 20.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 26.25, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 26.25, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 20.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 21.25, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 21.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 21.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 21.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 21.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 20.0, "lean": 85.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.05}, "out_route_mm": 5.39, "out_route_finger_mm": 2.88, "out_route_palm_mm": 5.99, "ok": true, "route_mm": 3.0, "palm_mm": 1.88, "pick_margin": {"min_deg": 0.677, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.226}, "finger_below_top_mm": 0.59, "thumb_below_top_mm": 8.82}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 20.0, "lean": 87.5, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 52.996}, "out_route_mm": 5.57, "out_route_finger_mm": 2.77, "out_route_palm_mm": 6.04, "ok": true, "route_mm": 2.8, "palm_mm": 1.91, "pick_margin": {"min_deg": 0.611, "joint": "r_wrist_pitch", "shoulder_roll_deg": 30.049}, "finger_below_top_mm": 1.3, "thumb_below_top_mm": 8.22}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 21.25, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 21.25, "lean": 85.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.128}, "out_route_mm": 5.65, "out_route_finger_mm": 2.69, "out_route_palm_mm": 6.05, "ok": true, "route_mm": 2.74, "palm_mm": 1.91, "pick_margin": {"min_deg": 1.191, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.548}, "finger_below_top_mm": 0.43, "thumb_below_top_mm": 7.67}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 22.5, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 22.5, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 22.5, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 22.5, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 21.25, "lean": 87.5, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.112}, "out_route_mm": 5.73, "out_route_finger_mm": 2.69, "out_route_palm_mm": 6.07, "ok": true, "route_mm": 2.7, "palm_mm": 1.93, "pick_margin": {"min_deg": 0.731, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.357}, "finger_below_top_mm": 1.2, "thumb_below_top_mm": 7.05}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 21.25, "lean": 90.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.082}, "out_route_mm": 5.92, "out_route_finger_mm": 2.59, "out_route_palm_mm": 6.17, "ok": true, "route_mm": 2.53, "palm_mm": 2.06, "pick_margin": {"min_deg": 0.149, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.168}, "finger_below_top_mm": 1.86, "thumb_below_top_mm": 6.36}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 22.5, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 23.75, "lean": 80.0, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 22.5, "lean": 90.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.0, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.166}, "out_route_mm": 6.23, "out_route_finger_mm": 2.38, "out_route_palm_mm": 6.23, "ok": true, "route_mm": 2.36, "palm_mm": 2.05, "pick_margin": {"min_deg": 0.182, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.451}, "finger_below_top_mm": 1.84, "thumb_below_top_mm": 5.17}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 22.5, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 22.5, "lean": 85.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.821, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.403}, "out_route_mm": 5.72, "out_route_finger_mm": 2.77, "out_route_palm_mm": 6.23, "ok": true, "route_mm": 2.72, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.793, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.853}, "finger_below_top_mm": 0.36, "thumb_below_top_mm": 6.59}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 22.5, "lean": 87.5, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.297, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.248}, "out_route_mm": 5.95, "out_route_finger_mm": 2.59, "out_route_palm_mm": 6.25, "ok": true, "route_mm": 2.51, "palm_mm": 1.88, "pick_margin": {"min_deg": 0.79, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.654}, "finger_below_top_mm": 1.17, "thumb_below_top_mm": 5.93}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 23.75, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 23.75, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 23.75, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 23.75, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 25.0, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 25.0, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 23.75, "lean": 82.5, "ok": false, "stage": "straddle", "reason": "predicted grasp pose does not straddle: ['finger_above_top']"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 23.75, "lean": 85.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 1.844, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.72}, "out_route_mm": 5.8, "out_route_finger_mm": 2.79, "out_route_palm_mm": 6.34, "ok": true, "route_mm": 2.59, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.845, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.148}, "finger_below_top_mm": 0.31, "thumb_below_top_mm": 5.51}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 25.0, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 25.0, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 25.0, "lean": 85.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 25.0, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 25.0, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 26.25, "lean": 80.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 25.0, "lean": 90.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 1.788, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.735}, "out_route_mm": 6.49, "out_route_finger_mm": 2.43, "out_route_palm_mm": 6.45, "ok": true, "route_mm": 2.03, "palm_mm": 1.99, "pick_margin": {"min_deg": 0.183, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.982}, "finger_below_top_mm": 1.96, "thumb_below_top_mm": 2.88}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 25.0, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 23.75, "lean": 87.5, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 1.277, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.556}, "out_route_mm": 6.09, "out_route_finger_mm": 2.58, "out_route_palm_mm": 6.21, "ok": true, "route_mm": 2.38, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.841, "joint": "r_arm_yaw", "shoulder_roll_deg": 30.936}, "finger_below_top_mm": 1.17, "thumb_below_top_mm": 4.82}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 23.75, "lean": 90.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 0.874, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.445}, "out_route_mm": 6.24, "out_route_finger_mm": 2.54, "out_route_palm_mm": 6.38, "ok": true, "route_mm": 2.31, "palm_mm": 2.03, "pick_margin": {"min_deg": 0.177, "joint": "r_wrist_roll", "shoulder_roll_deg": 30.712}, "finger_below_top_mm": 1.87, "thumb_below_top_mm": 4.0}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 26.25, "lean": 92.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 26.25, "lean": 95.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 26.25, "lean": 97.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 26.25, "lean": 100.0, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 25.0, "lean": 85.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 2.889, "joint": "r_wrist_pitch", "shoulder_roll_deg": 54.033}, "out_route_mm": 5.95, "out_route_finger_mm": 2.72, "out_route_palm_mm": 6.33, "ok": true, "route_mm": 2.47, "palm_mm": 1.86, "pick_margin": {"min_deg": 0.904, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.431}, "finger_below_top_mm": 0.28, "thumb_below_top_mm": 4.43}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 25.0, "lean": 87.5, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 2.242, "joint": "r_wrist_pitch", "shoulder_roll_deg": 53.854}, "out_route_mm": 6.26, "out_route_finger_mm": 2.52, "out_route_palm_mm": 6.33, "ok": true, "route_mm": 2.2, "palm_mm": 1.87, "pick_margin": {"min_deg": 0.904, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.212}, "finger_below_top_mm": 1.19, "thumb_below_top_mm": 3.7}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 26.25, "lean": 82.5, "ok": false, "stage": "plan", "reason": "IK found no grasp pose in the bounded start set"}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 26.25, "lean": 85.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 3.925, "joint": "r_wrist_pitch", "shoulder_roll_deg": 54.35}, "out_route_mm": 6.25, "out_route_finger_mm": 2.51, "out_route_palm_mm": 6.33, "ok": true, "route_mm": 2.22, "palm_mm": 1.86, "pick_margin": {"min_deg": 0.964, "joint": "r_arm_yaw", "shoulder_roll_deg": 31.722}, "finger_below_top_mm": 0.26, "thumb_below_top_mm": 3.34}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 26.25, "lean": 87.5, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 2.678, "joint": "r_wrist_pitch", "shoulder_roll_deg": 54.003}, "out_route_mm": 6.64, "out_route_finger_mm": 2.27, "out_route_palm_mm": 6.46, "ok": true, "route_mm": 1.91, "palm_mm": 1.99, "pick_margin": {"min_deg": 0.194, "joint": "r_wrist_roll", "shoulder_roll_deg": 31.483}, "finger_below_top_mm": 1.08, "thumb_below_top_mm": 2.43}
+{"origin": "r3c2", "dest": "r3c3", "tilt": 26.25, "lean": 90.0, "carry": 9, "psi": -20.9, "dest_margin": {"min_deg": 2.767, "joint": "r_wrist_pitch", "shoulder_roll_deg": 54.038}, "out_route_mm": 6.74, "out_route_finger_mm": 2.28, "out_route_palm_mm": 6.47, "ok": true, "route_mm": 1.84, "palm_mm": 2.01, "pick_margin": {"min_deg": 0.24, "joint": "r_wrist_roll", "shoulder_roll_deg": 31.24}, "finger_below_top_mm": 2.01, "thumb_below_top_mm": 1.68}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 26.25, "lean": 87.5, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}
+{"origin": "r3c2", "dest": "r3c1", "tilt": 26.25, "lean": 90.0, "ok": false, "stage": "destination", "reason": "IK found no pose that sets the object down on the target with the grasp's attitude"}

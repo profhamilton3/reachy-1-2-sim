@@ -128,23 +128,43 @@ _SHOULDER_XY = (float(_BASE[0]), float(_BASE[1] + _SHOULDER_Y["right"]))
 
 @dataclass(frozen=True)
 class CraneSpec:
-    """The approach.  Defaults are the recorded x-face plan, not a new search.
+    """The approach.
 
     ``lean_bearing_deg`` is the hand's lean azimuth relative to the bearing
-    from the shoulder to the object: 83.27 deg absolute at r2c2 in the
-    recorded plan, whose bearing is 23.75 deg.  ``face_axis`` is the object's
-    own axis the jaw closes along ("x": pads on the object's +/-x faces).  No
-    y-face straddle was found in what was examined (the lean staggers the pads
-    ~6 cm vertically; best worst-case margin -5.1 mm), so it is not offered.
-    That finding is
-    limited to what was examined: the cube at r2c2, opening -65 deg, a
-    48-case grid of tilt/lean/jaw-shift and a 12-start optimiser of the worst
-    margin, with this rig's joint limits.  It is not a claim about other
-    cells, openings or hand models.
+    from the shoulder to the object; ``face_axis`` is the object's own axis
+    the jaw closes along ("x": pads on the object's +/-x faces; for a square
+    object "y" is "x" with the lean turned 90 deg, so it is not searched).
+
+    October mount (#195).  Tilt 22.5 deg, lean 87.5 deg, searched offline
+    for red_cube against every crane check, with the palm in the hand model
+    (`grasp_alignment.PALM`), then flown.  Evidence and scripts:
+    docs/reviews/2026-10-19-crane-retune-195/ (README):
+
+      * ``palm_geometry.py``: with the palm held clear of the 6 cm cube's
+        top, both pad centres are below it only for tilts up to ~20-25 deg;
+      * ``reach_attitude.py``: those tilts are reachable inside the joint
+        travel at some cells only (the wrist's +/-45 deg pitch and roll);
+        r2c2 and r2c1 need >= 25 deg, r3c1 none up to 30;
+      * ``lift_grid.py`` / ``lift_seeded.py``: the full lift plan passes at
+        r3c2 only (tilt 20-26.25, lean 85-90);
+      * ``fine_grid.py``: from r3c2 the placement plans to r2c1, r2c2 and
+        r3c3 for tilt >= 22.5 (lean 87.5-90 at 22.5);
+      * ``flights/band_lift.jsonl``: the lift FLIES clean (every criterion)
+        for tilt 20-22.5 at lean 85-90 and 23.75 at lean 85-87.5; steeper,
+        the descent's straddle check halts it (thumb pad over the face).
+
+    22.5 / 87.5 is the one attitude that both plans to all three
+    destinations and has clean lift flights on every side of it, so the
+    lift and the placement share it, and r3c2 is the crane's one origin for
+    the 6 cm cube at the October mount: the #174 origin r2c2 cannot be
+    straddled with the palm clear at any reachable attitude.  It is narrow:
+    at the grasp the arm stands 0.8 deg from the arm-yaw stop and the finger
+    pad's centre 1.2 mm below the cube's top, and the r2c1 / r2c2 set-downs
+    stand on the wrist-pitch stop (fine_grid rows).
     """
     face_axis: str = "x"
-    tilt_deg: float = 30.0
-    lean_bearing_deg: float = 59.52
+    tilt_deg: float = 22.5
+    lean_bearing_deg: float = 87.5
     opening_deg: float = -65.0
     #: The wider release (#173): the gripper's travel ends at -68.75 deg, and
     #: this stays 0.75 deg inside it.  Used only when the measured state says
@@ -160,6 +180,14 @@ class CraneSpec:
     #: How far the hand backs out along its own axis (up the approach) while
     #: the grip lets go; 0 for the lift.  See `crane_place_live.PlaceSpec`.
     release_backoff_m: float = 0.0
+    #: How far the palm (`grasp_alignment.PALM`, #192's hand collision box)
+    #: stays above the object at grasp depth, as planned (#195).  The grasp
+    #: height is raised until it does; the route check then holds the palm,
+    #: like the pads, to the prediction tolerance (<= 0.494 mm).  2 mm is four
+    #: times that, for the vertical tracking error left after the hover
+    #: correction, which drifted up to 0.4 mm over the October descents
+    #: (flights/).
+    palm_clearance_m: float = 0.002
     close_deg: float = -5.0          # primitives._GRIPPER_CLOSED_DEG
     transit_opening_deg: float = -45.0   # rig_routes.OPEN
     rung_m: float = 0.01
@@ -193,17 +221,21 @@ def prediction_tolerance(distance_m: float) -> float:
 class CraneLimits:
     """Correction bounds and detection thresholds, fixed before motion.
 
-    From the recorded attempts (data/01-recorded-attempts-analysis.json):
-      * realised jaw-gap centre vs commanded, pre-contact: lateral 2.6-4.6 mm,
-        vertical 12.0-12.2 mm low; the lateral shift that would have
-        equalised the x-face pads' predicted route clearance was 5.45 mm.
-        A correction need beyond the recorded regime means something else is
-        wrong, so the caps are those maxima rounded up to the next mm.
-      * grip force read exactly 0.0 N in all 2194 pre-contact states and was
-        positive at first pad contact; the resting cube moved 0.0000 mm.
+    The correction caps are re-derived at the October mount (#195) the way
+    the August ones were (the largest correction the flights needed, rounded
+    up to the next mm: a need beyond that regime means something else is
+    wrong), from the offline physics flights in
+    docs/reviews/2026-10-19-crane-retune-195/flights/ flown with the caps
+    opened to measure: in the 39 that grasped and finished (the lift from
+    r3c2 and placements to r2c2 and r3c3, nominal and with the cube 3 mm
+    off), the realised jaw-gap centre sat 5.32-5.38 mm sideways and ~9.4 mm
+    low of the commanded one at the hover, and the hover correction needed
+    7.31-7.86 mm laterally and 8.89-9.04 mm vertically.  So 8 mm and 10 mm.
+    The pre-contact readings still hold: grip force read 0.0 N until the
+    pads met the cube, and nothing else on the board moved.
     """
-    max_lateral_correction_m: float = 0.006
-    max_vertical_correction_m: float = 0.013
+    max_lateral_correction_m: float = 0.008
+    max_vertical_correction_m: float = 0.010
     hover_corrections: int = 3
     pre_insertion_corrections: int = 1
     contact_force_n: float = 0.0     # halt on any reading above this
@@ -522,6 +554,11 @@ def check_crane_plan(planner, scene: SceneModel, plan: CranePlan,
         raise CraneRefused("pad_route", f"{side} pad route clearance "
                            f"{1000 * route.min_m:.2f} mm < {1000 * tol:.3f} mm "
                            f"from rung +{top}", route=route.as_dict())
+    # The palm (#195): a lateral re-centring cannot help it, so it is its own
+    # stage and not `correctable`.
+    if route.palm_m < tol:
+        raise CraneRefused("palm_route", f"palm route clearance {1000 * route.palm_m:.2f} mm "
+                           f"< {1000 * tol:.3f} mm from rung +{top}", route=route.as_dict())
 
     # 4. The straddle the descent should end in (predicted), before closing.
     hand0 = G.hand_frames(np.asarray(plan.rungs[0]) + off, g_open)
@@ -644,6 +681,19 @@ def plan_crane_pick(planner, scene: SceneModel, object_id: str,
     if got is None:
         raise CraneRefused("plan", "IK lost the grasp pose while centring it")
     q_g = got[0]
+    # ... and no deeper than leaves the palm `palm_clearance_m` above the
+    # object (#195).  Raising the hand moves the palm up one for one; twice
+    # settles the IK's sub-millimetre answer.
+    for _ in range(2):
+        palm = G.obb_separation(G.hand_frames(q_g, spec.opening_deg).palm, obj)
+        if palm >= spec.palm_clearance_m - 1e-5:
+            break
+        g1 = g1 + np.array([0.0, 0.0, spec.palm_clearance_m - palm])
+        got = solve_gap(arm, rot, g1, spec.opening_deg, q_g, tol)
+        if got is None:
+            raise CraneRefused("plan", "IK lost the grasp pose while raising the palm "
+                               "clear of the object")
+        q_g = got[0]
     targets = [g1 + np.array([0.0, 0.0, k * spec.rung_m])
                for k in range(spec.via_rungs + 1)]
     rungs = _solve_ladder(arm, rot, targets, spec.opening_deg, q_g, tol)
