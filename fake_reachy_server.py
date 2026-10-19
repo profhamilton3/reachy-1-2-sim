@@ -581,11 +581,32 @@ def _arm_ik(target: np.ndarray, side: str, q0=None):
     return q, success
 
 
+_ARM_CHAIN = ("shoulder_pitch", "shoulder_roll", "arm_yaw", "elbow_pitch",
+              "forearm_yaw", "wrist_pitch", "wrist_roll")
+
+
 class FakeArmKinematicsService(arm_kinematics_pb2_grpc.ArmKinematicsServicer):
+    def __init__(self, backend=None) -> None:
+        self._backend = backend
+
+    def _present_chain(self, side: str):
+        """The arm's present joint positions (radians, chain order), or None."""
+        if self._backend is None:
+            return None
+        joints = self._backend.latest_snapshot().joints
+        names = [f"{side[0]}_{n}" for n in _ARM_CHAIN]
+        if any(n not in joints for n in names):
+            return None
+        return [joints[n].present_position for n in names]
+
     def ComputeArmIK(self, request, context):
         side = "left" if request.target.side == arm_kinematics_pb2.LEFT else "right"
         target = np.array(list(request.target.pose.data), dtype=float).reshape(4, 4)
-        q0 = list(request.q0.positions) or None
+        # The SDK sends no q0 unless the caller passes one.  Unseeded, the solver
+        # would start from all zeros and stall on poses it solves from the arm's
+        # own pose (#199); seed from the present joints.  A request that carries
+        # a q0 is solved from it, unchanged.
+        q0 = list(request.q0.positions) or self._present_chain(side)
         joints, success = _arm_ik(target, side, q0)
         if not success:
             log.warning("ArmIK: no solution for target %s", target[:3, 3])
@@ -834,7 +855,7 @@ def serve() -> None:
         FakeHeadKinematicsService(), server
     )
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(
-        FakeArmKinematicsService(), server
+        FakeArmKinematicsService(joint_backend), server
     )
     camera_reachy_pb2_grpc.add_CameraServiceServicer_to_server(
         # remote_zoom_backend is the MujocoRemoteBackend under mujoco-remote and
