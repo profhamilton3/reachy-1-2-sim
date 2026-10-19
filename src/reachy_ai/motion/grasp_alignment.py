@@ -64,9 +64,20 @@ THUMB_PAD = K._THUMB_FRAME_BOXES[1]
 FINGER_PAD = K._FINGER_FRAME_BOXES[1]
 assert THUMB_PAD[0] == "r_thumb_col" and FINGER_PAD[0] == "r_finger_col"
 
-#: Links checked against the table.  The hand's only collision geoms in the
-#: MJCF are the two pads, so the hand is checked as those two boxes, not as
-#: the tube.
+#: The palm, (name, centre, half-extents) in the r_gripper_thumb frame: the
+#: lower of the two hand collision boxes #192 added (`r_palm_col`; the other,
+#: `r_hand_back_col`, sits above it).  Its underside is 5 mm above the pads'
+#: tops, so on a deep grasp it is the palm, not a pad, that meets the
+#: object's top: the first October crane flight (#195) halted on exactly that
+#: (`r_palm_col` touched the cube 1 rung above grasp depth), with every pad
+#: check passing.  Checked against the compiled model in
+#: tests/unit/test_grasp_alignment.py.
+PALM = ("r_palm_col", (0.0, -0.018, -0.040), (0.025, 0.028, 0.018))
+
+#: Links checked against the table.  The hand's collision geoms in the MJCF
+#: are the two pads and, since #192, the palm and the back of the hand; the
+#: hand is checked as the pads and the palm (the back is above the palm), not
+#: as the tube.
 TABLE_LINKS = ("upper_arm", "forearm")
 
 
@@ -156,6 +167,7 @@ class HandFrames:
     finger: Box                  # r_finger_col
     thumb_face: np.ndarray       # centre of the thumb pad's inner face
     finger_face: np.ndarray      # centre of the finger pad's inner face
+    palm: Optional[Box] = None   # r_palm_col (#195)
 
     @property
     def gap_mid(self) -> np.ndarray:
@@ -205,8 +217,11 @@ def hand_frames(joints: Sequence[float], gripper_deg: float) -> HandFrames:
     # y = -0.037); the finger pad faces +y (back toward the thumb).
     thumb_face = thumb_origin + r_thumb @ (tc - np.array([0.0, th[1], 0.0]))
     finger_face = finger_origin + r_finger @ (fc + np.array([0.0, fh[1], 0.0]))
+    _n, pc, ph = PALM
+    palm = Box("palm", thumb_origin + r_thumb @ np.asarray(pc, dtype=float), r_thumb,
+               np.asarray(ph, dtype=float))
     return HandFrames(wrist, r_thumb, r_finger, thumb, finger, thumb_face,
-                      finger_face)
+                      finger_face, palm)
 
 
 def hand_rotation(joints: Sequence[float]) -> np.ndarray:
@@ -325,6 +340,10 @@ class RouteReport:
     finger_at: int
     end: PadClearance            # at the last sample (grasp depth)
     samples: int
+    #: The palm's worst clearance to the object on the route (#195), and where.
+    #: Not part of ``min_m``: a lateral re-centring does not change it.
+    palm_m: float = math.inf
+    palm_at: int = -1
 
     @property
     def min_m(self) -> float:
@@ -335,6 +354,8 @@ class RouteReport:
                 "route_finger_mm": round(1000 * self.finger_m, 2),
                 "route_thumb_at": self.thumb_at,
                 "route_finger_at": self.finger_at,
+                "route_palm_mm": round(1000 * self.palm_m, 2),
+                "route_palm_at": self.palm_at,
                 "samples": self.samples, "end": self.end.as_dict()}
 
 
@@ -352,7 +373,7 @@ def densify(waypoints: Sequence[Sequence[float]], max_step_deg: float = 0.25
 def route_clearance(route: Sequence[Sequence[float]], gripper_deg: float,
                     obj: Box, offset: Optional[np.ndarray] = None,
                     max_step_deg: float = 0.25) -> RouteReport:
-    """Worst thumb and finger clearance to ``obj`` along a commanded route.
+    """Worst thumb, finger and palm clearance to ``obj`` along a commanded route.
 
     ``route`` is the commanded joint waypoints, top to bottom; the lines
     between them are sampled at ``max_step_deg`` (0.25 deg moves a pad by
@@ -361,19 +382,22 @@ def route_clearance(route: Sequence[Sequence[float]], gripper_deg: float,
     """
     off = np.zeros(7) if offset is None else np.asarray(offset, dtype=float)
     pts = densify(route, max_step_deg)
-    tw, fw, ti, fi = math.inf, math.inf, -1, -1
+    tw, fw, pw, ti, fi, pi = math.inf, math.inf, math.inf, -1, -1, -1
     end = None
     for k, q in enumerate(pts):
         hand = hand_frames(np.asarray(q) + off, gripper_deg)
         t = obb_separation(hand.thumb, obj)
         f = obb_separation(hand.finger, obj)
+        p = obb_separation(hand.palm, obj)
         if t < tw:
             tw, ti = t, k
         if f < fw:
             fw, fi = f, k
+        if p < pw:
+            pw, pi = p, k
         if k == len(pts) - 1:
             end = pad_clearance(hand, obj)
-    return RouteReport(tw, fw, ti, fi, end, len(pts))
+    return RouteReport(tw, fw, ti, fi, end, len(pts), pw, pi)
 
 
 def centring_shift(end: PadClearance, route: RouteReport,
@@ -449,7 +473,8 @@ class TableReport:
 def table_clearance(scene: SceneModel, seq: Iterable[Sequence[float]],
                     gripper_deg: float) -> TableReport:
     """Upper arm and forearm capsules (exact capsule-vs-box) and both pad
-    boxes (lowest corner) against the tabletop, worst over ``seq``."""
+    boxes and the palm (lowest corner) against the tabletop, worst over
+    ``seq``."""
     table = scene.table
     if table is None:
         raise ValueError("scene has no table")
@@ -466,7 +491,7 @@ def table_clearance(scene: SceneModel, seq: Iterable[Sequence[float]],
             if d < worst[0]:
                 worst = (d, name, k)
         hand = hand_frames(q, gripper_deg)
-        for box in (hand.thumb, hand.finger):
+        for box in (hand.thumb, hand.finger, hand.palm):
             d = box.lowest_z - top
             by[box.name] = min(by.get(box.name, math.inf), d)
             if d < worst[0]:
