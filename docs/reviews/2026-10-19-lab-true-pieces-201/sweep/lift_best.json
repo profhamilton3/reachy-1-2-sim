@@ -1,0 +1,1004 @@
+[
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 15.7
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 33.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +1"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 21.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.99,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 17.9
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.01,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 29.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 26.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach (best of 4 side-on approaches); crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach (best of 4 side-on approaches)",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 8.7
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.02,
+   "crane": 0.0
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": "joints"
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": null
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 25.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.97,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "straddle: predicted grasp pose does not straddle: ['finger_above_top']"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 21.4
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.01,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 18.6
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.64,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 34.1
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +2"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 27.1
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.98,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 17.5
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.99,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 28.2
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.39,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +11"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 24.8
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach (best of 4 side-on approaches); crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach (best of 4 side-on approaches)",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 9.1
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.97,
+   "crane": 0.0
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": "joints"
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": null
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 24.5
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.97,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 17.8
+ },
+ {
+  "object": "pool_cyl_1",
+  "from": "r1c1",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.96,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 56.1
+ },
+ {
+  "object": "pool_cyl_1",
+  "from": "r1c2",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.96,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 61.1
+ },
+ {
+  "object": "pool_cyl_1",
+  "from": "r1c3",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 70.6
+ },
+ {
+  "object": "pool_cyl_1",
+  "from": "r2c1",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.98,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 57.1
+ },
+ {
+  "object": "pool_cyl_1",
+  "from": "r2c2",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.9,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 59.8
+ },
+ {
+  "object": "pool_cyl_1",
+  "from": "r2c3",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.69,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 64.0
+ },
+ {
+  "object": "pool_cyl_1",
+  "from": "r3c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach (best of 24 side-on approaches); crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach (best of 24 side-on approaches)",
+   "crane": "plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 43.6
+ },
+ {
+  "object": "pool_cyl_1",
+  "from": "r3c2",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.96,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 54.2
+ },
+ {
+  "object": "pool_cyl_1",
+  "from": "r3c3",
+  "to": "",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.96,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 39.2
+ },
+ {
+  "object": "blue_cylinder",
+  "from": "r1c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "opening",
+  "reason": "side-on: opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg); crane: plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg)",
+   "crane": "plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "blue_cylinder",
+  "from": "r1c2",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "opening",
+  "reason": "side-on: opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg); crane: plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg)",
+   "crane": "plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "blue_cylinder",
+  "from": "r1c3",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "opening",
+  "reason": "side-on: opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg); crane: plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg)",
+   "crane": "plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "blue_cylinder",
+  "from": "r2c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "opening",
+  "reason": "side-on: opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg); crane: plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg)",
+   "crane": "plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "blue_cylinder",
+  "from": "r2c2",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "opening",
+  "reason": "side-on: opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg); crane: plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg)",
+   "crane": "plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "blue_cylinder",
+  "from": "r2c3",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "opening",
+  "reason": "side-on: opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg); crane: plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg)",
+   "crane": "plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "blue_cylinder",
+  "from": "r3c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "opening",
+  "reason": "side-on: opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg); crane: plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg)",
+   "crane": "plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "blue_cylinder",
+  "from": "r3c2",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "opening",
+  "reason": "side-on: opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg); crane: plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg)",
+   "crane": "plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.1
+ },
+ {
+  "object": "blue_cylinder",
+  "from": "r3c3",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "opening",
+  "reason": "side-on: opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg); crane: plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "opening: blue_cylinder is 70.0 mm across; the open jaw leaves 67.8 mm at -65 deg (69.0 mm at the widest, -68 deg)",
+   "crane": "plan: blue_cylinder is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 0.9
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c2",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 0.8
+ },
+ {
+  "object": "foam_block",
+  "from": "r1c3",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: IK found no pose for rung +2",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: IK found no pose for rung +2"
+  },
+  "seconds": 0.8
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 0.8
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c2",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 0.7
+ },
+ {
+  "object": "foam_block",
+  "from": "r2c3",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: IK found no pose for rung +10",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "seconds": 1.1
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 1.0
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c2",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: pad_route: finger pad route clearance -2.50 mm < 0.494 mm from rung +9",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "pad_route: finger pad route clearance -2.50 mm < 0.494 mm from rung +9"
+  },
+  "seconds": 2.1
+ },
+ {
+  "object": "foam_block",
+  "from": "r3c3",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: foam_block is a foam box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 1.0
+ },
+ {
+  "object": "soda_can",
+  "from": "r1c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: soda_can is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: soda_can is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "soda_can",
+  "from": "r1c2",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: soda_can is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: soda_can is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "soda_can",
+  "from": "r1c3",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: soda_can is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: soda_can is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "soda_can",
+  "from": "r2c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: soda_can is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: soda_can is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "soda_can",
+  "from": "r2c2",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: soda_can is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: soda_can is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "soda_can",
+  "from": "r2c3",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: soda_can is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: soda_can is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "soda_can",
+  "from": "r3c1",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: soda_can is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: soda_can is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "soda_can",
+  "from": "r3c2",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: soda_can is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: soda_can is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ },
+ {
+  "object": "soda_can",
+  "from": "r3c3",
+  "to": "",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "shape",
+  "reason": "side-on: shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only; crane: plan: soda_can is a cylinder; the crane pick closes on two flat faces",
+  "at": "pick",
+  "refusals": {
+   "side-on": "shape: soda_can is a can cylinder; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only",
+   "crane": "plan: soda_can is a cylinder; the crane pick closes on two flat faces"
+  },
+  "seconds": 0.0
+ }
+]

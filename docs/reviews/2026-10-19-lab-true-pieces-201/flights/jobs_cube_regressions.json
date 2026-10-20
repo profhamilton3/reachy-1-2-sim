@@ -1,0 +1,157 @@
+[
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 3,
+   "priority": 0
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r1c2",
+  "dest": "r1c1",
+  "grasp": "best",
+  "contact": {
+   "condim": 3,
+   "priority": 0
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r2c2",
+  "dest": "r1c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 3,
+   "priority": 0
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r2c2",
+  "dest": "r3c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 3,
+   "priority": 0
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r3c3",
+  "dest": "r2c2",
+  "grasp": "best",
+  "contact": {
+   "condim": 3,
+   "priority": 0
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.002
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r1c2",
+  "dest": "r1c1",
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.002
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r2c2",
+  "dest": "r1c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.002
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r2c2",
+  "dest": "r3c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.002
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r3c3",
+  "dest": "r2c2",
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.002
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 6,
+   "priority": 1
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r1c2",
+  "dest": "r1c1",
+  "grasp": "best",
+  "contact": {
+   "condim": 6,
+   "priority": 1
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r2c2",
+  "dest": "r1c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 6,
+   "priority": 1
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r2c2",
+  "dest": "r3c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 6,
+   "priority": 1
+  }
+ },
+ {
+  "oid": "pool_box_1",
+  "origin": "r3c3",
+  "dest": "r2c2",
+  "grasp": "best",
+  "contact": {
+   "condim": 6,
+   "priority": 1
+  }
+ }
+]

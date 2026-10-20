@@ -1,0 +1,263 @@
+[
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.003
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r3c2",
+  "dest": null,
+  "grasp": "crane",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.003
+  }
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r1c2",
+  "dest": null,
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.003
+  }
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r2c3",
+  "dest": null,
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.003
+  }
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r3c2",
+  "dest": null,
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.003
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.004
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r3c2",
+  "dest": null,
+  "grasp": "crane",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.004
+  }
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r1c2",
+  "dest": null,
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.004
+  }
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r2c3",
+  "dest": null,
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.004
+  }
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r3c2",
+  "dest": null,
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.004
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.0075
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r3c2",
+  "dest": null,
+  "grasp": "crane",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.0075
+  }
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r1c2",
+  "dest": null,
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.0075
+  }
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r2c3",
+  "dest": null,
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.0075
+  }
+ },
+ {
+  "oid": "pool_cyl_1",
+  "origin": "r3c2",
+  "dest": null,
+  "grasp": "best",
+  "contact": {
+   "condim": 4,
+   "priority": 1,
+   "torsion": 0.0075
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "cube_xy_offset": [
+   0.001,
+   0
+  ],
+  "contact": {
+   "condim": 3,
+   "priority": 0
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "cube_xy_offset": [
+   -0.001,
+   0
+  ],
+  "contact": {
+   "condim": 3,
+   "priority": 0
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "cube_xy_offset": [
+   0,
+   0.001
+  ],
+  "contact": {
+   "condim": 3,
+   "priority": 0
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "cube_xy_offset": [
+   0,
+   -0.001
+  ],
+  "contact": {
+   "condim": 3,
+   "priority": 0
+  }
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "cube_xy_offset": [
+   0.001,
+   0
+  ]
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "cube_xy_offset": [
+   -0.001,
+   0
+  ]
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "cube_xy_offset": [
+   0,
+   0.001
+  ]
+ },
+ {
+  "oid": "red_cube",
+  "origin": "r2c1",
+  "dest": "r1c3",
+  "grasp": "best",
+  "cube_xy_offset": [
+   0,
+   -0.001
+  ]
+ }
+]

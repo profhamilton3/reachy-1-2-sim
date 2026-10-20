@@ -49,6 +49,57 @@ a held cube creep within the grasp (#55). Override with
 release/opening behaviour under no-slip is an open item, and none of this is
 physical-robot validation. See `docs/adr/0005-mujoco-noslip-contact-model.md`.
 
+## Pad contact: torsional friction (#201)
+
+The four pad geoms (`r_thumb_col`, `r_finger_col` and the left mirrors) use
+**`condim="4" priority="1"`**. Every other geom keeps the default `condim` 3
+and priority 0, and no friction value changes.
+
+- **`condim` 4** adds **torsional** friction about the contact normal to
+  MuJoCo's sliding friction.
+- **`priority` 1** makes a pad contact use the pad's own friction (sliding
+  1.0, torsion 0.005 m: MuJoCo's defaults) instead of the larger of the two
+  geoms'. Sliding is unchanged, since no scene object is above 1.0. Torsion
+  is 0.005 m rather than the objects' 0.01 m.
+
+**Why torsion.** Side-on, the pads close horizontally, so the contact normal
+is the pinch axis. With `condim` 3 nothing resists a twist about that axis,
+and a held cylinder pivots about the line between the pads. #180 found this:
+26 of 56 pool cylinder placements were clean.
+
+**Why priority.** With `condim` 4 alone, a pad contact took the object's
+0.01 m torsion. The crane's release (red_cube, r3c2) then left a pad on the
+cube after opening: 0.22 N, 0.04 mm, so `clean_placement` was false and
+`tests/integration/test_place_offline.py` failed 3 of 3. At 0.005 m the
+release is clean (0.0 N), and the cylinder still holds. At 0.002 m and
+0.001 m, a cylinder lift failed (1 of 3 each).
+
+**`multiccd`.** MuJoCo 3.11 enables multi-point convex collision by default.
+It is a *disable* flag (`mjDSBL_MULTICCD`), and the model leaves it on. It
+was already on in the #180 flights. A pad meets the standing cylinder at 3–5
+points (thumb) and 1–3 (finger), not one, and more points did not stop the
+pivot. Disabling it gives 1 point per pad, and the cylinder dropped at the
+lift.
+
+**Evidence:** `docs/reviews/2026-10-19-lab-true-pieces-201/`, with the pool
+cylinder at Siva's 45.7 × 71.1 mm.
+
+| Pads | Cylinder lifts (8 reachable cells) | Crane lift r3c2 release |
+|---|---|---|
+| `condim` 3 (before) | 2 of 8 | clean |
+| `condim` 4, larger-of-two torsion (0.01 m) | 8 of 8 | pad left on the cube (0.22 N) |
+| `condim` 6 (adds rolling) | 7 of 8 | — |
+| **`condim` 4, priority 1 (0.005 m), chosen** | 8 of 8; placements 51 of 56 | clean |
+
+That README also has the re-flown placements, the crane, and the torsion scan
+(0.001–0.0075 m). In that scan, the crane release and one zero-margin red_cube pair
+flip with no trend, and 0.005 m is the setting that keeps the crane clean and
+every cylinder lift.
+
+**Test fixture.** `tests/unit/test_gripper.py`'s prior fixture uses a μ 2.5
+cube. It gives the cube priority 1 too, so its pad contacts keep the
+larger-of-two rule.
+
 ## Grasp detection
 
 A gripper is **grasping** when the same object geom is in contact with *both* its
@@ -80,3 +131,6 @@ so objects rest on it but the robot ignores it.
   cube slide out of the shallow pads — expected for this simplified geometry.
 - Collision pads are a functional approximation of the true finger shape; the
   visual mesh is unchanged.
+- The pads' torsional friction and priority (#201) are a modelling choice
+  validated only in simulation flights, not against the physical pads. With
+  priority, an object whose friction is above 1.0 no longer raises the pads'.

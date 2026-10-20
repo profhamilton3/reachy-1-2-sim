@@ -1,0 +1,27 @@
+red_cube r1c1 -> None best | side-on all=True halt=None err=1.86 final=PRESENT
+red_cube r1c2 -> None best | side-on all=True halt=None err=2.03 final=PRESENT
+red_cube r1c3 -> None best | side-on all=True halt=None err=1.81 final=PRESENT
+red_cube r2c1 -> None best | side-on all=True halt=None err=5.06 final=PRESENT
+red_cube r2c2 -> None best | side-on all=True halt=None err=1.72 final=PRESENT
+red_cube r2c3 -> None best | side-on all=True halt=None err=1.63 final=PRESENT
+red_cube r3c1 -> None best | plan: side-on: plan: IK found no level grasp pose for this approach (best of 4 side-on approaches); crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c2 -> None best | side-on all=True halt=None err=1.72 final=PRESENT
+red_cube r3c3 -> None best | side-on all=True halt=None err=1.48 final=PRESENT
+pool_box_1 r1c1 -> None best | side-on all=True halt=None err=3.54 final=PRESENT
+pool_box_1 r1c2 -> None best | side-on all=True halt=None err=3.34 final=PRESENT
+pool_box_1 r1c3 -> None best | side-on all=True halt=None err=3.28 final=PRESENT
+pool_box_1 r2c1 -> None best | side-on all=True halt=None err=3.58 final=PRESENT
+pool_box_1 r2c2 -> None best | side-on all=True halt=None err=3.11 final=PRESENT
+pool_box_1 r2c3 -> None best | side-on all=True halt=None err=2.79 final=PRESENT
+pool_box_1 r3c1 -> None best | plan: side-on: plan: IK found no level grasp pose for this approach (best of 4 side-on approaches); crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c2 -> None best | side-on all=True halt=None err=3.6 final=PRESENT
+pool_box_1 r3c3 -> None best | side-on all=True halt=None err=2.51 final=PRESENT
+pool_cyl_1 r1c1 -> None best | side-on all=True halt=None err=3.49 final=PRESENT
+pool_cyl_1 r1c2 -> None best | side-on all=True halt=None err=3.65 final=PRESENT
+pool_cyl_1 r1c3 -> None best | side-on all=True halt=None err=3.89 final=PRESENT
+pool_cyl_1 r2c1 -> None best | side-on all=True halt=None err=6.65 final=PRESENT
+pool_cyl_1 r2c2 -> None best | side-on all=True halt=None err=6.28 final=PRESENT
+pool_cyl_1 r2c3 -> None best | side-on all=True halt=None err=4.12 final=PRESENT
+pool_cyl_1 r3c1 -> None best | plan: side-on: plan: IK found no level grasp pose for this approach (best of 24 side-on approaches); crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c2 -> None best | side-on all=True halt=None err=2.86 final=PRESENT
+pool_cyl_1 r3c3 -> None best | side-on all=True halt=None err=7.69 final=PRESENT

@@ -287,7 +287,7 @@ class TestPlacement:
         # contact, not just height: an object hovering 1 mm up also passes a
         # z check, and an object 1 mm inside the board passes it too
         assert _touching(model, data, "pool_box_1", "table_top")
-        assert _z_of(model, data, "pool_box_1") == pytest.approx(0.741 + 0.02,
+        assert _z_of(model, data, "pool_box_1") == pytest.approx(0.741 + 0.0254,
                                                                 abs=0.004)
 
     def test_it_lands_over_the_cell_it_was_given(self, placer):

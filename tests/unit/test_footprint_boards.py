@@ -130,7 +130,12 @@ class TestNamedBoards:
     LOWER_TO_REST.  Every board is positive under both models now.  August
     (tube / shells, cm): evidence -5.699 / +4.479, incident -11.944 / -2.414,
     foam@r3c3 -9.369 / +2.106, soda@r2c3 -4.379 / +4.535, pool_box_1@r2c3
-    -3.719 / +6.258, pool_cyl_1@r2c3 -3.079 / +5.936."""
+    -3.719 / +6.258, pool_cyl_1@r2c3 -3.079 / +5.936.
+
+    #201 gave the pool items Siva's measured sizes (a 50.8 mm cube; a 45.7 x
+    71.1 mm cylinder).  At the 40 mm / 40 x 80 mm stand-ins the two pool
+    boards read pool_box_1@r2c3 +14.170 / +15.215 and pool_cyl_1@r2c3
+    +14.999 / +16.000."""
 
     @pytest.mark.parametrize("objects,oid,expected_tube_cm,expected_shells_cm", [
         pytest.param(
@@ -147,10 +152,10 @@ class TestNamedBoards:
             "soda_can", +12.837, +12.837, id="soda_can_on_r2c3"),
         pytest.param(
             {"pool_box_1": _cell_xy("cell_r2c3")},
-            "pool_box_1", +14.170, +15.215, id="pool_box_1_on_r2c3"),
+            "pool_box_1", +13.407, +14.453, id="pool_box_1_on_r2c3"),
         pytest.param(
             {"pool_cyl_1": _cell_xy("cell_r2c3")},
-            "pool_cyl_1", +14.999, +16.000, id="pool_cyl_1_on_r2c3"),
+            "pool_cyl_1", +14.714, +15.715, id="pool_cyl_1_on_r2c3"),
     ])
     def test_worst_clearance_under_the_corrected_tube(
             self, objects, oid, expected_tube_cm, expected_shells_cm):

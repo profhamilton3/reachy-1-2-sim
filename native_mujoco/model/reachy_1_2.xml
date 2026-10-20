@@ -216,7 +216,19 @@
                       <!-- R12-502: collision uses an opposed-pad pinch model
                            (fixed thumb pad at +y) rather than the bulky visual
                            box, so the revolute finger forms a clean grasp. -->
-                      <geom name="r_thumb_col" class="collision" type="box"
+                      <!-- #201: the pads (all four) take condim 4, adding
+                           torsional friction about the contact normal, so a
+                           held cylinder cannot pivot about the line between
+                           the pads.  priority 1 makes a pad contact use the
+                           pad's own torsional coefficient (MuJoCo's default
+                           0.005 m) rather than the object's larger 0.01 m,
+                           which left a pad stuck to the cube after the
+                           crane's release.  Sliding friction stays 1.0.
+                           Pads only; every other geom keeps condim 3 and
+                           priority 0.  multiccd is MuJoCo 3.11's default (on).
+                           Evidence: docs/reviews/2026-10-19-lab-true-pieces-201/,
+                           GRIPPER_MODEL.md. -->
+                      <geom name="r_thumb_col" class="collision" type="box" condim="4" priority="1"
                             size="0.014 0.008 0.022" pos="0 0.005 -0.085"/>
                       <!-- #192: simplified hand collision.  Without it the hand
                            has only the two pads, and at REST (hand on the board)
@@ -241,7 +253,7 @@
                               size="0.012 0.010 0.038" pos="0 0 -0.038"
                               material="gripper_mat"/>
                         <!-- moving pad: closes in +y toward the thumb pad -->
-                        <geom name="r_finger_col" class="collision" type="box"
+                        <geom name="r_finger_col" class="collision" type="box" condim="4" priority="1"
                               size="0.014 0.008 0.014" pos="0 0 -0.055"/>
                       </body>
 
@@ -323,7 +335,7 @@
                             material="gripper_mat"/>
                       <!-- R12-502: opposed-pad pinch model, mirrored (thumb pad at -y) -->
                       <geom name="l_thumb_col" class="collision" contype="0" conaffinity="0" type="box"
-                            size="0.014 0.008 0.022" pos="0 -0.005 -0.085"/>
+                            condim="4" priority="1" size="0.014 0.008 0.022" pos="0 -0.005 -0.085"/>
 
                       <!-- l_gripper_finger — URDF: xyz=0 0.037 -0.03998 -->
                       <body name="l_gripper_finger" pos="0 0.037 -0.03998">
@@ -334,7 +346,7 @@
                               material="gripper_mat"/>
                         <!-- moving pad: closes in -y toward the thumb pad -->
                         <geom name="l_finger_col" class="collision" contype="0" conaffinity="0" type="box"
-                              size="0.014 0.008 0.014" pos="0 0 -0.055"/>
+                              condim="4" priority="1" size="0.014 0.008 0.014" pos="0 0 -0.055"/>
                       </body>
 
                       <!-- l_tip site — URDF: xyz=0 0.012 -0.085 from l_gripper_thumb -->
