@@ -130,7 +130,20 @@ The open questions:
 
 ## 8. Live (the panel)
 
-To be filled in after the two live runs.
+- **Stack:** Docker `reachy-1-2-sim:latest` (not rebuilt) plus the native server, FWDCenterLabSivaPool, launched with `SivaLabLauncher.sh`, with the primary checkout detached at the commit under test. scenes/, native_mujoco/model, src/ and web/ are mounted from it.
+- **Driving:** the panel's own HTTP routes. No retries except the owner-granted one.
+- **Record:** Reachy-Lab `outputs/sim/working/trial-2026-10-19-issue201-live/`.
+- **Startup:** the pool pieces at the new heights (box z 0.0253 m, cylinder z 0.0355 m), arm at REST.
+
+| Run | Commit | Grasp | From centre | Tilt | Slip in hand | Grip | Release | Drag | #174 criteria |
+|---|---|---|---|---|---|---|---|---|---|
+| 1: red_cube r2c2 → r1c1 | 284ba17 | side-on | 2.0 mm | 0.0° | 0.068 mm (hand 0.069 mm) | 70.2 N | let go −58.7° (the old ramp) | 1.9 mm | **6 of 6** |
+| 2: pool_cyl_1 r2c3 → r2c2 | 284ba17 | side-on | 2.0 mm | 0.16° | 0.003 mm | 63.9 N | let go −18.4°, **29.7 N left on**; withdrawal refused before opening | 0.8 mm | 3 of 6 (stopped) |
+| 3: pool_cyl_1 r2c3 → r2c2, the one retry after §7 | 5af39e2 | side-on | 2.5 mm | 0.0° | 0.002 mm | 53.5 N | target −33.5°, let go after 0.2 s at 0.0 N; back-off 4 mm; opened to −68° | 2.0 mm | **6 of 6** |
+
+- Every run left the others unmoved (0.0 mm).
+- Runs 1 and 3 withdrew directly and returned to PRESENT.
+- Offline, the same cylinder pair after §7 placed 2.3–2.7 mm from the centre (`release/fixed/`).
 
 ## 9. Future refinement
 
