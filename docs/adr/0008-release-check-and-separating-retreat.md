@@ -34,6 +34,8 @@ cube still came to rest on the finger.
 
 **O2: check before opening.**
 1. `primitives.release_grip` opens only until the grip force reads zero.
+   *Amended by #201:* `primitives.release_to` opens to an absolute target
+   instead (see "Amendment: closed-loop release (#201)" below).
 2. From the measured state, the way out is judged for the opened hand. The
    wider opening (−68.0°, 0.75° inside the −68.75° travel) is tried before the
    usual −65°. A way out that needs no separating step is preferred.
@@ -93,3 +95,26 @@ between lifts. All 10 were lift pass, withdrawal completed and full cycle.
   decision.
 - The −68° opening is a simulator figure. The physical gripper's travel must
   be checked before this is ported.
+
+## Amendment: closed-loop release (#201, 2026-10-19)
+
+Live, the pool cylinder (r2c3 → r2c2) let go one ramp step in, at −18.4°.
+The pads were still on it at 29.7 N, and the withdrawal was refused before
+opening. Offline, a single zero grip-force reading at the start of the release
+reproduces this exactly. Observation and command lag alone (up to 200 ms) do
+not: they make the hand open further. The evidence is in
+`docs/reviews/2026-10-19-lab-true-pieces-201/release/`.
+
+Step 1 is now `primitives.release_to`:
+- **Absolute target.** It opens to the angle whose free gap is the object's
+  width across the jaw plus 4 mm (`CraneSpec.release_margin_m`), never wider
+  than the plan's opening.
+- **Settle.** The grip counts as let go only when fresh readings stay at or
+  under 0.5 N for 0.2 s (`release_force_n`, `release_settle_s`).
+- **Open further.** If the grip has not let go within 1 s, the hand opens 5°
+  further, up to the plan's opening.
+- **Refuse.** Only past the plan's opening does it refuse, with the force left.
+
+A placement's thumb-side back-off (#174) now follows the let-go instead of
+running in step with it. Steps 2–4 are unchanged, and `clean_placement` still
+requires 0 N after the full opening.

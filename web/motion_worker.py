@@ -345,7 +345,9 @@ KEPT_CRANE_EVENTS = ("phase", "GRASP_CHOSEN", "CORRECTION", "CORRECTION_COMMANDE
                      "WITHDRAWN", "HALT", "REFUSED", "RETREAT_REFUSED",
                      # the placement (#174)
                      "CARRY_PLANNED", "IN_HAND", "SETDOWN_MEASURE", "SETDOWN_CORRECTION",
-                     "ABORT", "RELEASE_RETREAT")
+                     "ABORT", "RELEASE_RETREAT",
+                     # the closed-loop release (#201)
+                     "RELEASE")
 
 
 def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
@@ -416,9 +418,12 @@ def _crane_phases(phase, kept: Optional[List[Dict[str, Any]]] = None):
         elif kind == "ABORT":
             phase(f"lift: not placing it -- {kw.get('reason')}; carrying it back to where "
                   "I picked it up")
+        elif kind == "RELEASE":
+            phase(f"lift: let go at {kw.get('let_go_deg', 0):.0f} deg" if kw.get("freed")
+                  else f"lift: the grip did not let go by {kw.get('let_go_deg', 0):.0f} deg")
         elif kind == "RELEASE_RETREAT":
-            phase("lift: backing my hand off the object as I let go" if kw.get("ok")
-                  else f"lift: letting go without backing off ({kw.get('reason')})")
+            phase("lift: backing my hand off the object" if kw.get("ok")
+                  else f"lift: not backing off ({kw.get('reason')})")
         elif kind == "HALT":
             phase(f"lift: stopped -- {kw.get('reason')}")
         elif kind in ("REFUSED", "RETREAT_REFUSED"):

@@ -181,6 +181,22 @@ class CraneSpec:
     #: How far the hand backs out along its own axis (up the approach) while
     #: the grip lets go; 0 for the lift.  See `crane_place_live.PlaceSpec`.
     release_backoff_m: float = 0.0
+    #: The release (#201) opens to an absolute target: the angle whose free
+    #: gap is the object's width across the jaw plus this (2 mm a side), never
+    #: wider than ``opening_deg``.  Offline the 45.7 mm pool cylinder let go
+    #: at -28 deg; its target is -33.5 deg.
+    release_margin_m: float = 0.004
+    #: Let go = fresh grip-force readings at or under ``release_force_n`` for
+    #: this long (10 of the server's 50 Hz pushes), within
+    #: ``release_timeout_s``; otherwise open ``release_step_deg`` further, up
+    #: to ``opening_deg``.  Not 0 N: offline the squeeze was gone by -28 deg
+    #: every time, but the thumb (the jaw that does not move as the hand
+    #: opens) could stay resting on the cylinder at 0.02-0.16 N until it backs
+    #: off; `clean_placement` still asks 0 N after the back-off and opening.
+    release_force_n: float = 0.5
+    release_settle_s: float = 0.2
+    release_timeout_s: float = 1.0
+    release_step_deg: float = 5.0
     #: How far the palm (`grasp_alignment.PALM`, #192's hand collision box)
     #: stays above the object at grasp depth, as planned (#195).  The grasp
     #: height is raised until it does; the route check then holds the palm,
@@ -1078,6 +1094,20 @@ def release_openings(spec: CraneSpec) -> Tuple[float, float]:
     return (spec.wide_opening_deg, spec.opening_deg)
 
 
+def release_target_deg(spec: CraneSpec, obj, o: "Observation", measured) -> float:
+    """Where the release opens to first (#201): the gripper angle whose free
+    gap is the object's width across the jaw -- measured pose, measured hand
+    -- plus `CraneSpec.release_margin_m`, rounded to 0.5 deg toward wider and
+    never wider than ``spec.opening_deg``."""
+    from reachy_ai.tasks.side_grasp_live import closure_deg, width_across_m
+
+    qm, gm = measured
+    jaw = G.hand_frames(qm, gm).jaw
+    width = width_across_m(G.object_box(obj, o.position, o.quat_wxyz), jaw)
+    g = closure_deg(width + spec.release_margin_m)
+    return max(spec.opening_deg, math.floor(2.0 * g) / 2.0)
+
+
 def plan_way_out(planner, scene: SceneModel, plan: CranePlan, cmd, above: int,
                  gm: float, live: G.Box, off, label: str = "",
                  kinds: Sequence[str] = WAY_OUT_KINDS
@@ -1962,29 +1992,40 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         outcome["final"] = "holding the object above the table (not released)"
         outcome["criteria"] = _criteria(outcome, arm)
         return _end(outcome, ev, observe)
-    # ── release (#173, O2): let go, CHECK, and only then open ───────────────
-    # Open only until the grip force reads zero: the object is free and the
-    # hand has opened no further than it took to free it.  Then judge the way
-    # out for the fully opened hand from where the object came to rest, and
-    # open no further if neither opening has one -- never open into a refusal.
-    # A placement backs the hand away on the thumb's side while it lets go
-    # (#174 drag study), when that move checks clear.
-    released = lambda: observe().grip_force_n <= lim.contact_force_n  # noqa: E731
-    retreat = release_retreat(ps)
-    if retreat is not None:
-        path, moved = retreat
-        let_go, q_last = P.release_grip_retreating(arm, ps.opening_deg, released, path,
-                                                   R_ARM_JOINTS, 0.8)
-        if q_last is not None:
-            st["cmd"] = list(q_last)
-        cur["plan"] = moved
-    else:
-        let_go = P.release_grip(arm, ps.opening_deg, released, 0.8)
-    hold(0.5, check=False)
-    opening = check_before_opening()
-    if opening is not None:
-        P.smooth_move(arm, {"r_gripper": opening}, 0.4)
-        hold(0.8, check=False)
+    # ── release (#173, O2; #201): let go, CHECK, and only then open ─────────
+    # Open to an absolute target -- the object's width across the jaw plus
+    # `release_margin_m`, never wider than the plan's opening -- and call the
+    # grip let go only when fresh readings stay at zero for
+    # `release_settle_s`; if they do not, open further in steps up to the
+    # plan's opening, and refuse only past that.  (#201: live, opening only
+    # until the first zero reading let go one ramp step in, the pads still on
+    # the cylinder at 29.7 N.)  Then a placement backs the hand away on the
+    # thumb's side (#174), the grip already free, and the way out for the
+    # fully opened hand is judged from where the object came to rest: no
+    # opening further if neither opening has one -- never open into a refusal.
+    def released() -> bool:
+        o_ = observe()
+        return o_.stale_reason is None and o_.grip_force_n <= ps.release_force_n
+
+    target = release_target_deg(ps, scene.get(plan.object_id), observe(), _read(arm))
+    let_go, freed, waited = P.release_to(
+        arm, target, ps.opening_deg, released, step_deg=ps.release_step_deg,
+        settle_s=ps.release_settle_s, timeout_s=ps.release_timeout_s)
+    ev("RELEASE", target_deg=round(target, 2), let_go_deg=round(float(let_go), 2),
+       freed=freed, waited_s=round(waited, 2), grip_force_n=observe().grip_force_n)
+    retreat, opening = None, None
+    if freed:
+        retreat = release_retreat(ps)
+        if retreat is not None:
+            path, moved = retreat
+            P.execute_trajectory(arm, path, R_ARM_JOINTS, rate_hz=P._INTERP_HZ)
+            st["cmd"] = list(path[-1])
+            cur["plan"] = moved
+        hold(0.5, check=False)
+        opening = check_before_opening()
+        if opening is not None:
+            P.smooth_move(arm, {"r_gripper": opening}, 0.4)
+            hold(0.8, check=False)
     o = observe()
     qm, gm = _read(arm)
     hm = G.hand_frames(qm, gm)
@@ -1998,6 +2039,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         "release_drag_mm": round(1000 * float(np.linalg.norm((np.asarray(o.position)
                                                                 - held_at)[:2])), 2),
         "let_go_deg": round(float(let_go), 2), "opening_deg": opening,
+        "release_target_deg": round(target, 2), "let_go_waited_s": round(waited, 2),
         "release_retreat_mm": round(1000 * ps.release_retreat_m, 1) if retreat else 0.0,
         "quat": list(o.quat_wxyz), "tilt_deg": round(tilt, 3),
         "lowest_above_table_mm": round(1000 * (placed.lowest_z - scene.table_surface_z), 3),
@@ -2017,6 +2059,10 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     # ── withdraw: re-judged against where the object now is ────────────────
     ev("phase", name="withdrawal")
     try:
+        if not freed:
+            raise _Halt(f"the grip did not let go: {o.grip_force_n:.1f} N still on "
+                        f"{plan.object_id} with the hand open to {let_go:.0f} deg (the "
+                        "plan's opening), so the hand was not opened further")
         if opening is None:
             raise _Halt("withdrawal refused before opening: with the grip let go, "
                         "neither opening has a clear way out, so the hand was not "
