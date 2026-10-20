@@ -76,8 +76,7 @@ cd ~/reachy-1-2-sim
 python3.13 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r native_mujoco/requirements.lock
-pip install "pyyaml==6.0.3"     # the server needs PyYAML, which requirements.lock doesn't list
+pip install -r native_mujoco/requirements.lock   # includes PyYAML (checkouts before this PR lack it; see T2)
 ```
 
 Check it:
@@ -209,7 +208,7 @@ docker compose logs --tail 200 reachy-sim           # container
 
 **T2. "✖ Native server did not start — see /tmp/reachy_mujoco_server.log"**
 - Read the log. The usual causes:
-  - `ModuleNotFoundError: No module named 'yaml'`: run `pip install "pyyaml==6.0.3"` in the venv (1.5).
+  - `ModuleNotFoundError: No module named 'yaml'`: your checkout predates PyYAML in `requirements.lock`. Run `git pull`, then `pip install -r native_mujoco/requirements.lock`, or just `pip install "pyyaml==6.0.3"` in the venv.
   - `No module named 'mujoco'` (or `websockets`, `numpy`, `PIL`): run `pip install -r native_mujoco/requirements.lock` in the venv.
   - A framework-build error: see T3.
   - `Address already in use`: see T4.
