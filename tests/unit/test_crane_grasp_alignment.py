@@ -374,9 +374,10 @@ def test_pad_force_during_withdrawal_stops_the_climb(rig, monkeypatch):
 # ── #173: let go, check before opening, and a way out from a resting pad ──────
 
 def test_the_release_lets_go_checks_and_then_opens(rig, monkeypatch):
-    """The gripper opens only until the grip force reads zero; the way out is
-    judged for the opened hand (wider first) BEFORE it opens further; then it
-    opens to the angle that was judged clear, and RELEASED says all three."""
+    """The gripper opens to the release target (#201: the object's width plus
+    the margin) and waits there until the grip lets go; the way out is judged
+    for the opened hand (wider first) BEFORE it opens further; then it opens
+    to the angle that was judged clear, and RELEASED says all three."""
     _scene_, arm, _planner, plan = rig
     cube = _Cube(arm, plan)
     out, events, arm = _run(rig, cube)
@@ -389,8 +390,10 @@ def test_the_release_lets_go_checks_and_then_opens(rig, monkeypatch):
     assert rel["opening_deg"] == checks[-1]["opening_deg"]
     assert rel["let_go_deg"] > rel["opening_deg"]           # let go before fully open
     assert "release_drag_mm" in rel
+    assert rel["let_go_deg"] == rel["release_target_deg"]   # let go at the target
     after_close = arm.gripper_goals[arm.gripper_goals.index(plan.spec.close_deg) + 1:]
-    assert after_close[0] == rel["opening_deg"]             # one opening, after the check
+    assert after_close[:2] == [rel["release_target_deg"], rel["opening_deg"]]
+    assert kinds.index("RELEASE") < kinds.index("WITHDRAWAL_PRECHECK")
     assert out["withdrawal"]["clean"] is True
 
 
@@ -462,6 +465,36 @@ def test_the_wider_opening_is_inside_the_gripper_travel():
     assert lo < spec.wide_opening_deg < spec.opening_deg
     assert spec.wide_opening_deg - lo >= 0.5
     assert C.release_openings(spec) == (spec.wide_opening_deg, spec.opening_deg)
+
+
+def test_release_to_opens_to_the_target_and_waits_for_the_grip_to_let_go(monkeypatch):
+    """#201: the release opens to an absolute target, then needs released()
+    true without a break for the settle time; one true reading is not it."""
+    monkeypatch.setattr(P.time, "sleep", lambda *_a: None)
+    arm = _Arm(C.present_joints(), -17.0)
+    reads = iter([True, False] + [True] * 10)
+    goal, freed, waited = P.release_to(arm, -33.5, -39.0, lambda: next(reads),
+                                       settle_s=0.2, timeout_s=1.0)
+    assert (goal, freed) == (-33.5, True)
+    assert arm.r_gripper.goal_position == -33.5
+    assert waited == pytest.approx(0.28)        # the lone first reading did not count
+
+
+def test_release_to_opens_further_and_stops_at_the_limit(monkeypatch):
+    """Not let go within the timeout: step wider, never past the limit, and
+    say so rather than open further."""
+    monkeypatch.setattr(P.time, "sleep", lambda *_a: None)
+    arm = _Arm(C.present_joints(), -17.0)
+    freed_at = P.release_to(arm, -33.5, -45.0,
+                            lambda: arm.r_gripper.goal_position <= -40.0,
+                            step_deg=5.0, settle_s=0.2, timeout_s=1.0)
+    assert freed_at[:2] == (-43.5, True)
+    held = P.release_to(_Arm(C.present_joints(), -17.0), -33.5, -39.0, lambda: False,
+                        step_deg=5.0, timeout_s=1.0)
+    assert held[:2] == (-39.0, False)
+    assert held[2] == pytest.approx(3.0)        # -33.5, -38.5, then the limit -39.0
+    assert P.release_to(_Arm(C.present_joints(), -17.0), -70.0, -65.0,
+                        lambda: True)[0] == -65.0
 
 
 def test_release_grip_stops_where_the_grip_lets_go(monkeypatch):

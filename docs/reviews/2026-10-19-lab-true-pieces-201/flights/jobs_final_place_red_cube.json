@@ -1,0 +1,434 @@
+[
+{
+"oid": "red_cube",
+"origin": "r1c1",
+"dest": "r1c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c1",
+"dest": "r1c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c1",
+"dest": "r2c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c1",
+"dest": "r2c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c1",
+"dest": "r2c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c1",
+"dest": "r3c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c1",
+"dest": "r3c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c1",
+"dest": "r3c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c2",
+"dest": "r1c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c2",
+"dest": "r1c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c2",
+"dest": "r2c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c2",
+"dest": "r2c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c2",
+"dest": "r2c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c2",
+"dest": "r3c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c2",
+"dest": "r3c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c2",
+"dest": "r3c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c3",
+"dest": "r1c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c3",
+"dest": "r1c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c3",
+"dest": "r2c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c3",
+"dest": "r2c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c3",
+"dest": "r2c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c3",
+"dest": "r3c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c3",
+"dest": "r3c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r1c3",
+"dest": "r3c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c1",
+"dest": "r1c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c1",
+"dest": "r1c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c1",
+"dest": "r1c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c1",
+"dest": "r2c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c1",
+"dest": "r2c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c1",
+"dest": "r3c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c1",
+"dest": "r3c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c1",
+"dest": "r3c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c2",
+"dest": "r1c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c2",
+"dest": "r1c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c2",
+"dest": "r1c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c2",
+"dest": "r2c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c2",
+"dest": "r2c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c2",
+"dest": "r3c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c2",
+"dest": "r3c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c2",
+"dest": "r3c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c3",
+"dest": "r1c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c3",
+"dest": "r1c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c3",
+"dest": "r1c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c3",
+"dest": "r2c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c3",
+"dest": "r2c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c3",
+"dest": "r3c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c3",
+"dest": "r3c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r2c3",
+"dest": "r3c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c1",
+"dest": "r1c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c1",
+"dest": "r1c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c1",
+"dest": "r1c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c1",
+"dest": "r2c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c1",
+"dest": "r2c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c1",
+"dest": "r2c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c1",
+"dest": "r3c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c1",
+"dest": "r3c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r1c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r1c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r1c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r2c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r2c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r2c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c2",
+"dest": "r3c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c3",
+"dest": "r1c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c3",
+"dest": "r1c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c3",
+"dest": "r1c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c3",
+"dest": "r2c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c3",
+"dest": "r2c2",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c3",
+"dest": "r2c3",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c3",
+"dest": "r3c1",
+"grasp": "best"
+},
+{
+"oid": "red_cube",
+"origin": "r3c3",
+"dest": "r3c2",
+"grasp": "best"
+}
+]

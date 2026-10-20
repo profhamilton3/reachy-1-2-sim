@@ -1,0 +1,23 @@
+red_cube r2c1 -> r1c3 best | side-on all=False halt=None err=342.08 final=PRESENT
+red_cube r3c2 -> None crane | crane all=False halt=None err=5.12 final=PRESENT
+pool_cyl_1 r1c2 -> None best | side-on all=True halt=None err=3.66 final=PRESENT
+pool_cyl_1 r2c3 -> None best | side-on all=True halt=None err=4.18 final=PRESENT
+pool_cyl_1 r3c2 -> None best | side-on all=True halt=None err=4.43 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=True halt=None err=2.11 final=PRESENT
+red_cube r3c2 -> None crane | crane all=False halt=None err=5.04 final=PRESENT
+pool_cyl_1 r1c2 -> None best | side-on all=True halt=None err=3.53 final=PRESENT
+pool_cyl_1 r2c3 -> None best | side-on all=True halt=None err=4.48 final=PRESENT
+pool_cyl_1 r3c2 -> None best | side-on all=True halt=None err=3.6 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=False halt=None err=343.06 final=PRESENT
+red_cube r3c2 -> None crane | crane all=True halt=None err=5.16 final=PRESENT
+pool_cyl_1 r1c2 -> None best | side-on all=True halt=None err=3.4 final=PRESENT
+pool_cyl_1 r2c3 -> None best | side-on all=True halt=None err=4.17 final=PRESENT
+pool_cyl_1 r3c2 -> None best | side-on all=True halt=None err=3.25 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=True halt=None err=1.72 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=True halt=None err=1.98 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=False halt=refused at rung +5 -- table: forearm -0.1 mm into the table on 'descent hover->grasp' (predicted) err=341.67 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=True halt=None err=1.71 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=False halt=None err=343.47 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=False halt=None err=342.54 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=False halt=refused at rung +5 -- table: forearm -0.1 mm into the table on 'descent hover->grasp' (predicted) err=341.67 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=False halt=None err=342.08 final=PRESENT

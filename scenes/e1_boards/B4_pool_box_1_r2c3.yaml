@@ -9,4 +9,4 @@ name: B4_pool_box_1_r2c3
 objects:
 - id: pool_box_1
   pose:
-    position: [0.4318, -0.1524, 0.76]
+    position: [0.4318, -0.1524, 0.7654]

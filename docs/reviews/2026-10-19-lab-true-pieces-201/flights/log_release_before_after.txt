@@ -1,0 +1,10 @@
+red_cube r3c2 -> r3c3 crane | crane all=True halt=None err=6.46 final=PRESENT
+red_cube r3c2 -> r3c3 crane | crane all=True halt=None err=6.91 final=PRESENT
+red_cube r3c2 -> r3c3 crane | crane all=True halt=None err=6.64 final=PRESENT
+red_cube r3c2 -> r3c3 crane | crane all=True halt=None err=6.63 final=PRESENT
+red_cube r3c2 -> r3c3 crane | crane all=True halt=None err=7.66 final=PRESENT
+red_cube r3c2 -> r3c3 best | side-on all=True halt=None err=4.65 final=PRESENT
+red_cube r3c2 -> r3c3 best | side-on all=True halt=None err=4.96 final=PRESENT
+red_cube r3c2 -> r3c3 best | side-on all=True halt=None err=4.87 final=PRESENT
+red_cube r3c2 -> r3c3 best | side-on all=True halt=None err=4.57 final=PRESENT
+red_cube r3c2 -> r3c3 best | side-on all=True halt=None err=4.66 final=PRESENT

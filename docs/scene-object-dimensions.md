@@ -17,6 +17,21 @@ Other pool-slot dimensions remain unchanged. The earlier photograph-derived clai
 
 The confirmed dimensions above are authoritative. Photographs of the soda can or foam block are not required: they are not a prerequisite for merging this correction or for grasp work, and no further confirmation is requested. The can and foam-block colours in `FWDCenterLabSiva.yaml` remain modelled values and are unchanged by this ruling. The ruling does not claim that detector accuracy or grasp reliability has been demonstrated.
 
+## Pool pieces: Siva's measurements — 2026-10-19 (#201)
+
+Siva measured the lab's real tic-tac-toe pieces with a tape measure on 2026-10-19, with photos; the owner provided the values in #201. This is owner-provided: the coding agent took no measurement of its own.
+
+| Pieces | Measured | Scene (`FWDCenterLabSivaPool.yaml`) |
+|---|---|---|
+| `pool_box_1`–`pool_box_5` | cube, 2 in on a side | box 0.0508 × 0.0508 × 0.0508 m |
+| `pool_cyl_1`–`pool_cyl_5` | cylinder, 1.8 in across × 2.8 in tall | radius 0.02285 m, length 0.0711 m |
+
+- They replace the 40 mm boxes and 40 × 80 mm cylinders that #193 kept as a stand-in "until Siva measures". All ten change together, so every pool box and every pool cylinder is still one size.
+- Both pieces fit the open jaw: it leaves 67.8 mm at −65° (`docs/reviews/2026-10-19-side-on-grasp-180/hand_geometry.txt`).
+- Floor-resting pool centres are half the height: 0.0254 m for a box, 0.03555 m for a cylinder. The generated E1 boards B4 and B5 (`scripts/make_e1_boards.py`) take the same half-heights on the board.
+- **Not measured, unchanged:** mass (0.05 kg), friction and colour.
+- **Unchanged by owner ruling (2026-10-17):** `red_cube`, `blue_cylinder`, `soda_can` and `foam_block` keep the dimensions above.
+
 ## Scene representation
 
 `FWDCenterLabMCC.yaml` is the authoritative inherited geometry: can radius 0.033 m, cylinder length 0.122 m. `FWDCenterLabSiva.yaml` and `FWDCenterLabSivaPool.yaml` inherit it. The can centre on the 0.740 m board is 0.801 m; its floor-resting pool centre is 0.061 m. Generated B1/B3 board placements must use the new half-height too.

@@ -1,0 +1,72 @@
+pool_box_1 r1c1 -> r1c2 best | side-on all=True halt=None err=1.72 final=PRESENT
+pool_box_1 r1c1 -> r1c3 best | side-on all=True halt=None err=1.72 final=PRESENT
+pool_box_1 r1c1 -> r2c1 best | side-on all=True halt=None err=1.73 final=PRESENT
+pool_box_1 r1c1 -> r2c2 best | side-on all=True halt=None err=1.72 final=PRESENT
+pool_box_1 r1c1 -> r2c3 best | side-on all=True halt=None err=1.9 final=PRESENT
+pool_box_1 r1c1 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r1c1 -> r3c2 best | side-on all=True halt=None err=1.77 final=PRESENT
+pool_box_1 r1c1 -> r3c3 best | side-on all=True halt=None err=1.88 final=PRESENT
+pool_box_1 r1c2 -> r1c1 best | side-on all=False halt=withdrawal refused before opening: with the grip let go, neither opening has a clear way out, so the hand was not opened further err=1.35 final=left beside the object (withdrawal refused or stopped)
+pool_box_1 r1c2 -> r1c3 best | side-on all=True halt=None err=0.68 final=PRESENT
+pool_box_1 r1c2 -> r2c1 best | side-on all=True halt=None err=1.39 final=PRESENT
+pool_box_1 r1c2 -> r2c2 best | side-on all=True halt=None err=2.39 final=PRESENT
+pool_box_1 r1c2 -> r2c3 best | side-on all=True halt=None err=1.54 final=PRESENT
+pool_box_1 r1c2 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r1c2 -> r3c2 best | side-on all=True halt=None err=1.53 final=PRESENT
+pool_box_1 r1c2 -> r3c3 best | side-on all=True halt=None err=1.27 final=PRESENT
+pool_box_1 r1c3 -> r1c1 best | side-on all=True halt=None err=1.64 final=PRESENT
+pool_box_1 r1c3 -> r1c2 best | side-on all=True halt=None err=1.75 final=PRESENT
+pool_box_1 r1c3 -> r2c1 best | side-on all=True halt=None err=1.64 final=PRESENT
+pool_box_1 r1c3 -> r2c2 best | side-on all=True halt=None err=1.59 final=PRESENT
+pool_box_1 r1c3 -> r2c3 best | side-on all=True halt=None err=1.63 final=PRESENT
+pool_box_1 r1c3 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no pose for rung +2
+pool_box_1 r1c3 -> r3c2 best | side-on all=True halt=None err=1.94 final=PRESENT
+pool_box_1 r1c3 -> r3c3 best | side-on all=True halt=None err=1.91 final=PRESENT
+pool_box_1 r2c1 -> r1c1 best | side-on all=True halt=None err=1.15 final=PRESENT
+pool_box_1 r2c1 -> r1c2 best | side-on all=True halt=None err=1.22 final=PRESENT
+pool_box_1 r2c1 -> r1c3 best | side-on all=True halt=None err=1.38 final=PRESENT
+pool_box_1 r2c1 -> r2c2 best | side-on all=True halt=None err=2.1 final=PRESENT
+pool_box_1 r2c1 -> r2c3 best | side-on all=True halt=None err=1.44 final=PRESENT
+pool_box_1 r2c1 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r2c1 -> r3c2 best | side-on all=True halt=None err=1.45 final=PRESENT
+pool_box_1 r2c1 -> r3c3 best | side-on all=True halt=None err=1.09 final=PRESENT
+pool_box_1 r2c2 -> r1c1 best | side-on all=True halt=None err=1.64 final=PRESENT
+pool_box_1 r2c2 -> r1c2 best | side-on all=True halt=None err=2.14 final=PRESENT
+pool_box_1 r2c2 -> r1c3 best | side-on all=False halt=None err=213.96 final=PRESENT
+pool_box_1 r2c2 -> r2c1 best | side-on all=True halt=None err=2.04 final=PRESENT
+pool_box_1 r2c2 -> r2c3 best | side-on all=True halt=None err=2.8 final=PRESENT
+pool_box_1 r2c2 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r2c2 -> r3c2 best | side-on all=True halt=None err=1.55 final=PRESENT
+pool_box_1 r2c2 -> r3c3 best | side-on all=False halt=withdrawal refused before opening: with the grip let go, neither opening has a clear way out, so the hand was not opened further err=1.43 final=left beside the object (withdrawal refused or stopped)
+pool_box_1 r2c3 -> r1c1 best | side-on all=True halt=None err=1.44 final=PRESENT
+pool_box_1 r2c3 -> r1c2 best | side-on all=True halt=None err=1.59 final=PRESENT
+pool_box_1 r2c3 -> r1c3 best | side-on all=True halt=None err=0.67 final=PRESENT
+pool_box_1 r2c3 -> r2c1 best | side-on all=True halt=None err=1.4 final=PRESENT
+pool_box_1 r2c3 -> r2c2 best | side-on all=True halt=None err=1.49 final=PRESENT
+pool_box_1 r2c3 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no pose for rung +11
+pool_box_1 r2c3 -> r3c2 best | side-on all=True halt=None err=1.47 final=PRESENT
+pool_box_1 r2c3 -> r3c3 best | side-on all=True halt=None err=1.17 final=PRESENT
+pool_box_1 r3c1 -> r1c1 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c1 -> r1c2 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c1 -> r1c3 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c1 -> r2c1 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c1 -> r2c2 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c1 -> r2c3 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c1 -> r3c2 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c1 -> r3c3 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c2 -> r1c1 best | side-on all=True halt=None err=1.39 final=PRESENT
+pool_box_1 r3c2 -> r1c2 best | side-on all=True halt=None err=1.66 final=PRESENT
+pool_box_1 r3c2 -> r1c3 best | side-on all=True halt=None err=1.33 final=PRESENT
+pool_box_1 r3c2 -> r2c1 best | side-on all=True halt=None err=1.46 final=PRESENT
+pool_box_1 r3c2 -> r2c2 best | side-on all=True halt=None err=1.58 final=PRESENT
+pool_box_1 r3c2 -> r2c3 best | side-on all=True halt=None err=1.53 final=PRESENT
+pool_box_1 r3c2 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: destination: IK found no pose that sets the object down on the target with the grasp's attitude
+pool_box_1 r3c2 -> r3c3 best | side-on all=True halt=None err=1.37 final=PRESENT
+pool_box_1 r3c3 -> r1c1 best | side-on all=True halt=None err=1.96 final=PRESENT
+pool_box_1 r3c3 -> r1c2 best | side-on all=True halt=None err=1.87 final=PRESENT
+pool_box_1 r3c3 -> r1c3 best | side-on all=False halt=None err=304.26 final=PRESENT
+pool_box_1 r3c3 -> r2c1 best | side-on all=True halt=None err=1.84 final=PRESENT
+pool_box_1 r3c3 -> r2c2 best | side-on all=False halt=None err=213.45 final=PRESENT
+pool_box_1 r3c3 -> r2c3 best | side-on all=True halt=None err=2.22 final=PRESENT
+pool_box_1 r3c3 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set
+pool_box_1 r3c3 -> r3c2 best | side-on all=True halt=None err=1.83 final=PRESENT

@@ -395,6 +395,39 @@ def release_grip_retreating(arm, open_deg: float, released, arm_path, arm_joints
     return goal, q
 
 
+def release_to(arm, target_deg: float, limit_deg: float, released, *,
+               step_deg: float = 5.0, settle_s: float = 0.2, timeout_s: float = 1.0,
+               duration: float = 0.4, joint: str = "r_gripper"):
+    """Open to an absolute ``target_deg``, then wait for the grip to let go
+    (#201): ``released()`` must read true without a break for ``settle_s``.
+
+    Not let go within ``timeout_s``: open ``step_deg`` further and wait again,
+    up to ``limit_deg`` (the right gripper opens toward negative angles; the
+    target is never past the limit).  One reading is not enough on its own:
+    live, a single zero grip-force reading stopped `release_grip`'s ramp one
+    step in, with the pads still on the object.  Returns (last commanded
+    angle, let go?, seconds waited).
+    """
+    goal = max(float(target_deg), float(limit_deg))
+    dt = 1.0 / _INTERP_HZ
+    waited = 0.0
+    while True:
+        smooth_move(arm, {joint: goal}, duration)
+        t = clear = 0.0
+        while t < timeout_s - 1e-9:
+            time.sleep(dt)
+            t += dt
+            clear = clear + dt if released() else 0.0
+            if clear >= settle_s - 1e-9:
+                log.debug("release_to: let go at %.1f° after %.2f s", goal, waited + t)
+                return goal, True, waited + t
+        waited += t
+        if goal <= limit_deg + 1e-9:
+            log.debug("release_to: still held at %.1f° (the limit)", goal)
+            return goal, False, waited
+        goal = max(float(limit_deg), goal - step_deg)
+
+
 def close_gripper(arm, duration: float = 0.8, side: str = "right") -> None:
     """Close the gripper to a firm grip (side-aware sign)."""
     jn = f"{side[0]}_gripper"

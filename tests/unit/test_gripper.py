@@ -37,12 +37,15 @@ _PILLAR = (ARM_BASE_IN_WORLD[0], -0.20, ARM_BASE_IN_WORLD[2] - 0.8153)
 _ORIGINAL_CUBE_FRICTION = "2.5 0.1 0.01"
 
 
-def _grasp_scene(cube_friction=_ORIGINAL_CUBE_FRICTION, noslip_iterations=None):
+def _grasp_scene(cube_friction=_ORIGINAL_CUBE_FRICTION, noslip_iterations=None,
+                 cube_priority=0):
     """Model with the table removed (clear workspace) + support pillar + cube.
 
     Support: contype=8 conaffinity=4  -> objects rest on it, robot ignores it.
     Cube:    contype=4 conaffinity=15 -> collides with world/robot/object/support.
     ``noslip_iterations=None`` keeps the model file's contact model (ADR-0005).
+    ``cube_priority`` 1 matches the pads' (#201), so a pad-cube contact takes
+    the larger of the two frictions, as every contact did before #201.
     """
     xml = open(_MODEL).read()
     xml = re.sub(r'<body name="table".*?</body>\s*', "", xml, flags=re.DOTALL)
@@ -55,7 +58,7 @@ def _grasp_scene(cube_friction=_ORIGINAL_CUBE_FRICTION, noslip_iterations=None):
       <freejoint name="cube_free"/>
       <geom name="cube" type="box" size="{_CUBE_HALF} {_CUBE_HALF} {_CUBE_HALF}"
             contype="4" conaffinity="15" rgba="0.9 0.2 0.2 1" mass="0.02"
-            friction="{cube_friction}"/>
+            friction="{cube_friction}" priority="{cube_priority}"/>
     </body>
   </worldbody>"""
     m = mujoco.MjModel.from_xml_string(xml.replace("  </worldbody>", extra, 1))
@@ -112,6 +115,13 @@ class TestGripperModelBasics:
 #   mu=2.5 matches no contact in the project's scenes; it was tuned for the
 #   soft model.  Neither value is a claim about physical friction.
 #
+# #201 gave the pads priority 1, so a pad contact takes the PAD's friction
+# (sliding 1.0) rather than the larger of the two.  No scene object is above
+# 1.0, so the scenes are unchanged; this fixture's mu=2.5 cube is, so the
+# prior fixture gives its cube priority 1 too, which restores the larger-of-two
+# rule for its pad contacts (mu 2.5, as before).  Without it the pinch is
+# mu 1.0 under the soft model and the cube slips out.
+#
 # The original mu=2.5 fixture does NOT grasp with no-slip on: the closing
 # finger tips the cube on the pillar and wedges it, and the thumb never
 # touches it.  TestOriginalFixtureUnderNoslip keeps that visible.  (At
@@ -119,7 +129,7 @@ class TestGripperModelBasics:
 # 2026-10-07.
 _GRASP_CONFIGS = {
     "noslip_off_prior_fixture": dict(cube_friction=_ORIGINAL_CUBE_FRICTION,
-                                     noslip_iterations=0),
+                                     noslip_iterations=0, cube_priority=1),
     "noslip_on_default": dict(cube_friction="1.0 0.1 0.01"),
 }
 
@@ -228,16 +238,20 @@ class TestGraspScenario:
 
 
 class TestOriginalFixtureUnderNoslip:
-    """The original mu=2.5 fixture under the default (no-slip on): no grasp.
+    """The original mu=2.5 fixture under the default (no-slip on).
 
-    Recorded, not hidden (ADR-0005).  The closing finger tips the cube on the
-    pillar and wedges it, and the thumb never touches it, so the detector
-    correctly reports no grasp.  If this starts grasping, the contact model
-    changed: revisit the configurations above.
+    Recorded, not hidden (ADR-0005).  With the pads at condim 3 the closing
+    finger tipped the cube on the pillar and wedged it, the thumb never
+    touched it, and the detector correctly reported no grasp.  #201 gave the
+    pads torsional friction and priority (condim 4, priority 1: a pad contact
+    takes the pad's own friction, sliding 1.0, torsion 0.005 m).  Now the
+    thumb meets the cube and the fixture grasps; it also grasped with condim 4
+    and the larger-of-two friction (mu 2.5).  If this flips again, the
+    contact model changed: revisit the configurations above.
     """
 
-    def test_original_fixture_does_not_grasp_with_noslip_on(self):
+    def test_original_fixture_grasps_with_pad_torsion(self):
         r = _run_grasp_scenario(cube_friction=_ORIGINAL_CUBE_FRICTION)
         assert r["noslip"] > 0
-        assert r["close"].grasping is False
-        assert r["thumb_on_cube"] is False
+        assert r["close"].grasping is True
+        assert r["thumb_on_cube"] is True

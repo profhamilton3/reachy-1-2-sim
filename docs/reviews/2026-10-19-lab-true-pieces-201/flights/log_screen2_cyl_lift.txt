@@ -1,0 +1,9 @@
+pool_cyl_1 r1c2 -> None best | side-on all=True halt=None err=3.64 final=PRESENT
+pool_cyl_1 r2c3 -> None best | side-on all=True halt=None err=4.18 final=PRESENT
+pool_cyl_1 r3c2 -> None best | side-on all=True halt=None err=2.9 final=PRESENT
+pool_cyl_1 r1c2 -> None best | side-on all=False halt=None err=3.75 final=PRESENT
+pool_cyl_1 r2c3 -> None best | side-on all=True halt=None err=4.56 final=PRESENT
+pool_cyl_1 r3c2 -> None best | side-on all=True halt=None err=5.68 final=PRESENT
+pool_cyl_1 r1c2 -> None best | side-on all=True halt=None err=3.72 final=PRESENT
+pool_cyl_1 r2c3 -> None best | side-on all=False halt=None err=4.38 final=PRESENT
+pool_cyl_1 r3c2 -> None best | side-on all=True halt=None err=6.35 final=PRESENT

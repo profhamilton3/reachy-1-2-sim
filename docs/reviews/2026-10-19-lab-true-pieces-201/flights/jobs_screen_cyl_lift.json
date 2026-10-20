@@ -1,0 +1,218 @@
+[
+{
+"oid": "pool_cyl_1",
+"origin": "r1c1",
+"dest": null,
+"grasp": "best"
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c2",
+"dest": null,
+"grasp": "best"
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c3",
+"dest": null,
+"grasp": "best"
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c1",
+"dest": null,
+"grasp": "best"
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c2",
+"dest": null,
+"grasp": "best"
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c3",
+"dest": null,
+"grasp": "best"
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c1",
+"dest": null,
+"grasp": "best"
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c2",
+"dest": null,
+"grasp": "best"
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c3",
+"dest": null,
+"grasp": "best"
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c1",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c3",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c1",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c3",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c1",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c3",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c1",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 6
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 6
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c3",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 6
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c1",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 6
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 6
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c3",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 6
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c1",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 6
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 6
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c3",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 6
+}
+}
+]

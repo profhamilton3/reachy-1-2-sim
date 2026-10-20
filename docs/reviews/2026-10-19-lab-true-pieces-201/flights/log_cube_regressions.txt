@@ -1,0 +1,15 @@
+red_cube r2c1 -> r1c3 best | side-on all=True halt=None err=1.97 final=PRESENT
+pool_box_1 r1c2 -> r1c1 best | side-on all=False halt=withdrawal refused before opening: with the grip let go, neither opening has a clear way out, so the hand was not opened further err=1.51 final=left beside the object (withdrawal refused or stopped)
+pool_box_1 r2c2 -> r1c3 best | side-on all=False halt=None err=213.05 final=PRESENT
+pool_box_1 r2c2 -> r3c3 best | side-on all=False halt=withdrawal refused before opening: with the grip let go, neither opening has a clear way out, so the hand was not opened further err=1.63 final=left beside the object (withdrawal refused or stopped)
+pool_box_1 r3c3 -> r2c2 best | side-on all=False halt=None err=213.35 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=False halt=None err=343.23 final=PRESENT
+pool_box_1 r1c2 -> r1c1 best | side-on all=False halt=withdrawal refused before opening: with the grip let go, neither opening has a clear way out, so the hand was not opened further err=1.57 final=left beside the object (withdrawal refused or stopped)
+pool_box_1 r2c2 -> r1c3 best | side-on all=False halt=None err=212.85 final=PRESENT
+pool_box_1 r2c2 -> r3c3 best | side-on all=False halt=withdrawal refused before opening: with the grip let go, neither opening has a clear way out, so the hand was not opened further err=1.29 final=left beside the object (withdrawal refused or stopped)
+pool_box_1 r3c3 -> r2c2 best | side-on all=False halt=None err=213.59 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=True halt=None err=1.75 final=PRESENT
+pool_box_1 r1c2 -> r1c1 best | side-on all=True halt=None err=1.16 final=PRESENT
+pool_box_1 r2c2 -> r1c3 best | side-on all=False halt=None err=212.67 final=PRESENT
+pool_box_1 r2c2 -> r3c3 best | side-on all=True halt=None err=1.09 final=PRESENT
+pool_box_1 r3c3 -> r2c2 best | side-on all=False halt=None err=213.78 final=PRESENT

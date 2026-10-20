@@ -1,0 +1,226 @@
+[
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +1",
+  "at": "pick",
+  "seconds": 0.9
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +10",
+  "at": "pick",
+  "seconds": 1.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "",
+  "grasp": "crane",
+  "used": "crane",
+  "margin": {
+   "margin_mm": 0.0,
+   "limit": "joints",
+   "joint": "r_arm_yaw",
+   "terms": {
+    "pad_route": 2.02,
+    "palm_route": 1.39,
+    "pad_below_top": 1.17,
+    "table": 18.6,
+    "carried_lift": 399.96,
+    "joints": 0.0
+   }
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 3.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "straddle",
+  "reason": "predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "pick",
+  "seconds": 2.9
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c1",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 1.1
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c2",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 1.3
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r1c3",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +2",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c1",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 1.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c2",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 0.8
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r2c3",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no pose for rung +11",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c1",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 1.2
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c2",
+  "to": "",
+  "grasp": "crane",
+  "used": "crane",
+  "margin": {
+   "margin_mm": 0.0,
+   "limit": "joints",
+   "joint": "r_arm_yaw",
+   "terms": {
+    "pad_route": 6.65,
+    "palm_route": 1.45,
+    "pad_below_top": 2.79,
+    "table": 7.8,
+    "carried_lift": 405.35,
+    "joints": 0.0
+   }
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "seconds": 3.0
+ },
+ {
+  "object": "pool_box_1",
+  "from": "r3c3",
+  "to": "",
+  "grasp": "crane",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "seconds": 1.3
+ }
+]

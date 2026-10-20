@@ -49,19 +49,16 @@ description: >-
 # visible rather than magic), and at y = ±0.75 they are far outside the right
 # arm's 0.609 m reach, so nothing can disturb them by accident.
 #
-# SIZES ARE PROVISIONAL AND THAT IS FINE HERE (#193: pool_box_4/5 and pool_cyl_4/5
-# copy the first six so every pool box and every pool cylinder is one size; the
-# photo-sizing attempt could not settle them, see docs/reviews/2026-10-19-pool-items-193/;
-# Siva's tape-measure values replace all ten together)
-#
-# 4 cm is used rather than the 6 cm the MCC objects inherit, simply as an
-# arbitrary stand-in distinct from them — these pool_box_*/pool_cyl_* slots
-# have no real-world counterpart to match, unlike the named manipulables
-# (red_cube, blue_cylinder, soda_can, foam_block; see
-# docs/scene-object-dimensions.md for their confirmed dimensions).
+# SIZES ARE THE LAB'S TIC-TAC-TOE PIECES (#201).  Siva measured them on
+# 2026-10-19, with photos: the cube is 2 in = 50.8 mm on a side; the cylinder
+# is 1.8 in = 45.7 mm across and 2.8 in = 71.1 mm tall.  All five boxes and
+# all five cylinders take those sizes (#193 made each set one size; the 40 mm
+# boxes and 40 x 80 mm cylinders were a stand-in "until Siva measures").
+# Provenance: docs/scene-object-dimensions.md.  Mass and friction are
+# unchanged: they were not measured.  The named manipulables (red_cube,
+# blue_cylinder, soda_can, foam_block) keep their own confirmed dimensions.
 # placement.py's reshape() sets size, colour and mass on the LIVE model, so a
-# slot becomes whatever the run needs without a recompile.  Treat these
-# numbers as a starting shape, not a measurement.
+# slot becomes whatever the run needs without a recompile.
 #
 # reshape() — not a bare geom_size write — is the supported way to do that.
 # geom_rbound is computed by the compiler and is NOT recomputed when geom_size
@@ -72,8 +69,8 @@ description: >-
 
 objects:
   - id: pool_box_1
-    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
-    pose: {position: [0.15, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: box, size: [0.0508, 0.0508, 0.0508]}
+    pose: {position: [0.15, 0.75, 0.0254], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.8, 0.01, 0.001], restitution: 0.05}
@@ -82,8 +79,8 @@ objects:
     tags: [pool, manipulable, pickable]
 
   - id: pool_box_2
-    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
-    pose: {position: [0.35, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: box, size: [0.0508, 0.0508, 0.0508]}
+    pose: {position: [0.35, 0.75, 0.0254], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.8, 0.01, 0.001], restitution: 0.05}
@@ -92,8 +89,8 @@ objects:
     tags: [pool, manipulable, pickable]
 
   - id: pool_box_3
-    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
-    pose: {position: [0.55, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: box, size: [0.0508, 0.0508, 0.0508]}
+    pose: {position: [0.55, 0.75, 0.0254], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.8, 0.01, 0.001], restitution: 0.05}
@@ -102,8 +99,8 @@ objects:
     tags: [pool, manipulable, pickable]
 
   - id: pool_cyl_1
-    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
-    pose: {position: [0.15, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: cylinder, radius: 0.02285, length: 0.0711}
+    pose: {position: [0.15, -0.75, 0.03555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.75, 0.01, 0.001], restitution: 0.03}
@@ -112,8 +109,8 @@ objects:
     tags: [pool, manipulable, pickable]
 
   - id: pool_cyl_2
-    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
-    pose: {position: [0.35, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: cylinder, radius: 0.02285, length: 0.0711}
+    pose: {position: [0.35, -0.75, 0.03555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.75, 0.01, 0.001], restitution: 0.03}
@@ -122,8 +119,8 @@ objects:
     tags: [pool, manipulable, pickable]
 
   - id: pool_cyl_3
-    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
-    pose: {position: [0.55, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: cylinder, radius: 0.02285, length: 0.0711}
+    pose: {position: [0.55, -0.75, 0.03555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.75, 0.01, 0.001], restitution: 0.03}
@@ -132,8 +129,8 @@ objects:
     tags: [pool, manipulable, pickable]
 
   - id: pool_box_4
-    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
-    pose: {position: [0.75, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: box, size: [0.0508, 0.0508, 0.0508]}
+    pose: {position: [0.75, 0.75, 0.0254], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.8, 0.01, 0.001], restitution: 0.05}
@@ -142,8 +139,8 @@ objects:
     tags: [pool, manipulable, pickable]
 
   - id: pool_box_5
-    geometry: {kind: box, size: [0.04, 0.04, 0.04]}
-    pose: {position: [0.95, 0.75, 0.02], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: box, size: [0.0508, 0.0508, 0.0508]}
+    pose: {position: [0.95, 0.75, 0.0254], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.46, 0.45, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.8, 0.01, 0.001], restitution: 0.05}
@@ -152,8 +149,8 @@ objects:
     tags: [pool, manipulable, pickable]
 
   - id: pool_cyl_4
-    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
-    pose: {position: [0.75, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: cylinder, radius: 0.02285, length: 0.0711}
+    pose: {position: [0.75, -0.75, 0.03555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.75, 0.01, 0.001], restitution: 0.03}
@@ -162,8 +159,8 @@ objects:
     tags: [pool, manipulable, pickable]
 
   - id: pool_cyl_5
-    geometry: {kind: cylinder, radius: 0.02, length: 0.08}
-    pose: {position: [0.95, -0.75, 0.04], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    geometry: {kind: cylinder, radius: 0.02285, length: 0.0711}
+    pose: {position: [0.95, -0.75, 0.03555], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
     material: {rgba: [0.46, 0.47, 0.46, 1.0], roughness: 0.85}
     physics: {dynamic: true, collision: true, mass: 0.05,
               friction: [0.75, 0.01, 0.001], restitution: 0.03}

@@ -1,0 +1,101 @@
+[
+{
+"oid": "pool_cyl_1",
+"origin": "r1c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4,
+"torsion": 0.005,
+"priority": 1
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c3",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4,
+"torsion": 0.005,
+"priority": 1
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4,
+"torsion": 0.005,
+"priority": 1
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4,
+"torsion": 0.002,
+"priority": 1
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c3",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4,
+"torsion": 0.002,
+"priority": 1
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4,
+"torsion": 0.002,
+"priority": 1
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r1c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4,
+"torsion": 0.001,
+"priority": 1
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r2c3",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4,
+"torsion": 0.001,
+"priority": 1
+}
+},
+{
+"oid": "pool_cyl_1",
+"origin": "r3c2",
+"dest": null,
+"grasp": "best",
+"contact": {
+"condim": 4,
+"torsion": 0.001,
+"priority": 1
+}
+}
+]

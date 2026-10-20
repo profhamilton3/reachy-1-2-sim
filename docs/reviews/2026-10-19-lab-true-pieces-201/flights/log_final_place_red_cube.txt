@@ -1,0 +1,72 @@
+red_cube r1c1 -> r1c2 best | side-on all=True halt=None err=3.24 final=PRESENT
+red_cube r1c1 -> r1c3 best | side-on all=True halt=None err=2.53 final=PRESENT
+red_cube r1c1 -> r2c1 best | side-on all=True halt=None err=3.1 final=PRESENT
+red_cube r1c1 -> r2c2 best | side-on all=True halt=None err=3.12 final=PRESENT
+red_cube r1c1 -> r2c3 best | side-on all=True halt=None err=1.15 final=PRESENT
+red_cube r1c1 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r1c1 -> r3c2 best | side-on all=True halt=None err=3.02 final=PRESENT
+red_cube r1c1 -> r3c3 best | side-on all=True halt=None err=2.83 final=PRESENT
+red_cube r1c2 -> r1c1 best | side-on all=True halt=None err=2.95 final=PRESENT
+red_cube r1c2 -> r1c3 best | side-on all=True halt=None err=2.57 final=PRESENT
+red_cube r1c2 -> r2c1 best | side-on all=True halt=None err=3.21 final=PRESENT
+red_cube r1c2 -> r2c2 best | side-on all=True halt=None err=3.1 final=PRESENT
+red_cube r1c2 -> r2c3 best | side-on all=True halt=None err=1.24 final=PRESENT
+red_cube r1c2 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r1c2 -> r3c2 best | side-on all=True halt=None err=3.25 final=PRESENT
+red_cube r1c2 -> r3c3 best | side-on all=True halt=None err=3.1 final=PRESENT
+red_cube r1c3 -> r1c1 best | side-on all=True halt=None err=2.79 final=PRESENT
+red_cube r1c3 -> r1c2 best | side-on all=True halt=None err=3.64 final=PRESENT
+red_cube r1c3 -> r2c1 best | side-on all=True halt=None err=2.38 final=PRESENT
+red_cube r1c3 -> r2c2 best | side-on all=True halt=None err=2.46 final=PRESENT
+red_cube r1c3 -> r2c3 best | side-on all=True halt=None err=2.83 final=PRESENT
+red_cube r1c3 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no pose for rung +1
+red_cube r1c3 -> r3c2 best | side-on all=True halt=None err=2.55 final=PRESENT
+red_cube r1c3 -> r3c3 best | side-on all=True halt=None err=2.75 final=PRESENT
+red_cube r2c1 -> r1c1 best | side-on all=True halt=None err=2.62 final=PRESENT
+red_cube r2c1 -> r1c2 best | side-on all=True halt=None err=2.8 final=PRESENT
+red_cube r2c1 -> r1c3 best | side-on all=False halt=None err=342.98 final=PRESENT
+red_cube r2c1 -> r2c2 best | side-on all=True halt=None err=3.39 final=PRESENT
+red_cube r2c1 -> r2c3 best | side-on all=True halt=None err=2.75 final=PRESENT
+red_cube r2c1 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r2c1 -> r3c2 best | side-on all=True halt=None err=2.76 final=PRESENT
+red_cube r2c1 -> r3c3 best | side-on all=True halt=None err=2.74 final=PRESENT
+red_cube r2c2 -> r1c1 best | side-on all=True halt=None err=2.88 final=PRESENT
+red_cube r2c2 -> r1c2 best | side-on all=True halt=None err=3.14 final=PRESENT
+red_cube r2c2 -> r1c3 best | side-on all=False halt=None err=214.39 final=PRESENT
+red_cube r2c2 -> r2c1 best | side-on all=True halt=None err=2.83 final=PRESENT
+red_cube r2c2 -> r2c3 best | side-on all=True halt=None err=2.64 final=PRESENT
+red_cube r2c2 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r2c2 -> r3c2 best | side-on all=True halt=None err=2.49 final=PRESENT
+red_cube r2c2 -> r3c3 best | side-on all=True halt=None err=2.3 final=PRESENT
+red_cube r2c3 -> r1c1 best | side-on all=True halt=None err=2.42 final=PRESENT
+red_cube r2c3 -> r1c2 best | side-on all=True halt=None err=2.94 final=PRESENT
+red_cube r2c3 -> r1c3 best | side-on all=True halt=None err=2.21 final=PRESENT
+red_cube r2c3 -> r2c1 best | side-on all=True halt=None err=2.77 final=PRESENT
+red_cube r2c3 -> r2c2 best | side-on all=True halt=None err=2.62 final=PRESENT
+red_cube r2c3 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no pose for rung +10
+red_cube r2c3 -> r3c2 best | side-on all=True halt=None err=2.64 final=PRESENT
+red_cube r2c3 -> r3c3 best | side-on all=True halt=None err=2.43 final=PRESENT
+red_cube r3c1 -> r1c1 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c1 -> r1c2 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c1 -> r1c3 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c1 -> r2c1 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c1 -> r2c2 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c1 -> r2c3 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c1 -> r3c2 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c1 -> r3c3 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set
+red_cube r3c2 -> r1c1 best | side-on all=True halt=None err=2.58 final=PRESENT
+red_cube r3c2 -> r1c2 best | side-on all=True halt=None err=2.76 final=PRESENT
+red_cube r3c2 -> r1c3 best | side-on all=True halt=None err=2.36 final=PRESENT
+red_cube r3c2 -> r2c1 best | side-on all=True halt=None err=2.78 final=PRESENT
+red_cube r3c2 -> r2c2 best | side-on all=True halt=None err=2.98 final=PRESENT
+red_cube r3c2 -> r2c3 best | side-on all=True halt=None err=2.83 final=PRESENT
+red_cube r3c2 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: destination: IK found no pose that sets the object down on the target with the grasp's attitude
+red_cube r3c2 -> r3c3 best | side-on all=True halt=None err=2.72 final=PRESENT
+red_cube r3c3 -> r1c1 best | side-on all=True halt=None err=2.53 final=PRESENT
+red_cube r3c3 -> r1c2 best | side-on all=True halt=None err=2.88 final=PRESENT
+red_cube r3c3 -> r1c3 best | side-on all=False halt=refused at rung +1 -- table: forearm -0.0 mm into the table on 'descent hover->grasp' (predicted) err=304.8 final=PRESENT
+red_cube r3c3 -> r2c1 best | side-on all=True halt=None err=2.79 final=PRESENT
+red_cube r3c3 -> r2c2 best | side-on all=True halt=None err=2.78 final=PRESENT
+red_cube r3c3 -> r2c3 best | side-on all=False halt=refused at rung +1 -- table: forearm -0.0 mm into the table on 'descent hover->grasp' (predicted) err=152.4 final=PRESENT
+red_cube r3c3 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: straddle: predicted grasp pose does not straddle: ['finger_above_top']
+red_cube r3c3 -> r3c2 best | side-on all=True halt=None err=2.85 final=PRESENT

@@ -357,7 +357,7 @@ def test_the_hover_is_derived_from_what_is_on_the_board():
 
     # Heights are the scene's own geometry, not guesses: a 12.2 cm can wants
     # 18.2 cm, a 5 cm block is under the floor and gets 12.
-    for oid, want in (("foam_block", 0.12), ("pool_cyl_1", 0.14),
+    for oid, want in (("foam_block", 0.12), ("pool_cyl_1", 0.1311),   # 71.1 mm (#201)
                       ("blue_cylinder", 0.16), ("soda_can", 0.182)):
         board = SceneModel.from_yaml(scene)
         cx, cy, cz = board.cell_center("cell_r2c2")
@@ -464,9 +464,10 @@ def test_pointing_at_an_object_aims_at_its_own_top(monkeypatch, validated):
 
 def test_a_short_object_is_not_given_the_tall_board_hover(monkeypatch,
                                                           validated):
-    """Where the two rules separate.  A 4 cm box on the board gets 6 cm of air
-    over ITS top — 10 cm over the table — and not the 12 cm floor a cell would
-    get, because a cell has to be crossed to and a box does not."""
+    """Where the two rules separate.  A 5.08 cm box (#201) on the board gets
+    6 cm of air over ITS top — 11.1 cm over the table — and not the 12 cm
+    floor a cell would get, because a cell has to be crossed to and a box
+    does not."""
     from reachy_ai.motion import rig_routes as R
     from reachy_ai.scene.awareness import SceneModel
     from reachy_ai.tasks import rig_motion as M
@@ -490,7 +491,7 @@ def test_a_short_object_is_not_given_the_tall_board_hover(monkeypatch,
                              live={"pool_box_1": list(stood)}), _conn())
 
     assert out["status"] == "moved", out
-    assert seen["base_z"] == pytest.approx(0.740 + 0.04 + R.POINT_CLEARANCE,
+    assert seen["base_z"] == pytest.approx(0.740 + 0.0508 + R.POINT_CLEARANCE,
                                            abs=2e-3)
     # And the board-wide rule, which is what a CELL would have been given, is
     # a different and higher number.

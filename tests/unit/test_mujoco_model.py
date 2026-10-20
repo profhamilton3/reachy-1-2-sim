@@ -132,6 +132,36 @@ class TestCollisionChannels:
         assert model.geom_conaffinity[gid] == 6
 
 
+class TestPadContact:
+    """#201: the four pads carry torsional friction (condim 4, priority 1) so
+    a held cylinder cannot pivot about the pinch axis; nothing else changes."""
+
+    PADS = ("r_thumb_col", "r_finger_col", "l_thumb_col", "l_finger_col")
+
+    def test_pads_have_torsional_friction(self, model):
+        for name in self.PADS:
+            assert model.geom_condim[_gid(model, name)] == 4, name
+
+    def test_pad_contacts_take_the_pads_own_friction(self, model):
+        # priority 1 over everything else: torsion 0.005 m, not an object's 0.01
+        for name in self.PADS:
+            g = _gid(model, name)
+            assert model.geom_priority[g] == 1, name
+            assert model.geom_friction[g] == pytest.approx([1.0, 0.005, 0.0001])
+        pads = {_gid(model, n) for n in self.PADS}
+        assert all(model.geom_priority[g] == 0 for g in range(model.ngeom) if g not in pads)
+
+    def test_every_other_geom_keeps_condim_3(self, model):
+        pads = {_gid(model, n) for n in self.PADS}
+        others = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, g)
+                  for g in range(model.ngeom)
+                  if g not in pads and model.geom_condim[g] != 3]
+        assert others == []
+
+    def test_multiccd_is_mujocos_default(self, model):
+        assert not model.opt.disableflags & int(mujoco.mjtDisableBit.mjDSBL_MULTICCD)
+
+
 class TestBaselineStability:
     def test_zero_baseline_contacts(self, model, data):
         mujoco.mj_forward(model, data)

@@ -1,0 +1,72 @@
+pool_cyl_1 r1c1 -> r1c2 best | side-on all=True halt=None err=2.31 final=PRESENT
+pool_cyl_1 r1c1 -> r1c3 best | side-on all=False halt=None err=301.53 final=PRESENT
+pool_cyl_1 r1c1 -> r2c1 best | side-on all=True halt=None err=2.58 final=PRESENT
+pool_cyl_1 r1c1 -> r2c2 best | side-on all=True halt=None err=2.79 final=PRESENT
+pool_cyl_1 r1c1 -> r2c3 best | side-on all=False halt=None err=339.74 final=PRESENT
+pool_cyl_1 r1c1 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r1c1 -> r3c2 best | side-on all=False halt=None err=343.47 final=PRESENT
+pool_cyl_1 r1c1 -> r3c3 best | side-on all=False halt=None err=431.76 final=PRESENT
+pool_cyl_1 r1c2 -> r1c1 best | side-on all=False halt=None err=8.37 final=PRESENT
+pool_cyl_1 r1c2 -> r1c3 best | side-on all=False halt=object moved 0.22 mm err=1.92 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r1c2 -> r2c1 best | side-on all=False halt=None err=218.76 final=PRESENT
+pool_cyl_1 r1c2 -> r2c2 best | side-on all=False halt=object moved 0.63 mm err=101.71 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r1c2 -> r2c3 best | side-on all=False halt=object moved 0.82 mm err=62.03 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r1c2 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r1c2 -> r3c2 best | side-on all=False halt=object moved 0.20 mm err=2.3 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r1c2 -> r3c3 best | side-on all=False halt=object moved 0.21 mm err=6.2 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r1c3 -> r1c1 best | side-on all=False halt=None err=303.48 final=PRESENT
+pool_cyl_1 r1c3 -> r1c2 best | side-on all=False halt=None err=152.37 final=PRESENT
+pool_cyl_1 r1c3 -> r2c1 best | side-on all=False halt=object moved 3.89 mm err=400.56 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r1c3 -> r2c2 best | side-on all=False halt=None err=214.16 final=PRESENT
+pool_cyl_1 r1c3 -> r2c3 best | side-on all=False halt=object moved 1.70 mm err=102.12 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r1c3 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r1c3 -> r3c2 best | side-on all=False halt=object moved 0.36 mm err=298.2 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r1c3 -> r3c3 best | side-on all=False halt=object moved 0.35 mm err=311.79 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r2c1 -> r1c1 best | side-on all=False halt=None err=3.41 final=PRESENT
+pool_cyl_1 r2c1 -> r1c2 best | side-on all=False halt=stopped while carrying the object back: the grip force read zero while carrying: the object is not held err=22.57 final=stopped on the way back to the pickup
+pool_cyl_1 r2c1 -> r1c3 best | side-on all=False halt=stopped while carrying the object back: the grip force read zero while carrying: the object is not held err=197.81 final=stopped on the way back to the pickup
+pool_cyl_1 r2c1 -> r2c2 best | side-on all=False halt=None err=3.29 final=PRESENT
+pool_cyl_1 r2c1 -> r2c3 best | side-on all=False halt=None err=310.95 final=PRESENT
+pool_cyl_1 r2c1 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r2c1 -> r3c2 best | side-on all=False halt=None err=3.28 final=PRESENT
+pool_cyl_1 r2c1 -> r3c3 best | side-on all=False halt=stopped while carrying the object back: the grip force read zero while carrying: the object is not held err=23.35 final=stopped on the way back to the pickup
+pool_cyl_1 r2c2 -> r1c1 best | side-on all=True halt=None err=2.88 final=PRESENT
+pool_cyl_1 r2c2 -> r1c2 best | side-on all=True halt=None err=2.84 final=PRESENT
+pool_cyl_1 r2c2 -> r1c3 best | side-on all=False halt=None err=1.77 final=PRESENT
+pool_cyl_1 r2c2 -> r2c1 best | side-on all=True halt=None err=3.39 final=PRESENT
+pool_cyl_1 r2c2 -> r2c3 best | side-on all=False halt=None err=154.31 final=PRESENT
+pool_cyl_1 r2c2 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r2c2 -> r3c2 best | side-on all=True halt=None err=3.75 final=PRESENT
+pool_cyl_1 r2c2 -> r3c3 best | side-on all=True halt=None err=3.31 final=PRESENT
+pool_cyl_1 r2c3 -> r1c1 best | side-on all=False halt=object moved 1.69 mm err=74.29 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r2c3 -> r1c2 best | side-on all=False halt=object moved 0.21 mm err=3.11 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r2c3 -> r1c3 best | side-on all=False halt=None err=1.42 final=PRESENT
+pool_cyl_1 r2c3 -> r2c1 best | side-on all=False halt=object moved 1.89 mm err=76.18 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r2c3 -> r2c2 best | side-on all=False halt=object moved 0.21 mm err=4.39 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r2c3 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r2c3 -> r3c2 best | side-on all=False halt=object moved 1.00 mm err=65.03 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r2c3 -> r3c3 best | side-on all=False halt=object moved 0.21 mm err=12.35 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r3c1 -> r1c1 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c1 -> r1c2 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c1 -> r1c3 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c1 -> r2c1 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c1 -> r2c2 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c1 -> r2c3 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c1 -> r3c2 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c1 -> r3c3 best | plan: side-on: plan: IK found no level grasp pose for this approach; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c2 -> r1c1 best | side-on all=False halt=object moved 0.30 mm err=59.14 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r3c2 -> r1c2 best | side-on all=False halt=None err=3.37 final=PRESENT
+pool_cyl_1 r3c2 -> r1c3 best | side-on all=False halt=None err=1.24 final=PRESENT
+pool_cyl_1 r3c2 -> r2c1 best | side-on all=False halt=object moved 0.20 mm err=3.8 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r3c2 -> r2c2 best | side-on all=False halt=None err=0.97 final=PRESENT
+pool_cyl_1 r3c2 -> r2c3 best | side-on all=False halt=None err=1.96 final=PRESENT
+pool_cyl_1 r3c2 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c2 -> r3c3 best | side-on all=False halt=object moved 5.16 mm err=146.25 final=left beside the object (withdrawal refused or stopped)
+pool_cyl_1 r3c3 -> r1c1 best | side-on all=False halt=None err=3.03 final=PRESENT
+pool_cyl_1 r3c3 -> r1c2 best | side-on all=False halt=None err=2.22 final=PRESENT
+pool_cyl_1 r3c3 -> r1c3 best | side-on all=False halt=None err=297.87 final=PRESENT
+pool_cyl_1 r3c3 -> r2c1 best | side-on all=False halt=None err=2.38 final=PRESENT
+pool_cyl_1 r3c3 -> r2c2 best | side-on all=False halt=None err=2.17 final=PRESENT
+pool_cyl_1 r3c3 -> r2c3 best | side-on all=False halt=None err=142.65 final=PRESENT
+pool_cyl_1 r3c3 -> r3c1 best | destination: side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: pool_cyl_1 is a cylinder; the crane pick closes on two flat faces
+pool_cyl_1 r3c3 -> r3c2 best | side-on all=False halt=None err=2.74 final=PRESENT

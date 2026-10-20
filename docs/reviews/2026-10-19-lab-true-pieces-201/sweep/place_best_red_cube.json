@@ -1,0 +1,1698 @@
+[
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r1c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -9.02,
+  "azimuth_deg": 90.0,
+  "seconds": 42.2
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r1c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -50.78,
+  "azimuth_deg": 90.0,
+  "seconds": 65.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r2c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -21.3,
+  "azimuth_deg": 90.0,
+  "seconds": 41.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r2c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -37.82,
+  "azimuth_deg": 90.0,
+  "seconds": 42.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r2c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -68.45,
+  "azimuth_deg": 90.0,
+  "seconds": 48.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r3c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "destination",
+  "refusals": {
+   "side-on": "destination: IK found no level pose that sets the object down on the target",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 210.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r3c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -51.23,
+  "azimuth_deg": 90.0,
+  "seconds": 45.2
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c1",
+  "to": "r3c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -72.22,
+  "azimuth_deg": 90.0,
+  "seconds": 45.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r1c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 9.02,
+  "azimuth_deg": 90.0,
+  "seconds": 101.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r1c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -41.75,
+  "azimuth_deg": 90.0,
+  "seconds": 109.9
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r2c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -12.28,
+  "azimuth_deg": 90.0,
+  "seconds": 117.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r2c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -28.8,
+  "azimuth_deg": 90.0,
+  "seconds": 90.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r2c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -59.42,
+  "azimuth_deg": 90.0,
+  "seconds": 102.7
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r3c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "destination",
+  "refusals": {
+   "side-on": "destination: IK found no level pose that sets the object down on the target",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 209.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r3c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -42.2,
+  "azimuth_deg": 90.0,
+  "seconds": 82.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c2",
+  "to": "r3c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -63.2,
+  "azimuth_deg": 90.0,
+  "seconds": 55.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r1c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +1"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 50.78,
+  "azimuth_deg": 0.0,
+  "seconds": 26.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r1c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +1"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 41.75,
+  "azimuth_deg": 0.0,
+  "seconds": 26.7
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r2c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +1"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 29.47,
+  "azimuth_deg": 0.0,
+  "seconds": 26.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r2c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +1"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 12.95,
+  "azimuth_deg": 0.0,
+  "seconds": 23.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r2c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +1"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -17.67,
+  "azimuth_deg": 0.0,
+  "seconds": 20.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r3c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no pose for rung +1",
+  "at": "destination",
+  "refusals": {
+   "side-on": "destination: IK found no level pose that sets the object down on the target",
+   "crane": "plan: IK found no pose for rung +1"
+  },
+  "seconds": 83.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r3c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +1"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -0.45,
+  "azimuth_deg": 0.0,
+  "seconds": 21.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r1c3",
+  "to": "r3c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +1"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -21.45,
+  "azimuth_deg": 0.0,
+  "seconds": 20.6
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r1c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.99,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 21.3,
+  "azimuth_deg": 90.0,
+  "seconds": 16.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r1c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.99,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 12.28,
+  "azimuth_deg": 90.0,
+  "seconds": 18.2
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r1c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -29.47,
+  "azimuth_deg": 90.0,
+  "seconds": 31.7
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r2c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.99,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -16.52,
+  "azimuth_deg": 90.0,
+  "seconds": 17.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r2c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -47.14,
+  "azimuth_deg": 90.0,
+  "seconds": 22.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r3c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "destination",
+  "refusals": {
+   "side-on": "destination: IK found no level pose that sets the object down on the target",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 81.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r3c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.99,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -29.92,
+  "azimuth_deg": 90.0,
+  "seconds": 17.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c1",
+  "to": "r3c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.99,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -50.92,
+  "azimuth_deg": 90.0,
+  "seconds": 17.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r1c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.01,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 37.82,
+  "azimuth_deg": 0.0,
+  "seconds": 32.2
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r1c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.01,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 28.8,
+  "azimuth_deg": 0.0,
+  "seconds": 32.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r1c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -57.95,
+  "azimuth_deg": 90.0,
+  "seconds": 48.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r2c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.01,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 31.52,
+  "azimuth_deg": 0.0,
+  "seconds": 34.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r2c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.63,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -30.62,
+  "azimuth_deg": 90.0,
+  "seconds": 33.2
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r3c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "destination",
+  "refusals": {
+   "side-on": "destination: IK found no level pose that sets the object down on the target",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 308.9
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r3c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.01,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 1.6,
+  "azimuth_deg": 0.0,
+  "seconds": 56.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c2",
+  "to": "r3c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.63,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -34.4,
+  "azimuth_deg": 90.0,
+  "seconds": 61.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r1c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 68.45,
+  "azimuth_deg": 0.0,
+  "seconds": 64.7
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r1c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 59.42,
+  "azimuth_deg": 0.0,
+  "seconds": 67.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r1c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 17.67,
+  "azimuth_deg": 0.0,
+  "seconds": 69.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r2c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 47.14,
+  "azimuth_deg": 0.0,
+  "seconds": 66.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r2c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 30.62,
+  "azimuth_deg": 0.0,
+  "seconds": 53.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r3c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "side-on: destination: IK found no level pose that sets the object down on the target; crane: plan: IK found no pose for rung +10",
+  "at": "destination",
+  "refusals": {
+   "side-on": "destination: IK found no level pose that sets the object down on the target",
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "seconds": 230.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r3c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 17.22,
+  "azimuth_deg": 0.0,
+  "seconds": 47.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r2c3",
+  "to": "r3c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +10"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -3.78,
+  "azimuth_deg": 0.0,
+  "seconds": 38.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r1c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 8.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r1c2",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 8.2
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r1c3",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 8.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r2c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 8.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r2c2",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 7.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r2c3",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 8.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r3c2",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 8.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c1",
+  "to": "r3c3",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "plan",
+  "reason": "side-on: plan: IK found no level grasp pose for this approach; crane: plan: IK found no grasp pose in the bounded start set",
+  "at": "pick",
+  "refusals": {
+   "side-on": "plan: IK found no level grasp pose for this approach",
+   "crane": "plan: IK found no grasp pose in the bounded start set"
+  },
+  "seconds": 8.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r1c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.02,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "destination: IK found no pose that sets the object down on the target with the grasp's attitude"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 51.23,
+  "azimuth_deg": 0.0,
+  "seconds": 101.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r1c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.02,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "destination: IK found no pose that sets the object down on the target with the grasp's attitude"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 42.2,
+  "azimuth_deg": 0.0,
+  "seconds": 109.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r1c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "plan: IK found no pose for rung +2"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 0.45,
+  "azimuth_deg": 0.0,
+  "seconds": 87.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r2c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.61,
+   "crane": 0.0
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": "joints"
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": null
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 29.92,
+  "azimuth_deg": 0.0,
+  "seconds": 66.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r2c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.02,
+   "crane": 0.0
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": "joints"
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": null
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 13.4,
+  "azimuth_deg": 0.0,
+  "seconds": 66.0
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r2c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.02,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "destination: IK found no pose that sets the object down on the target with the grasp's attitude"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -17.22,
+  "azimuth_deg": 0.0,
+  "seconds": 92.8
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r3c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "side-on: destination: IK found no level pose that sets the object down on the target; crane: destination: IK found no pose that sets the object down on the target with the grasp's attitude",
+  "at": "destination",
+  "refusals": {
+   "side-on": "destination: IK found no level pose that sets the object down on the target",
+   "crane": "destination: IK found no pose that sets the object down on the target with the grasp's attitude"
+  },
+  "seconds": 190.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c2",
+  "to": "r3c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 1.02,
+   "crane": 0.0
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": "joints"
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": null
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": -21.0,
+  "azimuth_deg": 0.0,
+  "seconds": 35.2
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r1c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.97,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "straddle: predicted grasp pose does not straddle: ['finger_above_top']"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 72.22,
+  "azimuth_deg": 0.0,
+  "seconds": 33.3
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r1c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.97,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "straddle: predicted grasp pose does not straddle: ['finger_above_top']"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 63.2,
+  "azimuth_deg": 0.0,
+  "seconds": 38.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r1c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "straddle: predicted grasp pose does not straddle: ['finger_above_top']"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 21.45,
+  "azimuth_deg": 0.0,
+  "seconds": 38.4
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r2c1",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.97,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "straddle: predicted grasp pose does not straddle: ['finger_above_top']"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 50.92,
+  "azimuth_deg": 0.0,
+  "seconds": 32.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r2c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.88,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "straddle: predicted grasp pose does not straddle: ['finger_above_top']"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 34.4,
+  "azimuth_deg": 0.0,
+  "seconds": 32.1
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r2c3",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.0,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "joints",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "straddle: predicted grasp pose does not straddle: ['finger_above_top']"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 3.78,
+  "azimuth_deg": 0.0,
+  "seconds": 33.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r3c1",
+  "grasp": "best",
+  "feasible": false,
+  "stage": "destination",
+  "reason": "side-on: destination: IK found no level pose that sets the object down on the target; crane: straddle: predicted grasp pose does not straddle: ['finger_above_top']",
+  "at": "destination",
+  "refusals": {
+   "side-on": "destination: IK found no level pose that sets the object down on the target",
+   "crane": "straddle: predicted grasp pose does not straddle: ['finger_above_top']"
+  },
+  "seconds": 138.5
+ },
+ {
+  "object": "red_cube",
+  "from": "r3c3",
+  "to": "r3c2",
+  "grasp": "best",
+  "used": "side-on",
+  "margins": {
+   "side-on": 0.97,
+   "crane": null
+  },
+  "limits": {
+   "side-on": "pad_route",
+   "crane": null
+  },
+  "refusals": {
+   "side-on": null,
+   "crane": "straddle: predicted grasp pose does not straddle: ['finger_above_top']"
+  },
+  "feasible": true,
+  "stage": "",
+  "reason": "",
+  "carry_rung": 9,
+  "psi_deg": 21.0,
+  "azimuth_deg": 0.0,
+  "seconds": 30.7
+ }
+]
