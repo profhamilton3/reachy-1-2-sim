@@ -1,0 +1,421 @@
+{
+  "arm_base_in_world": [
+    0.206,
+    0.0,
+    1.15
+  ],
+  "cells": [
+    {
+      "half_extent": 0.0635,
+      "name": "r1c1",
+      "top_z": 0.741,
+      "x": 0.2794,
+      "y": 0.1524
+    },
+    {
+      "half_extent": 0.0635,
+      "name": "r1c2",
+      "top_z": 0.741,
+      "x": 0.2794,
+      "y": 0.0
+    },
+    {
+      "half_extent": 0.0635,
+      "name": "r1c3",
+      "top_z": 0.741,
+      "x": 0.2794,
+      "y": -0.1524
+    },
+    {
+      "half_extent": 0.0635,
+      "name": "r2c1",
+      "top_z": 0.741,
+      "x": 0.4318,
+      "y": 0.1524
+    },
+    {
+      "half_extent": 0.0635,
+      "name": "r2c2",
+      "top_z": 0.741,
+      "x": 0.4318,
+      "y": 0.0
+    },
+    {
+      "half_extent": 0.0635,
+      "name": "r2c3",
+      "top_z": 0.741,
+      "x": 0.4318,
+      "y": -0.1524
+    },
+    {
+      "half_extent": 0.0635,
+      "name": "r3c1",
+      "top_z": 0.741,
+      "x": 0.5842,
+      "y": 0.1524
+    },
+    {
+      "half_extent": 0.0635,
+      "name": "r3c2",
+      "top_z": 0.741,
+      "x": 0.5842,
+      "y": 0.0
+    },
+    {
+      "half_extent": 0.0635,
+      "name": "r3c3",
+      "top_z": 0.741,
+      "x": 0.5842,
+      "y": -0.1524
+    }
+  ],
+  "exported_utc": "2026-10-20T00:00:00Z",
+  "frame": "scene (pedestal): x forward, y left, z up; metres",
+  "objects": [
+    {
+      "cell": "r3c3",
+      "id": "blue_cylinder",
+      "kind": "cylinder",
+      "pos_xyz": [
+        0.5842,
+        -0.1524,
+        0.791
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": 0.035,
+      "semantic_class": "cylinder",
+      "shape": "cylinder",
+      "size_m": [
+        0.07,
+        0.07,
+        0.1
+      ]
+    },
+    {
+      "cell": null,
+      "id": "foam_block",
+      "kind": "foam",
+      "pos_xyz": [
+        0.15,
+        -0.95,
+        0.025
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": null,
+      "semantic_class": "foam",
+      "shape": "box",
+      "size_m": [
+        0.07,
+        0.07,
+        0.05
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_box_1",
+      "kind": "cube",
+      "pos_xyz": [
+        0.15,
+        0.75,
+        0.0254
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": null,
+      "semantic_class": "cube",
+      "shape": "box",
+      "size_m": [
+        0.0508,
+        0.0508,
+        0.0508
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_box_2",
+      "kind": "cube",
+      "pos_xyz": [
+        0.35,
+        0.75,
+        0.0254
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": null,
+      "semantic_class": "cube",
+      "shape": "box",
+      "size_m": [
+        0.0508,
+        0.0508,
+        0.0508
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_box_3",
+      "kind": "cube",
+      "pos_xyz": [
+        0.55,
+        0.75,
+        0.0254
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": null,
+      "semantic_class": "cube",
+      "shape": "box",
+      "size_m": [
+        0.0508,
+        0.0508,
+        0.0508
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_box_4",
+      "kind": "cube",
+      "pos_xyz": [
+        0.75,
+        0.75,
+        0.0254
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": null,
+      "semantic_class": "cube",
+      "shape": "box",
+      "size_m": [
+        0.0508,
+        0.0508,
+        0.0508
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_box_5",
+      "kind": "cube",
+      "pos_xyz": [
+        0.95,
+        0.75,
+        0.0254
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": null,
+      "semantic_class": "cube",
+      "shape": "box",
+      "size_m": [
+        0.0508,
+        0.0508,
+        0.0508
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_cyl_1",
+      "kind": "cylinder",
+      "pos_xyz": [
+        0.15,
+        -0.75,
+        0.03555
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": 0.02285,
+      "semantic_class": "cylinder",
+      "shape": "cylinder",
+      "size_m": [
+        0.0457,
+        0.0457,
+        0.0711
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_cyl_2",
+      "kind": "cylinder",
+      "pos_xyz": [
+        0.35,
+        -0.75,
+        0.03555
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": 0.02285,
+      "semantic_class": "cylinder",
+      "shape": "cylinder",
+      "size_m": [
+        0.0457,
+        0.0457,
+        0.0711
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_cyl_3",
+      "kind": "cylinder",
+      "pos_xyz": [
+        0.55,
+        -0.75,
+        0.03555
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": 0.02285,
+      "semantic_class": "cylinder",
+      "shape": "cylinder",
+      "size_m": [
+        0.0457,
+        0.0457,
+        0.0711
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_cyl_4",
+      "kind": "cylinder",
+      "pos_xyz": [
+        0.75,
+        -0.75,
+        0.03555
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": 0.02285,
+      "semantic_class": "cylinder",
+      "shape": "cylinder",
+      "size_m": [
+        0.0457,
+        0.0457,
+        0.0711
+      ]
+    },
+    {
+      "cell": null,
+      "id": "pool_cyl_5",
+      "kind": "cylinder",
+      "pos_xyz": [
+        0.95,
+        -0.75,
+        0.03555
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": 0.02285,
+      "semantic_class": "cylinder",
+      "shape": "cylinder",
+      "size_m": [
+        0.0457,
+        0.0457,
+        0.0711
+      ]
+    },
+    {
+      "cell": "r1c2",
+      "id": "red_cube",
+      "kind": "cube",
+      "pos_xyz": [
+        0.2794,
+        0.0,
+        0.771
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": null,
+      "semantic_class": "cube",
+      "shape": "box",
+      "size_m": [
+        0.06,
+        0.06,
+        0.06
+      ]
+    },
+    {
+      "cell": "r2c2",
+      "id": "soda_can",
+      "kind": "can",
+      "pos_xyz": [
+        0.4318,
+        0.0,
+        0.802
+      ],
+      "quat_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "radius_m": 0.033,
+      "semantic_class": "can",
+      "shape": "cylinder",
+      "size_m": [
+        0.066,
+        0.066,
+        0.122
+      ]
+    }
+  ],
+  "paused": false,
+  "quat_order": "wxyz",
+  "scene_file": "FWDCenterLabSivaPool.yaml",
+  "scene_name": "FWDCenterLabSivaPool",
+  "scene_revision": "rev-1",
+  "scene_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "schema_version": "truth.v1",
+  "sim_step": 4000,
+  "sim_time_s": 8.0
+}
