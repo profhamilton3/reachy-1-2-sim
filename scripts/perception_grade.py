@@ -13,6 +13,12 @@
 Each pair is a bundle (or an unpacked folder) from the tabletop stereo viewer holding
 `analysis.json` and `depth.json`.  Writes `result.json` and `report.md`.
 
+A pair entry that ends in `.json` is instead a `PerceivedScene` document (perceived_scene.v1, made by the tabletop
+builder, validated by native_mujoco/perceived_scene.py), graded with the same metrics: the 40 mm gate is on the
+measured `surface_point_m` (so the same objects match with a surface correction on or off), and `centre_m` is
+graded against the true centre.  Cells are graded from the scene's own cell reports.  A layout may not mix forms.
+`--bias-loo` adds a leave-one-layout-out "measured-bias.v1" evaluation (see `bias_loo`).
+
 Rules, as decided on #186:
 * The scene must be static across a layout.  Truth is read before and after that
   layout's captures; if the scene revision changed or any object moved more than
@@ -52,6 +58,7 @@ import numpy as np
 _REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "native_mujoco"))
 
+import perceived_scene as ps                                # noqa: E402
 import truth_export as te                                   # noqa: E402
 
 SCHEMA_VERSION = "perception_grade.v1"
@@ -70,6 +77,19 @@ _PROFILE_KEYS = ("lens", "resolution", "focal_px", "warp_fx_px", "radial", "base
 _NECK = ("neck_roll", "neck_pitch", "neck_yaw")
 # Head frame +x forward, +y left, +z up  <-  optical +x right, +y down, +z forward.
 _OPTICAL_TO_HEAD = np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]], dtype=float)
+
+
+#: Sim stereo profiles a PerceivedScene can name by `rig.intrinsics_sha256` (= StereoGeometry.identity["id"], the first
+#: 16 hex digits of the SHA-256 of the identity JSON without the id).  The document carries no lens model, so the grader
+#: needs it; an unknown id is refused.  `test_perception_grade.py` re-derives the id from this dict.
+KNOWN_SIM_PROFILES: Dict[str, Dict[str, Any]] = {
+    "771392183ddc6c62": {
+        "baseline_m": 0.0725, "focal_px": [407.0, 398.8], "geometry": "URDF camera positions and axes",
+        "lens": "distorted", "name": "measured_2026_08_27 + scene URDF", "neck_origin_pitch_rad": 0.174,
+        "neck_origin_xyz_m": [0.015, 0, 0.095], "radial": [[-0.3163, 0.1027], [-0.3895, 0.1838]],
+        "resolution": [640, 480], "right_camera_in_head_m": [0.0033, -0.03625, 0.061], "source": "sim",
+        "warp_fx_px": [408.4, 400.9]},
+}
 
 
 class GradeError(ValueError):
@@ -269,6 +289,20 @@ def check_bracket(before: Mapping[str, Any], after: Mapping[str, Any],
     return not reasons, reasons, worst
 
 
+def _err(p: np.ndarray, delta: np.ndarray, t: Mapping[str, Any]) -> dict:
+    """Errors of a position `p` (delta = p - true centre) for one truth object, in mm.
+
+    gate/centre/horizontal are magnitudes; along_ray_mm (+ = farther than the centre) and x/y/z_mm (torso frame,
+    detection minus truth) are SIGNED, so a bias can be learned.  `toward_camera` is the unit vector from the truth
+    centre to the camera, kept so a bias can be projected on the ray later."""
+    return {"gate_mm": float(np.linalg.norm(p - t["surface"])) * 1000,
+            "centre_mm": float(np.linalg.norm(delta)) * 1000,
+            "along_ray_mm": float(delta @ -t["u"]) * 1000,
+            "horizontal_mm": float(np.linalg.norm(delta[:2])) * 1000,
+            "x_mm": float(delta[0]) * 1000, "y_mm": float(delta[1]) * 1000, "z_mm": float(delta[2]) * 1000,
+            "toward_camera": [round(float(v), 6) for v in t["u"]]}
+
+
 def _box_contains(box: Sequence[float], px: Optional[Tuple[float, float]]) -> bool:
     return px is not None and box[0] <= px[0] <= box[0] + box[2] and box[1] <= px[1] <= box[1] + box[3]
 
@@ -350,10 +384,7 @@ def grade_pair(truth: Mapping[str, Any], parsed: Mapping[str, Any], *,
         p = xyz_of(i)
         if p is not None:
             delta = p - t["centre"]
-            rec["err"] = {"gate_mm": float(np.linalg.norm(p - t["surface"])) * 1000,
-                          "centre_mm": float(np.linalg.norm(delta)) * 1000,
-                          "along_ray_mm": float(delta @ -t["u"]) * 1000,
-                          "horizontal_mm": float(np.linalg.norm(delta[:2])) * 1000}
+            rec["err"] = _err(p, delta, t)
         matches.append(rec)
     matched_objs = {j for _, j, _ in matched}
     for j, t in enumerate(objs):
@@ -436,6 +467,150 @@ def grade_pair(truth: Mapping[str, Any], parsed: Mapping[str, Any], *,
             or (analysis.get("model") or {}).get("name")}
 
 
+def load_scene(path: pathlib.Path) -> Tuple[Any, str]:
+    """A PerceivedScene document (perceived_scene.v1).  Returns (scene, sha256 of the file)."""
+    raw = _read_limited(path, MAX_JSON_BYTES)
+    try:
+        return ps.loads(raw.decode("utf-8")), _sha256(raw)
+    except (UnicodeDecodeError, ps.SceneContractError) as exc:
+        raise GradeError(f"{path.name}: {exc}") from exc
+
+
+def grade_scene(truth: Mapping[str, Any], scene: Any, *, neck_deg: Optional[Sequence[float]] = None,
+                radius_m: float = MATCH_RADIUS_M, margin_px: float = IN_VIEW_MARGIN_PX) -> dict:
+    """Grade one PerceivedScene against the layout's truth, in the same result shape as `grade_pair`.
+
+    Differences from a viewer pair, all because the document is the builder's output rather than raw detections:
+    * the gate (`radius_m`) is on `surface_point_m`, the raw stereo median, against the truth visible-surface point,
+      so the same objects match whatever surface correction the builder applied; `centre_m` (after the correction)
+      is graded against the true centre for centre / horizontal / along-ray / x, y, z;
+    * `objects` and `off_board` are both candidate detections (the parked pool is in view);
+    * there are no `empty` boxes: a cell the scene reports `empty` is an empty detection on that cell, and every
+      cell outcome comes from the scene's own cell reports (`unknown` when it has no board);
+    * misses carry no `box_covers_label`: the document has no boxes;
+    * the head pose is the objects' `source.neck_deg`.  A scene with no object has none, so the manifest entry may give
+      `neck_deg` (the pair's own read-back); when both exist they must agree.
+    """
+    if scene.rig.source != "sim":
+        raise GradeError("only a sim PerceivedScene can be graded against simulator truth")
+    for key in ("scene_sha256", "scene_revision"):
+        mine, theirs = getattr(scene.rig, key), truth.get(key)
+        if mine is not None and theirs is not None and mine != theirs:
+            raise GradeError(f"scene {key} {mine!r} differs from the truth's {theirs!r}")
+    profile = KNOWN_SIM_PROFILES.get(scene.rig.intrinsics_sha256)
+    if profile is None:
+        raise GradeError(f"unknown sim stereo profile {scene.rig.intrinsics_sha256!r}: the document carries no lens model")
+    perceived = list(scene.objects) + list(scene.off_board)
+    poses = {tuple(o.source.neck_deg) for o in perceived}
+    if len(poses) > 1:
+        raise GradeError("the scene's objects were captured at different head poses")
+    if neck_deg is not None:
+        if len(neck_deg) != 3 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in neck_deg):
+            raise GradeError("neck_deg must be three finite numbers (roll, pitch, yaw)")
+        if poses and max(abs(a - b) for a, b in zip(neck_deg, next(iter(poses)))) > 0.01:
+            raise GradeError("the manifest's neck_deg differs from the scene's")
+    elif poses:
+        neck_deg = next(iter(poses))
+    else:
+        raise GradeError("the scene lists no object, so its head pose is unknown: give neck_deg in the manifest entry")
+    neck = dict(zip(_NECK, (float(v) for v in neck_deg)))
+    rig = Rig(profile, neck)
+    base = np.array(truth["arm_base_in_world"], dtype=float)
+    cam = rig.origin("right")
+
+    objs = []
+    for o in truth["objects"]:
+        c = np.array(o["pos_xyz"], dtype=float) - base
+        if not rig.in_view(c, margin_px):
+            continue
+        to_cam = cam - c
+        dist = float(np.linalg.norm(to_cam))
+        u = to_cam / dist
+        objs.append({"o": o, "centre": c, "u": u, "dist": dist, "surface": c + u * half_extent_along(o, u)})
+
+    surface = [np.array(d.surface_point_m, dtype=float) for d in perceived]
+    centre = [np.array(d.centre_m, dtype=float) for d in perceived]
+    used_det, used_obj = set(), set()
+    matched: List[Tuple[int, int]] = []
+    for dist, i, j in sorted((float(np.linalg.norm(surface[i] - t["surface"])), i, j)
+                             for i in range(len(perceived)) for j, t in enumerate(objs)):
+        if dist <= radius_m and i not in used_det and j not in used_obj:
+            used_det.add(i), used_obj.add(j), matched.append((i, j))
+
+    matches, oov_hits, misses = [], [], []
+    for i, j in matched:
+        t, d = objs[j], perceived[i]
+        o = t["o"]
+        if o["kind"] not in VOCAB:
+            oov_hits.append({"object_id": o["id"], "kind": o["kind"], "label": d.kind,
+                             "det_index": i, "on_board": o["cell"] is not None})
+            continue
+        matches.append({"object_id": o["id"], "kind": o["kind"], "cell": o["cell"], "label": d.kind,
+                        "correct": d.kind == o["kind"], "via": "3d", "on_board": o["cell"] is not None,
+                        "det_index": i, "confidence": d.kind_confidence, "distance_m": round(t["dist"], 4),
+                        "err": _err_centre(surface[i], centre[i], t),
+                        "bounds_provisional": d.bounds_provisional,
+                        "perceived_cell": d.cell})
+    for j, t in enumerate(objs):
+        o = t["o"]
+        if j in used_obj or o["kind"] not in VOCAB:
+            continue
+        misses.append({"object_id": o["id"], "kind": o["kind"], "cell": o["cell"], "on_board": o["cell"] is not None,
+                       "distance_m": round(t["dist"], 4), "box_covers_label": None, "no_boxes": True})
+    false_pos = []
+    for i in range(len(perceived)):
+        if i in used_det:
+            continue
+        near = None
+        if objs:
+            k = min(range(len(objs)), key=lambda j: np.linalg.norm(surface[i] - objs[j]["surface"]))
+            near = (objs[k]["o"]["id"], round(float(np.linalg.norm(surface[i] - objs[k]["surface"])) * 1000, 1))
+        false_pos.append({"det_index": i, "label": perceived[i].kind, "confidence": perceived[i].kind_confidence,
+                          "measured": True, "nearest_truth": near[0] if near else None,
+                          "nearest_mm": near[1] if near else None})
+
+    occupant: Dict[str, List[str]] = {}
+    for o in truth["objects"]:
+        if o["cell"]:
+            occupant.setdefault(o["cell"], []).append(o["kind"])
+    in_view_cells = set()
+    for c in truth["cells"]:
+        if rig.in_view(np.array([c["x"], c["y"], c["top_z"]]) - base, margin_px):
+            in_view_cells.add(c["name"])
+    reported = {c.name: c.state for c in scene.cells}          # {} without a board: every cell is unknown
+    empty_dets = [{"det_index": None, "cell": n, "confidence": None, "correct": n not in occupant}
+                  for n in sorted(in_view_cells) if reported.get(n) == EMPTY]
+    cells = {}
+    for name in sorted(in_view_cells):
+        state = reported.get(name, "unknown")
+        kinds = occupant.get(name)
+        if kinds:
+            truth_s = "+".join(sorted(kinds))
+            outcome = "unknown" if state == "unknown" else "correct" if state == truth_s else "wrong"
+            if all(k not in VOCAB for k in kinds):
+                outcome = "oov"
+        else:
+            truth_s = EMPTY
+            outcome = "correct" if state == EMPTY else "unknown" if state == "unknown" else "wrong"
+        cells[name] = {"truth": truth_s, "reported": state, "outcome": outcome}
+
+    return {"neck_deg": neck, "in_view": sorted(t["o"]["id"] for t in objs),
+            "n_detections": len(perceived), "matches": matches, "oov_hits": oov_hits,
+            "misses": misses, "false_positives": false_pos, "empty_dets": empty_dets,
+            "cells": cells, "profile_id": scene.rig.intrinsics_sha256,
+            "detector_model": scene.pipeline.detector_model_sha256,
+            "perceived": {"scene_id": scene.scene_id, "surface_correction_id": scene.pipeline.surface_correction_id,
+                          "bounds_model_id": scene.pipeline.bounds_model_id, "has_board": scene.board is not None,
+                          "pair_id": perceived[0].source.pair_id if perceived else None}}
+
+
+def _err_centre(surface_pt: np.ndarray, centre_pt: np.ndarray, t: Mapping[str, Any]) -> dict:
+    """`_err` for a perceived object: the gate on its surface point, everything else on its (corrected) centre."""
+    out = _err(centre_pt, centre_pt - t["centre"], t)
+    out["gate_mm"] = float(np.linalg.norm(surface_pt - t["surface"])) * 1000
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Summaries
 # ---------------------------------------------------------------------------
@@ -448,6 +623,15 @@ def _stats(values: Sequence[float]) -> dict:
             "p95": round(float(np.percentile(v, 95)), 1), "max": round(float(v.max()), 1)}
 
 
+def _signed_stats(values: Sequence[float]) -> dict:
+    """Signed errors: the mean is the bias; min and max show the spread (a p95 of a signed value means little)."""
+    if not values:
+        return {"n": 0, "mean": None, "median": None, "std": None, "min": None, "max": None}
+    v = np.asarray(values, dtype=float)
+    return {"n": len(v), "mean": round(float(v.mean()), 1), "median": round(float(statistics.median(v)), 1),
+            "std": round(float(v.std()), 1), "min": round(float(v.min()), 1), "max": round(float(v.max()), 1)}
+
+
 def _band(distance_m: float, edges: Sequence[float] = BAND_EDGES_M) -> str:
     lo = None
     for e in edges:
@@ -458,8 +642,12 @@ def _band(distance_m: float, edges: Sequence[float] = BAND_EDGES_M) -> str:
 
 
 def _err_block(matches: Sequence[Mapping[str, Any]]) -> dict:
-    return {k: _stats([m["err"][k] for m in matches]) for k in
-            ("gate_mm", "centre_mm", "horizontal_mm", "along_ray_mm")}
+    block = {k: _stats([m["err"][k] for m in matches]) for k in
+             ("gate_mm", "centre_mm", "horizontal_mm", "along_ray_mm")}
+    block.update({k: _signed_stats([m["err"][k] for m in matches if k in m["err"]])
+                  for k in ("x_mm", "y_mm", "z_mm")})
+    block["along_ray_signed_mm"] = _signed_stats([m["err"]["along_ray_mm"] for m in matches])
+    return block
 
 
 def summarize(pairs: Sequence[Mapping[str, Any]], score_off_board: bool = False) -> dict:
@@ -547,6 +735,69 @@ def summarize(pairs: Sequence[Mapping[str, Any]], score_off_board: bool = False)
 
 
 # ---------------------------------------------------------------------------
+# measured-bias.v1: a correction learned from graded rows, graded leave-one-layout-out
+# ---------------------------------------------------------------------------
+
+def bias_loo(layouts: Sequence[Mapping[str, Any]], score_off_board: bool = False) -> dict:
+    """"measured-bias.v1": subtract the per-kind signed mean error (torso x, y, z) from graded positions.
+
+    To avoid fitting and testing on the same data it is fitted leave-one-layout-out: for each accepted layout, the
+    mean signed error per truth kind over every OTHER layout's rows, applied to that layout's rows.  A kind with no
+    row in the other layouts has no fit; its rows are counted in `n_unfitted` and left out of `after`.  `before`
+    is the same rows uncorrected, so the two blocks compare like with like.  The input rows are the headline rows
+    (on board unless `score_off_board`) with a 3D position; repeated pairs of one layout are counted as they are
+    in the headline, and `n_distinct` counts distinct (layout, object) sightings.
+    """
+    rows = []
+    for lay in layouts:
+        if not lay["accepted"]:
+            continue
+        for pair in lay["pairs"]:
+            for m in pair["matches"]:
+                e = m["err"]
+                if e and "x_mm" in e and (score_off_board or m["on_board"]):
+                    rows.append({"layout": lay["name"], "kind": m["kind"], "object_id": m["object_id"],
+                                 "delta": np.array([e["x_mm"], e["y_mm"], e["z_mm"]]) / 1000.0,
+                                 "u": np.array(e["toward_camera"]), "distance_m": m["distance_m"]})
+    names = sorted({r["layout"] for r in rows})
+    folds, before, after, unfitted = [], [], [], 0
+
+    def errors(r, delta):
+        return {"centre_mm": float(np.linalg.norm(delta)) * 1000, "horizontal_mm": float(np.linalg.norm(delta[:2])) * 1000,
+                "along_ray_mm": float(delta @ -r["u"]) * 1000, "x_mm": float(delta[0]) * 1000,
+                "y_mm": float(delta[1]) * 1000, "z_mm": float(delta[2]) * 1000}
+
+    for name in names:
+        fit = {}
+        for k in VOCAB:
+            d = [r["delta"] for r in rows if r["layout"] != name and r["kind"] == k]
+            if d:
+                fit[k] = np.mean(d, axis=0)
+        graded = [r for r in rows if r["layout"] == name]
+        folds.append({"layout": name, "n_graded": len(graded),
+                      "n_fit": {k: sum(1 for r in rows if r["layout"] != name and r["kind"] == k) for k in VOCAB},
+                      "bias_mm": {k: [round(float(v) * 1000, 1) for v in vec] for k, vec in fit.items()}})
+        for r in graded:
+            if r["kind"] not in fit:
+                unfitted += 1
+                continue
+            before.append(errors(r, r["delta"]))
+            after.append(errors(r, r["delta"] - fit[r["kind"]]))
+
+    def block(items):
+        out = {k: _stats([e[k] for e in items]) for k in ("centre_mm", "horizontal_mm", "along_ray_mm")}
+        out.update({k: _signed_stats([e[k] for e in items]) for k in ("x_mm", "y_mm", "z_mm")})
+        return out
+
+    overall = {k: [round(float(v) * 1000, 1) for v in np.mean([r["delta"] for r in rows if r["kind"] == k], axis=0)]
+               for k in VOCAB if any(r["kind"] == k for r in rows)}
+    return {"scheme": "measured-bias.v1", "fit": "leave-one-layout-out, per truth kind, mean signed x/y/z error",
+            "n_rows": len(rows), "n_distinct": len({(r["layout"], r["object_id"]) for r in rows}),
+            "n_graded": len(after), "n_unfitted": unfitted, "folds": folds,
+            "bias_mm_all_rows": overall, "before": block(before), "after": block(after)}
+
+
+# ---------------------------------------------------------------------------
 # Whole run
 # ---------------------------------------------------------------------------
 
@@ -583,10 +834,10 @@ def load_manifest(path: pathlib.Path) -> Tuple[dict, pathlib.Path]:
 
 def grade_run(manifest: Mapping[str, Any], root: pathlib.Path, *,
               radius_m: float = MATCH_RADIUS_M, margin_px: float = IN_VIEW_MARGIN_PX,
-              move_tol_m: float = MOVE_TOL_M, score_off_board: bool = False) -> dict:
+              move_tol_m: float = MOVE_TOL_M, score_off_board: bool = False, bias_loo_eval: bool = False) -> dict:
     layouts, rejected_pairs, ok_pairs = [], [], []
     inputs = []
-    profile_ids, models = set(), set()
+    profile_ids, models, corrections = set(), set(), set()
     for lay in manifest["layouts"]:
         before, h_before = load_truth(_resolve(root, lay["truth_before"]))
         after, h_after = load_truth(_resolve(root, lay["truth_after"]))
@@ -597,14 +848,33 @@ def grade_run(manifest: Mapping[str, Any], root: pathlib.Path, *,
             "sim_step_before": before["sim_step"], "sim_step_after": after["sim_step"]},
             "pairs": [], "summary": None}
         in_files = []
-        for rel in lay["pairs"]:
+        forms = {isinstance(r, dict) or (isinstance(r, str) and r.endswith(".json")) for r in lay["pairs"]}
+        if len(forms) > 1:
+            raise GradeError(f"layout {lay['name']!r} mixes viewer bundles and PerceivedScene .json documents")
+        for entry_in in lay["pairs"]:
+            extra = {}
+            if isinstance(entry_in, dict):       # {"scene": "x.json", "neck_deg": [roll, pitch, yaw]}
+                if set(entry_in) - {"scene", "neck_deg"} or "scene" not in entry_in:
+                    raise GradeError("a scene entry is a path or {\"scene\": path, \"neck_deg\": [...]}")
+                extra, rel = {"neck_deg": entry_in.get("neck_deg")}, entry_in["scene"]
+            else:
+                rel = entry_in
             p = _resolve(root, rel)
             try:
-                parsed, digest = load_pair(p)
-                in_files.append({"path": rel, "sha256": digest})
-                if not ok:
-                    raise GradeError("layout rejected (scene not static)")
-                res = grade_pair(before, parsed, radius_m=radius_m, margin_px=margin_px)
+                if True in forms:
+                    scene, digest = load_scene(p)
+                    in_files.append({"path": rel, "sha256": digest})
+                    if not ok:
+                        raise GradeError("layout rejected (scene not static)")
+                    res = grade_scene(before, scene, radius_m=radius_m, margin_px=margin_px, **extra)
+                    parsed = {"pair": {"pair_id": res["perceived"]["pair_id"]}}
+                    corrections.add(res["perceived"]["surface_correction_id"])
+                else:
+                    parsed, digest = load_pair(p)
+                    in_files.append({"path": rel, "sha256": digest})
+                    if not ok:
+                        raise GradeError("layout rejected (scene not static)")
+                    res = grade_pair(before, parsed, radius_m=radius_m, margin_px=margin_px)
             except (GradeError, KeyError, TypeError, ValueError, IndexError) as exc:
                 rejected_pairs.append({"layout": lay["name"], "pair": rel, "reason": str(exc)})
                 continue
@@ -619,7 +889,7 @@ def grade_run(manifest: Mapping[str, Any], root: pathlib.Path, *,
         inputs.append({"layout": lay["name"], "truth_before_sha256": h_before,
                        "truth_after_sha256": h_after, "scene_sha256": before["scene_sha256"],
                        "pairs": in_files})
-    return {
+    result = {
         "schema_version": SCHEMA_VERSION,
         "config": {"match_radius_m": radius_m, "in_view_margin_px": margin_px,
                    "distance_band_edges_m": list(BAND_EDGES_M), "static_move_tolerance_m": move_tol_m,
@@ -630,6 +900,12 @@ def grade_run(manifest: Mapping[str, Any], root: pathlib.Path, *,
         "inputs": inputs, "layouts": layouts, "rejected_pairs": rejected_pairs,
         "overall": summarize(ok_pairs, score_off_board) if ok_pairs else None,
     }
+    if corrections:
+        result["config"]["input_form"] = "perceived_scene.v1"
+        result["config"]["surface_corrections"] = sorted(corrections)
+    if bias_loo_eval:
+        result["measured_bias_v1"] = bias_loo(layouts, score_off_board)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +923,20 @@ def _err_rows(block: Mapping[str, Mapping[str, Any]]) -> List[str]:
         rows.append(f"| {name} | {e['gate_mm']['n']} | {_fmt(e['gate_mm']['mean'])} | {_fmt(e['gate_mm']['p95'])} "
                     f"| {_fmt(e['centre_mm']['median'])} | {_fmt(e['horizontal_mm']['median'])} "
                     f"| {_fmt(e['horizontal_mm']['p95'])} | {_fmt(e['along_ray_mm']['median'])} |")
+    return rows
+
+
+def _signed_rows(block: Mapping[str, Mapping[str, Any]]) -> List[str]:
+    """Signed mean error per axis (torso x forward, y left, z up) and along the ray: a bias if it is not near 0."""
+    rows = ["| group | n | x mean | y mean | z mean | along-ray mean | z min..max | along-ray min..max |",
+            "|---|---|---|---|---|---|---|---|"]
+    for name, e in block.items():
+        if "x_mm" not in e:
+            continue
+        z, a = e["z_mm"], e["along_ray_signed_mm"]
+        rows.append(f"| {name} | {e['x_mm']['n']} | {_fmt(e['x_mm']['mean'])} | {_fmt(e['y_mm']['mean'])} "
+                    f"| {_fmt(z['mean'])} | {_fmt(a['mean'])} | {_fmt(z['min'])}..{_fmt(z['max'])} "
+                    f"| {_fmt(a['min'])}..{_fmt(a['max'])} |")
     return rows
 
 
@@ -679,12 +969,36 @@ def _summary_md(s: Mapping[str, Any]) -> List[str]:
             ""] + _err_rows({"all": s["error_3d_mm"]}) + [""]
     out += ["By cell:", ""] + _err_rows(s["error_3d_by_cell_mm"]) + ["", "By camera distance:", ""] \
         + _err_rows(s["error_3d_by_distance_mm"]) + [""]
+    out += ["Signed error in mm, detection minus truth centre (torso x forward, y left, z up; along-ray + = farther "
+            "than the centre). The mean is the bias.", ""] + _signed_rows({"all": s["error_3d_mm"]}) + [""]
+    out += ["Signed, by camera distance:", ""] + _signed_rows(s["error_3d_by_distance_mm"]) + [""]
     out.append(f"Size error: not available ({s['size_error']['reason']}).")
+    return out
+
+
+def _bias_md(b: Mapping[str, Any]) -> List[str]:
+    out = [f"Fit: {b['fit']}. Rows: {b['n_rows']} ({b['n_distinct']} distinct sightings); graded {b['n_graded']}, "
+           f"no fit for {b['n_unfitted']}.", "",
+           "| layout | graded | fit rows (cube / cylinder) | bias mm cube (x, y, z) | bias mm cylinder (x, y, z) |",
+           "|---|---|---|---|---|"]
+    for f in b["folds"]:
+        out.append(f"| {f['layout']} | {f['n_graded']} | {f['n_fit'].get('cube', 0)} / {f['n_fit'].get('cylinder', 0)} "
+                   f"| {_fmt(f['bias_mm'].get('cube'))} | {_fmt(f['bias_mm'].get('cylinder'))} |")
+    out += ["", "Error in mm over the same rows, before and after:", "",
+            "| | n | centre median | horizontal median | horizontal p95 | along-ray median | z mean |",
+            "|---|---|---|---|---|---|---|"]
+    for name in ("before", "after"):
+        e = b[name]
+        out.append(f"| {name} | {e['centre_mm']['n']} | {_fmt(e['centre_mm']['median'])} "
+                   f"| {_fmt(e['horizontal_mm']['median'])} | {_fmt(e['horizontal_mm']['p95'])} "
+                   f"| {_fmt(e['along_ray_mm']['median'])} | {_fmt(e['z_mm']['mean'])} |")
     return out
 
 
 def _miss_line(m):
     """One report line for a miss; says plainly when no detection box covers the object."""
+    if m.get("no_boxes"):
+        return f"- miss: {m['object_id']} ({m['kind']}, {m['cell']}); the scene lists no object near it"
     covered = (f"a box covers it labelled {m['box_covers_label']}" if m["box_covers_label"] is not None
                else "no detection box covers it")
     return f"- miss: {m['object_id']} ({m['kind']}, {m['cell']}); {covered}"
@@ -697,6 +1011,10 @@ def render_report(result: Mapping[str, Any]) -> str:
              f"in-view margin {c['in_view_margin_px']:g} px; distance bands {c['distance_band_edges_m']} m.",
              f"- Detector model: {', '.join(result['detector_models']) or '-'}; "
              f"stereo profile: {', '.join(result['profile_ids']) or '-'}.", ""]
+    if c.get("input_form"):
+        lines[-1:] = [f"- Input: PerceivedScene documents ({c['input_form']}), surface correction "
+                      f"{', '.join(c['surface_corrections'])}. The gate is on `surface_point_m`; centre, horizontal, "
+                      f"along-ray and the signed errors are on `centre_m`, against the true centre.", ""]
     rej = result["rejected_pairs"]
     bad = [lay for lay in result["layouts"] if not lay["accepted"]]
     if bad or rej:
@@ -709,6 +1027,8 @@ def render_report(result: Mapping[str, Any]) -> str:
         lines.append("")
     lines += ["## Overall", ""]
     lines += _summary_md(result["overall"]) if result["overall"] else ["No pair was graded."]
+    if result.get("measured_bias_v1"):
+        lines += ["", "## measured-bias.v1 (leave-one-layout-out)", ""] + _bias_md(result["measured_bias_v1"])
     for lay in result["layouts"]:
         lines += ["", f"## Layout {lay['name']}", "",
                   f"Static bracket: {'ok' if lay['accepted'] else 'REJECTED'} (largest move "
@@ -736,12 +1056,14 @@ def main(argv=None) -> int:
     ap.add_argument("--score-off-board", action="store_true",
                     help="count in-view objects that are not on a grid cell (floor pool) in the headline")
     ap.add_argument("--in-view-margin-px", type=float, default=IN_VIEW_MARGIN_PX)
+    ap.add_argument("--bias-loo", action="store_true",
+                    help="also grade measured-bias.v1: a per-kind signed-mean correction fitted leave-one-layout-out")
     args = ap.parse_args(argv)
     try:
         manifest, root = load_manifest(args.manifest)
         result = grade_run(manifest, root, radius_m=args.match_radius_mm / 1000,
                            margin_px=args.in_view_margin_px,
-                           score_off_board=args.score_off_board)
+                           score_off_board=args.score_off_board, bias_loo_eval=args.bias_loo)
     except (GradeError, OSError) as exc:
         print(f"perception_grade: {exc}", file=sys.stderr)
         return 1
