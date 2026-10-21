@@ -278,6 +278,14 @@ def _run_dir(tmp_path, after="truth_after.json"):
     return tmp_path / "layouts.json"
 
 
+def test_miss_line_says_when_no_box_covers_the_object():
+    base = {"object_id": "red_cube", "kind": "cube", "cell": "r1c2"}
+    assert pg._miss_line(dict(base, box_covers_label=None)) == \
+        "- miss: red_cube (cube, r1c2); no detection box covers it"
+    assert pg._miss_line(dict(base, box_covers_label="cylinder")) == \
+        "- miss: red_cube (cube, r1c2); a box covers it labelled cylinder"
+
+
 def test_end_to_end_writes_result_and_report(tmp_path):
     m = _run_dir(tmp_path)
     assert pg.main(["--manifest", str(m), "--out-dir", str(tmp_path / "out")]) == 0

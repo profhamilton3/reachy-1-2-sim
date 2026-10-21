@@ -683,6 +683,13 @@ def _summary_md(s: Mapping[str, Any]) -> List[str]:
     return out
 
 
+def _miss_line(m):
+    """One report line for a miss; says plainly when no detection box covers the object."""
+    covered = (f"a box covers it labelled {m['box_covers_label']}" if m["box_covers_label"] is not None
+               else "no detection box covers it")
+    return f"- miss: {m['object_id']} ({m['kind']}, {m['cell']}); {covered}"
+
+
 def render_report(result: Mapping[str, Any]) -> str:
     c = result["config"]
     lines = ["# Perception stage 1 grading report (#186)", "",
@@ -711,8 +718,7 @@ def render_report(result: Mapping[str, Any]) -> str:
         for p in lay["pairs"]:
             if p["misses"] or p["false_positives"]:
                 lines += ["", f"Pair `{p['pair']}`:"]
-                lines += [f"- miss: {m['object_id']} ({m['kind']}, {m['cell']}); a box covers it labelled "
-                          f"{m['box_covers_label']}" for m in p["misses"]]
+                lines += [_miss_line(m) for m in p["misses"]]
                 lines += [f"- false positive: {f['label']} #{f['det_index']}, nearest truth {f['nearest_truth']} "
                           f"at {f['nearest_mm']} mm" for f in p["false_positives"]]
     lines += ["", "## Not modelled", "",
