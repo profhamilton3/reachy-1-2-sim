@@ -118,6 +118,19 @@ python3 scripts/perception_grade.py --manifest $RUN/layouts.json --out-dir $RUN/
 
 This writes `result.json` (machine-readable, with input SHA-256s, the settings, detector model and stereo profile id) and `report.md`. Keep the raw bundles and truth files next to them. Options: `--match-radius-mm 40`, `--in-view-margin-px 16`, `--score-off-board`.
 
+### Grading PerceivedScene documents (P1b, #182)
+
+A pair entry ending in `.json` is a `PerceivedScene` (perceived_scene.v1) made by the tabletop builder (`scripts/build_perceived_scene.py` in reachy-tabletop-ai) instead of a viewer zip; a layout does not mix the two. The same metrics and the same 40 mm gate apply, with these differences:
+
+- the gate is on the object's `surface_point_m` (the raw stereo median), so the same objects match whether or not the builder applied a surface correction; `centre_m`, after the correction, is graded against the true centre (centre, horizontal, along-ray and the signed x, y, z);
+- the document carries no lens model, so the grader holds the sim's stereo profile by id (`KNOWN_SIM_PROFILES`; an unknown id is refused), and it refuses a scene whose `scene_sha256` or `scene_revision` differs from the truth's;
+- cell outcomes come from the scene's own cell reports, and `unknown` is not wrong;
+- a scene with no object has no head pose, so its entry may be `{"scene": "A/pair1.json", "neck_deg": [roll, pitch, yaw]}`.
+
+`--bias-loo` adds a "measured-bias.v1" evaluation to `result.json` and `report.md`: the per-kind signed mean error (torso x, y, z) subtracted from the graded rows, fitted leave-one-layout-out (fit on four layouts, grade the fifth).
+
+**The board pose.** On a populated board the builder's single-pair grid finder finds no board (the taped lines are hidden), so a scene built from one of these pairs has no `BoardPose` and every cell is `unknown`. The board pose comes from a head sweep of the empty board at the start of a session (`build_perceived_scene.py --head-sweep`).
+
 A rejected layout (scene moved) or an ungradable pair (no `depth.json`, no neck read-back, a bundle that fails its manifest SHA-256) is listed under **Rejected input** in the report and in `rejected_pairs`; it is never silently dropped.
 
 ## What each metric means
@@ -184,3 +197,25 @@ Run: sim only, scene `FWDCenterLabSivaPool`, head pose `board_view` (0, 64, 0), 
 - pair1 and pair2 of each layout give the same result: the sim renders deterministically, so the two pairs measure nothing about repeatability beyond that. n is effectively 5 scenes.
 - Limits: sim only; small n; a single head pose; one match radius. The sim pictures differ from the lab's (#182 findings 3-5), so these are not robot numbers, and no Docker, Apple-Silicon or robot result is claimed.
 - Next step (#182): run the same detector on the robot images from reachy-tabletop-ai#28 before deciding whether to fine-tune with sim data (`generate_dataset.py`).
+
+## Addendum (P1b, 2026-10-21): the bias question
+
+Question (reachy-tabletop-ai PR #48 review): the viewer measures the near surface, so does moving the centre away from the camera by the class half-extent along the view ray (`class-half-extent.v1`) remove the bias? Method: the tabletop builder was run on all 10 pair zips above, once with `--surface-correction none` and once with `class-half-extent.v1` (builder at reachy-tabletop-ai `bc77f70`, bounds from this folder's `result.json`, zoom ZERO); the 20 documents were graded against the same truth files with `perception_grade.py --bias-loo`. The zips, scenes and reports are held by the owner and not committed.
+
+**Correction off reproduces #186 exactly**: the error blocks for gate, centre, horizontal and along-ray are identical to the zip-graded `result.json` above (horizontal median 10.9 mm, p95 23.3 mm; 24 misses and 4 false positives, unchanged). The zip-graded `result.json` regenerated with the new grader is identical to the committed one apart from the added signed fields.
+
+n = 20 matched rows = **10 distinct sightings** (5 layouts, one object each, pair1 = pair2). Signed errors are detection minus truth centre in the torso frame (x forward, y left, z up); along-ray is + when farther than the centre.
+
+| Correction | n | horizontal median | horizontal p95 | centre median | centre p95 | x mean | y mean | z mean | along-ray mean (min..max) |
+|---|---|---|---|---|---|---|---|---|---|
+| none (reproduces #186) | 20 (10 distinct) | 10.9 | 23.3 | 24.5 | 31.3 | -7.0 | -3.1 | +19.9 | -23.3 (-31.1..-9.6) |
+| `class-half-extent.v1` (new row) | 20 (10 distinct) | 9.3 | 17.4 | 25.1 | 42.7 | +7.7 | +2.7 | -24.4 | +25.9 (+16.1..+42.1) |
+| `measured-bias.v1`, leave-one-layout-out | 20 (10 distinct) | 10.0 | 20.3 | 14.0 | 23.6 | 0.0 | 0.0 | 0.0 | -3.3 (max +8.9) |
+
+All values in mm. The three rows share the same gate and the same matched objects.
+
+**Half-extent overshoots about 2x: confirmed on all 10 pairs (20 of 20 rows).** The correction moved each centre by 40-52 mm along the ray, against a measured near-surface offset of 10-31 mm. The ratio (correction / measured offset) has median 1.99 (cubes 1.87, cylinders 2.04) and ranges from 1.62 to 5.4. Every one of the 20 rows ends farther than the truth centre (along-ray + in 20 of 20) and every z error changes sign (+4..+30 mm becomes -13..-39 mm). The r3c2 `pool_cyl_1` in D_full pair 1 is the case from the review: z +7.9 mm becomes -36.0 mm (the ratio there is 3.7 because the viewer's own offset was only 14 mm). The horizontal numbers improve a little (median 10.9 to 9.3 mm, p95 23.3 to 17.4 mm) but the 3D error does not: centre p95 gets worse, 31.3 to 42.7 mm, and the x and y biases flip sign rather than vanish. The correction as defined is not supported by this data.
+
+**What the data does support: a per-kind constant.** `measured-bias.v1` is the mean signed error per truth kind over the other four layouts. Fitted on all 20 rows it is cube (-10.1, -4.5, +21.2) mm and cylinder (-4.9, -2.3, +19.0) mm in (x, y, z): essentially a +19..+21 mm z offset, which is what the near surface being above the centre would look like. Graded leave-one-layout-out (no row is graded by a fit that saw its own layout) it brings the centre median from 24.5 to 14.0 mm, the centre p95 from 31.3 to 23.6 mm, the along-ray mean from -23.3 to -3.3 mm, and the horizontal median/p95 from 10.9/23.3 to 10.0/20.3 mm. The horizontal p95 stays above the 8 mm crane cap and 3.9 mm side slack either way, so this does not change any verdict in the design note.
+
+Limits: 10 distinct sightings from one head pose and one detector; the cube fit rests on 3 distinct sightings per fold; the fitted bias is per kind, not per piece or per distance (the signed means by camera band are in the report: z +22.7, +26.6, +9.1, +15.8 mm for the four bands with n = 2, 10, 6, 2); pair1 = pair2 doubles every row. The cell outcomes of these scenes are all `unknown`, because no board was found in the populated pairs (see "The board pose" above); the cell results in this folder's `result.json` are the zip path's.
