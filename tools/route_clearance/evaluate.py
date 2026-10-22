@@ -156,6 +156,12 @@ def close_cell(world, legs, close_pose):
     return None
 
 
+def close_spot(world, legs, close_pose):
+    """World xy (m) of the close pose's tip: the supply spot a piece is held at when the pose is over no cell."""
+    world.set_arm(approach_legs(legs, close_pose)[-1].q_to)
+    return tuple(float(v) for v in world.tip_world()[:2])
+
+
 def approach_direction(world, legs, close_pose):
     """Unit xy vector from the close pose's tip toward the tip of the pose the last approach leg starts from: the
     side the hand comes in from."""
@@ -165,6 +171,10 @@ def approach_direction(world, legs, close_pose):
     world.set_arm(last.q_from)
     v = world.tip_world()[:2] - to
     return v / np.linalg.norm(v)
+
+
+#: Half-width (m) of the square a supply-spot target may wander over, the same as a grid cell's.
+SPOT_HALF_M = 0.0635
 
 
 def placement_tolerance(steps):

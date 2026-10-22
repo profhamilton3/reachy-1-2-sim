@@ -303,6 +303,52 @@ def test_close_cell_and_approach_for_b2_grip_tune(world, doc):
     assert math.hypot(*u) == pytest.approx(1.0) and u[1] > 0.9      # the hand comes in from +y (column 1's side)
 
 
+def pick_route(doc):
+    """The doc with PICK_GRIP_TUNE added: REST -> REST_OUT -> PICK_SAFE -> PICK, closing at PICK (off every cell)."""
+    out = copy.deepcopy(doc)
+    out["routes"]["PICK_GRIP_TUNE"] = {
+        "purpose": "gripper_calibration", "start": "REST", "end": "REST", "close_pose": "PICK", "return": "reverse",
+        "legs": [{"to": "REST_OUT", "gripper_deg": 20.0, "min_duration_s": 4.0},
+                 {"to": "PICK_SAFE", "gripper_deg": -29.0, "min_duration_s": 6.0},
+                 {"to": "PICK", "gripper_deg": -29.0, "min_duration_s": 5.0, "near_board": True}]}
+    return out
+
+
+def test_close_spot_is_the_pick_tip_beside_r2c3(world, doc):
+    legs = R.expand(pick_route(doc), "PICK_GRIP_TUNE")
+    assert E.close_cell(world, legs, "PICK") is None                       # the supply spot is off the grid
+    x, y = E.close_spot(world, legs, "PICK")
+    assert (x, y) == pytest.approx((0.4811, -0.2520), abs=1e-4)
+    cx, cy, half = world.cells["r2c3"]
+    assert abs(y - cy) > half and abs(x - cx) < half                       # beside r2c3, outside its edge
+    assert math.hypot(*E.approach_direction(world, legs, "PICK")) == pytest.approx(1.0)
+
+
+def test_target_spot_option_refuses_a_close_pose_over_a_cell(doc, tmp_path):
+    with pytest.raises(R.RouteError, match="B2_PLACE tip is over r2c2"):
+        record.run(ROUTES, "B2_GRIP_TUNE", SCENE, physics=False, cells=["r3c3"], target_spot=True)
+
+
+def test_target_spot_flies_pieces_from_the_spot_in_1mm_steps(world, doc, monkeypatch):
+    """_target with a spot: pieces start at the spot, step toward the approach, tolerance from the steps. The flight is
+    replaced by a stand-in that disturbs a piece once it is 3 mm or more from the spot."""
+    legs = R.expand(pick_route(doc), "PICK_GRIP_TUNE")
+    spot = E.close_spot(world, legs, "PICK")
+    seen = []
+
+    def fake_fly(_world, _legs, layout):
+        (body, xy), = layout.items()
+        off = math.hypot(xy[0] - spot[0], xy[1] - spot[1]) * 1000
+        seen.append(off)
+        return {"moved_mm": {body: 1.5 if off >= 2.99 else 0.0}, "legs": [{"contacts": {}}] * len(_legs)}
+
+    monkeypatch.setattr(record.flight, "fly", fake_fly)
+    u, pieces = record._target(world, legs, "PICK", None, lambda *_: None, spot_xy=spot)
+    assert seen[0] == pytest.approx(0.0, abs=1e-6)
+    assert {k: v["tolerance_mm"] for k, v in pieces.items()} == {"cube": 2, "cylinder": 2}
+    assert [s["offset_mm"] for s in pieces["cube"]["steps"]] == [0, 1, 2, 3]
+
+
 # ---- the record -------------------------------------------------------------------------------------------------
 
 def test_record_is_deterministic_and_named_by_route_and_hash(doc, tmp_path):

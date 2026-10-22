@@ -12,7 +12,7 @@ import mujoco
 
 from . import _REPO, evaluate as E, flight, head
 from .limits import ARM_MOUNT_ID, ARM_RIG_LAYOUT_ID
-from .route import MAX_AVG_SPEED_DEG_S, expand, hash_of, near_board_poses, waypoints
+from .route import MAX_AVG_SPEED_DEG_S, RouteError, expand, hash_of, near_board_poses, waypoints
 from .world import CAP_M, MODEL_PATH, PIECES, World
 
 SCHEMA = "arm_route_record.v1"
@@ -70,20 +70,22 @@ def _piece_contacts(legs, flown, bodies):
     return out
 
 
-def _target(world, legs, close_pose, cell, log):
-    """The target piece at its intended placement on the close cell: centred, then 1 mm steps toward the approach,
-    flown to the close pose and its hold (before the pads close), until a step moves it >= 1 mm."""
+def _target(world, legs, close_pose, cell, log, spot_xy=None):
+    """The target piece at its intended placement: centred on the close cell, or on spot_xy when the close pose is
+    over no cell (a supply spot). Then 1 mm steps toward the approach, flown to the close pose and its hold (before
+    the pads close), until a step moves it >= 1 mm."""
     approach = E.approach_legs(legs, close_pose)
     u = E.approach_direction(world, legs, close_pose)
     pieces = {}
     for kind in sorted(PIECES):
         body = PIECES[kind][0]
-        reach_mm = int((world.cells[cell][2] - world.piece_half_footprint(body)) * 1000 + 1e-9)
+        half = world.cells[cell][2] if spot_xy is None else E.SPOT_HALF_M
+        reach_mm = int((half - world.piece_half_footprint(body)) * 1000 + 1e-9)
         steps, contacts = [], []
         for k in range(reach_mm + 1):
-            centre = world.cell_point(cell)
+            centre = world.cell_point(cell) if spot_xy is None else spot_xy
             xy = (centre[0] + u[0] * k / 1000.0, centre[1] + u[1] * k / 1000.0)
-            log("physics: target %s %s at %d mm" % (cell, kind, k))
+            log("physics: target %s %s at %d mm" % (cell or "spot", kind, k))
             flown = flight.fly(world, approach, {body: xy})
             moved = flown["moved_mm"][body]
             steps.append({"offset_mm": k, "moved_mm": _r(moved)})
@@ -96,9 +98,11 @@ def _target(world, legs, close_pose, cell, log):
     return [_r(u[0], 4), _r(u[1], 4)], pieces
 
 
-def run(routes_path, route_name, scene_name, physics=True, cells=None, declared=None, log=lambda *_: None):
+def run(routes_path, route_name, scene_name, physics=True, cells=None, declared=None, target_spot=False,
+        log=lambda *_: None):
     """The record as a dict. declared: [(pose, pair, None | max_joint_deviation_deg)], default the route's
-    DECLARED_CONTACTS."""
+    DECLARED_CONTACTS. target_spot: the target is the spot under the close pose's tip, for a route whose close pose is
+    over no grid cell (the supply spot); every grid cell is then in the occupancy map."""
     doc_text = pathlib.Path(routes_path).read_bytes()
     doc = json.loads(doc_text)
     legs = expand(doc, route_name)
@@ -112,6 +116,12 @@ def run(routes_path, route_name, scene_name, physics=True, cells=None, declared=
     scene_path = _REPO / "scenes" / (scene_name + ".yaml")
     world = World(scene_path)
     target_cell = E.close_cell(world, legs, close_pose)
+    spot_xy = None
+    if target_spot:
+        if target_cell is not None:
+            raise RouteError("--target-spot: the %s tip is over %s, a grid cell; the target is that cell"
+                             % (close_pose, target_cell))
+        spot_xy = E.close_spot(world, legs, close_pose)
     extra = []
 
     log("kinematic")
@@ -192,11 +202,12 @@ def run(routes_path, route_name, scene_name, physics=True, cells=None, declared=
                         "piece_contacts": _piece_contacts(legs, flown, list(placed))})
 
     approach_xy, target_pieces = None, {}
-    if target_cell is not None and physics:
-        approach_xy, target_pieces = _target(world, legs, close_pose, target_cell, log)
-        extra += E.target_reasons(target_cell, close_pose, target_pieces)
-    elif target_cell is not None:
-        extra.append("target %s: placement not flown in physics" % target_cell)
+    target_name = target_cell or ("spot at %s's tip" % close_pose if spot_xy is not None else None)
+    if target_name is not None and physics:
+        approach_xy, target_pieces = _target(world, legs, close_pose, target_cell, log, spot_xy)
+        extra += E.target_reasons(target_name, close_pose, target_pieces)
+    elif target_name is not None:
+        extra.append("target %s: placement not flown in physics" % target_name)
 
     log("head")
     head_rows = {}
@@ -234,8 +245,9 @@ def run(routes_path, route_name, scene_name, physics=True, cells=None, declared=
         "occupancy": occupancy,
         "target_cell": target_cell,
         "target_placement_tolerance_mm": {kind: row["tolerance_mm"] for kind, row in sorted(target_pieces.items())},
-        "target_placement": {"close_pose": close_pose, "approach_xy": approach_xy,
-                             "pieces": dict(sorted(target_pieces.items()))},
+        "target_placement": dict(
+            {"close_pose": close_pose, "approach_xy": approach_xy, "pieces": dict(sorted(target_pieces.items()))},
+            **({"spot_xy_m": [_r(spot_xy[0], 4), _r(spot_xy[1], 4)]} if spot_xy is not None else {})),
         "layouts_flown": layouts,
         "head": head_rows,
         "method": {
