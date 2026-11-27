@@ -47,7 +47,7 @@ At torso (0.206, 0, 1.15) the shoulders are directly over the board (x 0.16–0.
 | Neck pivot | (0.015, 0, 1.095) | (0.221, 0, 1.245) |
 
 - **The MJCF.** `pedestal` stays at the scene origin, because the scene's `frame_id` and RViz's fixed frame are both `pedestal`. The torso carries the whole offset, which is one translation, as in the URDF.
-- **Python.** `ARM_BASE_IN_WORLD` in `scene/awareness.py` states the mount. `gaze.NECK_PIVOT_IN_WORLD`, `primitives._HEAD_WORLD` and `crane_pick_live._SHOULDER_XY` are derived from it.
+- **Python.** `ARM_BASE_IN_WORLD` in `scene/awareness.py` states the mount. `gaze.NECK_PIVOT_IN_WORLD` and `crane_pick_live._SHOULDER_XY` are derived from it. `primitives.look_at` aims through `gaze.neck_angles_for` (#220; before that it kept its own copy of the pivot, `_HEAD_WORLD`).
 - **The native server.** `native_mujoco/placement.py` cannot import `reachy_ai`, so it restates the mount.
 - **RViz.** `scripts/urdf_with_mount.py` rewrites the URDF's `pedestal` joint, and supervisord pipes the stock URDF through it. This takes effect on an image rebuild.
 - **The check.** `tests/unit/test_robot_mount.py` holds all of these to the compiled MJCF.

@@ -1,0 +1,36 @@
+caller                      target                      before: (pitch, yaw) off(u,v) px, both eyes  after
+demo_control_panel          console (initial)           ( 35.3,   +0.0)  off (  +0,  -14)  in        ( 31.4,   +0.0)  off (  +0,  +13)  in 
+demo_control_panel          btn_red                     ( 51.0,  -30.0)  off ( -83,   +1)  in        ( 51.1,  -18.4)  off (  +0,   +0)  in 
+demo_control_panel          btn_green                   ( 54.4,  -12.0)  off ( -35,  -23)  in        ( 51.1,   -7.0)  off (  +0,   +0)  in 
+demo_control_panel          btn_blue                    ( 54.4,  +12.0)  off ( +36,  -23)  in        ( 51.1,   +7.0)  off (  +0,   +0)  in 
+demo_control_panel          btn_yellow                  ( 51.0,  +30.0)  off ( +84,   +1)  in        ( 51.1,  +18.4)  off (  +0,   +0)  in 
+demo_control_panel          lever_r                     ( 32.7,  -28.6)  off ( -33,  +10)  in        ( 32.3,  -23.8)  off (  +0,  +13)  in 
+demo_control_panel          lever_l                     ( 32.7,  +28.6)  off ( +34,  +10)  in        ( 32.3,  +23.8)  off (  +0,  +13)  in 
+demo_control_panel          switch_r                    ( 32.1,  -10.5)  off ( -10,  -12)  in        ( 28.7,   -8.9)  off (  +0,  +12)  in 
+demo_control_panel          switch_l                    ( 32.1,  +10.5)  off ( +11,  -12)  in        ( 28.7,   +8.9)  off (  +0,  +12)  in 
+demo_control_panel          btn_white                   ( 27.6,  -16.2)  off ( -12,  -11)  in        ( 24.6,  -14.4)  off (  +0,   +9)  in 
+demo_control_panel          btn_pink                    ( 27.6,  +16.2)  off ( +12,  -11)  in        ( 24.6,  +14.4)  off (  +0,   +9)  in 
+demo_pick_place             workspace centroid          ( 63.2,  -30.7)  off (-127,   -2)  in        ( 62.7,  -13.4)  off (  +0,   +2)  in 
+pick_place_live grasp       red_cube                    ( 60.5,  -42.1)  off (-171,  +26)  in        ( 63.4,  -19.4)  off (  +0,   +5)  in 
+pick_place_live grasp       blue_cylinder               ( 61.0,  -18.5)  off ( -68,  -13)  in        ( 58.4,   -8.9)  off (  +0,   +5)  in 
+pick_place_live place       cell_r1c1                   ( 64.0,  +69.0)  off (+526, +183)  OUT       ( 64.0,  +16.9)  off (  +0, +112)  in 
+crane_pick_live obj.center  cell_r1c1 (50.8 mm cube)    ( 64.0,  +69.0)  off (+511, +179)  OUT       ( 64.0,  +17.7)  off (  +0, +111)  in 
+pick_place_live place       cell_r1c2                   ( 64.0,   +0.0)  off (  +0, +117)  in        ( 64.0,   +0.0)  off (  +0, +117)  in 
+crane_pick_live obj.center  cell_r1c2 (50.8 mm cube)    ( 64.0,   +0.0)  off (  +0, +117)  in        ( 64.0,   +0.0)  off (  +0, +117)  in 
+pick_place_live place       cell_r1c3                   ( 64.0,  -69.0)  off (-525, +183)  OUT       ( 64.0,  -16.9)  off (  +0, +112)  in 
+crane_pick_live obj.center  cell_r1c3 (50.8 mm cube)    ( 64.0,  -69.0)  off (-510, +179)  OUT       ( 64.0,  -17.7)  off (  +0, +111)  in 
+pick_place_live place       cell_r2c1                   ( 62.7,  +35.9)  off (+150,   +7)  in        ( 63.4,  +15.6)  off (  +0,   +2)  in 
+crane_pick_live obj.center  cell_r2c1 (50.8 mm cube)    ( 61.5,  +35.9)  off (+145,  +11)  in        ( 62.4,  +16.3)  off (  +0,   +4)  in 
+pick_place_live place       cell_r2c2                   ( 64.0,   +0.0)  off (  +0,   -2)  in        ( 63.4,   +0.0)  off (  +0,   +2)  in 
+crane_pick_live obj.center  cell_r2c2 (50.8 mm cube)    ( 64.0,   +0.0)  off (  +0,   -7)  in        ( 62.4,   +0.0)  off (  +0,   +4)  in 
+pick_place_live place       cell_r2c3                   ( 62.7,  -35.9)  off (-150,   +7)  in        ( 63.4,  -15.6)  off (  +0,   +2)  in 
+crane_pick_live obj.center  cell_r2c3 (50.8 mm cube)    ( 61.5,  -35.9)  off (-145,  +11)  in        ( 62.4,  -16.3)  off (  +0,   +4)  in 
+pick_place_live place       cell_r3c1                   ( 52.0,  +22.8)  off ( +64,  -15)  in        ( 50.4,  +13.8)  off (  +0,   -3)  in 
+crane_pick_live obj.center  cell_r3c1 (50.8 mm cube)    ( 50.6,  +22.8)  off ( +60,  -13)  in        ( 49.0,  +14.3)  off (  +0,   -2)  in 
+pick_place_live place       cell_r3c2                   ( 54.3,   +0.0)  off (  +0,  -31)  in        ( 50.4,   +0.0)  off (  +0,   -3)  in 
+crane_pick_live obj.center  cell_r3c2 (50.8 mm cube)    ( 52.9,   +0.0)  off (  +0,  -30)  in        ( 49.0,   +0.0)  off (  +0,   -2)  in 
+pick_place_live place       cell_r3c3                   ( 52.0,  -22.8)  off ( -63,  -15)  in        ( 50.4,  -13.8)  off (  +0,   -3)  in 
+crane_pick_live obj.center  cell_r3c3 (50.8 mm cube)    ( 50.6,  -22.8)  off ( -60,  -13)  in        ( 49.0,  -14.3)  off (  +0,   -2)  in 
+v2 notebook fixed point     (0.42, 0.15, 0.77)          ( 62.3,  +37.0)  off (+154,  +13)  in        ( 63.4,  +16.3)  off (  +0,   +5)  in 
+v2 notebook fixed point     (0.50, 0, 0.90)             ( 51.0,   +0.0)  off (  +0,  -15)  in        ( 47.1,   +0.0)  off (  +0,  +13)  in 
+targets 34; in both frames: before 30, after 34
