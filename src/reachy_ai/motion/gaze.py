@@ -48,32 +48,33 @@ BUILT_IN_PITCH_DEG = 10.0
 
 # Measured correction on top of the pivot geometry.
 #
-# RE-FITTED FOR THE OCTOBER LAYOUT (#192, 2026-10-17).  The August fit, with
-# the torso at (0, 0, 1.0), aimed at red_cube and fitted where it lands in the
-# left image against the correction applied:
+# RE-FITTED FOR THE OCTOBER LAYOUT (#192) AND AGAIN WITH THE YAW ORDER FIXED
+# (#208, 2026-11-27).  The August fit, with the torso at (0, 0, 1.0), aimed at
+# red_cube and fitted where it lands in the left image against the correction
+# applied:
 #
 #     extra   +0.0   +5.0   +10.0   +15.0   +20.0     (degrees)
 #     row%    65.9   59.5    52.6    41.6    36.8     (0% = top of frame)
 #     fit: row% = -1.52 * extra + 66.5  ->  centred at +10.8
 #
 # Repeated at the October mount (offline render, measured fovy, segmentation
-# mask of red_cube standing on each cell), it no longer holds as one number:
+# mask of red_cube standing on each cell), aiming with `neck_angles_for`:
 #
 #     cell     slope   centred at        cell     slope   centred at
-#     r3c2     -1.54     +5.7            r3c3     -1.48     +8.0
-#     r3c1     -1.48     +7.9            r2c1     -1.53    +11.3
+#     r3c2     -1.54     +5.7            r3c3     -1.48     +5.7
+#     r3c1     -1.48     +5.7            r2c1     -1.46     +6.5
 #
-# The slope is unchanged; the offset is not, because most of it is parallax.
-# The cameras sit 0.061 m ABOVE the neck pivot in the head frame, and how much
-# steeper an eye must aim than the pivot depends on how far below and away the
-# target is -- in the October layout the board is 0.41 m down and starts
-# almost under the head, so the spread is wide.  The nearer cells need more
-# pitch than the neck's travel and cannot be centred at all (r1c3 at about
-# +72).  +8.5 is the value whose worst error over the four cells above is
-# smallest: +-2.8 deg, about +-4% of the frame height, with the target always in
-# frame.  For a whole-board view use `board_view_pose`, which places each eye
-# explicitly and needs no fitted constant.
-PITCH_BIAS_DEG = 8.5
+# +6.1 is the value whose worst error over these four cells is smallest:
+# +-0.4 deg, under 1% of the frame height.  The other five cells centre at
+# +5.7 to +7.2.  #192 read +5.7 to +11.3 here and chose +8.5, but it aimed the
+# off-centre cells with the old yaw order, which made most of that spread.
+# What remains is parallax: the cameras sit 0.061 m ABOVE the neck pivot in the
+# head frame, and how much steeper an eye must aim than the pivot depends on
+# how far away the target is.  The nearest row needs more pitch than the neck's
+# travel and cannot be centred (r1 at about +79).  For a whole-board view use
+# `board_view_pose`, which places each eye explicitly and needs no fitted
+# constant.
+PITCH_BIAS_DEG = 6.1
 
 # Neck joint travel, from the MJCF ranges (radians) less a degree of margin:
 #   neck_pitch  range="-0.8 1.13"   = -45.8 .. +64.7 deg
@@ -91,23 +92,47 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return lo if v < lo else (hi if v > hi else v)
 
 
+def _yaw_toward(offset: XYZ, pitch_deg: float) -> float:
+    """Neck yaw (deg) that points closest to ``offset`` (pivot to target, world
+    axes) with the neck pitched to ``pitch_deg``.
+
+    Yaw turns about the PITCHED head's Z, so it is measured in that frame: the
+    target's forward component there depends on the pitch.
+    """
+    dx, dy, dz = offset
+    b = math.radians(BUILT_IN_PITCH_DEG + pitch_deg)
+    return math.degrees(math.atan2(dy, math.cos(b) * dx - math.sin(b) * dz))
+
+
 def neck_angles_for(target: XYZ, clamp: bool = True) -> Tuple[float, float]:
     """Neck (pitch, yaw) in degrees that put ``target`` in the stereo view.
 
-    Positive pitch looks down; positive yaw turns to the robot's left.  With
-    ``clamp`` the angles are limited to the neck's travel, so a target behind
-    the robot gives the closest achievable gaze rather than an impossible goal
-    the joint will silently fail to reach.
+    Positive pitch looks down; positive yaw turns to the robot's left.  Yaw is
+    applied after pitch (see `project`), so the pitch is the angle of the
+    target seen from the side, ``atan2(-dz, dx)``, which off centre is steeper
+    than its elevation; the yaw is then taken at the pitch returned, so it
+    still faces the target when the pitch has been biased or clamped.
+
+    A target behind the pivot can also be faced by tilting the other way and
+    turning the head past 90 degrees; that is chosen when its pitch is inside
+    the travel.  With ``clamp`` the angles are limited to the neck's travel, so
+    a target out of reach gives a gaze at the limit rather than an impossible
+    goal the joint will silently fail to reach.
     """
-    dx = target[0] - NECK_PIVOT_IN_WORLD[0]
-    dy = target[1] - NECK_PIVOT_IN_WORLD[1]
-    dz = target[2] - NECK_PIVOT_IN_WORLD[2]
-    horizontal = math.hypot(dx, dy)
-    pitch = (math.degrees(math.atan2(-dz, horizontal))
-             - BUILT_IN_PITCH_DEG + PITCH_BIAS_DEG)
-    yaw = math.degrees(math.atan2(dy, dx))
+    offset = tuple(target[i] - NECK_PIVOT_IN_WORLD[i] for i in range(3))
+    side = math.degrees(math.atan2(-offset[2], offset[0]))
+    bias = PITCH_BIAS_DEG
+    if abs(side) > 90.0:
+        turned = side - math.copysign(180.0, side)
+        # The head faces backwards here, so more pitch raises the gaze: the
+        # bias changes sign to keep correcting the same way in the image.
+        if PITCH_LIMITS[0] <= turned - BUILT_IN_PITCH_DEG - bias <= PITCH_LIMITS[1]:
+            side, bias = turned, -bias
+    pitch = side - BUILT_IN_PITCH_DEG + bias
     if clamp:
         pitch = _clamp(pitch, *PITCH_LIMITS)
+    yaw = _yaw_toward(offset, pitch)
+    if clamp:
         yaw = _clamp(yaw, *YAW_LIMITS)
     return pitch, yaw
 
@@ -150,17 +175,21 @@ def project(point: XYZ, pitch_deg: float, yaw_deg: float = 0.0,
             ) -> Tuple[float, float]:
     """Pixel (u, v) of a world point in one eye at neck (pitch, yaw), roll 0.
 
+    The head turns as the MJCF chains the neck: roll, then pitch, then yaw,
+    each nested in the one before, so yaw is applied last, about the pitched
+    head's Z.  tests/unit/test_robot_mount.py holds this to MuJoCo's cameras.
+
     (nan, nan) when the point is behind the camera.
     """
     _name, cam_y, fx, fy = camera
     b = math.radians(BUILT_IN_PITCH_DEG + pitch_deg)
     yw = math.radians(yaw_deg)
-    # Head rotation: yaw about world Z, then the total pitch about the head's
-    # Y.  Columns are the head's X (look), Y and Z (image up) in world terms.
+    # Head rotation Ry(total pitch) * Rz(yaw).  Its columns are the head's
+    # X (look), Y and Z (image up) in world terms.
     cy_, sy_, cb, sb = math.cos(yw), math.sin(yw), math.cos(b), math.sin(b)
-    hx = (cy_ * cb, sy_ * cb, -sb)
-    hy = (-sy_, cy_, 0.0)
-    hz = (cy_ * sb, sy_ * sb, cb)
+    hx = (cb * cy_, sy_, -sb * cy_)
+    hy = (-cb * sy_, cy_, sb * sy_)
+    hz = (sb, 0.0, cb)
     off = (CAMERA_IN_HEAD[0], cam_y, CAMERA_IN_HEAD[2])
     cam = tuple(NECK_PIVOT_IN_WORLD[i] + off[0] * hx[i] + off[1] * hy[i]
                 + off[2] * hz[i] for i in range(3))
@@ -194,24 +223,24 @@ def board_view_pose(points, step_deg: float = 0.1) -> dict:
     """Neck joint goals (degrees) that put every point in both frames, with the
     largest worst-case margin, inside the neck's travel.
 
-    Yaw aims at the points' centroid; pitch is searched over PITCH_LIMITS.
-    ``margin_px`` says how much room the worst point has; negative means one
-    view cannot hold them all (then view near and far rows separately).
+    Pitch is searched over PITCH_LIMITS; at each pitch, yaw faces the points'
+    centroid.  ``margin_px`` says how much room the worst point has; negative
+    means one view cannot hold them all (then view near and far rows
+    separately).
     """
     pts = list(points)
-    cx = sum(p[0] for p in pts) / len(pts)
-    cy = sum(p[1] for p in pts) / len(pts)
-    yaw = math.degrees(math.atan2(cy - NECK_PIVOT_IN_WORLD[1],
-                                  cx - NECK_PIVOT_IN_WORLD[0]))
+    centroid = tuple(sum(p[i] for p in pts) / len(pts)
+                     - NECK_PIVOT_IN_WORLD[i] for i in range(3))
     best = None
     n = int(round((PITCH_LIMITS[1] - PITCH_LIMITS[0]) / step_deg))
     for i in range(n + 1):
         pitch = PITCH_LIMITS[0] + i * step_deg
+        yaw = _clamp(_yaw_toward(centroid, pitch), *YAW_LIMITS)
         m = frame_margin(pts, pitch, yaw)
-        if best is None or m > best[1]:
-            best = (pitch, m)
+        if best is None or m > best[2]:
+            best = (pitch, yaw, m)
     return {"neck_roll": 0.0, "neck_pitch": round(best[0], 1),
-            "neck_yaw": round(yaw, 1), "margin_px": round(best[1], 1)}
+            "neck_yaw": round(best[1], 1), "margin_px": round(best[2], 1)}
 
 
 #: The October board's nine cells, outer corners, on the surface: the measured
