@@ -168,11 +168,11 @@ class TestTheReuseGateStaysExact:
     def test_a_promoted_parent_trial_is_still_refused_in_a_variant(self):
         """Owner decision 2026-11-27: route validations only.  A different
         scene file is a different world to the reuse gate."""
+        pytest.importorskip("mujoco")        # `objects` imports it
         from reachy_ai.experience.compatibility import (
             KIND_ABILITY_ROUTE, ReuseCandidate, ReuseRequest, check_reuse)
         from reachy_ai.experience.identity import build_simulator_identity
         from objects import build_scene_model_xml
-        pytest.importorskip("mujoco")
 
         def identity(name):
             path = _SCENES / f"{name}.yaml"
