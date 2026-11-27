@@ -222,6 +222,35 @@ class TestCompiler:
         assert sorted(model.body_inertia[bid]) == pytest.approx(
             sorted([ixx, ixx, izz]), rel=1e-4)
 
+    def test_rounding_residue_is_written_as_zero(self):
+        """The products of inertia of a symmetric compound cancel to about
+        1e-22, and Python 3.12 changed how sum() rounds, so the same scene
+        compiled to different text on the host (3.14) and in the container
+        (3.8): different content hashes for one world."""
+        s = math.sqrt(0.5)
+        ring = {"kind": "compound", "parts": [
+            _box_part([0.01, 0.005, 0.02],
+                      [0.02 * math.cos(k * math.pi / 8), 0.02 * math.sin(k * math.pi / 8), 0.0],
+                      [math.cos(k * math.pi / 16), 0.0, 0.0, math.sin(k * math.pi / 16)])
+            for k in range(16)]}
+        for geometry in (ring, holed_block_geometry()):
+            xml = compile_scene(_doc(_obj(geometry)))
+            inertial = next(l for l in xml.splitlines() if "<inertial" in l)
+            assert 'pos="0.000000000 0.000000000 0.000000000"' in inertial
+            full = inertial.split('fullinertia="')[1].split('"')[0].split()
+            assert full[3:] == ["0.000000000000e+00"] * 3, full
+
+    def test_a_real_product_of_inertia_is_kept(self):
+        """An L shape (centred bounding box) has a non-zero Ixy; only residue
+        is dropped."""
+        geometry = {"kind": "compound", "parts": [
+            _box_part([0.04, 0.01, 0.01], [0.0, -0.015, 0.0]),
+            _box_part([0.01, 0.03, 0.01], [-0.015, 0.005, 0.0])]}
+        xml = compile_scene(_doc(_obj(geometry)))
+        inertial = next(l for l in xml.splitlines() if "<inertial" in l)
+        full = [float(v) for v in inertial.split('fullinertia="')[1].split('"')[0].split()]
+        assert abs(full[3]) > 0.05 * max(full[:3])
+
     def test_a_static_compound_has_no_joint_and_no_mass_requirement(self):
         obj = _obj(holed_block_geometry(), dynamic=False)
         del obj["physics"]["mass"]

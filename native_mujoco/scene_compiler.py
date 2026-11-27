@@ -407,8 +407,15 @@ def _compound_inertial(parts: List[dict], mass: float) -> str:
                 inertia[i][j] += sum(rot[i][k] * local[k] * rot[j][k] for k in range(3))
                 inertia[i][j] += m * ((d2 if i == j else 0.0) - d[i] * d[j])
 
-    full = (inertia[0][0], inertia[1][1], inertia[2][2],
-            inertia[0][1], inertia[0][2], inertia[1][2])
+    # Terms that cancel in a symmetric compound leave residue of about 1e-22,
+    # which depends on how the Python version rounds sum() (it changed in 3.12),
+    # and a centre of mass can come out as -0.0.  Written as an exact zero, one
+    # scene compiles to the same text on every host.
+    scale = max(inertia[0][0], inertia[1][1], inertia[2][2])
+    products = [0.0 if abs(v) < 1e-12 * scale else v
+                for v in (inertia[0][1], inertia[0][2], inertia[1][2])]
+    com = [round(v, 9) + 0.0 for v in com]
+    full = (inertia[0][0], inertia[1][1], inertia[2][2], *products)
     return ('<inertial pos="' + " ".join(f"{v:.9f}" for v in com) + '" '
             f'mass="{mass:.6f}" '
             'fullinertia="' + " ".join(f"{v:.12e}" for v in full) + '"/>')
