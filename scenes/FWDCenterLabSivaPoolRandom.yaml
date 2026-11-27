@@ -22,8 +22,12 @@ description: >-
 # Each object draws independently: sha256("<seed>:<id>") picks a palette entry.
 # So two copies of one design can differ, and a run need not use all colours.
 #
-# NOTE: routes validated by name (reachy_ai.motion.rig_routes) are validated for
-# FWDCenterLabSivaPool, not for this name.
+# SAME GEOMETRY AS FWDCenterLabSivaPool: the compiled models differ in rgba
+# only.  reachy_ai.motion.rig_routes.SCENE_GEOMETRY_PARENTS records that, so the
+# routes validated there are valid here (generated per-run scenes keep this
+# name), and tests/unit/test_colour_variant_routes.py holds it.  CHANGE COLOUR
+# ONLY in this file.  The experience reuse gate does not share trials with the
+# parent.
 
 color_randomization:
   tag: part-set

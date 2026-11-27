@@ -8,6 +8,11 @@ Prints the path of a three-line child of scenes/FWDCenterLabSivaPoolRandom.yaml.
 Start the simulator on that file (REACHY_SIM_SCENE=<path> ./scripts/start_sim.sh,
 or native_mujoco/server.py --scene <path> --record runs).  Everything that loads
 it, in the container too, then sees the same colours.
+
+The seed is written in that file, and each run's manifest repeats it with the
+colours it gave (`color_randomization`: the server's --record manifest and
+generate_dataset's).  The file goes to scenes/generated/, which git ignores and
+the container sees through its ./scenes mount.
 """
 
 from __future__ import annotations

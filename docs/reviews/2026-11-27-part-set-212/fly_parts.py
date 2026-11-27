@@ -4,11 +4,14 @@
     python3 fly_parts.py --out OUT_DIR [--port 8799]
 
 For each colour variant (family, black, one generated random seed) it starts
-`mjpython native_mujoco/server.py --record`, then, as a WebSocket client:
-tilts the neck down, places one of each design on eight cells, waits 2 s of SIM
-time, reads the poses, saves the robot's left camera frame, stows them, and (for
-the family scene) does the same with the other eight.  It renders two free-camera
-views of the same settled poses offline.  Raw numbers go to results.json.
+`mjpython native_mujoco/server.py --record` with the launcher's default
+calibration, then, as a WebSocket client: turns the head to gaze.BOARD_VIEW,
+places one of each design on eight cells, waits 2 s of SIM time, reads the
+poses, saves the robot's left camera frame, stows them, and (for the family
+scene) does the same with the other eight.  It renders free-camera views of the
+same settled poses offline, including close-ups of the two holed blocks, and
+composes contact_sheet.png.  Raw numbers go to results.json.  It exits non-zero
+unless every part is still, upright and on its cell.
 
 Reads no STL/STEP file.
 """
@@ -16,16 +19,17 @@ import argparse, asyncio, base64, json, math, pathlib, shutil, subprocess, sys, 
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[2]
-sys.path[:0] = [str(REPO / "native_mujoco"), str(REPO / "scripts")]
+sys.path[:0] = [str(REPO / "native_mujoco"), str(REPO / "scripts"), str(REPO / "src")]
 
 import mujoco                                           # noqa: E402
 import numpy as np                                      # noqa: E402
 import websockets                                       # noqa: E402
-from PIL import Image                                   # noqa: E402
+from PIL import Image, ImageDraw                        # noqa: E402
 
 from make_part_colour_scene import write_scene          # noqa: E402
 from objects import build_scene_model_xml               # noqa: E402
 from placement import cells_from_scene                  # noqa: E402
+from reachy_ai.motion import gaze                       # noqa: E402
 from scene_io import load_scene                         # noqa: E402
 
 DESIGNS = ["110", "111", "120", "121", "210", "211", "220", "221"]
@@ -34,7 +38,8 @@ CELLS = {"110": "r1c1", "111": "r1c2", "210": "r1c3", "211": "r2c1",
          "120": "r3c1", "121": "r2c2", "220": "r2c3", "221": "r3c3"}
 RANDOM_SEED = 20261127
 SIM_SECONDS = 2.0
-NECK_PITCH_INDEX, NECK_PITCH_RAD = 17, 1.05
+NECK_INDEX = {"neck_roll": 16, "neck_pitch": 17, "neck_yaw": 18}
+CALIBRATION = REPO / "scenes" / "calibration_measured_2026_08_27.yaml"
 
 
 async def drive(url, doc, batches, out, label):
@@ -60,8 +65,9 @@ async def drive(url, doc, batches, out, label):
 
         await recv_until(lambda m: m.get("type") == "state")
         target = [0.0] * 21
-        target[NECK_PITCH_INDEX] = NECK_PITCH_RAD
-        mask = [i == NECK_PITCH_INDEX for i in range(21)]
+        for joint, deg in gaze.BOARD_VIEW.items():
+            target[NECK_INDEX[joint]] = math.radians(deg)
+        mask = [i in NECK_INDEX.values() for i in range(21)]
         await ws.send(json.dumps({"type": "joint_command", "seq": 1, "target_rad": target, "mask": mask}))
         t0 = latest["state"]["sim_time_s"]
         await recv_until(lambda m: m.get("type") == "state" and m["sim_time_s"] >= t0 + 3.0)
@@ -135,9 +141,17 @@ def render_free(doc, poses, out, label):
             model.geom_rgba[g][3] = 0.0
             model.geom_matid[g] = -1
     renderer = mujoco.Renderer(model, 480, 640)
-    for view, (azimuth, elevation, distance) in {"top": (0, -89.9, 0.78), "oblique": (35, -38, 0.80)}.items():
+    views = {"top": ((0.432, 0.0, 0.76), 0, -89.9, 0.78),
+             "oblique": ((0.432, 0.0, 0.76), 35, -38, 0.80)}
+    # The round bore of a holed block, seen from straight above and at a slant.
+    for oid, height in (("part111_a", 0.0254), ("part121_a", 0.06985)):
+        if oid in poses:
+            x, y, z = poses[oid]["pos_xyz"]
+            views[f"closeup_{oid}_top"] = ((x, y, z + height / 2), 0, -89.9, 0.14)
+            views[f"closeup_{oid}_slant"] = ((x, y, z + height / 2), 20, -52, 0.16)
+    for view, (lookat, azimuth, elevation, distance) in views.items():
         cam = mujoco.MjvCamera()
-        cam.lookat[:] = (0.432, 0.0, 0.76)
+        cam.lookat[:] = lookat
         cam.azimuth, cam.elevation, cam.distance = azimuth, elevation, distance
         renderer.update_scene(data, camera=cam)
         Image.fromarray(renderer.render()).save(out / f"{label}_{view}.png")
@@ -150,7 +164,8 @@ def run_variant(label, scene, batches, out, port):
         log = out / f"{label}_server.log"
         with open(log, "w") as fh:
             proc = subprocess.Popen(
-                [mjpython, "server.py", "--scene", str(scene), "--port", str(port), "--record", runs],
+                [mjpython, "server.py", "--scene", str(scene), "--port", str(port), "--record", runs,
+                 "--calibration", str(CALIBRATION)],
                 cwd=REPO / "native_mujoco", stdout=fh, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 90
@@ -171,6 +186,29 @@ def run_variant(label, scene, batches, out, port):
             "mujoco_version": manifest.get("mujoco_version")}
 
 
+def contact_sheet(out, labels):
+    """family / black / random rows, then the holed-block close-ups."""
+    cell_w, cell_h, caption = 640, 480, 24
+    rows = len(labels) * (cell_h + caption)
+    sheet = Image.new("RGB", (2 * cell_w, rows + caption + 240), "white")
+    draw = ImageDraw.Draw(sheet)
+    for row, label in enumerate(labels):
+        y = row * (cell_h + caption)
+        draw.text((8, y + 6), f"{label}  |  left: robot left_camera frame from the live server at board_view "
+                  "(unaltered)   right: free camera, same settled poses, ROBOT HIDDEN", fill="black")
+        sheet.paste(Image.open(out / f"{label}_left_camera_a.jpg").convert("RGB"), (0, y + caption))
+        sheet.paste(Image.open(out / f"{label}_a_oblique.png").convert("RGB"), (cell_w, y + caption))
+    draw.text((8, rows + 6), "Holed blocks close up (free camera, robot hidden), the round 16-sided bore:  "
+              "family PART121 from above | family PART111 slant | black PART111 from above | "
+              "random PART121 slant", fill="black")
+    shots = [f"{labels[0]}_a_closeup_part121_a_top.png", f"{labels[0]}_a_closeup_part111_a_slant.png",
+             f"{labels[1]}_a_closeup_part111_a_top.png", f"{labels[2]}_a_closeup_part121_a_slant.png"]
+    for i, name in enumerate(shots):
+        crop = Image.open(out / name).convert("RGB").crop((160, 120, 480, 360))
+        sheet.paste(crop, (i * 320, rows + caption))
+    sheet.save(out / "contact_sheet.png", optimize=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=pathlib.Path, required=True)
@@ -186,7 +224,9 @@ def main():
                     (f"random_seed{RANDOM_SEED}", write_scene(RANDOM_SEED, pathlib.Path(gen)), [a])]
         report = {label: run_variant(label, scene, batches, out, args.port)
                   for label, scene, batches in variants}
-    (out / "results.json").write_text(json.dumps(report, indent=1) + "\n")
+    contact_sheet(out, [label for label, _, _ in variants])
+    full = {"head_deg": gaze.BOARD_VIEW, "calibration": CALIBRATION.name, "variants": report}
+    (out / "results.json").write_text(json.dumps(full, indent=1) + "\n")
     for label, r in report.items():
         for oid, m in r["parts"].items():
             print(f"{label:22s} {oid} {m['cell']} t={m['sim_seconds_after_placement']}s "
@@ -194,6 +234,18 @@ def main():
                   f"moved={m['moved_in_next_0p25s_mm']}mm")
         print(label, "manifest color_randomization seed:",
               (r["manifest_color_randomization"] or {}).get("seed"))
+    readings = [m for r in report.values() for m in r["parts"].values()]
+    bad = [m for m in readings
+           if not (m["sim_seconds_after_placement"] >= SIM_SECONDS and m["xy_error_mm"] < 2.0
+                   and abs(m["rest_height_error_mm"]) < 0.5 and m["tilt_deg"] < 1.0
+                   and m["moved_in_next_0p25s_mm"] < 0.05)]
+    family = set(report["family"]["parts"])
+    print(f"{len(readings)} readings, {len(bad)} not still/upright/on-cell; "
+          f"family scene covers {len(family)} of 16 parts")
+    print("worst: xy {:.3f} mm, height {:.3f} mm, tilt {:.4f} deg, moved {:.4f} mm".format(
+        *(max(abs(m[k]) for m in readings) for k in
+          ("xy_error_mm", "rest_height_error_mm", "tilt_deg", "moved_in_next_0p25s_mm"))))
+    sys.exit(1 if bad or len(family) != 16 else 0)
 
 
 if __name__ == "__main__":

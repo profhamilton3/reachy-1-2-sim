@@ -31,6 +31,9 @@ FWDCenterLabSivaPool.  So a route is not usable in a scene until it has been
 flown there, at the current mount, and recorded in `ROUTE_COMPATIBILITY`;
 `check_route()` refuses the pair otherwise, in the scene's own name rather than
 by claiming the arm is unavailable.
+
+One thing is not a different scene for this purpose: a scene that is another in
+different colours.  `SCENE_GEOMETRY_PARENTS` records each such pair (#212).
 """
 
 from __future__ import annotations
@@ -507,18 +510,83 @@ class ValidationAttempt:
 VALIDATION_ATTEMPTS: Tuple[ValidationAttempt, ...] = ()
 
 
+# ---------------------------------------------------------------------------
+# Scenes that are another scene's geometry
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class GeometryParent:
+    """The record that `scene` is `parent` in different colours, and nothing
+    else, so what was flown in `parent` was flown over `scene`'s geometry."""
+
+    scene: str
+    parent: str
+    evidence: str
+
+
+_COLOUR_ONLY = (
+    "#212, owner decision D5 (2026-11-27). "
+    "tests/unit/test_colour_variant_routes.py holds it: the compiled MuJoCo "
+    "model, serialised whole, equals the parent's with geom_rgba zeroed, and "
+    "the resolved scene document differs only in material colour and naming. "
+)
+
+#: EXPLICIT, AND PROVEN, NOT INFERRED.  A scene is here because a test shows it
+#: is the parent's geometry; extending the parent is not enough (the E1 boards
+#: extend FWDCenterLabSivaPool and put objects on it).  Do not add a row without
+#: adding the scene to that test.  No chains: a parent has no parent.
+#:
+#: Like every row in this module it is keyed by the scene's NAME: nothing here
+#: hashes a scene at run time, for these or for the parent.
+#:
+#: ROUTE RECORDS ONLY.  `experience.compatibility.check_reuse` does not read
+#: this and stays exact on the scene and compiled-model hashes (same decision).
+SCENE_GEOMETRY_PARENTS: Tuple[GeometryParent, ...] = (
+    GeometryParent(
+        "FWDCenterLabSivaPoolBlack", "FWDCenterLabSivaPool",
+        _COLOUR_ONLY + "The sixteen PART objects are matte black."),
+    GeometryParent(
+        "FWDCenterLabSivaPoolRandom", "FWDCenterLabSivaPool",
+        _COLOUR_ONLY + "The PART colours are drawn by a seed; per-run scenes "
+        "from scripts/make_part_colour_scene.py keep this name and are tested "
+        "at several seeds."),
+)
+
+
+def geometry_parent(scene: str) -> Optional[GeometryParent]:
+    """The record that makes `scene` another scene's geometry, or None."""
+    for record in SCENE_GEOMETRY_PARENTS:
+        if record.scene == scene:
+            return record
+    return None
+
+
+def geometry_scene(scene: str) -> str:
+    """The scene whose geometry `scene` has: its recorded parent, else itself."""
+    record = geometry_parent(scene)
+    return record.parent if record else scene
+
+
 def attempts_for(route: str, scene: str) -> Tuple[ValidationAttempt, ...]:
+    """Recorded attempts over this geometry.  A rejection travels between a
+    parent and its colour variants exactly as a pass does."""
+    geometry = geometry_scene(scene)
     return tuple(a for a in VALIDATION_ATTEMPTS
-                 if a.route == route and a.scene == scene)
+                 if a.route == route and geometry_scene(a.scene) == geometry)
 
 
 def validation_for(route: str, scene: str,
                    mount: Optional[str] = None) -> Optional[RouteValidation]:
     """The record of `route` flown in `scene` at `mount` (default: the current
-    mount), or None."""
+    mount), or None.
+
+    For a recorded colour variant the row returned is the PARENT's, unaltered:
+    its `scene` says where the route was actually flown, and
+    `geometry_parent(scene)` says why that counts."""
     mount = CURRENT_MOUNT if mount is None else mount
+    geometry = geometry_scene(scene)
     for row in ROUTE_COMPATIBILITY:
-        if row.route == route and row.scene == scene and row.mount == mount:
+        if row.route == route and row.scene == geometry and row.mount == mount:
             return row
     return None
 
@@ -536,7 +604,7 @@ def check_route(route: str, scene: str) -> Tuple[bool, str]:
     if not route:
         return False, "that action names no route"
     row = validation_for(route, scene)
-    if row is None and any(r.route == route and r.scene == scene
+    if row is None and any(r.route == route and r.scene == geometry_scene(scene)
                            for r in ROUTE_COMPATIBILITY):
         # Flown here, but with the robot mounted somewhere else (#192).  Said
         # in those words: "not validated" would send someone looking for a

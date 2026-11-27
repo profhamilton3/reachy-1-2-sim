@@ -276,6 +276,21 @@ def apply_color_randomization(doc: dict) -> dict:
     return dict(doc, objects=objects)
 
 
+def color_randomization_record(doc: Mapping[str, Any]) -> dict | None:
+    """What a run manifest records of a RESOLVED scene's randomisation:
+    {tag, seed, colors: {object id: rgba}}, or None if it has none."""
+    block = doc.get("color_randomization")
+    if not block:
+        return None
+    return {
+        "tag": block["tag"],
+        "seed": block["seed"],
+        "colors": {str(o["id"]): list(o["material"]["rgba"])
+                   for o in doc.get("objects") or []
+                   if block["tag"] in (o.get("tags") or [])},
+    }
+
+
 # ── Loading ─────────────────────────────────────────────────────────────────
 
 def load_scene(path: str | pathlib.Path, _depth: int = 0) -> dict:

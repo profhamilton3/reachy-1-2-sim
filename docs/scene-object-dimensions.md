@@ -66,8 +66,34 @@ The dimensions and volumes below are those recorded in #212, parsed from the STE
 
 - **Mass is synthetic, not measured.** Owner rule: 1.25× to 2.25× the heaviest object the scene already had (`red_cube`, 0.12 kg), which is 0.150–0.270 kg, mapped linearly on volume (35.4 → 169.2 cm³) and rounded to the nearest 5 g. So similar volumes give similar masses (PART121 ≈ PART220, PART111 ≈ PART210) and a hole always reduces mass. These are not PLA densities. The prints can be weighed later.
 - **Friction:** as the pool pieces, not measured: block 0.8, cylinder 0.75 (torsional 0.01, rolling 0.001).
-- **Colour** follows the family (shape × height) and never the hole. Source: the owner's palette file, kept with the uncommitted printer inputs. The RGBA values above are the scene's *material* colours. Rendered pixels differ with lighting (see the frames in `docs/reviews/2026-11-27-part-set-212/`), so do not compare a camera pixel to these numbers directly.
-- **Variants:** `FWDCenterLabSivaPoolBlack.yaml` paints every part matte black (0.05, 0.05, 0.05). `FWDCenterLabSivaPoolRandom.yaml` draws each part's colour from the four family colours by a recorded seed; `scripts/make_part_colour_scene.py` makes one scene per run, and the server writes the seed and colours to the run manifest.
+- **Colour** follows the family (shape × height) and never the hole. Source: the owner's palette file, kept with the uncommitted printer inputs. The RGBA values above are the scene's *material* colours. Rendered pixels differ with lighting, so do not compare a camera pixel to these numbers: use the *rendered reference colours* below.
+- **Variants:** `FWDCenterLabSivaPoolBlack.yaml` paints every part matte black (0.05, 0.05, 0.05). `FWDCenterLabSivaPoolRandom.yaml` draws each part's colour from the four family colours by a recorded seed (the committed file keeps seed 2026). `scripts/make_part_colour_scene.py` writes one scene per run to `scenes/generated/` (git-ignored, and visible to the container through `./scenes`); the seed is in that file, and the server's recorder manifest and `generate_dataset`'s manifest repeat it with the colours (`color_randomization`).
+- **Same geometry** (D5). Both variants compile to the Pool scene's model with only `geom_rgba` different, so `rig_routes.SCENE_GEOMETRY_PARENTS` records the Pool scene as their geometry parent and its route validations apply to them (`tests/unit/test_colour_variant_routes.py`). The experience reuse gate (`check_reuse`) does **not** share trials between them: it requires the same scene and compiled-model hashes (owner decision 2026-11-27).
+
+### Rendered reference colours (owner decision D6, 2026-11-27)
+
+The palette above is the *material* colour. What a camera sees is different, so colour grading (reachy-tabletop-ai#84) compares against **these**, not against the hex palette. The palette is unchanged.
+
+CIELAB (D65) from the sRGB of the decoded JPEG. `left_camera`, 640 × 480, `calibration_measured_2026_08_27`, no distortion or effects; head at `gaze.BOARD_VIEW` (neck 0, 64, 0); arm at REST; the compiled scene's lighting; MuJoCo 3.11.0 on macOS arm64 (another renderer may differ). Pixels on the part's **top and outer side faces** (bore interior and edge pixels left out), one part at a time on each of the nine cells at yaw 0, both designs of the family. Reproduce with `docs/reviews/2026-11-27-part-set-212/measure_rendered_colours.py` (two runs gave identical numbers); raw values are in `rendered_colours.json`.
+
+| Scene | Family | Material | **Reference L\*, a\*, b\*** (top + side) | Top only | Side only | Furthest single placement, ΔE76: combined / top / side | Top share of pixels | Top pixels with a clipped channel |
+|---|---|---|---|---|---|---|---|---|
+| family | PART11x (block, short) | mustard yellow | **94.9, -17.1, 82.3** | 96.0, -18.8, 83.2 | 41.6, 3.8, 42.9 | 46.2 / 48.2 / 22.6 | 85 % | 60 % |
+| family | PART12x (block, tall) | burnt orange | **66.4, 32.3, 63.8** | 69.6, 35.0, 68.4 | 30.8, 25.9, 36.1 | 45.5 / 30.6 / 23.0 | 64 % | 57 % |
+| family | PART21x (cylinder, short) | dusty-blue grey | **79.1, -3.5, -17.3** | 80.6, -3.8, -19.6 | 32.0, -1.9, -10.0 | 32.1 / 33.9 / 12.6 | 85 % | 20 % |
+| family | PART22x (cylinder, tall) | grass green | **74.3, -51.0, 53.7** | 85.4, -58.8, 62.7 | 33.4, -27.6, 28.7 | 50.9 / 46.6 / 19.8 | 64 % | 20 % |
+| black | PART11x (block, short) | matte black | **6.3, 0.0, 0.0** | 6.3, 0.0, 0.0 | 2.2, 0.0, 0.0 | 5.9 / 5.9 / 0.8 | 85 % | 0 % |
+| black | PART12x (block, tall) | matte black | **5.1, 0.0, 0.0** | 6.3, 0.0, 0.0 | 2.2, 0.0, 0.0 | 6.2 / 5.4 / 0.8 | 64 % | 0 % |
+| black | PART21x (cylinder, short) | matte black | **6.3, 0.0, 0.0** | 6.3, 0.0, 0.0 | 2.2, 0.0, 0.0 | 5.9 / 5.9 / 0.5 | 85 % | 0 % |
+| black | PART22x (cylinder, tall) | matte black | **4.7, 0.0, 0.0** | 6.3, 0.0, 0.0 | 2.2, 0.0, 0.0 | 6.6 / 5.4 / 0.8 | 64 % | 0 % |
+
+How far to trust them:
+
+- **In the family scene they separate the families:** 68 of 72 single placements are nearest (ΔE76) to their own family's reference, 70 of 72 using a\*b\* alone. Misses: PART11x 4 (L\*a\*b\*) / 2 (a\*b\*).
+- **One placement can be far from its family's reference.** Top and side faces render very differently (L\* often twice as high on top), so the combined median is the median of two clusters and moves with how much side face is in view. Comparing top with top or side with side removes that, but lighting still varies across the board.
+- **The lighting clips the top faces:** the last column is the share of top pixels with a channel at 255. Hue there is distorted, which is why mustard renders as a pure yellow.
+- **In the black scene all four families are the same colour** (differences are only which cells and faces each shape shows). These rows say what black looks like; they cannot tell families apart.
+- These are sim values at one head pose and yaw 0. They say nothing about the printed parts under lab light.
 
 ### Where the sim differs from the real part
 
@@ -75,12 +101,18 @@ Holed parts use `geometry.kind: compound` (a mesh would collide as its convex hu
 
 | Design | Sim geometry | Difference from the CAD part |
 |---|---|---|
-| PART111, PART121 | Four boxes: two 49.21 × 11.905 mm walls and two 11.905 × 25.40 mm walls (see *End faces*) | **The bore is square** (25.4 × 25.4 mm), not round Ø25.4. Its corners are open out to a radius of 17.96 mm, and the sim's solid volume is smaller than the real part's (45.1 vs 48.7 cm³ short, 124.0 vs 133.8 cm³ tall). |
-| PART211, PART221 | 16 boxes, a 16-sided ring with flats at r = 12.7 and 24.606 mm | The bore and the outside are 16-sided. The clear bore is nowhere narrower than Ø25.4 mm. Outer corners stand 0.48 mm proud of r = 24.606; the bounding box is exactly 49.212 mm. Neighbouring segments overlap near the bore. |
+| PART111, PART121 | 20 boxes. Four walls (two 49.21 × 11.905 mm, two 11.905 × 25.40 mm) make a square 25.4 mm opening; a ring of 16 boxes from r = 12.7 to 18.0 mm, just past that opening's corners (12.7 × √2 = 17.96), rounds it | The bore is a **16-sided round hole of inradius 12.7 mm** (corners at r = 12.95), the same opening as PART211/PART221 (owner decision D2, 2026-11-27: round, like the printed parts). The ring lies mostly inside the walls. |
+| PART211, PART221 | 16 boxes, a 16-sided ring with flats at r = 12.7 and 24.606 mm | The bore and the outside are 16-sided. Outer corners stand 0.48 mm proud of r = 24.606; the bounding box is exactly 49.212 mm. Neighbouring segments overlap near the bore. |
 
-**End faces.** In a holed part only every other ring segment (8 of 16), or the two long walls of a block, reach the top and bottom faces; the other parts stop **0.1 mm short at each end**. The full-height parts span the whole footprint (the same convex hull as a flat face, so the part stands and tips the same way, either way up), and the envelope, bore and side faces are unchanged. The reason is cost, measured on the Mac (M-series, MuJoCo 3.11.0, physics step only, all 16 parts parked): with all faces flat each ring carried 64 floor contacts and the Pool scene's step rose from about 0.1 ms to 1.7 ms of its 2.0 ms budget, because the no-slip pass (ADR-0005) grows with the square of the contacts on one body. With the recess it is about 0.6 ms. The no-slip setting is unchanged. In close renders the holed cylinders' top faces show faint radial seams where the heights change; they are an artefact of the sim, not a feature of the part.
+In both, the clear bore is nowhere narrower than Ø25.4 mm.
 
-Mass is stated once, on the body's inertial. Its inertia tensor is computed from the parts at one uniform density. That is, to within the 0.1 mm recess, the sim's square-bore shape for the four-wall block, and within 5 % of an ideal annulus for the ring, whose overlaps count twice (`tests/unit/test_part_set_scene.py`).
+**End faces** (accepted by the owner, D1). In a holed part only every other segment of a cylinder's ring (8 of 16), or a block's two long walls, reaches the top and bottom faces. All other parts, including a block's whole bore ring, stop **0.1 mm short at each end**. The full-height parts span the whole footprint (the same convex hull as a flat face, so the part stands and tips the same way, either way up), and the envelope, bore and side faces are unchanged. The reason is cost: with all faces flat each ring cylinder carried 64 floor contacts and the Pool scene's physics step rose from about 0.1 ms to 1.7 ms of its 2.0 ms budget, because the no-slip pass (ADR-0005) grows with the square of the contacts on one body. With the recess it is about 0.6 ms (`step_cost.py` and `step_cost.txt` in the review folder; a benchmark, not a test). The no-slip setting is unchanged.
+
+**Faint lines on the tops (note for reachy-tabletop-ai#84).** In close renders the tops of the holed parts show faint lines where the heights change: radial seams on the ring cylinders, and lines on the holed blocks where the recessed ring and short walls meet the long walls. They are artefacts of the sim, not features of the printed parts, and a perception method that looks for 0.1 mm steps or fine edges on a top face will find them. The owner accepts them. Separately, **close** renders with shadows on show small patches on the holed blocks' tops around the bore; they go away with shadows off (`closeup_shadows_on_off.png`), so they are a shadow-rendering artefact. From the robot's `left_camera` at `board_view` no recessed surface shows through a full-height top face (0 pixels in 36 placements of the four holed designs, `hidden_surface_check.txt`).
+
+**Step-cost guard** (D3). `tests/unit/test_part_set_scene.py` places each PART upright on a board cell and bounds its active contacts: solid block 4, holed block 8, solid cylinder 5, holed cylinder 32. It counts rather than times, so it does not depend on the machine's load.
+
+Mass is stated once, on the body's inertial. Its inertia tensor is computed from the parts at one uniform density, so where parts overlap the overlap counts twice. For the ring cylinders it is within 5 % of an ideal annulus. For the holed blocks, where the bore ring lies largely inside the walls and draws mass inward, it is **3.7 % to 9.5 % below** a square prism with a round Ø25.4 bore (both held by tests). The total mass is exact.
 
 For software that reads an object as one primitive: the planner's `SceneModel` treats a compound as its solid bounding box, bore and all (conservative for clearance), and `truth.v1` reports its outer box or cylinder, chosen by `semantic_class`. `truth.v1` has **no hole field**; the design id carries it (third digit of `part<SHF>`).
 

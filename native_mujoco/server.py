@@ -488,20 +488,6 @@ class SimState:
         return d
 
 
-def _color_randomization_record(scene_doc: Mapping[str, Any]) -> Optional[dict]:
-    """{tag, seed, colors: {object id: rgba}} of a resolved scene, or None."""
-    block = scene_doc.get("color_randomization")
-    if not block:
-        return None
-    return {
-        "tag": block["tag"],
-        "seed": block["seed"],
-        "colors": {str(o["id"]): list(o["material"]["rgba"])
-                   for o in scene_doc.get("objects") or []
-                   if block["tag"] in (o.get("tags") or [])},
-    }
-
-
 class ReachyMujocoServer:
 
     def __init__(
@@ -554,9 +540,10 @@ class ReachyMujocoServer:
             # unchecked.  This is not hypothetical: between #37 and #38 the
             # format gained `extends:` while the schema and this call site did
             # not, and the server could not load FWDCenterLabSiva at all.
+            from scene_io import color_randomization_record
             from scene_io import load_scene as _resolve_scene
             scene_doc = _resolve_scene(scene_path)
-            self._color_randomization = _color_randomization_record(scene_doc)
+            self._color_randomization = color_randomization_record(scene_doc)
             if self._color_randomization:
                 log.info("Colour randomisation: tag %r, seed %d",
                          self._color_randomization["tag"],

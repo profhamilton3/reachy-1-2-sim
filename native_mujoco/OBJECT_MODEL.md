@@ -59,7 +59,7 @@ Rules (schema and `scene_io.check_compound_object`, which also runs without `jso
 
 ## Colour randomisation (#212)
 
-A top-level `color_randomization: {tag, seed, palette}` repaints every object carrying `tag`, choosing `sha256("<seed>:<id>")` modulo the palette. `scene_io.load_scene` applies it once, after `extends` is resolved, so all consumers of one file agree. A child may override just `seed`; `scripts/make_part_colour_scene.py` writes such a child per run. The recorder manifest stores `color_randomization: {tag, seed, colors}` (null otherwise).
+A top-level `color_randomization: {tag, seed, palette}` repaints every object carrying `tag`, choosing `sha256("<seed>:<id>")` modulo the palette. `scene_io.load_scene` applies it once, after `extends` is resolved, so all consumers of one file agree. A child may override just `seed`; `scripts/make_part_colour_scene.py` writes such a child per run. The recorder manifest and the dataset manifest store `color_randomization: {tag, seed, colors}` (null otherwise; `scene_io.color_randomization_record`).
 
 ## Tracking & streaming
 
