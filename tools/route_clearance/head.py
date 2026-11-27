@@ -3,8 +3,13 @@ the tabletop's neck limits, and whether the tip is in each eye's frame there.
 
 The model's own FK and cameras, posed by mj_forward with the arm at the waypoint: the tip is the r_tip site (the SDK's
 forward_kinematics point) and the eyes are left_camera / right_camera, pinhole at their compiled fovy over a 640x480
-frame (the measured profile's resolution; the render does not apply lens distortion). Not gaze.project, whose yaw
-order is wrong away from yaw 0 (#208). Roll stays 0.
+frame (the measured profile's resolution; the render does not apply lens distortion). Roll stays 0.
+
+The model's cameras are the reference, so this keeps using them. gaze.project restates their geometry in plain Python
+for callers without MuJoCo; its yaw order was wrong away from yaw 0, was fixed in #208, and
+tests/unit/test_robot_mount.py now holds it to these cameras within 0.5 px. The aim here is this tool's own solve (the
+tip on the eyes' mean optical axis, inside the tabletop limits), not gaze.neck_angles_for, which adds a fitted
+PITCH_BIAS_DEG and has the sim's wider limits.
 """
 import math
 

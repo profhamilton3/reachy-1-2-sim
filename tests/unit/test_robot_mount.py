@@ -91,10 +91,6 @@ class TestOneMount:
         pos, _ = _body(model, zero, "r_shoulder")
         assert placement.SHOULDER_XYZ == pytest.approx(tuple(pos), abs=1e-9)
 
-    def test_primitives_look_at_uses_the_neck_pivot(self):
-        from reachy_ai.motion import primitives as P
-        assert P._HEAD_WORLD == gaze.NECK_PIVOT_IN_WORLD
-
     def test_rviz_urdf_gets_the_mount(self):
         import urdf_with_mount as U
         with open(os.path.join(_ROOT, "native_mujoco", "model",
@@ -254,6 +250,102 @@ class TestPedestalStub:
                 assert mujoco.mj_geomDistance(m, d, ped, g, 1.0, None) > 0.01, body
                 checked += 1
         assert checked == 6
+
+
+def _neck_pose(model, pitch_deg, yaw_deg, roll_deg=0.0):
+    d = mujoco.MjData(model)
+    for joint, deg in (("neck_roll", roll_deg), ("neck_pitch", pitch_deg),
+                       ("neck_yaw", yaw_deg)):
+        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint)
+        d.qpos[model.jnt_qposadr[jid]] = math.radians(deg)
+    mujoco.mj_forward(model, d)
+    return d
+
+
+def _eye(model, data, name):
+    cid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, f"{name}_camera")
+    return data.cam_xpos[cid], data.cam_xmat[cid].reshape(3, 3)
+
+
+def _mj_pixel(model, data, cam, point):
+    """``point`` through MuJoCo's own camera pose, with gaze's focal lengths."""
+    pos, rot = _eye(model, data, cam[0])
+    v = rot.T @ (np.asarray(point) - pos)
+    return 320 + cam[2] * v[0] / -v[2], 240 - cam[3] * v[1] / -v[2]
+
+
+#: The torso-frame gripper tip at REST (#208's example), in the world frame.
+REST_TIP = tuple(b + t for b, t in zip(ARM_BASE_IN_WORLD, (0.141, -0.397, -0.397)))
+
+
+class TestGazeAwayFromYawZero:
+    """The neck chain is roll, pitch, yaw, with yaw applied LAST (#208)."""
+
+    @pytest.mark.parametrize("yaw", (0.0, 15.0, -15.0, 38.0, -38.0, 45.0, -45.0,
+                                     120.0, -120.0))
+    @pytest.mark.parametrize("pitch", (-30.0, 0.0, 30.0, 64.0))
+    def test_project_matches_the_mjcf_cameras(self, model, pitch, yaw):
+        d = _neck_pose(model, pitch, yaw)
+        # Points spread over MuJoCo's own left frame, near and far.
+        pos, rot = _eye(model, d, "left")
+        _, _, fx, fy = gaze.CAMERAS[0]
+        for depth in (0.4, 0.9):
+            for u in (80, 320, 560):
+                for v in (60, 240, 420):
+                    local = ((u - 320) / fx * depth, -(v - 240) / fy * depth, -depth)
+                    point = tuple(pos + rot @ np.array(local))
+                    for cam in gaze.CAMERAS:
+                        got = gaze.project(point, pitch, yaw, cam)
+                        want = _mj_pixel(model, d, cam, point)
+                        assert got == pytest.approx(want, abs=0.5)
+
+    @pytest.mark.parametrize("target", [
+        REST_TIP,                    # the hand at REST: yaw about -38
+        (0.55, 0.40, 0.74),          # on the table, to the left
+        (0.60, -0.55, 1.25),         # level with the neck, to the right
+        (-0.40, 0.70, 0.90),         # behind-left: yaw past 90
+        (-0.40, -0.70, 1.05),        # behind-right
+    ])
+    def test_unbiased_aim_points_the_head_at_the_target(self, model, monkeypatch,
+                                                        target):
+        monkeypatch.setattr(gaze, "PITCH_BIAS_DEG", 0.0)
+        d = _neck_pose(model, *gaze.neck_angles_for(target, clamp=False))
+        pivot, rot = _body(model, d, "head")
+        want = np.asarray(target) - pivot
+        cos = float(rot[:, 0] @ want / np.linalg.norm(want))
+        # BUILT_IN_PITCH_DEG is 10, the MJCF's 0.174 rad is 9.97.
+        assert math.degrees(math.acos(min(1.0, cos))) < 0.05
+
+    @pytest.mark.parametrize("target", [
+        REST_TIP,                    # pitch clamps
+        (0.55, 0.40, 0.74),
+        (-0.40, 0.70, 0.90),         # behind-left
+        (0.30, -0.30, 0.45),         # pitch clamps, well off centre
+    ])
+    def test_the_aim_faces_the_target_even_when_pitch_clamps(self, model, target):
+        # Facing it: midway between the two eyes' columns is the frame centre.
+        d = _neck_pose(model, *gaze.neck_angles_for(target))
+        columns = [_mj_pixel(model, d, cam, target)[0] for cam in gaze.CAMERAS]
+        assert sum(columns) / 2 == pytest.approx(320.0, abs=1.5)
+
+    def test_the_rest_tip_is_in_both_frames(self, model):
+        pitch, yaw = gaze.neck_angles_for(REST_TIP)
+        assert pitch == gaze.PITCH_LIMITS[1]
+        assert yaw == pytest.approx(-38.0, abs=0.5)
+        d = _neck_pose(model, pitch, yaw)
+        for cam in gaze.CAMERAS:
+            u, v = _mj_pixel(model, d, cam, REST_TIP)
+            assert 0 < u < 640 and 0 < v < 480
+            assert gaze.project(REST_TIP, pitch, yaw, cam) == pytest.approx(
+                (u, v), abs=0.5)
+
+    def test_board_view_pose_faces_an_off_centre_group(self, model):
+        points = [(x, y - 0.35, z) for x, y, z in gaze.BOARD_CELL_CORNERS]
+        pose = gaze.board_view_pose(points)
+        centroid = tuple(np.mean(points, axis=0))
+        d = _neck_pose(model, pose["neck_pitch"], pose["neck_yaw"])
+        columns = [_mj_pixel(model, d, cam, centroid)[0] for cam in gaze.CAMERAS]
+        assert sum(columns) / 2 == pytest.approx(320.0, abs=1.5)
 
 
 class TestBoardView:

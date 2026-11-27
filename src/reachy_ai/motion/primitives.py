@@ -263,21 +263,9 @@ def smooth_move(arm, pose: Dict[str, float], duration: float = 2.0) -> None:
 
 import math
 
-# World position of the neck pivot, for look-at geometry: gaze's, which is
-# derived from the torso pose.  It was a literal (0.02, 0.0, 1.18) for a torso
-# at (0, 0, 1.0), and stayed there when #192 moved the torso.
-from .gaze import NECK_PIVOT_IN_WORLD as _HEAD_WORLD
-from .gaze import PITCH_LIMITS as _GAZE_PITCH_LIMITS
-# Neck look-at limits (deg).  Pitch was capped at 45 deg for a natural down-gaze
-# at a board 0.26 m below the shoulders.  In the October layout (#192) the
-# board is 0.41 m below them and starts under the head, and 45 deg leaves most
-# of it out of frame, so the cap is the neck's own travel (gaze.PITCH_LIMITS).
-_NECK_PITCH_RANGE = _GAZE_PITCH_LIMITS
-_NECK_YAW_RANGE = (-159.0, 159.0)
-
-
-def _clamp(v, lo, hi):
-    return max(lo, min(hi, v))
+# The sim's one aiming implementation: the neck pivot, the head's built-in tilt,
+# the yaw-after-pitch order and the neck's travel all live in gaze (#208, #220).
+from .gaze import neck_angles_for
 
 
 def look_at(robot, xyz, duration: float = 1.0) -> None:
@@ -286,15 +274,13 @@ def look_at(robot, xyz, duration: float = 1.0) -> None:
     neck_pitch>0 looks down; neck_yaw>0 turns toward +Y (robot's left).  The
     workspace objects are down and to the right (−Y), so this yaws right and
     pitches down to face them.
+
+    The angles are `gaze.neck_angles_for(xyz)`, clamped to the neck's travel.
     """
     head = getattr(robot, "head", None)
     if head is None:
         return
-    hx, hy, hz = _HEAD_WORLD
-    dx, dy, dz = xyz[0] - hx, xyz[1] - hy, xyz[2] - hz
-    horiz = math.hypot(dx, dy)
-    yaw = _clamp(math.degrees(math.atan2(dy, dx)), *_NECK_YAW_RANGE)
-    pitch = _clamp(math.degrees(math.atan2(-dz, horiz)), *_NECK_PITCH_RANGE)
+    pitch, yaw = neck_angles_for(xyz)
     robot.turn_on("head")
     # turn_on("head") does not reliably make the neck stiff on the sim backend;
     # stiffen the neck joints explicitly or goal_position is ignored (compliant).

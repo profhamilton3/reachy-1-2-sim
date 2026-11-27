@@ -587,6 +587,23 @@ class TestGaze:
         assert yaw < -20.0            # it really is off to the right
         assert -45.0 <= pitch <= 64.0
 
+    def test_a_target_behind_is_faced_by_turning_past_90(self):
+        """Yaw is applied after pitch (#208), so facing backwards takes a yaw
+        beyond 90, not a pitch beyond 90."""
+        from reachy_ai.motion.gaze import (BUILT_IN_PITCH_DEG, PITCH_BIAS_DEG,
+                                           NECK_PIVOT_IN_WORLD, can_look_at,
+                                           neck_angles_for)
+        x, y, z = NECK_PIVOT_IN_WORLD
+        behind_left = (x - 0.5, y + 0.7, z - 0.2)
+        assert can_look_at(behind_left)
+        assert 90.0 < neck_angles_for(behind_left)[1] < 159.0
+        dead_astern = (x - 1.0, y, z)
+        assert not can_look_at(dead_astern)          # needs yaw 180
+        pitch, yaw = neck_angles_for(dead_astern)
+        assert abs(yaw) == pytest.approx(159.0)
+        # Level, head turned round: the bias is applied the other way up.
+        assert pitch == pytest.approx(-BUILT_IN_PITCH_DEG - PITCH_BIAS_DEG)
+
     def test_clamping_keeps_an_impossible_target_inside_the_travel(self):
         from reachy_ai.motion.gaze import (PITCH_LIMITS, can_look_at,
                                            neck_angles_for)
