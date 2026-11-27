@@ -134,9 +134,11 @@ class TestLimits:
                 assert -159.0 <= pose["neck_yaw"] <= 159.0
 
     def test_below_and_behind_looks_down_forward(self, moves):
-        # The one limit case that differs: the old aim turned the head round to
-        # the yaw stop.  Yaw is applied after pitch, so with pitch at its stop
-        # the closest gaze to a point under the chest faces forward.
+        # BEHIND the pivot, not every target the old aim pinned at a stop is
+        # pinned there now (#220, PR #221).  This is the clearest case: the old
+        # aim turned the head round to the yaw stop.  Yaw is applied after
+        # pitch, so that pointed the head up and back; with pitch at its stop
+        # the nearer gaze to a point under the chest faces forward.
         target = _from_pivot(-0.2, 0.0, -1.2)
         assert _old_formula(target) == (64.0, 159.0)
         pose = _commanded(moves, target)
