@@ -119,6 +119,8 @@ What an SDK client sees differently:
 
 `PITCH_BIAS_DEG` was re-fitted from 10.8 to 8.5. At the new mount the centring offset depends on distance: +5.7 to +11.3 over the cells the neck can centre. See its docstring.
 
+**Amended by #208 (2026-11-27).** `gaze.project` and `neck_angles_for` applied yaw before pitch; the MJCF applies it last. The view above is at yaw 0 and is unchanged. The #192 fit aimed its off-centre cells with the wrong order, which made most of its spread. Refitted, the same four cells centre at +5.7 to +6.5, and `PITCH_BIAS_DEG` is now 6.1.
+
 ### 6. The hand's collision model
 
 Two boxes fill the hand's visual shell (`r_thumb_body`) in `r_gripper_thumb`: `r_hand_back_col` (the wrist side) and `r_palm_col`, whose underside stays 5 mm above the pads' tops. They are in `r_gripper_thumb`, not `r_wrist2hand`, so they turn with wrist roll as the shell does (−17.5° at REST). The R12-502 pads are unchanged.
