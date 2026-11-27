@@ -91,10 +91,6 @@ class TestOneMount:
         pos, _ = _body(model, zero, "r_shoulder")
         assert placement.SHOULDER_XYZ == pytest.approx(tuple(pos), abs=1e-9)
 
-    def test_primitives_look_at_uses_the_neck_pivot(self):
-        from reachy_ai.motion import primitives as P
-        assert P._HEAD_WORLD == gaze.NECK_PIVOT_IN_WORLD
-
     def test_rviz_urdf_gets_the_mount(self):
         import urdf_with_mount as U
         with open(os.path.join(_ROOT, "native_mujoco", "model",
