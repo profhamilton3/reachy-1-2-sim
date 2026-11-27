@@ -194,6 +194,9 @@ def _full_extents(geo: dict) -> Tuple[float, float, float]:
     if kind == "plane":
         sx, sy, _ = geo.get("size", [1.0, 1.0, 0.0])
         return float(sx), float(sy), 0.01
+    if kind == "compound":
+        sx, sy, sz = _scene_io().compound_size(geo)
+        return sx, sy, sz
     sx, sy, sz = geo.get("size", [0.1, 0.1, 0.1])
     return float(sx), float(sy), float(sz)
 
@@ -246,7 +249,10 @@ def object_sdf(obj: SceneObject, point: XYZ) -> float:
            point[2] - obj.center[2])
     w, x, y, z = obj.quat
     local = _rotate((w, -x, -y, -z), rel)          # world -> object frame
-    if obj.kind == "box" or obj.kind == "plane":
+    # A compound is its bounding box here, bore and all: a cylinder would leave
+    # a square block's corners unguarded, and refusing too much is the safe way
+    # to be wrong.
+    if obj.kind in ("box", "plane", "compound"):
         half = (obj.size[0] / 2.0, obj.size[1] / 2.0, obj.size[2] / 2.0)
         return _box_sdf(half, local)
     return _cylinder_sdf(obj.footprint_radius, obj.half_height, local)
@@ -288,6 +294,21 @@ def segment_object_distance(
     return object_sdf(obj, at(t)) - radius, at(t)
 
 
+def _scene_io():
+    """scene_io.py: under native_mujoco/ on the host, /opt in the container."""
+    root = pathlib.Path(__file__).resolve().parents[3]
+    for candidate in (root / "native_mujoco", root):
+        if (candidate / "scene_io.py").is_file() and str(candidate) not in sys.path:
+            sys.path.append(str(candidate))
+    try:
+        import scene_io
+    except ImportError as exc:                                  # pragma: no cover
+        raise RuntimeError(
+            f"the shared scene module (scene_io.py) is not importable from {root}"
+        ) from exc
+    return scene_io
+
+
 def _resolve_inheritance(path: str) -> dict:
     """Follow a scene's `extends:` chain via the shared resolver.
 
@@ -303,18 +324,7 @@ def _resolve_inheritance(path: str) -> dict:
     that drifted would mean one scene file describing two different worlds
     depending on which module loaded it.
     """
-    root = pathlib.Path(__file__).resolve().parents[3]
-    for candidate in (root / "native_mujoco", root):
-        if (candidate / "scene_io.py").is_file() and str(candidate) not in sys.path:
-            sys.path.append(str(candidate))
-    try:
-        from scene_io import load_scene as _resolve
-    except ImportError as exc:                                  # pragma: no cover
-        raise RuntimeError(
-            f"{pathlib.Path(path).name} uses `extends:` but the resolver "
-            f"(scene_io.py) is not importable from {root}"
-        ) from exc
-    return _resolve(path)
+    return _scene_io().load_scene(path)
 
 
 
@@ -342,7 +352,7 @@ class SceneModel:
     def from_yaml(cls, path: str) -> "SceneModel":
         with open(path) as f:
             doc = yaml.safe_load(f)
-        if "extends" in doc:
+        if "extends" in doc or "color_randomization" in doc:
             doc = _resolve_inheritance(path)
         return cls.from_doc(doc)
 

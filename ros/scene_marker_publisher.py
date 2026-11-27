@@ -8,7 +8,8 @@ Publishes to /reachy_sim/scene/markers with TRANSIENT_LOCAL durability so
 late-joining RViz instances receive the full marker set without waiting for
 the next publish cycle.
 
-Each scene object maps to one Marker.  Geometry kind → RViz marker type:
+Each scene object maps to one Marker, except a compound, which maps to one per
+part (#212).  Geometry kind → RViz marker type:
     box       → CUBE
     sphere    → SPHERE
     cylinder  → CYLINDER
@@ -24,6 +25,7 @@ geometry_msgs/Quaternion message, so no reordering is needed.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
@@ -38,6 +40,7 @@ from scene_loader import (  # noqa: E402
     SceneDocument,
     SceneGeometry,
     SceneObject,
+    ScenePose,
     load_scene,
 )
 
@@ -52,6 +55,7 @@ try:
     _ROS_AVAILABLE = True
 except ImportError:  # pragma: no cover — only missing outside the container
     _ROS_AVAILABLE = False
+    Node = object    # so this module, and primitive_views(), import without ROS
 
 
 _PUBLISH_HZ = 15.0   # fast enough for smooth object-follows-gripper animation
@@ -111,6 +115,46 @@ def _marker_scale(geo: SceneGeometry) -> tuple[float, float, float]:
         sx, sy, sz = geo.scale or (1.0, 1.0, 1.0)
         return float(sx), float(sy), float(sz)
     return 0.1, 0.1, 0.1
+
+
+def _quat_mul(a: tuple, b: tuple) -> tuple:
+    """Hamilton product of two [w, x, y, z] quaternions."""
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return (aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw)
+
+
+def primitive_views(obj: SceneObject, position: tuple | None = None) -> list:
+    """The single-primitive views an object is drawn as, in the scene frame.
+
+    A compound has no RViz marker type, so each part becomes its own view.
+    `position` is a live override of the object's position (orientation kept).
+    """
+    pose = obj.pose
+    if position is not None:
+        pose = dataclasses.replace(pose, position=tuple(float(v) for v in position[:3]))
+    if obj.geometry.kind != "compound":
+        return [obj if position is None else dataclasses.replace(obj, pose=pose)]
+
+    q = pose.orientation_wxyz
+    norm = sum(v * v for v in q) ** 0.5
+    q = tuple(v / norm for v in q)
+    conj = (q[0], -q[1], -q[2], -q[3])
+    views = []
+    for part in obj.geometry.parts:
+        offset = _quat_mul(_quat_mul(q, (0.0,) + tuple(part.pos)), conj)[1:]
+        views.append(dataclasses.replace(
+            obj,
+            geometry=SceneGeometry(kind=part.kind, size=part.size,
+                                   radius=part.radius, length=part.length),
+            pose=ScenePose(
+                position=tuple(p + o for p, o in zip(pose.position, offset)),
+                orientation_wxyz=_quat_mul(q, part.quat_wxyz)),
+        ))
+    return views
 
 
 def _build_marker(
@@ -177,12 +221,12 @@ class SceneMarkerPublisher(Node):  # type: ignore[misc]
         frame_id = self._scene.frame_id
         overrides = _read_overrides(self._overrides_path)
         markers = []
-        for idx, obj in enumerate(self._scene.objects):
-            m = _build_marker(obj, idx, frame_id, stamp)
+        for obj in self._scene.objects:
             ov = overrides.get(obj.id)
-            if ov and len(ov) >= 3:
-                m.pose.position = Point(x=float(ov[0]), y=float(ov[1]), z=float(ov[2]))
-            markers.append(m)
+            moved = tuple(ov[:3]) if ov and len(ov) >= 3 else None
+            for view in primitive_views(obj, position=moved):
+                # Marker ids count views, so they stay unique and stable.
+                markers.append(_build_marker(view, len(markers), frame_id, stamp))
         msg = MarkerArray()
         msg.markers = markers
         self._pub.publish(msg)

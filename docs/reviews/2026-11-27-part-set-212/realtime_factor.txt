@@ -1,0 +1,2 @@
+main (14 movable)          real-time factor 1.000   camera frames/s received (both eyes) 30.3
+this branch (30 movable)   real-time factor 1.000   camera frames/s received (both eyes) 30.3

@@ -32,6 +32,58 @@ Siva measured the lab's real tic-tac-toe pieces with a tape measure on 2026-10-1
 - **Not measured, unchanged:** mass (0.05 kg), friction and colour.
 - **Unchanged by owner ruling (2026-10-17):** `red_cube`, `blue_cylinder`, `soda_can` and `foam_block` keep the dimensions above.
 
+## Willis's printed parts: the PART set (#212)
+
+Owner decisions: Terrance, 2026-11-27 (#212, part of reachy-tabletop-ai#80). Sixteen bodies in `FWDCenterLabSivaPool.yaml`, two of each of eight designs.
+
+### Source
+
+| | |
+|---|---|
+| Author | Willis |
+| File | `docs/input_3D_printer_files/digital_twin_blocks.stp` (with `.stl`, `.3dm` and a photo of the prints) |
+| STEP SHA-256 | `17e1ce8a3f62d394104c095d9e8a36aedffefe7bc1ef277ea6e40cb464083104` |
+| STEP units | **INCH** (`CONVERSION_BASED_UNIT('INCH', …)`) |
+| Published | **No.** The repository is public and permission to commit these files has not been given. The directory is in `.gitignore` (#217). |
+| Licence | None recorded. |
+
+The dimensions and volumes below are those recorded in #212, parsed from the STEP/STL on 2026-11-27. When building the scene the coding agent re-checked only the STEP file's SHA-256 and its unit declaration; it did not re-parse the geometry and measured no physical print. **Nothing in the repository reads the STEP or STL**: the scene is built from primitives, so it needs neither file.
+
+### Parts
+
+`PART<S><H><F>`: S 1 = block, 2 = cylinder; H 1 = short, 2 = tall; F 0 = solid, 1 = through hole. Scene ids are `part<SHF>_a` and `part<SHF>_b`.
+
+| Design | Shape | Size (m) | Hole | Volume (cm³) | Mass (kg), synthetic | Family colour | RGBA |
+|---|---|---|---|---|---|---|---|
+| PART110 | block | 0.04921 × 0.04921 × 0.02540 | — | 61.5 | 0.175 | Mustard Yellow #CFA023 | 0.812, 0.627, 0.137 |
+| PART111 | block | same | Ø0.0254 through, vertical | 48.7 | 0.160 | Mustard Yellow | same |
+| PART120 | block | 0.04921 × 0.04921 × 0.06985 | — | 169.2 | 0.270 | Burnt Orange #C85A17 | 0.784, 0.353, 0.090 |
+| PART121 | block | same | Ø0.0254 through | 133.8 | 0.240 | Burnt Orange | same |
+| PART210 | cylinder | r 0.024606, h 0.02540 | — | 48.3 | 0.160 | Dusty-Blue Grey #6B8299 | 0.420, 0.510, 0.600 |
+| PART211 | cylinder | same | Ø0.0254 through | 35.4 | 0.150 | Dusty-Blue Grey | same |
+| PART220 | cylinder | r 0.024606, h 0.06985 | — | 132.8 | 0.235 | Grass Green #4E9A34 | 0.306, 0.604, 0.204 |
+| PART221 | cylinder | same | Ø0.0254 through | 97.4 | 0.205 | Grass Green | same |
+
+- **Mass is synthetic, not measured.** Owner rule: 1.25× to 2.25× the heaviest object the scene already had (`red_cube`, 0.12 kg), which is 0.150–0.270 kg, mapped linearly on volume (35.4 → 169.2 cm³) and rounded to the nearest 5 g. So similar volumes give similar masses (PART121 ≈ PART220, PART111 ≈ PART210) and a hole always reduces mass. These are not PLA densities. The prints can be weighed later.
+- **Friction:** as the pool pieces, not measured: block 0.8, cylinder 0.75 (torsional 0.01, rolling 0.001).
+- **Colour** follows the family (shape × height) and never the hole. Source: the owner's palette file, kept with the uncommitted printer inputs. The RGBA values above are the scene's *material* colours. Rendered pixels differ with lighting (see the frames in `docs/reviews/2026-11-27-part-set-212/`), so do not compare a camera pixel to these numbers directly.
+- **Variants:** `FWDCenterLabSivaPoolBlack.yaml` paints every part matte black (0.05, 0.05, 0.05). `FWDCenterLabSivaPoolRandom.yaml` draws each part's colour from the four family colours by a recorded seed; `scripts/make_part_colour_scene.py` makes one scene per run, and the server writes the seed and colours to the run manifest.
+
+### Where the sim differs from the real part
+
+Holed parts use `geometry.kind: compound` (a mesh would collide as its convex hull, which fills the hole).
+
+| Design | Sim geometry | Difference from the CAD part |
+|---|---|---|
+| PART111, PART121 | Four boxes: two 49.21 × 11.905 mm walls and two 11.905 × 25.40 mm walls (see *End faces*) | **The bore is square** (25.4 × 25.4 mm), not round Ø25.4. Its corners are open out to a radius of 17.96 mm, and the sim's solid volume is smaller than the real part's (45.1 vs 48.7 cm³ short, 124.0 vs 133.8 cm³ tall). |
+| PART211, PART221 | 16 boxes, a 16-sided ring with flats at r = 12.7 and 24.606 mm | The bore and the outside are 16-sided. The clear bore is nowhere narrower than Ø25.4 mm. Outer corners stand 0.48 mm proud of r = 24.606; the bounding box is exactly 49.212 mm. Neighbouring segments overlap near the bore. |
+
+**End faces.** In a holed part only every other ring segment (8 of 16), or the two long walls of a block, reach the top and bottom faces; the other parts stop **0.1 mm short at each end**. The full-height parts span the whole footprint (the same convex hull as a flat face, so the part stands and tips the same way, either way up), and the envelope, bore and side faces are unchanged. The reason is cost, measured on the Mac (M-series, MuJoCo 3.11.0, physics step only, all 16 parts parked): with all faces flat each ring carried 64 floor contacts and the Pool scene's step rose from about 0.1 ms to 1.7 ms of its 2.0 ms budget, because the no-slip pass (ADR-0005) grows with the square of the contacts on one body. With the recess it is about 0.6 ms. The no-slip setting is unchanged. In close renders the holed cylinders' top faces show faint radial seams where the heights change; they are an artefact of the sim, not a feature of the part.
+
+Mass is stated once, on the body's inertial. Its inertia tensor is computed from the parts at one uniform density. That is, to within the 0.1 mm recess, the sim's square-bore shape for the four-wall block, and within 5 % of an ideal annulus for the ring, whose overlaps count twice (`tests/unit/test_part_set_scene.py`).
+
+For software that reads an object as one primitive: the planner's `SceneModel` treats a compound as its solid bounding box, bore and all (conservative for clearance), and `truth.v1` reports its outer box or cylinder, chosen by `semantic_class`. `truth.v1` has **no hole field**; the design id carries it (third digit of `part<SHF>`).
+
 ## Scene representation
 
 `FWDCenterLabMCC.yaml` is the authoritative inherited geometry: can radius 0.033 m, cylinder length 0.122 m. `FWDCenterLabSiva.yaml` and `FWDCenterLabSivaPool.yaml` inherit it. The can centre on the 0.740 m board is 0.801 m; its floor-resting pool centre is 0.061 m. Generated B1/B3 board placements must use the new half-height too.

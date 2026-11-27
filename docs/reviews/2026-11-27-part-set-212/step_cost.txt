@@ -1,0 +1,5 @@
+without the PART set (the scene before #212)         0.080 ms/step  ncon= 50 noslip=10 (budget 2.0 ms)
+A: every face flat                                   1.630 ms/step  ncon=398 noslip=10 (budget 2.0 ms)
+B: ring on 4 of 16 segments (85 % standing area)     0.411 ms/step  ncon=206 noslip=10 (budget 2.0 ms)
+C: B, block on its 2 long walls                      0.314 ms/step  ncon=174 noslip=10 (budget 2.0 ms)
+D: ring on 8 alternate, block 2 long walls  <- chosen 0.618 ms/step  ncon=238 noslip=10 (budget 2.0 ms)

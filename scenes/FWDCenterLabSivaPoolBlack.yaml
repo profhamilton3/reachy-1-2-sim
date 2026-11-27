@@ -1,0 +1,49 @@
+schema_version: "1.0"
+extends: FWDCenterLabSivaPool.yaml
+name: FWDCenterLabSivaPoolBlack
+
+description: >-
+  FWDCenterLabSivaPool with every printed PART object matte black, like the
+  black PLA prints on hand.  Geometry, mass and friction are inherited.
+
+# Colour variant (#212, owner 2026-11-27).  Reachy should register colour and
+# sort by it, but height, hole and orientation must not depend on it, so
+# geometry perception is reported on this scene and on ...Random
+# (reachy-tabletop-ai#84).
+#
+# NOTE: routes validated by name (reachy_ai.motion.rig_routes) are validated for
+# FWDCenterLabSivaPool, not for this name.
+
+objects:
+  - id: part110_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part110_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part111_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part111_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part120_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part120_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part121_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part121_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part210_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part210_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part211_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part211_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part220_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part220_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part221_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part221_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}

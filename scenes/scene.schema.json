@@ -49,6 +49,36 @@
       "default": "pedestal",
       "pattern": "^[A-Za-z][A-Za-z0-9_/.-]*$"
     },
+    "color_randomization": {
+      "description": "Repaint every object carrying `tag` with a palette colour chosen from `seed` and the object's id.  Applied by native_mujoco/scene_io.py after `extends:` is resolved, so every consumer of one file sees the same colours.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tag",
+        "seed",
+        "palette"
+      ],
+      "properties": {
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "palette": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/rgba"
+          }
+        }
+      }
+    },
     "world": {
       "$ref": "#/$defs/world"
     },
@@ -303,6 +333,89 @@
         }
       }
     },
+    "compoundBoxPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "size",
+        "pos",
+        "quat_wxyz"
+      ],
+      "properties": {
+        "kind": {
+          "const": "box"
+        },
+        "size": {
+          "$ref": "#/$defs/positiveVec3"
+        },
+        "pos": {
+          "$ref": "#/$defs/vec3"
+        },
+        "quat_wxyz": {
+          "$ref": "#/$defs/quaternion"
+        }
+      }
+    },
+    "compoundCylinderPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "radius",
+        "length",
+        "pos",
+        "quat_wxyz"
+      ],
+      "properties": {
+        "kind": {
+          "const": "cylinder"
+        },
+        "radius": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "pos": {
+          "$ref": "#/$defs/vec3"
+        },
+        "quat_wxyz": {
+          "$ref": "#/$defs/quaternion"
+        }
+      }
+    },
+    "compoundGeometry": {
+      "description": "Several box/cylinder parts on one body, for shapes a single primitive cannot express (a through-hole: a mesh would collide as its convex hull).  `pos` and `quat_wxyz` are in the object frame.  Custom validation also requires unit quaternions, finite numbers and a bounding box centred on the object origin.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "parts"
+      ],
+      "properties": {
+        "kind": {
+          "const": "compound"
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/compoundBoxPart"
+              },
+              {
+                "$ref": "#/$defs/compoundCylinderPart"
+              }
+            ]
+          }
+        }
+      }
+    },
     "geometry": {
       "oneOf": [
         {
@@ -310,6 +423,9 @@
         },
         {
           "$ref": "#/$defs/meshGeometry"
+        },
+        {
+          "$ref": "#/$defs/compoundGeometry"
         }
       ]
     },

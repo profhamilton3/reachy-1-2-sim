@@ -60,6 +60,19 @@ class GripperModel:
             self._thumb_gid[side] = mujoco.mj_name2id(
                 model, mujoco.mjtObj.mjOBJ_GEOM, thumb)
             self._sensor_uid[side] = uid
+        # What a pinch has to hold on both sides: one geom, except on a movable
+        # body made of several (a compound part, #212), where finger and thumb
+        # on opposite walls of a bore hold ONE object.  Static multi-geom
+        # bodies are left per geom: furniture is not a thing one picks up.
+        self._grasp_key = [self._key_of(g) for g in range(model.ngeom)]
+
+    def _key_of(self, gid: int) -> tuple:
+        m = self.model
+        body = int(m.geom_bodyid[gid])
+        if (int(m.body_geomnum[body]) > 1 and int(m.body_jntnum[body]) > 0
+                and m.jnt_type[m.body_jntadr[body]] == mujoco.mjtJoint.mjJNT_FREE):
+            return ("body", body)
+        return ("geom", gid)
 
     def _normal_force(self, data: mujoco.MjData, contact_idx: int) -> float:
         wrench = np.zeros(6, dtype=np.float64)
@@ -106,8 +119,14 @@ class GripperModel:
                             thumb_objs[side].add(other)
 
         for side, st in states.items():
-            # A pinch: same object geom held between finger AND thumb.
-            pinched = finger_objs[side] & thumb_objs[side]
+            # A pinch: same object held between finger AND thumb.  The geom
+            # reported is the first one the finger holds on that object.
+            thumb_keys = {self._grasp_key[g] for g in thumb_objs[side]}
+            held: Dict[tuple, int] = {}
+            for g in sorted(finger_objs[side]):
+                if self._grasp_key[g] in thumb_keys:
+                    held.setdefault(self._grasp_key[g], g)
+            pinched = list(held.values())
             if pinched:
                 st.grasping = True
                 st.grasped_geoms = [

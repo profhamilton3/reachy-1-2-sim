@@ -32,11 +32,12 @@ def test_every_shipped_board_passes(name, capsys):
     assert "[FAIL]" not in capsys.readouterr().out
 
 
-def test_the_panel_scene_loads_all_fourteen_objects_through_extends(capsys):
+def test_the_panel_scene_loads_all_its_objects_through_extends(capsys):
     # FWDCenterLabSivaPool inherits four objects from FWDCenterLabSiva; a
-    # loader that ignored `extends:` would report ten.
+    # loader that ignored `extends:` would report four fewer than its thirty
+    # (ten pool slots, sixteen printed parts (#212) and the four).
     assert T.check_scene(str(_SCENES / "FWDCenterLabSivaPool.yaml")) == 0
-    assert "14 manipulable object(s)" in capsys.readouterr().out
+    assert "30 manipulable object(s)" in capsys.readouterr().out
 
 
 def test_a_grasp_point_below_the_tabletop_fails(tmp_path, capsys):

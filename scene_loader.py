@@ -44,13 +44,25 @@ class ScenePose:
 
 
 @dataclass(frozen=True)
-class SceneGeometry:
-    kind: str                                        # box, sphere, cylinder, capsule, plane, mesh
+class SceneGeometryPart:
+    """One primitive of a compound geometry, posed in the object frame."""
+    kind: str                                        # box, cylinder
+    pos: Tuple[float, float, float]
+    quat_wxyz: Tuple[float, float, float, float]
     size: Optional[Tuple[float, float, float]] = None
+    radius: Optional[float] = None
+    length: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class SceneGeometry:
+    kind: str                       # box, sphere, cylinder, capsule, plane, mesh, compound
+    size: Optional[Tuple[float, float, float]] = None   # compound: its bounding box
     radius: Optional[float] = None
     length: Optional[float] = None
     path: Optional[str] = None                       # resolved absolute path for mesh
     scale: Optional[Tuple[float, float, float]] = None
+    parts: Tuple[SceneGeometryPart, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -161,9 +173,27 @@ def _parse_material(mat_dict: Optional[dict]) -> SceneMaterial:
     return SceneMaterial()
 
 
+def _parse_compound(obj_dict: dict) -> SceneGeometry:
+    scene_io = _scene_io()
+    try:
+        parts = scene_io.check_compound_object(obj_dict)
+        size = scene_io.compound_size(obj_dict["geometry"])
+    except scene_io.SceneLoadError as exc:
+        raise SceneValidationError(str(exc)) from exc
+    return SceneGeometry(kind="compound", size=size, parts=tuple(
+        SceneGeometryPart(
+            kind=p["kind"], pos=tuple(p["pos"]), quat_wxyz=tuple(p["quat_wxyz"]),
+            size=tuple(p["size"]) if "size" in p else None,
+            radius=p.get("radius"), length=p.get("length"))
+        for p in parts))
+
+
 def _parse_object(obj_dict: dict, scene_root: Path) -> SceneObject:
     obj_id = obj_dict["id"]
-    geometry = _parse_geometry(obj_dict["geometry"], obj_id, scene_root)
+    if obj_dict["geometry"].get("kind") == "compound":
+        geometry = _parse_compound(obj_dict)
+    else:
+        geometry = _parse_geometry(obj_dict["geometry"], obj_id, scene_root)
     pose = _parse_pose(obj_dict["pose"], obj_id)
     material = _parse_material(obj_dict.get("material"))
     physics = obj_dict.get("physics", {})
@@ -180,6 +210,26 @@ def _parse_object(obj_dict: dict, scene_root: Path) -> SceneObject:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _scene_io():
+    """The shared scene module (resolver and compound rules), wherever it is.
+
+    ONE implementation, two locations.  scene_io.py lives under native_mujoco/
+    on the host and is copied beside this file into the container image, because
+    the container gets scene_loader.py but not the native_mujoco tree.
+    """
+    here = Path(__file__).resolve().parent
+    for candidate in (here / "native_mujoco", here):
+        if (candidate / "scene_io.py").is_file() and str(candidate) not in sys.path:
+            sys.path.append(str(candidate))
+    try:
+        import scene_io
+    except ImportError as exc:                                 # pragma: no cover
+        raise SceneValidationError(
+            f"the shared scene module (scene_io.py) is not importable from {here}"
+        ) from exc
+    return scene_io
+
+
 def _resolve_inheritance(yaml_path: Path) -> dict:
     """Follow `extends:` via the shared resolver in scene_io.
 
@@ -190,19 +240,10 @@ def _resolve_inheritance(yaml_path: Path) -> dict:
     genuinely horrible bug to chase: the same scene file would compile to two
     different worlds depending on which side loaded it.
     """
-    here = Path(__file__).resolve().parent
-    for candidate in (here / "native_mujoco", here):
-        if (candidate / "scene_io.py").is_file() and str(candidate) not in sys.path:
-            sys.path.append(str(candidate))
+    scene_io = _scene_io()
     try:
-        from scene_io import SceneLoadError, load_scene as _resolve
-    except ImportError as exc:                                 # pragma: no cover
-        raise SceneValidationError(
-            f"'{yaml_path.name}' uses `extends:` but the resolver (scene_io.py) "
-            f"is not importable from {here}") from exc
-    try:
-        return _resolve(yaml_path)
-    except SceneLoadError as exc:
+        return scene_io.load_scene(yaml_path)
+    except scene_io.SceneLoadError as exc:
         raise SceneValidationError(str(exc)) from exc
 
 
@@ -258,7 +299,7 @@ def load_scene(
     # scenes through this function to draw RViz markers, and it has no way to
     # reach the resolver on its own — so without this, launching an inherited
     # scene renders the child's objects floating with no board under them.
-    if document is None and "extends" in doc:
+    if document is None and ("extends" in doc or "color_randomization" in doc):
         doc = _resolve_inheritance(yaml_path)
 
     # ── Pre-flight path safety (runs before jsonschema for clear messages) ───

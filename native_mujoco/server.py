@@ -488,6 +488,20 @@ class SimState:
         return d
 
 
+def _color_randomization_record(scene_doc: Mapping[str, Any]) -> Optional[dict]:
+    """{tag, seed, colors: {object id: rgba}} of a resolved scene, or None."""
+    block = scene_doc.get("color_randomization")
+    if not block:
+        return None
+    return {
+        "tag": block["tag"],
+        "seed": block["seed"],
+        "colors": {str(o["id"]): list(o["material"]["rgba"])
+                   for o in scene_doc.get("objects") or []
+                   if block["tag"] in (o.get("tags") or [])},
+    }
+
+
 class ReachyMujocoServer:
 
     def __init__(
@@ -524,6 +538,9 @@ class ReachyMujocoServer:
         tracked_ids = None
         interactive_specs = None
         scene_doc = None
+        # Set when the scene randomises colours: the seed and the colours it
+        # gave, for the run manifest.
+        self._color_randomization: Optional[dict] = None
         if scene_path:
             log.info("Loading scene: %s (into model %s)", scene_path, model_path)
             from objects import build_scene_model_xml
@@ -539,6 +556,11 @@ class ReachyMujocoServer:
             # not, and the server could not load FWDCenterLabSiva at all.
             from scene_io import load_scene as _resolve_scene
             scene_doc = _resolve_scene(scene_path)
+            self._color_randomization = _color_randomization_record(scene_doc)
+            if self._color_randomization:
+                log.info("Colour randomisation: tag %r, seed %d",
+                         self._color_randomization["tag"],
+                         self._color_randomization["seed"])
             # Safety validation (raises on unsafe mesh paths / bad schema); the
             # compiler consumes the raw dict since it needs full physics fields.
             # scene_loader lives at the repo root, and BOTH launch scripts cd
@@ -1216,6 +1238,11 @@ class ReachyMujocoServer:
             "scene_path": self._scene_path,
             "scene_sha256": _sha256(self._scene_path),
             "scene_revision": self._sim.scene_revision,
+            # None unless the scene randomises colours.  scene_sha256 covers
+            # only the named file, not its parents, so the colours are recorded
+            # as they came out.
+            "color_randomization": copy.deepcopy(
+                getattr(self, "_color_randomization", None)),
             "mujoco_version": mujoco_version,
             "python_version": _sys.version,
             "platform": platform.platform(),
