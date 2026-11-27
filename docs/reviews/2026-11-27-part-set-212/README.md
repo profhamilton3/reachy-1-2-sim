@@ -1,6 +1,6 @@
 # sim #212: the PART set — evidence (2026-11-27)
 
-Environment: macOS arm64 (Apple Silicon), Python 3.14.0, MuJoCo 3.11.0, native server under `mjpython`. These files are from the host; container results are in the PR description.
+Environment: macOS arm64 (Apple Silicon), Python 3.14.0, MuJoCo 3.11.0, native server under `mjpython`. 
 
 Everything here reflects the owner's decisions D1–D6 on PR #219 (round bore in the holed blocks, contact guard, route validations for the colour variants, rendered reference colours).
 
@@ -23,5 +23,7 @@ Everything here reflects the owner's decisions D1–D6 on PR #219 (round bore in
 Cells in the frames, far row first (left to right as seen): PART120, empty, PART221 / PART211, PART121, PART220 / PART110, PART111, PART210.
 
 On macOS the two depth-buffer scripts print `ARB_clip_control unavailable … depth accuracy will be limited`. The accuracy is enough here: on solid parts, which have no bore, every pixel the segmentation gives them was placed on a top or outer side face within 0.4 mm (`max_excluded_fraction_solid` = 0.0).
+
+Container (Docker) results are in `container_checks.md`; `check_rviz_markers.py` runs inside the container, and `container_compare.py` compared the per-file test logs (not committed).
 
 No STL or STEP file was read to make any of this.
