@@ -1,0 +1,96 @@
+{
+ "design": "121",
+ "object": "part121_a",
+ "planner": "crane",
+ "scene_kind": "compound",
+ "grasp_envelope": {
+  "of": "compound",
+  "outline": "box",
+  "size_mm": [
+   49.21,
+   49.21,
+   69.85
+  ]
+ },
+ "refused_pairs": [],
+ "flown": {
+  "origin": "r3c2",
+  "dest": "r3c3",
+  "grasp": "crane",
+  "criteria": null,
+  "held": {},
+  "replaced": {},
+  "placement_error_mm": 152.3999999962458,
+  "tilt_deg": 0.0,
+  "release_drag_mm": null,
+  "pad_contact_after_release_mm": 0.0,
+  "others_moved_max_mm": 3.167753931523377e-07,
+  "withdrawal": null,
+  "aborted": null,
+  "refusal_in_flight": "palm_route: palm route clearance -6.13 mm < 0.494 mm from rung +9",
+  "halt": "refused at the hover -- palm_route: palm route clearance -6.13 mm < 0.494 mm from rung +9",
+  "final": "PRESENT",
+  "sim_s": 30.751999999999637,
+  "final_object": [
+   0.5841999999995802,
+   -3.754186745132349e-12,
+   0.774902478980787
+  ],
+  "event_kinds": [
+   "phase",
+   "phase",
+   "phase",
+   "phase",
+   "MEASURE",
+   "ALIGN_REFUSED",
+   "HALT",
+   "phase",
+   "ATTEMPT_END"
+  ],
+  "events_of_interest": [
+   {
+    "reason": "refused at the hover -- palm_route: palm route clearance -6.13 mm < 0.494 mm from rung +9",
+    "above_rung": 9,
+    "q_measured": [
+     -63.375,
+     -18.848,
+     90.407,
+     -82.937,
+     -53.139,
+     44.999,
+     29.256
+    ],
+    "object": [
+     0.5841999999995802,
+     -3.754430739504128e-12,
+     0.7749024789808485
+    ],
+    "quat": [
+     0.9999999999999998,
+     9.504961918386755e-17,
+     1.5590411088590977e-18,
+     -9.21939142587256e-14
+    ],
+    "grip_force_n": 0.0,
+    "kind": "HALT"
+   }
+  ],
+  "d6": {
+   "successful": false,
+   "explanation": "=== Place Verdict: panel:place_on_cell:offline ===\nPLAN: preflight passed; plan 000000000000 recorded.\nPLACEMENT ERROR: not recorded, so it cannot be told.\nTILT: not recorded, so it cannot be told.\nOTHERS: the most any other object moved is 0.000 mm, 1 mm allowed.\nCONTACT: part121_a (target) on table_top (support) during approach, 3664 sample(s), 0.02 mm deep \u2014 allowed: the target stands on its support until it is lifted, is set down on it, and stands there after the release; while HELD it must not touch it; part121_a (target) on table_top (support) during approach at PRESENT, 360 sample(s), 0.02 mm deep \u2014 allowed: the target stands on its support until it is lifted, is set down on it, and stands there after the release; while HELD it must not touch it\nAFTER THE RELEASE: no pad touched the object.\nARRIVED: at present, within 8 degrees.\nWITHDRAWAL: not reached (reported; not part of the place verdict).\nFULL CYCLE: no.\nSteps: 15356  ForbiddenContact: 0  Hard: 2  Soft: 0",
+   "reported": {
+    "withdrawal": "not reached",
+    "withdrawal_detail": "not reached",
+    "withdrawal_contacts": [],
+    "full_cycle": false,
+    "ends_at_present": true,
+    "aborted": false,
+    "placement_error_mm": null,
+    "tilt_deg": null,
+    "others_moved_max_mm": 0.0,
+    "release_drag_mm": null
+   }
+  }
+ },
+ "wall_s": 18.4
+}

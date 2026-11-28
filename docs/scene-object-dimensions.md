@@ -114,7 +114,7 @@ In both, the clear bore is nowhere narrower than Ø25.4 mm.
 
 Mass is stated once, on the body's inertial. Its inertia tensor is computed from the parts at one uniform density, so where parts overlap the overlap counts twice. For the ring cylinders it is within 5 % of an ideal annulus. For the holed blocks, where the bore ring lies largely inside the walls and draws mass inward, it is **3.7 % to 9.5 % below** a square prism with a round Ø25.4 bore (both held by tests). The total mass is exact.
 
-For software that reads an object as one primitive: the planner's `SceneModel` treats a compound as its solid bounding box, bore and all (conservative for clearance), and `truth.v1` reports its outer box or cylinder, chosen by `semantic_class`. `truth.v1` has **no hole field**; the design id carries it (third digit of `part<SHF>`).
+For software that reads an object as one primitive: the planner's `SceneModel` treats a compound as its solid bounding box, bore and all (conservative for clearance), except that a grasp planner sees the object it is **grasping** through its checked outer envelope (box for the holed blocks, cylinder for the holed cylinders; `native_mujoco/OBJECT_MODEL.md`), and `truth.v1` reports its outer box or cylinder, chosen by `semantic_class`. `truth.v1` has **no hole field**; the design id carries it (third digit of `part<SHF>`).
 
 ## Scene representation
 

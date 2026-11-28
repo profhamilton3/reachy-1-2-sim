@@ -53,9 +53,15 @@ Rules (schema and `scene_io.check_compound_object`, which also runs without `jso
 | planner `SceneModel` | the solid bounding box, holes included |
 | `truth.v1` | outer box or cylinder, chosen by `semantic_class` (`block`/`cube` or `cylinder`); anything else is refused; no hole field |
 | RViz markers | one marker per part |
-| side-on and crane grasps | refuse the kind `compound` (not validated) |
+| side-on and crane grasps | read the object being grasped through its outer envelope (`SceneModel.grasp_target`, below); without one, refused at the `shape` stage |
 
 **Contact cost.** Many coplanar parts resting on one face are expensive with `noslip_iterations` on: the pass grows with the square of the contacts on one body. Let only as many parts reach the face as the footprint needs and recess the rest slightly, as the PART rings do (`docs/scene-object-dimensions.md`).
+
+### Grasp envelope
+
+A pinch closes on outer faces, so for the object **being grasped** the planners see a compound as the box or cylinder its outer surface makes (`reachy_ai/scene/grasp_envelope.py`). It is derived and checked, never assumed: every point just inside the bounding rectangle (box), or inside the circle of the bounding radius on a square footprint (cylinder, nothing more than 2.5 % beyond it), must be covered by a part running the full height (within 0.5 mm). A cylinder envelope's radius is the farthest part corner, so it encloses the solid (25.09 mm for the PART rings, against 24.61 mm flats). An L, a notched face, a plate on a stem or a tipped part has none. Using one is announced (`GRASP_ENVELOPE` event: `object_id`, `of`, `outline`, `size_mm`). **As an obstacle a compound is still its solid bounding box**, and a plain box or cylinder is read exactly as before.
+
+An envelope only lifts a refusal that was about the kind `compound`. Every other rule applies to the envelope as to a plain object.
 
 ## Colour randomisation (#212)
 

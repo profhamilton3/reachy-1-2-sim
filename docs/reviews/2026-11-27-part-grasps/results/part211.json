@@ -1,0 +1,25 @@
+{
+ "design": "211",
+ "object": "part211_a",
+ "planner": "side",
+ "scene_kind": "compound",
+ "grasp_envelope": {
+  "of": "compound",
+  "outline": "cylinder",
+  "size_mm": [
+   50.176,
+   50.176,
+   25.4
+  ]
+ },
+ "refused_pairs": [
+  {
+   "origin": "r2c2",
+   "dest": "r1c1",
+   "why": "plan: part211_a is 25 mm tall; the pads at 34 mm would not be 4 mm below its top"
+  }
+ ],
+ "flown": null,
+ "stopped": "the refusal does not depend on the cell",
+ "wall_s": 1.5
+}

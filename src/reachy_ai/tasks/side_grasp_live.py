@@ -377,7 +377,7 @@ def grasp_box(scene: SceneModel, object_id: str, position, quat,
               approach: np.ndarray) -> Tuple[G.Box, Optional[np.ndarray]]:
     """The object as the side-on checks see it, and the cylinder alignment
     (`CranePlan.align`): a cylinder's bounding box is taken across the jaw."""
-    obj = scene.get(object_id)
+    obj = scene.grasp_target(object_id)
     align = jaw_of(approach) if obj.kind == "cylinder" else None
     return G.object_box(obj, position, quat, align=align), align
 
@@ -552,7 +552,7 @@ class BoxHandPlanner:
         boxes = {o: G.object_box(scene.get(o)) for o in ids}
         tgt = None
         if target is not None and scene.get(target.object_id).collides:
-            tgt = scene.get(target.object_id)
+            tgt = scene.grasp_target(target.object_id)
         worst = [math.inf, "", "", -1]
 
         def consider(d, oid, link, idx):
@@ -918,7 +918,7 @@ def side_candidates(planner, scene: SceneModel, object_id: str,
     its grasp solved (or its refusal), best grasp joint margin first.  The
     shape and the opening are checked first (CraneRefused)."""
     ev = on_event or (lambda *_a, **_k: None)
-    obj = scene.get(object_id)
+    obj = CP.target_of(scene, object_id, ev)
     shape = side_shape(obj)
     pq = None if pose is None else (pose.position, pose.quat_wxyz)
     box0 = G.object_box(obj, *(pq or (None, None)))
@@ -1105,7 +1105,7 @@ def plan_side_place(planner, scene: SceneModel, object_id: str, target_cell: str
         raise CP.CraneRefused("destination", f"{target_cell} is out of the right arm's reach")
     cx, cy, _tz = scene.cell_center(cell_id)
     tx, ty = PL.aimed((cx, cy), place)
-    held = G.object_box(scene.get(object_id), *(() if pose is None else
+    held = G.object_box(CP.target_of(scene, object_id, ev), *(() if pose is None else
                                                    (pose.position, pose.quat_wxyz)))
     reach = float(np.linalg.norm(held.half[:2]))
     square = G.Box(object_id, np.array([tx, ty, held.center[2]]), np.eye(3),
