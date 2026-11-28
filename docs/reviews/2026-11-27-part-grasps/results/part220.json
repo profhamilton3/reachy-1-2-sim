@@ -1,0 +1,402 @@
+{
+ "design": "220",
+ "object": "part220_a",
+ "planner": "side",
+ "scene_kind": "cylinder",
+ "grasp_envelope": null,
+ "refused_pairs": [],
+ "flown": {
+  "origin": "r2c2",
+  "dest": "r1c1",
+  "grasp": "side-on",
+  "criteria": {
+   "placed_on_target": true,
+   "retained_height": true,
+   "slip_within_resolution": true,
+   "clean_placement": false,
+   "clean_withdrawal": false,
+   "returned_to_present": false
+  },
+  "held": {},
+  "replaced": {
+   "supported_before_open": true,
+   "object": [
+    0.27999862196331265,
+    0.15275438480974937,
+    0.7749134893409745
+   ],
+   "release_drag_mm": 0.9,
+   "let_go_deg": -44.5,
+   "opening_deg": null,
+   "release_target_deg": -38.5,
+   "let_go_waited_s": 3.0,
+   "release_retreat_mm": 0.0,
+   "quat": [
+    0.91509777254035,
+    0.00018090560548511997,
+    0.0007018709682670383,
+    0.40323137445143736
+   ],
+   "tilt_deg": 0.083,
+   "lowest_above_table_mm": -0.062,
+   "offset_from_start_mm": 215.35,
+   "grip_force_after_open_n": 0.5368382803563386,
+   "thumb_above_table_mm": 17.5,
+   "finger_above_table_mm": 17.78
+  },
+  "placement_error_mm": 0.6956556966929922,
+  "tilt_deg": 0.08305712766712792,
+  "release_drag_mm": 0.9,
+  "pad_contact_after_release_mm": 0.0,
+  "others_moved_max_mm": 1.0029142865848245e-06,
+  "withdrawal": {
+   "clean": false,
+   "reason": "the grip did not let go: 0.5 N still on part220_a with the hand open to -44 deg (the plan's opening), so the hand was not opened further"
+  },
+  "aborted": null,
+  "refusal_in_flight": null,
+  "halt": "the grip did not let go: 0.5 N still on part220_a with the hand open to -44 deg (the plan's opening), so the hand was not opened further",
+  "final": "left beside the object (withdrawal refused or stopped)",
+  "sim_s": 93.34400000000342,
+  "final_object": [
+   0.27999862196331265,
+   0.15275438480974937,
+   0.7749134893409745
+  ],
+  "event_kinds": [
+   "side_roll_model",
+   "side_opening",
+   "side_opening_chosen",
+   "side_candidates",
+   "side_pick_candidate",
+   "place_checked",
+   "side_pick_candidate",
+   "place_checked",
+   "side_pick_candidate",
+   "place_checked",
+   "side_pick_candidate",
+   "place_checked",
+   "side_place_chosen",
+   "phase",
+   "phase",
+   "phase",
+   "phase",
+   "MEASURE",
+   "ALIGNED",
+   "phase",
+   "MEASURE",
+   "CONTINUE",
+   "MEASURE",
+   "CONTINUE",
+   "MEASURE",
+   "CONTINUE",
+   "MEASURE",
+   "CONTINUE",
+   "MEASURE",
+   "CONTINUE",
+   "MEASURE",
+   "CONTINUE",
+   "MEASURE",
+   "CONTINUE",
+   "MEASURE",
+   "CONTINUE",
+   "MEASURE",
+   "CONTINUE",
+   "MEASURE",
+   "MEASURE",
+   "STRADDLE",
+   "phase",
+   "CLOSED",
+   "phase",
+   "LIFT_RUNG",
+   "LIFT_RUNG",
+   "LIFT_RUNG",
+   "LIFT_RUNG",
+   "LIFT_RUNG",
+   "phase",
+   "HELD",
+   "CARRY_PLANNED",
+   "phase",
+   "IN_HAND",
+   "SETDOWN_MEASURE",
+   "SETDOWN_CORRECTION",
+   "IN_HAND",
+   "SETDOWN_MEASURE",
+   "IN_HAND",
+   "SETDOWN_MEASURE",
+   "SETDOWN_CORRECTION",
+   "IN_HAND",
+   "SETDOWN_MEASURE",
+   "phase",
+   "REPLACE_PLAN",
+   "SUPPORTED",
+   "RELEASE",
+   "RELEASED",
+   "phase",
+   "HALT",
+   "ATTEMPT_END"
+  ],
+  "events_of_interest": [
+   {
+    "object_id": "part220_a",
+    "radius_mm": 24.6,
+    "closure_deg": -32.4,
+    "wedge_deg": 32.4,
+    "squeeze_out_limit_deg": 73.7,
+    "holds": true,
+    "push_height_mm": 34.0,
+    "radius_over_height": 0.724,
+    "friction": 1.0,
+    "a_push_tips_it": true,
+    "kind": "side_roll_model"
+   },
+   {
+    "object_id": "part220_a",
+    "opening_deg": -44.5,
+    "close_deg": -17.5,
+    "kind": "side_opening_chosen"
+   },
+   {
+    "ok": true,
+    "failed": [],
+    "thumb_mm": 3.96,
+    "finger_mm": 3.57,
+    "thumb_side_mm": 3.96,
+    "finger_side_mm": 3.57,
+    "gap_offset_normal_mm": 4.68,
+    "gap_offset_along_mm": 3.09,
+    "gap_above_center_mm": -5.45,
+    "thumb_center_below_top_mm": 39.98,
+    "finger_center_below_top_mm": 40.2,
+    "jaw_face_angle_deg": 0.04,
+    "tilt_from_vertical_deg": 84.3,
+    "jaw_face_limit_deg": 3.78,
+    "kind": "STRADDLE"
+   },
+   {
+    "ok": true,
+    "rise_start_mm": 46.18,
+    "rise_end_mm": 46.18,
+    "required_mm": 40.0,
+    "in_hand_slip_mm": 0.002,
+    "in_hand_slip_vector_mm": [
+     0.0,
+     -0.0,
+     -0.002
+    ],
+    "hand_moved_mm": 0.0,
+    "slip_bound_mm": 0.1,
+    "grasping": true,
+    "grip_force_n": 82.60947031752359,
+    "object": [
+     0.427851098746634,
+     0.005312432332881611,
+     0.8210635930145613
+    ],
+    "quat": [
+     0.9962245130359388,
+     -0.0006498867908324046,
+     0.0011525778951936118,
+     0.08680419827208591
+    ],
+    "kind": "HELD"
+   },
+   {
+    "label": "r1c1 +9",
+    "drift_mm": 0.394,
+    "grip_force_n": 80.56243094483764,
+    "object": [
+     0.27823856015067344,
+     0.15042553921956064,
+     0.856537961978551
+    ],
+    "kind": "IN_HAND"
+   },
+   {
+    "label": "carry height",
+    "rung": 9,
+    "iteration": 0,
+    "error_mm": 2.29,
+    "object": [
+     0.27824,
+     0.15043,
+     0.85654
+    ],
+    "kind": "SETDOWN_MEASURE"
+   },
+   {
+    "label": "carry height, after correction 1",
+    "drift_mm": 0.399,
+    "grip_force_n": 80.43382509133012,
+    "object": [
+     0.2794277165127467,
+     0.15235442836616295,
+     0.8564713246038594
+    ],
+    "kind": "IN_HAND"
+   },
+   {
+    "label": "carry height",
+    "rung": 9,
+    "iteration": 1,
+    "error_mm": 0.05,
+    "object": [
+     0.27943,
+     0.15235,
+     0.85647
+    ],
+    "kind": "SETDOWN_MEASURE"
+   },
+   {
+    "label": "r1c1 +2",
+    "drift_mm": 0.431,
+    "grip_force_n": 80.19199395312468,
+    "object": [
+     0.27898359360061253,
+     0.15082081957258708,
+     0.7867241594663853
+    ],
+    "kind": "IN_HAND"
+   },
+   {
+    "label": "2 rungs up",
+    "rung": 2,
+    "iteration": 0,
+    "error_mm": 1.63,
+    "object": [
+     0.27898,
+     0.15082,
+     0.78672
+    ],
+    "kind": "SETDOWN_MEASURE"
+   },
+   {
+    "label": "2 rungs up, after correction 1",
+    "drift_mm": 0.433,
+    "grip_force_n": 80.19157589245086,
+    "object": [
+     0.27938345448306223,
+     0.15236522500381486,
+     0.786670866284905
+    ],
+    "kind": "IN_HAND"
+   },
+   {
+    "label": "2 rungs up",
+    "rung": 2,
+    "iteration": 1,
+    "error_mm": 0.04,
+    "object": [
+     0.27938,
+     0.15237,
+     0.78667
+    ],
+    "kind": "SETDOWN_MEASURE"
+   },
+   {
+    "reached": true,
+    "object": [
+     0.27935967670048273,
+     0.15212550159721996,
+     0.7750580385168915
+    ],
+    "quat": [
+     0.9147667259700492,
+     -0.001316067482285477,
+     0.002270091737124815,
+     0.40397394929366964
+    ],
+    "thumb_above_table_mm": 14.62,
+    "finger_above_table_mm": 13.74,
+    "grip_force_n": 80.32875545062885,
+    "q_commanded": [
+     -5.841,
+     -2.354,
+     79.773,
+     -71.848,
+     -3.536,
+     -15.164,
+     34.372
+    ],
+    "joint_margin_deg": {
+     "min_deg": 10.181,
+     "joint": "r_arm_yaw",
+     "shoulder_roll_deg": 22.637
+    },
+    "kind": "SUPPORTED"
+   },
+   {
+    "target_deg": -38.5,
+    "let_go_deg": -44.5,
+    "freed": false,
+    "waited_s": 3.0,
+    "grip_force_n": 0.5368382803563386,
+    "kind": "RELEASE"
+   },
+   {
+    "supported_before_open": true,
+    "object": [
+     0.27999862196331265,
+     0.15275438480974937,
+     0.7749134893409745
+    ],
+    "release_drag_mm": 0.9,
+    "let_go_deg": -44.5,
+    "opening_deg": null,
+    "release_target_deg": -38.5,
+    "let_go_waited_s": 3.0,
+    "release_retreat_mm": 0.0,
+    "quat": [
+     0.91509777254035,
+     0.00018090560548511997,
+     0.0007018709682670383,
+     0.40323137445143736
+    ],
+    "tilt_deg": 0.083,
+    "lowest_above_table_mm": -0.062,
+    "offset_from_start_mm": 215.35,
+    "grip_force_after_open_n": 0.5368382803563386,
+    "thumb_above_table_mm": 17.5,
+    "finger_above_table_mm": 17.78,
+    "kind": "RELEASED"
+   },
+   {
+    "reason": "the grip did not let go: 0.5 N still on part220_a with the hand open to -44 deg (the plan's opening), so the hand was not opened further",
+    "stage": "withdrawal",
+    "object": [
+     0.27999862196331265,
+     0.15275438480974937,
+     0.7749134893409745
+    ],
+    "grip_force_n": 0.5368382803563386,
+    "q_measured": [
+     -5.629,
+     -2.667,
+     79.914,
+     -71.311,
+     -3.527,
+     -15.011,
+     34.424
+    ],
+    "kind": "HALT"
+   }
+  ],
+  "d6": {
+   "successful": true,
+   "explanation": "=== Place Verdict: panel:place_on_cell:offline ===\nPLAN: preflight passed; plan 000000000000 recorded.\nPOSITION: 0.70 mm (xy) from the target cell's centre, 10 mm allowed.\nTILT: 0.08 deg from upright, 5 deg allowed.\nOTHERS: the most any other object moved is 0.000 mm, 1 mm allowed.\nCONTACT: part220_a (target) on r_gripper_finger (pad) during carry, 1992 sample(s), 2.45 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on r_gripper_finger (pad) during grasp, 1080 sample(s), 4.94 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on r_gripper_finger (pad) during hold, 150 sample(s), 2.28 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on r_gripper_finger (pad) during release, 12 sample(s), 2.17 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on r_gripper_finger (pad) during set_down, 237 sample(s), 2.19 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on r_gripper_thumb (pad) during carry, 1992 sample(s), 1.15 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on r_gripper_thumb (pad) during grasp, 1093 sample(s), 3.98 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on r_gripper_thumb (pad) during hold, 150 sample(s), 0.77 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on r_gripper_thumb (pad) during release, 309 sample(s), 0.84 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on r_gripper_thumb (pad) during set_down, 237 sample(s), 0.79 mm deep \u2014 allowed: pads on the target from grasp to release are the grasp; part220_a (target) on table_top (support) during approach, 4470 sample(s), 0.04 mm deep \u2014 allowed: the target stands on its support until it is lifted, is set down on it, and stands there after the release; while HELD it must not touch it; part220_a (target) on table_top (support) during approach at PRESENT, 85 sample(s), 0.04 mm deep \u2014 allowed: the target stands on its support until it is lifted, is set down on it, and stands there after the release; while HELD it must not touch it; part220_a (target) on table_top (support) during grasp, 310 sample(s), 0.81 mm deep \u2014 allowed: the target stands on its support until it is lifted, is set down on it, and stands there after the release; while HELD it must not touch it; part220_a (target) on table_top (support) during release, 519 sample(s), 0.15 mm deep \u2014 allowed: the target stands on its support until it is lifted, is set down on it, and stands there after the release; while HELD it must not touch it\nAFTER THE RELEASE: no pad touched the object.\nENDS AT PRESENT: not judged -- the withdrawal was refused.\nWITHDRAWAL: refused (reported; not part of the place verdict).\nFULL CYCLE: no.\nSteps: 46652  ForbiddenContact: 0  Hard: 0  Soft: 0",
+   "reported": {
+    "withdrawal": "refused",
+    "withdrawal_detail": "refused",
+    "withdrawal_contacts": [],
+    "full_cycle": false,
+    "ends_at_present": false,
+    "aborted": false,
+    "placement_error_mm": 0.7,
+    "tilt_deg": 0.083,
+    "others_moved_max_mm": 0.0,
+    "release_drag_mm": null
+   }
+  }
+ },
+ "wall_s": 109.4
+}

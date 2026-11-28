@@ -1,0 +1,25 @@
+# feat/part-set-grasps, grasp_envelope wired
+part110_a: kind=box class=block size_mm=[49.21, 49.21, 25.4]
+   crane  : passes the shape gates (reaches IK)
+   side-on: REFUSED [shape] part110_a is a block box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only
+part111_a: kind=compound class=block size_mm=[49.21, 49.21, 25.4]
+   crane  : passes the shape gates (reaches IK)
+   side-on: REFUSED [shape] part111_a is a block box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only
+part120_a: kind=box class=block size_mm=[49.21, 49.21, 69.85]
+   crane  : passes the shape gates (reaches IK)
+   side-on: REFUSED [shape] part120_a is a block box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only
+part121_a: kind=compound class=block size_mm=[49.21, 49.21, 69.85]
+   crane  : passes the shape gates (reaches IK)
+   side-on: REFUSED [shape] part121_a is a block box; the side-on grasp is for cubes (red_cube, the pool boxes) and cylinders (blue_cylinder, the pool cylinders) only
+part210_a: kind=cylinder class=cylinder size_mm=[49.21, 49.21, 25.4]
+   crane  : REFUSED [plan] part210_a is a cylinder; the crane pick closes on two flat faces
+   side-on: REFUSED before IK, all 24 approaches: part210_a is 25 mm tall; the pads at 34 mm would not be 4 mm below its top
+part211_a: kind=compound class=cylinder size_mm=[49.21, 49.21, 25.4]
+   crane  : REFUSED [plan] part211_a is a cylinder; the crane pick closes on two flat faces
+   side-on: REFUSED before IK, all 24 approaches: part211_a is 25 mm tall; the pads at 34 mm would not be 4 mm below its top
+part220_a: kind=cylinder class=cylinder size_mm=[49.21, 49.21, 69.85]
+   crane  : REFUSED [plan] part220_a is a cylinder; the crane pick closes on two flat faces
+   side-on: passes the shape gates (reaches IK)
+part221_a: kind=compound class=cylinder size_mm=[49.21, 49.21, 69.85]
+   crane  : REFUSED [plan] part221_a is a cylinder; the crane pick closes on two flat faces
+   side-on: passes the shape gates (reaches IK)

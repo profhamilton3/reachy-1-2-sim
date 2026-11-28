@@ -114,7 +114,8 @@ from reachy_ai.motion.kinematics import (
 )
 from reachy_ai.motion.kinematics import RESOLVE_MAX_ATTITUDE_DEG, _rotvec
 from reachy_ai.motion.transit import CARRY_HZ, STEP_HZ
-from reachy_ai.scene.awareness import SceneModel
+from reachy_ai.scene.awareness import SceneModel, SceneObject
+from reachy_ai.scene.grasp_envelope import NoGraspEnvelope
 from reachy_ai.tasks.pick_place_live import present_joints
 
 log = logging.getLogger("reachy12.tasks.crane_pick_live")
@@ -483,7 +484,8 @@ class CranePlan:
 
     def object_box(self, scene: SceneModel, position, quat) -> G.Box:
         """The planned-for object at a live pose, as the plan's checks see it."""
-        return G.object_box(scene.get(self.object_id), position, quat, align=self.align)
+        return G.object_box(scene.grasp_target(self.object_id), position, quat,
+                            align=self.align)
 
     @property
     def hover(self) -> List[float]:
@@ -705,6 +707,20 @@ def _insertion_rung(plan: CranePlan) -> int:
                        "even at the hover")
 
 
+def target_of(scene: SceneModel, object_id: str, ev) -> SceneObject:
+    """The object being grasped, as both planners see it.  A compound is read
+    as its checked outer envelope, which is announced; without one it is
+    refused here, at the "shape" stage, with the reason."""
+    try:
+        obj = scene.grasp_target(object_id)
+    except NoGraspEnvelope as exc:
+        raise CraneRefused("shape", f"{object_id} is a compound and {exc}")
+    if obj.envelope_of:
+        ev("GRASP_ENVELOPE", object_id=object_id, of=obj.envelope_of, outline=obj.kind,
+           size_mm=[round(1000 * v, 3) for v in obj.size])
+    return obj
+
+
 def plan_crane_pick(planner, scene: SceneModel, object_id: str,
                     pose: Optional[Observation] = None,
                     spec: CraneSpec = CraneSpec(),
@@ -720,7 +736,7 @@ def plan_crane_pick(planner, scene: SceneModel, object_id: str,
     """
     ev = on_event or (lambda *_a, **_k: None)
     arm = planner._arm
-    obj_model = scene.get(object_id)
+    obj_model = target_of(scene, object_id, ev)
     if obj_model.kind != "box":
         raise CraneRefused("plan", f"{object_id} is a {obj_model.kind}; the "
                            f"crane pick closes on two flat faces")
@@ -1259,7 +1275,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
                                   "final": None, "criteria": None}
     first = observe()
     c0 = np.asarray(first.position, dtype=float)
-    rest_lowest = (G.object_box(scene.get(plan.object_id), first.position,
+    rest_lowest = (G.object_box(scene.grasp_target(plan.object_id), first.position,
                                 first.quat_wxyz).lowest_z - scene.table_surface_z)
     if float(np.linalg.norm(c0 - plan.obj.center)) > lim.object_moved_m:
         outcome["refusal"] = "the object is not where the plan was made"
@@ -1587,7 +1603,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
             o_ = observe()
             if o_.age_s > FEEDBACK_STALE_S:
                 return False          # no fresh feedback is never support
-            b = G.object_box(scene.get(plan_.object_id), o_.position, o_.quat_wxyz)
+            b = G.object_box(scene.grasp_target(plan_.object_id), o_.position, o_.quat_wxyz)
             return b.lowest_z - scene.table_surface_z <= rest_lowest + lim.object_moved_m
 
         reached = supported()
@@ -2007,7 +2023,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
         o_ = observe()
         return o_.stale_reason is None and o_.grip_force_n <= ps.release_force_n
 
-    target = release_target_deg(ps, scene.get(plan.object_id), observe(), _read(arm))
+    target = release_target_deg(ps, scene.grasp_target(plan.object_id), observe(), _read(arm))
     let_go, freed, waited = P.release_to(
         arm, target, ps.opening_deg, released, step_deg=ps.release_step_deg,
         settle_s=ps.release_settle_s, timeout_s=ps.release_timeout_s)
@@ -2029,7 +2045,7 @@ def execute_crane_pick(robot, planner, scene: SceneModel, plan: CranePlan,
     o = observe()
     qm, gm = _read(arm)
     hm = G.hand_frames(qm, gm)
-    placed = G.object_box(scene.get(plan.object_id), o.position, o.quat_wxyz)
+    placed = G.object_box(scene.grasp_target(plan.object_id), o.position, o.quat_wxyz)
     w, x, y, z = o.quat_wxyz
     tilt = math.degrees(math.acos(max(-1.0, min(1.0, 1 - 2 * (x * x + y * y)))))
     outcome["replaced"] = {

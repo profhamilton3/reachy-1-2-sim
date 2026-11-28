@@ -283,7 +283,7 @@ def exits_open(scene: SceneModel, object_id: str, box: G.Box) -> Dict[str, Dict[
     there = copy.copy(scene)
     there._objects = dict(scene._objects)
     there._objects[object_id] = replace(
-        scene.get(object_id), center=tuple(float(v) for v in box.center),
+        scene.grasp_target(object_id), center=tuple(float(v) for v in box.center),
         quat=G._rot_to_quat(box.axes))
     out: Dict[str, Dict[str, object]] = {}
     for posture, route in EXITS_FROM_PRESENT:
@@ -472,7 +472,7 @@ def plan_crane_place(planner, scene: SceneModel, object_id: str, target_cell: st
     tx, ty = aimed((cx, cy), place)
     # The cell must be free whatever the heading: nothing within the object's
     # footprint circle (plus the margin) of the cell centre.
-    held = G.object_box(scene.get(object_id), *(() if pose is None else
+    held = G.object_box(CP.target_of(scene, object_id, ev), *(() if pose is None else
                                                    (pose.position, pose.quat_wxyz)))
     reach = float(np.linalg.norm(held.half[:2]))
     square = G.Box(object_id, np.array([tx, ty, held.center[2]]), np.eye(3),

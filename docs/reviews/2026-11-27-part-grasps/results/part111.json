@@ -1,0 +1,54 @@
+{
+ "design": "111",
+ "object": "part111_a",
+ "planner": "crane",
+ "scene_kind": "compound",
+ "grasp_envelope": {
+  "of": "compound",
+  "outline": "box",
+  "size_mm": [
+   49.21,
+   49.21,
+   25.4
+  ]
+ },
+ "refused_pairs": [
+  {
+   "origin": "r3c2",
+   "dest": "r3c3",
+   "why": "plan: IK found no grasp pose in the bounded start set"
+  },
+  {
+   "origin": "r2c2",
+   "dest": "r1c1",
+   "why": "plan: IK found no grasp pose in the bounded start set"
+  },
+  {
+   "origin": "r2c2",
+   "dest": "r2c3",
+   "why": "plan: IK found no grasp pose in the bounded start set"
+  },
+  {
+   "origin": "r2c3",
+   "dest": "r2c2",
+   "why": "plan: IK found no pose for rung +13"
+  },
+  {
+   "origin": "r3c3",
+   "dest": "r3c2",
+   "why": "plan: IK found no grasp pose in the bounded start set"
+  },
+  {
+   "origin": "r1c2",
+   "dest": "r1c1",
+   "why": "plan: IK found no grasp pose in the bounded start set"
+  },
+  {
+   "origin": "r2c1",
+   "dest": "r3c1",
+   "why": "plan: IK found no grasp pose in the bounded start set"
+  }
+ ],
+ "flown": null,
+ "wall_s": 8.9
+}

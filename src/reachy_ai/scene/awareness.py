@@ -54,6 +54,10 @@ class SceneObject:
     # False only for scene objects with physics.collision == false (markings,
     # placement targets, calibration decals).  "fixture" counts as colliding.
     collides: bool = True
+    # A compound's checked parts (object frame), and, on the copy a grasp
+    # planner is given, what that copy is the outer envelope of.
+    parts: Optional[Tuple[dict, ...]] = None
+    envelope_of: Optional[str] = None
 
     @property
     def is_control(self) -> bool:
@@ -379,6 +383,8 @@ class SceneModel:
                 control_type=inter.get("type"),
                 articulation=raw.get("articulation"),
                 collides=phys.get("collision", True) is not False,
+                parts=(tuple(_scene_io().compound_parts(geo, raw["id"]))
+                       if geo.get("kind") == "compound" else None),
             )
             objects.append(obj)
             if table_id is None and (
@@ -396,6 +402,13 @@ class SceneModel:
 
     def get(self, object_id: str) -> SceneObject:
         return self._objects[object_id]
+
+    def grasp_target(self, object_id: str) -> SceneObject:
+        """The object as a grasp planner may treat it when GRASPING it: itself,
+        or for a compound its checked outer envelope (`grasp_envelope`, which
+        raises `NoGraspEnvelope`).  Obstacles are not read through this."""
+        from .grasp_envelope import grasp_envelope
+        return grasp_envelope(self.get(object_id))
 
     def manipulable_ids(self) -> List[str]:
         """Tracked, dynamic objects (grasp targets), in scene order."""
