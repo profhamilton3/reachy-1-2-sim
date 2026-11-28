@@ -1,0 +1,52 @@
+schema_version: "1.0"
+extends: FWDCenterLabSivaPool.yaml
+name: FWDCenterLabSivaPoolBlack
+
+description: >-
+  FWDCenterLabSivaPool with every printed PART object matte black, like the
+  black PLA prints on hand.  Geometry, mass and friction are inherited.
+
+# Colour variant (#212, owner 2026-11-27).  Reachy should register colour and
+# sort by it, but height, hole and orientation must not depend on it, so
+# geometry perception is reported on this scene and on ...Random
+# (reachy-tabletop-ai#84).
+#
+# SAME GEOMETRY AS FWDCenterLabSivaPool: the compiled models differ in rgba
+# only.  reachy_ai.motion.rig_routes.SCENE_GEOMETRY_PARENTS records that, so the
+# routes validated there are valid here, and
+# tests/unit/test_colour_variant_routes.py holds it.  CHANGE COLOUR ONLY in this
+# file.  The experience reuse gate does not share trials with the parent.
+
+objects:
+  - id: part110_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part110_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part111_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part111_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part120_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part120_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part121_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part121_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part210_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part210_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part211_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part211_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part220_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part220_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part221_a
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}
+  - id: part221_b
+    material: {rgba: [0.05, 0.05, 0.05, 1.0]}

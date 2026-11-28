@@ -524,6 +524,9 @@ class ReachyMujocoServer:
         tracked_ids = None
         interactive_specs = None
         scene_doc = None
+        # Set when the scene randomises colours: the seed and the colours it
+        # gave, for the run manifest.
+        self._color_randomization: Optional[dict] = None
         if scene_path:
             log.info("Loading scene: %s (into model %s)", scene_path, model_path)
             from objects import build_scene_model_xml
@@ -537,8 +540,14 @@ class ReachyMujocoServer:
             # unchecked.  This is not hypothetical: between #37 and #38 the
             # format gained `extends:` while the schema and this call site did
             # not, and the server could not load FWDCenterLabSiva at all.
+            from scene_io import color_randomization_record
             from scene_io import load_scene as _resolve_scene
             scene_doc = _resolve_scene(scene_path)
+            self._color_randomization = color_randomization_record(scene_doc)
+            if self._color_randomization:
+                log.info("Colour randomisation: tag %r, seed %d",
+                         self._color_randomization["tag"],
+                         self._color_randomization["seed"])
             # Safety validation (raises on unsafe mesh paths / bad schema); the
             # compiler consumes the raw dict since it needs full physics fields.
             # scene_loader lives at the repo root, and BOTH launch scripts cd
@@ -1216,6 +1225,11 @@ class ReachyMujocoServer:
             "scene_path": self._scene_path,
             "scene_sha256": _sha256(self._scene_path),
             "scene_revision": self._sim.scene_revision,
+            # None unless the scene randomises colours.  scene_sha256 covers
+            # only the named file, not its parents, so the colours are recorded
+            # as they came out.
+            "color_randomization": copy.deepcopy(
+                getattr(self, "_color_randomization", None)),
             "mujoco_version": mujoco_version,
             "python_version": _sys.version,
             "platform": platform.platform(),

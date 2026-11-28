@@ -34,3 +34,6 @@ docs/reviews/probes-*/*.json
 # Willis's 3D-printer input files (STL/STEP/3DM, photo). Not committed: the repo
 # is public and permission to publish these has not been given.
 docs/input_3D_printer_files/
+
+# Per-run randomised-colour scenes (scripts/make_part_colour_scene.py, #212).
+scenes/generated/

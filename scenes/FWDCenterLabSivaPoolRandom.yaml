@@ -1,0 +1,39 @@
+schema_version: "1.0"
+extends: FWDCenterLabSivaPool.yaml
+name: FWDCenterLabSivaPoolRandom
+
+description: >-
+  FWDCenterLabSivaPool with each printed PART object's colour drawn from the
+  four family colours by a recorded seed, so colour says nothing about shape,
+  height or hole.  Geometry, mass and friction are inherited.
+
+# Colour variant (#212, owner 2026-11-27).
+#
+# LAUNCHING THIS FILE GIVES THE SEED BELOW, EVERY TIME.  For a new draw per run:
+#
+#   python3 scripts/make_part_colour_scene.py              # prints a new scene path
+#   python3 scripts/make_part_colour_scene.py --seed 777   # or repeat a recorded one
+#
+# and start the simulator on the file it prints.  The seed lives in a FILE, not
+# in a server flag, because the physics server, RViz and the planner each load
+# the scene for themselves and must agree on every colour.  The server writes
+# the seed and the resulting colours to the run manifest (`color_randomization`).
+#
+# Each object draws independently: sha256("<seed>:<id>") picks a palette entry.
+# So two copies of one design can differ, and a run need not use all colours.
+#
+# SAME GEOMETRY AS FWDCenterLabSivaPool: the compiled models differ in rgba
+# only.  reachy_ai.motion.rig_routes.SCENE_GEOMETRY_PARENTS records that, so the
+# routes validated there are valid here (generated per-run scenes keep this
+# name), and tests/unit/test_colour_variant_routes.py holds it.  CHANGE COLOUR
+# ONLY in this file.  The experience reuse gate does not share trials with the
+# parent.
+
+color_randomization:
+  tag: part-set
+  seed: 2026
+  palette:
+    - [0.812, 0.627, 0.137, 1.0]   # mustard yellow  #CFA023
+    - [0.784, 0.353, 0.090, 1.0]   # burnt orange    #C85A17
+    - [0.420, 0.510, 0.600, 1.0]   # dusty-blue grey #6B8299
+    - [0.306, 0.604, 0.204, 1.0]   # grass green     #4E9A34

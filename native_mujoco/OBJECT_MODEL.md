@@ -30,6 +30,37 @@ Field names follow `scenes/scene.schema.json`: `geometry.size|radius|height`,
 `pose.position` + `orientation_wxyz|rpy`, `material.rgba`.  `rpy` is converted
 to a `wxyz` quaternion.
 
+## Compound geometry (#212)
+
+For shapes one primitive cannot express, above all a through-hole (MuJoCo collides a mesh as its convex hull, which fills it):
+
+```yaml
+geometry:
+  kind: compound
+  parts:        # 1..64; each in the OBJECT frame
+    - {kind: box, size: [x, y, z], pos: [x, y, z], quat_wxyz: [w, x, y, z]}
+    - {kind: cylinder, radius: r, length: l, pos: [x, y, z], quat_wxyz: [w, x, y, z]}
+```
+
+Rules (schema and `scene_io.check_compound_object`, which also runs without `jsonschema`): unknown or missing fields fail; numbers are finite and sizes positive; quaternions are unit; **the bounding box is centred on the object origin**; a dynamic compound needs `physics.mass`; `articulation` is not supported.
+
+| Consumer | What it does with a compound |
+|---|---|
+| compiler | one geom per part (same colour, contact channel and friction), no per-geom mass; a dynamic body gets an explicit `<inertial>` with the total mass, inertia computed from the parts at uniform density (overlaps count twice) |
+| `ObjectPlacer.place` | rest height from the lowest point of any part |
+| `ObjectPlacer.reshape` | refused, for every argument |
+| `GripperModel` | finger and thumb on different parts of one free body count as a pinch |
+| planner `SceneModel` | the solid bounding box, holes included |
+| `truth.v1` | outer box or cylinder, chosen by `semantic_class` (`block`/`cube` or `cylinder`); anything else is refused; no hole field |
+| RViz markers | one marker per part |
+| side-on and crane grasps | refuse the kind `compound` (not validated) |
+
+**Contact cost.** Many coplanar parts resting on one face are expensive with `noslip_iterations` on: the pass grows with the square of the contacts on one body. Let only as many parts reach the face as the footprint needs and recess the rest slightly, as the PART rings do (`docs/scene-object-dimensions.md`).
+
+## Colour randomisation (#212)
+
+A top-level `color_randomization: {tag, seed, palette}` repaints every object carrying `tag`, choosing `sha256("<seed>:<id>")` modulo the palette. `scene_io.load_scene` applies it once, after `extends` is resolved, so all consumers of one file agree. A child may override just `seed`; `scripts/make_part_colour_scene.py` writes such a child per run. The recorder manifest and the dataset manifest store `color_randomization: {tag, seed, colors}` (null otherwise; `scene_io.color_randomization_record`).
+
 ## Tracking & streaming
 
 `ObjectTracker` discovers free-joint bodies (optionally filtered to the tracked

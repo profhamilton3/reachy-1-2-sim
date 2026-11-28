@@ -64,6 +64,7 @@ import numpy as np
 from calibration import StereoCalibrationProfile, apply_to_model
 from distortion import LensDistorter, auto_margin
 from renderer import StereoRenderer, decode_seg
+from scene_io import color_randomization_record
 from zoom import ZoomLevel, all_levels
 
 # Zoom levels to sample, and how often.  ZoomLevel.ZERO is deliberately EXCLUDED:
@@ -479,6 +480,9 @@ class DatasetGenerator:
             "classes": self._class_names,
             "calibration_provenance": self._cal.provenance,
             "scene_name": self._scene.get("name"),
+            # `seed` above drives placement; this is the PART colours' own seed,
+            # which came from the scene file.  None unless the scene randomises.
+            "color_randomization": color_randomization_record(self._scene),
             "empty_frames": empty,
             "boxes_per_class": {
                 c: sum(1 for r in records for b in r.boxes if b.semantic_class == c)

@@ -11,8 +11,9 @@ name: FWDCenterLabSivaPool
 # four manipulables on the grid; this scene is the one where the board starts
 # empty and the caller decides what goes on it.
 #
-# Fourteen placeable objects: the four inherited manipulables (in the MCC colours)
-# plus ten grey spare slots (five boxes, five cylinders, all one size).
+# Thirty placeable objects: the four inherited manipulables (in the MCC colours),
+# ten grey spare slots (five boxes, five cylinders, all one size), and sixteen of
+# Willis's printed parts (#212, below).
 # Spares exist because MuJoCo freezes nbody/njnt/ngeom at compile time — there
 # is no add_body(), so having MORE objects available than a scene declares means
 # declaring them up front and moving them.  reshape() then makes one slot stand
@@ -23,7 +24,8 @@ description: >-
   FWDCenterLabSiva plus a pool of spare manipulables parked on the floor, for
   putting objects on the board while the simulation is running.  Geometry,
   calibration, grid, reachability and the grid and reachability are all
-  inherited; this file adds slots and restores the four named objects' colours.
+  inherited; this file adds slots and the sixteen printed PART objects and
+  restores the four named objects' colours.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WHY A CHILD SCENE AND NOT FWDCenterLabSiva ITSELF
@@ -167,6 +169,291 @@ objects:
     tracked: true
     semantic_class: cylinder
     tags: [pool, manipulable, pickable]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # WILLIS'S PRINTED PARTS (#212, owner decisions 2026-11-27)
+  #
+  # Sixteen bodies, two of each of eight designs.  PART<S><H><F>:
+  #   S  1 = block, 2 = cylinder
+  #   H  1 = short (25.4 mm), 2 = tall (69.85 mm)
+  #   F  0 = solid, 1 = 25.4 mm through hole, vertical
+  # Footprint: block 49.21 mm square, cylinder radius 24.606 mm.
+  #
+  # BUILT FROM PRIMITIVES.  The printer files are not committed (public repo, no
+  # permission yet), and a mesh would collide as its convex hull, which fills
+  # the hole.  Holed parts are `kind: compound`.  BOTH HAVE THE SAME BORE, a
+  # 16-sided round hole of radius 12.7 mm, like the printed parts:
+  #   block     four walls (a square opening), plus a ring of 16 boxes from
+  #             r = 12.7 to 18.0 mm, just past that square's corners at 17.96,
+  #             which rounds it
+  #   cylinder  16 boxes, a 16-sided ring: flats at r = 12.7 and 24.606 mm,
+  #             outer corners 0.48 mm proud
+  #
+  # DO NOT "TIDY" THE TWO HEIGHTS.  In a holed part only every other segment of
+  # a cylinder's ring, or a block's two long walls, reaches the end faces; the
+  # others, including a block's whole bore ring, stop 0.1 mm short at each end.  Those that do reach span the whole footprint, so
+  # it stands and tips as a flat face would.  With all sixteen on the floor,
+  # the four parked rings took the physics step from 0.14 ms to 1.7 ms of its
+  # 2 ms budget (the no-slip pass grows with the square of the contacts on one
+  # body).  tests/unit/test_part_set_scene.py::TestEndFaces holds this.
+  #
+  # COLOUR FOLLOWS THE FAMILY (shape x height), NEVER THE HOLE, so the hole has
+  # to be perceived.  FWDCenterLabSivaPoolBlack and ...Random repaint these by
+  # the `part-set` tag or by id.
+  #
+  # MASS IS SYNTHETIC, NOT MEASURED.  Provenance: docs/scene-object-dimensions.md.
+  #
+  # Parked like the pool slots: blocks at y = +1.15, cylinders at y = -1.15.
+  # reshape() refuses the holed ones; use them as they are.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  # PART110: block, short -- mustard yellow, solid
+  - id: part110_a
+    geometry: {kind: box, size: [0.04921, 0.04921, 0.0254]}
+    pose: {position: [0.15, 1.15, 0.0127], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.812, 0.627, 0.137, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.175,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: block
+    tags: [pool, part-set, manipulable, pickable]
+
+  - id: part110_b
+    geometry: {kind: box, size: [0.04921, 0.04921, 0.0254]}
+    pose: {position: [0.35, 1.15, 0.0127], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.812, 0.627, 0.137, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.175,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: block
+    tags: [pool, part-set, manipulable, pickable]
+
+  # PART111: block, short -- mustard yellow, through hole
+  - id: part111_a
+    geometry: &part111_geometry
+      kind: compound
+      parts:
+        - {kind: box, size: [0.04921, 0.011905, 0.0254], pos: [0.0, 0.0186525, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.04921, 0.011905, 0.0254], pos: [0.0, -0.0186525, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.011905, 0.0254, 0.0252], pos: [0.0186525, 0.0, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.011905, 0.0254, 0.0252], pos: [-0.0186525, 0.0, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [0.01535, 0.0, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [0.0141816, 0.0058742, 0.0], quat_wxyz: [0.9807853, 0.0, 0.0, 0.1950903]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [0.0108541, 0.0108541, 0.0], quat_wxyz: [0.9238795, 0.0, 0.0, 0.3826834]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [0.0058742, 0.0141816, 0.0], quat_wxyz: [0.8314696, 0.0, 0.0, 0.5555702]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [0.0, 0.01535, 0.0], quat_wxyz: [0.7071068, 0.0, 0.0, 0.7071068]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [-0.0058742, 0.0141816, 0.0], quat_wxyz: [0.5555702, 0.0, 0.0, 0.8314696]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [-0.0108541, 0.0108541, 0.0], quat_wxyz: [0.3826834, 0.0, 0.0, 0.9238795]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [-0.0141816, 0.0058742, 0.0], quat_wxyz: [0.1950903, 0.0, 0.0, 0.9807853]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [-0.01535, 0.0, 0.0], quat_wxyz: [0.0, 0.0, 0.0, 1.0]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [-0.0141816, -0.0058742, 0.0], quat_wxyz: [-0.1950903, 0.0, 0.0, 0.9807853]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [-0.0108541, -0.0108541, 0.0], quat_wxyz: [-0.3826834, 0.0, 0.0, 0.9238795]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [-0.0058742, -0.0141816, 0.0], quat_wxyz: [-0.5555702, 0.0, 0.0, 0.8314696]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [0.0, -0.01535, 0.0], quat_wxyz: [-0.7071068, 0.0, 0.0, 0.7071068]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [0.0058742, -0.0141816, 0.0], quat_wxyz: [-0.8314696, 0.0, 0.0, 0.5555702]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [0.0108541, -0.0108541, 0.0], quat_wxyz: [-0.9238795, 0.0, 0.0, 0.3826834]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.0252], pos: [0.0141816, -0.0058742, 0.0], quat_wxyz: [-0.9807853, 0.0, 0.0, 0.1950903]}
+    pose: {position: [0.55, 1.15, 0.0127], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.812, 0.627, 0.137, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.16,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: block
+    tags: [pool, part-set, manipulable, pickable]
+
+  - id: part111_b
+    geometry: *part111_geometry
+    pose: {position: [0.75, 1.15, 0.0127], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.812, 0.627, 0.137, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.16,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: block
+    tags: [pool, part-set, manipulable, pickable]
+
+  # PART120: block, tall -- burnt orange, solid
+  - id: part120_a
+    geometry: {kind: box, size: [0.04921, 0.04921, 0.06985]}
+    pose: {position: [0.95, 1.15, 0.034925], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.784, 0.353, 0.09, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.27,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: block
+    tags: [pool, part-set, manipulable, pickable]
+
+  - id: part120_b
+    geometry: {kind: box, size: [0.04921, 0.04921, 0.06985]}
+    pose: {position: [1.15, 1.15, 0.034925], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.784, 0.353, 0.09, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.27,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: block
+    tags: [pool, part-set, manipulable, pickable]
+
+  # PART121: block, tall -- burnt orange, through hole
+  - id: part121_a
+    geometry: &part121_geometry
+      kind: compound
+      parts:
+        - {kind: box, size: [0.04921, 0.011905, 0.06985], pos: [0.0, 0.0186525, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.04921, 0.011905, 0.06985], pos: [0.0, -0.0186525, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.011905, 0.0254, 0.06965], pos: [0.0186525, 0.0, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.011905, 0.0254, 0.06965], pos: [-0.0186525, 0.0, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [0.01535, 0.0, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [0.0141816, 0.0058742, 0.0], quat_wxyz: [0.9807853, 0.0, 0.0, 0.1950903]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [0.0108541, 0.0108541, 0.0], quat_wxyz: [0.9238795, 0.0, 0.0, 0.3826834]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [0.0058742, 0.0141816, 0.0], quat_wxyz: [0.8314696, 0.0, 0.0, 0.5555702]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [0.0, 0.01535, 0.0], quat_wxyz: [0.7071068, 0.0, 0.0, 0.7071068]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [-0.0058742, 0.0141816, 0.0], quat_wxyz: [0.5555702, 0.0, 0.0, 0.8314696]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [-0.0108541, 0.0108541, 0.0], quat_wxyz: [0.3826834, 0.0, 0.0, 0.9238795]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [-0.0141816, 0.0058742, 0.0], quat_wxyz: [0.1950903, 0.0, 0.0, 0.9807853]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [-0.01535, 0.0, 0.0], quat_wxyz: [0.0, 0.0, 0.0, 1.0]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [-0.0141816, -0.0058742, 0.0], quat_wxyz: [-0.1950903, 0.0, 0.0, 0.9807853]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [-0.0108541, -0.0108541, 0.0], quat_wxyz: [-0.3826834, 0.0, 0.0, 0.9238795]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [-0.0058742, -0.0141816, 0.0], quat_wxyz: [-0.5555702, 0.0, 0.0, 0.8314696]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [0.0, -0.01535, 0.0], quat_wxyz: [-0.7071068, 0.0, 0.0, 0.7071068]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [0.0058742, -0.0141816, 0.0], quat_wxyz: [-0.8314696, 0.0, 0.0, 0.5555702]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [0.0108541, -0.0108541, 0.0], quat_wxyz: [-0.9238795, 0.0, 0.0, 0.3826834]}
+        - {kind: box, size: [0.0053, 0.0071608, 0.06965], pos: [0.0141816, -0.0058742, 0.0], quat_wxyz: [-0.9807853, 0.0, 0.0, 0.1950903]}
+    pose: {position: [1.35, 1.15, 0.034925], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.784, 0.353, 0.09, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.24,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: block
+    tags: [pool, part-set, manipulable, pickable]
+
+  - id: part121_b
+    geometry: *part121_geometry
+    pose: {position: [1.55, 1.15, 0.034925], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.784, 0.353, 0.09, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.24,
+              friction: [0.8, 0.01, 0.001], restitution: 0.05}
+    tracked: true
+    semantic_class: block
+    tags: [pool, part-set, manipulable, pickable]
+
+  # PART210: cylinder, short -- dusty-blue grey, solid
+  - id: part210_a
+    geometry: {kind: cylinder, radius: 0.024606, length: 0.0254}
+    pose: {position: [0.15, -1.15, 0.0127], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.42, 0.51, 0.6, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.16,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, part-set, manipulable, pickable]
+
+  - id: part210_b
+    geometry: {kind: cylinder, radius: 0.024606, length: 0.0254}
+    pose: {position: [0.35, -1.15, 0.0127], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.42, 0.51, 0.6, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.16,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, part-set, manipulable, pickable]
+
+  # PART211: cylinder, short -- dusty-blue grey, through hole
+  - id: part211_a
+    geometry: &part211_geometry
+      kind: compound
+      parts:
+        - {kind: box, size: [0.011906, 0.0097889, 0.0254], pos: [0.018653, 0.0, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0252], pos: [0.0172331, 0.0071382, 0.0], quat_wxyz: [0.9807853, 0.0, 0.0, 0.1950903]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0254], pos: [0.0131897, 0.0131897, 0.0], quat_wxyz: [0.9238795, 0.0, 0.0, 0.3826834]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0252], pos: [0.0071382, 0.0172331, 0.0], quat_wxyz: [0.8314696, 0.0, 0.0, 0.5555702]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0254], pos: [0.0, 0.018653, 0.0], quat_wxyz: [0.7071068, 0.0, 0.0, 0.7071068]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0252], pos: [-0.0071382, 0.0172331, 0.0], quat_wxyz: [0.5555702, 0.0, 0.0, 0.8314696]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0254], pos: [-0.0131897, 0.0131897, 0.0], quat_wxyz: [0.3826834, 0.0, 0.0, 0.9238795]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0252], pos: [-0.0172331, 0.0071382, 0.0], quat_wxyz: [0.1950903, 0.0, 0.0, 0.9807853]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0254], pos: [-0.018653, 0.0, 0.0], quat_wxyz: [0.0, 0.0, 0.0, 1.0]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0252], pos: [-0.0172331, -0.0071382, 0.0], quat_wxyz: [-0.1950903, 0.0, 0.0, 0.9807853]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0254], pos: [-0.0131897, -0.0131897, 0.0], quat_wxyz: [-0.3826834, 0.0, 0.0, 0.9238795]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0252], pos: [-0.0071382, -0.0172331, 0.0], quat_wxyz: [-0.5555702, 0.0, 0.0, 0.8314696]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0254], pos: [0.0, -0.018653, 0.0], quat_wxyz: [-0.7071068, 0.0, 0.0, 0.7071068]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0252], pos: [0.0071382, -0.0172331, 0.0], quat_wxyz: [-0.8314696, 0.0, 0.0, 0.5555702]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0254], pos: [0.0131897, -0.0131897, 0.0], quat_wxyz: [-0.9238795, 0.0, 0.0, 0.3826834]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.0252], pos: [0.0172331, -0.0071382, 0.0], quat_wxyz: [-0.9807853, 0.0, 0.0, 0.1950903]}
+    pose: {position: [0.55, -1.15, 0.0127], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.42, 0.51, 0.6, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.15,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, part-set, manipulable, pickable]
+
+  - id: part211_b
+    geometry: *part211_geometry
+    pose: {position: [0.75, -1.15, 0.0127], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.42, 0.51, 0.6, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.15,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, part-set, manipulable, pickable]
+
+  # PART220: cylinder, tall -- grass green, solid
+  - id: part220_a
+    geometry: {kind: cylinder, radius: 0.024606, length: 0.06985}
+    pose: {position: [0.95, -1.15, 0.034925], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.306, 0.604, 0.204, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.235,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, part-set, manipulable, pickable]
+
+  - id: part220_b
+    geometry: {kind: cylinder, radius: 0.024606, length: 0.06985}
+    pose: {position: [1.15, -1.15, 0.034925], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.306, 0.604, 0.204, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.235,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, part-set, manipulable, pickable]
+
+  # PART221: cylinder, tall -- grass green, through hole
+  - id: part221_a
+    geometry: &part221_geometry
+      kind: compound
+      parts:
+        - {kind: box, size: [0.011906, 0.0097889, 0.06985], pos: [0.018653, 0.0, 0.0], quat_wxyz: [1.0, 0.0, 0.0, 0.0]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06965], pos: [0.0172331, 0.0071382, 0.0], quat_wxyz: [0.9807853, 0.0, 0.0, 0.1950903]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06985], pos: [0.0131897, 0.0131897, 0.0], quat_wxyz: [0.9238795, 0.0, 0.0, 0.3826834]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06965], pos: [0.0071382, 0.0172331, 0.0], quat_wxyz: [0.8314696, 0.0, 0.0, 0.5555702]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06985], pos: [0.0, 0.018653, 0.0], quat_wxyz: [0.7071068, 0.0, 0.0, 0.7071068]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06965], pos: [-0.0071382, 0.0172331, 0.0], quat_wxyz: [0.5555702, 0.0, 0.0, 0.8314696]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06985], pos: [-0.0131897, 0.0131897, 0.0], quat_wxyz: [0.3826834, 0.0, 0.0, 0.9238795]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06965], pos: [-0.0172331, 0.0071382, 0.0], quat_wxyz: [0.1950903, 0.0, 0.0, 0.9807853]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06985], pos: [-0.018653, 0.0, 0.0], quat_wxyz: [0.0, 0.0, 0.0, 1.0]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06965], pos: [-0.0172331, -0.0071382, 0.0], quat_wxyz: [-0.1950903, 0.0, 0.0, 0.9807853]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06985], pos: [-0.0131897, -0.0131897, 0.0], quat_wxyz: [-0.3826834, 0.0, 0.0, 0.9238795]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06965], pos: [-0.0071382, -0.0172331, 0.0], quat_wxyz: [-0.5555702, 0.0, 0.0, 0.8314696]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06985], pos: [0.0, -0.018653, 0.0], quat_wxyz: [-0.7071068, 0.0, 0.0, 0.7071068]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06965], pos: [0.0071382, -0.0172331, 0.0], quat_wxyz: [-0.8314696, 0.0, 0.0, 0.5555702]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06985], pos: [0.0131897, -0.0131897, 0.0], quat_wxyz: [-0.9238795, 0.0, 0.0, 0.3826834]}
+        - {kind: box, size: [0.011906, 0.0097889, 0.06965], pos: [0.0172331, -0.0071382, 0.0], quat_wxyz: [-0.9807853, 0.0, 0.0, 0.1950903]}
+    pose: {position: [1.35, -1.15, 0.034925], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.306, 0.604, 0.204, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.205,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, part-set, manipulable, pickable]
+
+  - id: part221_b
+    geometry: *part221_geometry
+    pose: {position: [1.55, -1.15, 0.034925], orientation_wxyz: [1.0, 0.0, 0.0, 0.0]}
+    material: {rgba: [0.306, 0.604, 0.204, 1.0], roughness: 0.85}
+    physics: {dynamic: true, collision: true, mass: 0.205,
+              friction: [0.75, 0.01, 0.001], restitution: 0.03}
+    tracked: true
+    semantic_class: cylinder
+    tags: [pool, part-set, manipulable, pickable]
 
   # ───────────────────────────────────────────────────────────────────────────
   # THE BOARD STARTS EMPTY.

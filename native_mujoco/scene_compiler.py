@@ -10,6 +10,9 @@ Compiles validated scene objects (see scenes/scene.schema.json) into MJCF
     physics:  {dynamic, collision, mass, friction, restitution}
     tracked:  bool
 
+``geometry.kind: compound`` (#212) emits one geom per part and, when the body
+moves, an explicit ``<inertial>`` carrying the object's total mass.
+
 Static objects (physics.dynamic == false, the default) are welded to the world.
 Dynamic objects (physics.dynamic == true) get a <freejoint> and mass, so the
 native backend simulates and streams their pose (R12-503).
@@ -25,6 +28,8 @@ from __future__ import annotations
 
 import math
 from typing import Any, List, Mapping, Optional, Tuple
+
+from scene_io import SceneLoadError, check_compound_object, rotation_matrix
 
 # Object contact channel (see reachy_1_2.xml R12-500 collision model).
 _OBJ_CONTYPE = 4
@@ -172,6 +177,13 @@ def _compile_object(obj: Mapping[str, Any]) -> Tuple[str, str]:
                 f"articulation.joint='{required_joint}', got '{actual_joint}'"
             )
 
+    parts = None
+    if geo.get("kind") == "compound":
+        try:
+            parts = check_compound_object(obj)
+        except SceneLoadError as exc:
+            raise SceneCompilerError(str(exc)) from exc
+
     pos_str = _pos_str(pose.get("position") or [0, 0, 0])
     quat_str = _quat_str(_pose_quat(pose, obj_id))
     rgba_str = _rgba_str(material.get("rgba") or [0.7, 0.7, 0.7, 1.0])
@@ -183,12 +195,16 @@ def _compile_object(obj: Mapping[str, Any]) -> Tuple[str, str]:
     # Articulated / interactive geoms are named so the InteractiveController can
     # find them for color changes.
     named = articulated or bool(obj.get("interactive"))
-    geom_xml, asset_xml = _compile_geometry(
-        geo, obj_id, rgba_str, physics, dynamic, collision,
-        articulated=articulated,
-        geom_pos=articulation.get("handle_offset") if articulated else None,
-        name=geom_name(obj_id) if named else None,
-    )
+    if parts is not None:
+        geom_xml = _compile_compound(parts, rgba_str, physics, dynamic, collision)
+        asset_xml = ""
+    else:
+        geom_xml, asset_xml = _compile_geometry(
+            geo, obj_id, rgba_str, physics, dynamic, collision,
+            articulated=articulated,
+            geom_pos=articulation.get("handle_offset") if articulated else None,
+            name=geom_name(obj_id) if named else None,
+        )
 
     if articulated:
         joint = _compile_articulation(articulation, obj_id)
@@ -291,21 +307,7 @@ def _compile_geometry(
     if geom_pos is not None and isinstance(geom_pos, (list, tuple)) and len(geom_pos) == 3:
         attrs.append(f'pos="{_pos_str(geom_pos)}"')
 
-    # Contact channel + friction.
-    # collision: true  → standard object channel (contype=4, conaffinity=7)
-    # collision: "fixture" → fixture channel (contype=8, conaffinity=2)
-    #            collides with robot links but not with sibling controls
-    # collision: false → non-colliding (contype=0, conaffinity=0)
-    if collision == "fixture":
-        attrs.append(f'contype="{_FIXTURE_CONTYPE}" conaffinity="{_FIXTURE_CONAFFINITY}"')
-    elif collision:
-        attrs.append(f'contype="{_OBJ_CONTYPE}" conaffinity="{_OBJ_CONAFFINITY}"')
-        fr = physics.get("friction")
-        if isinstance(fr, (list, tuple)) and len(fr) >= 1:
-            fr_str = " ".join(f"{float(v):.4f}" for v in fr[:3])
-            attrs.append(f'friction="{fr_str}"')
-    else:
-        attrs.append('contype="0" conaffinity="0"')
+    attrs.extend(_contact_attrs(physics, collision))
 
     # Mass: dynamic (freejoint) and articulated (hinge/slide) bodies both need a
     # finite mass so MuJoCo can build a well-conditioned inertia.  Static welded
@@ -321,6 +323,102 @@ def _compile_geometry(
         attrs.append(f'solref="0.01 1"')
 
     return f'<geom {" ".join(attrs)}/>', asset_xml
+
+
+def _contact_attrs(physics: Mapping[str, Any], collision: Any) -> List[str]:
+    """Contact channel + friction of one geom.
+
+    collision: true  → standard object channel (contype=4, conaffinity=7)
+    collision: "fixture" → fixture channel (contype=8, conaffinity=2)
+               collides with robot links but not with sibling controls
+    collision: false → non-colliding (contype=0, conaffinity=0)
+    """
+    if collision == "fixture":
+        return [f'contype="{_FIXTURE_CONTYPE}" conaffinity="{_FIXTURE_CONAFFINITY}"']
+    if not collision:
+        return ['contype="0" conaffinity="0"']
+    attrs = [f'contype="{_OBJ_CONTYPE}" conaffinity="{_OBJ_CONAFFINITY}"']
+    fr = physics.get("friction")
+    if isinstance(fr, (list, tuple)) and len(fr) >= 1:
+        fr_str = " ".join(f"{float(v):.4f}" for v in fr[:3])
+        attrs.append(f'friction="{fr_str}"')
+    return attrs
+
+
+def _compile_compound(
+    parts: List[dict],
+    rgba_str: str,
+    physics: Mapping[str, Any],
+    dynamic: bool,
+    collision: Any,
+) -> str:
+    """One geom per part and, for a moving body, one explicit inertial.
+
+    No geom carries a mass: the object's mass is stated once, on the inertial.
+    The geoms are unnamed, like every other free object's, so code that falls
+    back to the body name keeps working.
+    """
+    lines = []
+    if dynamic:
+        lines.append(_compound_inertial(parts, float(physics["mass"])))
+    for part in parts:
+        if part["kind"] == "box":
+            size = " ".join(f"{v / 2:.7f}" for v in part["size"])
+        else:
+            size = f'{part["radius"]:.7f} {part["length"] / 2:.7f}'
+        attrs = [
+            f'type="{part["kind"]}" size="{size}"',
+            'pos="' + " ".join(f"{v:.7f}" for v in part["pos"]) + '"',
+            'quat="' + " ".join(f"{v:.7f}" for v in part["quat_wxyz"]) + '"',
+            f'rgba="{rgba_str}"',
+        ]
+        attrs.extend(_contact_attrs(physics, collision))
+        if "restitution" in physics:
+            attrs.append('solref="0.01 1"')
+        lines.append(f'<geom {" ".join(attrs)}/>')
+    return "\n      ".join(lines)
+
+
+def _compound_inertial(parts: List[dict], mass: float) -> str:
+    """The parts' composite inertia at one uniform density, scaled to `mass`.
+
+    Exact when the parts do not overlap.  Where they do (neighbouring segments
+    of a ring) the overlap counts twice.
+    """
+    volumes = [p["size"][0] * p["size"][1] * p["size"][2] if p["kind"] == "box"
+               else math.pi * p["radius"] ** 2 * p["length"] for p in parts]
+    masses = [mass * v / sum(volumes) for v in volumes]
+    com = [sum(m * p["pos"][k] for m, p in zip(masses, parts)) / mass for k in range(3)]
+
+    inertia = [[0.0] * 3 for _ in range(3)]
+    for m, p in zip(masses, parts):
+        if p["kind"] == "box":
+            a, b, c = p["size"]
+            local = (m * (b * b + c * c) / 12, m * (a * a + c * c) / 12,
+                     m * (a * a + b * b) / 12)
+        else:
+            side = m * (3 * p["radius"] ** 2 + p["length"] ** 2) / 12
+            local = (side, side, m * p["radius"] ** 2 / 2)
+        rot = rotation_matrix(p["quat_wxyz"])
+        d = [p["pos"][k] - com[k] for k in range(3)]
+        d2 = sum(v * v for v in d)
+        for i in range(3):
+            for j in range(3):
+                inertia[i][j] += sum(rot[i][k] * local[k] * rot[j][k] for k in range(3))
+                inertia[i][j] += m * ((d2 if i == j else 0.0) - d[i] * d[j])
+
+    # Terms that cancel in a symmetric compound leave residue of about 1e-22,
+    # which depends on how the Python version rounds sum() (it changed in 3.12),
+    # and a centre of mass can come out as -0.0.  Written as an exact zero, one
+    # scene compiles to the same text on every host.
+    scale = max(inertia[0][0], inertia[1][1], inertia[2][2])
+    products = [0.0 if abs(v) < 1e-12 * scale else v
+                for v in (inertia[0][1], inertia[0][2], inertia[1][2])]
+    com = [round(v, 9) + 0.0 for v in com]
+    full = (inertia[0][0], inertia[1][1], inertia[2][2], *products)
+    return ('<inertial pos="' + " ".join(f"{v:.9f}" for v in com) + '" '
+            f'mass="{mass:.6f}" '
+            'fullinertia="' + " ".join(f"{v:.12e}" for v in full) + '"/>')
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import pathlib
 from typing import Any, Mapping, Optional
 
 from placement import cells_from_scene
+from scene_io import SceneLoadError, compound_size
 
 SCHEMA_VERSION = "truth.v1"
 PROTOCOL_VERSION = 1
@@ -57,10 +58,33 @@ def _finite_vec(value: Any, n: int, what: str) -> list:
     return [float(v) for v in value]
 
 
+def _compound_outline(obj: Mapping[str, Any]) -> tuple:
+    """A compound's OUTER shape, which is what truth.v1 describes.
+
+    The parts cannot say it (a ring of boxes is a cylinder), so the object's
+    semantic_class does, and anything else is refused rather than guessed.
+    truth.v1 has no field for a hole.
+    """
+    oid = obj.get("id")
+    try:
+        sx, sy, sz = compound_size(obj.get("geometry") or {}, str(oid))
+    except SceneLoadError as exc:
+        raise TruthError(str(exc)) from exc
+    outline = obj.get("semantic_class")
+    if outline in ("block", "cube"):
+        return "box", [sx, sy, sz], None
+    if outline == "cylinder" and abs(sx - sy) < 1e-5:
+        return "cylinder", [sx, sy, sz], sx / 2.0
+    raise TruthError(f"{oid}: cannot tell the outline of this compound from semantic_class "
+                     f"{outline!r} and a {sx:.5f} x {sy:.5f} footprint")
+
+
 def _geometry(obj: Mapping[str, Any]) -> tuple:
     """(shape, bounding size [x, y, z] full extents, radius or None) of a scene object."""
     geo = obj.get("geometry") or {}
     shape = geo.get("kind")
+    if shape == "compound":
+        return _compound_outline(obj)
     if shape == "box":
         size = _finite_vec(geo.get("size"), 3, f"{obj.get('id')}: box size")
         radius = None

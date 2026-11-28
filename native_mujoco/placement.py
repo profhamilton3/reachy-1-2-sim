@@ -224,6 +224,10 @@ class ObjectPlacer:
         self._d = data
         self._cells = cells_from_scene(scene_doc)
         self._pool = pool_ids(scene_doc)
+        self._compound = {
+            str(o.get("id")) for o in (scene_doc.get("objects") or [])
+            if isinstance(o, Mapping)
+            and (o.get("geometry") or {}).get("kind") == "compound"}
         self._slots: Dict[str, _Slot] = {}
         for jid in range(model.njnt):
             if model.jnt_type[jid] != mujoco.mjtJoint.mjJNT_FREE:
@@ -281,6 +285,35 @@ class ObjectPlacer:
             return float(s[0])
         return float(max(s))
 
+    def _rest_height(self, slot: _Slot) -> float:
+        """Height of a body's origin above whatever it stands on, upright.
+
+        A compound body (#212) has several geoms, each posed in the body frame,
+        so its underside is the lowest point of any of them.  A single-geom
+        body keeps the rule it has always had.
+        """
+        if int(self._m.body_geomnum[slot.body_id]) == 1:
+            return self._half_height(slot.geom_id)
+        first = int(self._m.body_geomadr[slot.body_id])
+        return max(self._half_height_in_body(g) - float(self._m.geom_pos[g][2])
+                   for g in range(first, first + int(self._m.body_geomnum[slot.body_id])))
+
+    def _half_height_in_body(self, gid: int) -> float:
+        """Half of one box or cylinder geom's extent along its body's z."""
+        t = self._m.geom_type[gid]
+        s = self._m.geom_size[gid]
+        mat = np.zeros(9)
+        mujoco.mju_quat2Mat(mat, self._m.geom_quat[gid])
+        z = mat[6:9]                       # body z in the geom's axes
+        G = mujoco.mjtGeom
+        if t == G.mjGEOM_BOX:
+            return float(sum(abs(float(z[j])) * float(s[j]) for j in range(3)))
+        if t == G.mjGEOM_CYLINDER:
+            along = float(z[2])
+            return (float(s[0]) * math.sqrt(max(0.0, 1.0 - along * along))
+                    + float(s[1]) * abs(along))
+        return float(self._m.geom_rbound[gid])
+
     @staticmethod
     def _rbound_for(geom_type, size) -> float:
         G = mujoco.mjtGeom
@@ -315,6 +348,11 @@ class ObjectPlacer:
         through the object, with nothing in any log.
         """
         slot = self._slot(object_id)
+        if object_id in self._compound:
+            raise PlacementError(
+                f"{object_id!r} is a compound object (several primitives, e.g. "
+                f"the walls around a through-hole); reshape cannot change it. "
+                f"Its size, colour and mass are fixed by the scene file")
         gid = slot.geom_id
         gtype = self._m.geom_type[gid]
         G = mujoco.mjtGeom
@@ -390,7 +428,7 @@ class ObjectPlacer:
                 raise PlacementError(
                     f"cell {c.name} already holds {held!r}; stow it first, or "
                     f"pass allow_occupied=True if a collision is the point")
-        z = c.top_z + self._half_height(slot.geom_id) + _SETTLE_CLEARANCE_M
+        z = c.top_z + self._rest_height(slot) + _SETTLE_CLEARANCE_M
         pos = (c.x, c.y, z)
         quat = yaw_to_quat(yaw_deg)
         self._write(slot, pos, quat)

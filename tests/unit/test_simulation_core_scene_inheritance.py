@@ -32,7 +32,7 @@ def test_an_inheriting_scene_keeps_its_parents_objects():
     ids = SimulationCore.from_paths(MODEL, POOL).objects.object_ids
     for inherited in ("red_cube", "blue_cylinder", "soda_can", "foam_block"):
         assert inherited in ids
-    assert len(ids) == 14
+    assert len(ids) == 14 + 16      # + the printed PART set (#212)
 
 
 @pytest.mark.parametrize("scene", ["FWDCenterLabSivaPool", "FWDCenterLabSiva",

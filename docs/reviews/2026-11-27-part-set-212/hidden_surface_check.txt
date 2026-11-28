@@ -1,0 +1,6 @@
+
+znear*extent = 0.024162052405568176 m   zfar*extent = 120.81026472816072 m
+part111_a: 0/5620 left-camera pixels on a full-height top face show a recessed part instead (0.0 %), over 9 cells
+part121_a: 0/6794 left-camera pixels on a full-height top face show a recessed part instead (0.0 %), over 9 cells
+part211_a: 0/1430 left-camera pixels on a full-height top face show a recessed part instead (0.0 %), over 9 cells
+part221_a: 0/1702 left-camera pixels on a full-height top face show a recessed part instead (0.0 %), over 9 cells
